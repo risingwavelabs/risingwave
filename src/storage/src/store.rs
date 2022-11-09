@@ -29,7 +29,7 @@ use crate::write_batch::WriteBatch;
 pub trait StaticSendSync = Send + Sync + 'static;
 
 pub trait NextFutureTrait<'a, Item> = Future<Output = StorageResult<Option<Item>>> + Send + 'a;
-pub trait StateStoreIter: Send + 'static {
+pub trait StateStoreIter: StaticSendSync {
     type Item: Send;
     type NextFuture<'a>: NextFutureTrait<'a, Self::Item>;
 
@@ -206,7 +206,7 @@ pub trait StateStore: StateStoreRead + StateStoreWrite + StaticSendSync + Clone 
 
     type ClearSharedBufferFuture<'a>: EmptyFutureTrait<'a>;
 
-    type NewLocalFuture<'a>: Future<Output = Self::Local> + 'a;
+    type NewLocalFuture<'a>: Future<Output = Self::Local> + Send + 'a;
 
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
     /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.

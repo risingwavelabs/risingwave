@@ -95,6 +95,7 @@ fiemap = "0.1.1"
 # tikv = ["tikv-client"]
 test = []
 failpoints = ["fail/failpoints"]
+generic_state_store_impl = []
 bpf = []
 
 [[bench]]

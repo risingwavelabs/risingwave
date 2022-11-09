@@ -29,8 +29,11 @@ use crate::hummock::{
 };
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
+#[cfg(feature = "generic_state_store_impl")]
+use crate::store_impl::boxed_state_store::BoxGenericStateStore;
 use crate::StateStore;
 
+#[cfg(not(feature = "generic_state_store_impl"))]
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
 pub enum StateStoreImpl {
@@ -51,15 +54,62 @@ pub enum StateStoreImpl {
     MemoryStateStore(Monitored<MemoryStateStore>),
 }
 
+#[cfg(feature = "generic_state_store_impl")]
+#[derive(Clone, EnumAsInner)]
+pub enum StateStoreImpl {
+    HummockStateStore(Monitored<BoxGenericStateStore>),
+    HummockStateStoreV1(Monitored<BoxGenericStateStore>),
+    MemoryStateStore(Monitored<BoxGenericStateStore>),
+}
+
 impl StateStoreImpl {
     pub fn shared_in_memory_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
-        Self::MemoryStateStore(MemoryStateStore::shared().monitored(state_store_metrics))
+        #[cfg(not(feature = "generic_state_store_impl"))]
+        {
+            Self::MemoryStateStore(MemoryStateStore::shared().monitored(state_store_metrics))
+        }
+        #[cfg(feature = "generic_state_store_impl")]
+        {
+            Self::MemoryStateStore(
+                (Box::new(MemoryStateStore::shared()) as BoxGenericStateStore)
+                    .monitored(state_store_metrics),
+            )
+        }
     }
 
     pub fn for_test() -> Self {
-        StateStoreImpl::MemoryStateStore(
-            MemoryStateStore::new().monitored(Arc::new(StateStoreMetrics::unused())),
-        )
+        #[cfg(not(feature = "generic_state_store_impl"))]
+        {
+            Self::MemoryStateStore(
+                MemoryStateStore::new().monitored(Arc::new(StateStoreMetrics::unused())),
+            )
+        }
+        #[cfg(feature = "generic_state_store_impl")]
+        {
+            Self::MemoryStateStore(
+                (Box::new(MemoryStateStore::new()) as BoxGenericStateStore)
+                    .monitored(Arc::new(StateStoreMetrics::unused())),
+            )
+        }
+    }
+
+    pub fn as_hummock(&self) -> Option<&HummockStorage> {
+        #[cfg(not(feature = "generic_state_store_impl"))]
+        {
+            match self {
+                StateStoreImpl::HummockStateStore(hummock) => Some(hummock.inner()),
+                _ => None,
+            }
+        }
+        #[cfg(feature = "generic_state_store_impl")]
+        {
+            match self {
+                StateStoreImpl::HummockStateStore(hummock) => {
+                    Some(hummock.inner().as_hummock().expect("should be hummock"))
+                }
+                _ => None,
+            }
+        }
     }
 }
 
@@ -180,7 +230,16 @@ impl StateStoreImpl {
                     )
                     .await?;
 
-                    StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
+                    #[cfg(not(feature = "generic_state_store_impl"))]
+                    {
+                        StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
+                    }
+                    #[cfg(feature = "generic_state_store_impl")]
+                    {
+                        StateStoreImpl::HummockStateStore(
+                            (Box::new(inner) as BoxGenericStateStore).monitored(state_store_stats),
+                        )
+                    }
                 } else {
                     let inner = HummockStorageV1::new(
                         config.clone(),
@@ -191,7 +250,16 @@ impl StateStoreImpl {
                     )
                     .await?;
 
-                    StateStoreImpl::HummockStateStoreV1(inner.monitored(state_store_stats))
+                    #[cfg(not(feature = "generic_state_store_impl"))]
+                    {
+                        StateStoreImpl::HummockStateStoreV1(inner.monitored(state_store_stats))
+                    }
+                    #[cfg(feature = "generic_state_store_impl")]
+                    {
+                        StateStoreImpl::HummockStateStoreV1(
+                            (Box::new(inner) as BoxGenericStateStore).monitored(state_store_stats),
+                        )
+                    }
                 }
             }
 
@@ -204,5 +272,310 @@ impl StateStoreImpl {
         };
 
         Ok(store)
+    }
+}
+
+#[cfg(feature = "generic_state_store_impl")]
+pub mod boxed_state_store {
+    use std::future::Future;
+    use std::ops::{Bound, Deref, DerefMut};
+
+    use bytes::Bytes;
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::HummockReadEpoch;
+
+    use crate::error::StorageResult;
+    use crate::hummock::{HummockStorage, HummockStorageV1};
+    use crate::memory::MemoryStateStore;
+    use crate::storage_value::StorageValue;
+    use crate::store::{
+        EmptyFutureTrait, GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, LocalStateStore,
+        NextFutureTrait, ReadOptions, StateStoreRead, StateStoreWrite, StaticSendSync,
+        SyncFutureTrait, SyncResult, WriteOptions,
+    };
+    use crate::{StateStore, StateStoreIter};
+
+    // For StateStoreIter
+
+    #[async_trait::async_trait]
+    pub trait GenericStateStoreIter: StaticSendSync {
+        async fn next(&mut self) -> StorageResult<Option<(Bytes, Bytes)>>;
+    }
+
+    #[async_trait::async_trait]
+    impl<I: StateStoreIter<Item = (Bytes, Bytes)>> GenericStateStoreIter for I {
+        async fn next(&mut self) -> StorageResult<Option<(Bytes, Bytes)>> {
+            self.next().await
+        }
+    }
+
+    impl StateStoreIter for Box<dyn GenericStateStoreIter> {
+        type Item = (Bytes, Bytes);
+
+        type NextFuture<'a> = impl NextFutureTrait<'a, Self::Item>;
+
+        fn next(&mut self) -> Self::NextFuture<'_> {
+            async { self.deref_mut().next().await }
+        }
+    }
+
+    // For StateStoreRead
+
+    #[async_trait::async_trait]
+    pub trait GenericStateStoreRead: StaticSendSync {
+        async fn get<'a>(
+            &'a self,
+            key: &'a [u8],
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>>;
+
+        async fn iter(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> StorageResult<Box<dyn GenericStateStoreIter>>;
+    }
+
+    #[async_trait::async_trait]
+    impl<S: StateStoreRead> GenericStateStoreRead for S {
+        async fn get<'a>(
+            &'a self,
+            key: &'a [u8],
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>> {
+            self.get(key, epoch, read_options).await
+        }
+
+        async fn iter(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> StorageResult<Box<dyn GenericStateStoreIter>> {
+            Ok(Box::new(self.iter(key_range, epoch, read_options).await?))
+        }
+    }
+
+    // For StateStoreWrite
+
+    #[async_trait::async_trait]
+    pub trait GenericStateStoreWrite: StaticSendSync {
+        async fn ingest_batch(
+            &self,
+            kv_pairs: Vec<(Bytes, StorageValue)>,
+            write_options: WriteOptions,
+        ) -> StorageResult<usize>;
+    }
+
+    #[async_trait::async_trait]
+    impl<S: StateStoreWrite> GenericStateStoreWrite for S {
+        async fn ingest_batch(
+            &self,
+            kv_pairs: Vec<(Bytes, StorageValue)>,
+            write_options: WriteOptions,
+        ) -> StorageResult<usize> {
+            self.ingest_batch(kv_pairs, write_options).await
+        }
+    }
+
+    // For LocalStateStore
+
+    pub trait GenericLocalStateStore: GenericStateStoreRead + GenericStateStoreWrite {}
+    impl<S: GenericStateStoreRead + GenericStateStoreWrite> GenericLocalStateStore for S {}
+    pub type BoxGenericLocalStateStore = Box<dyn GenericLocalStateStore>;
+
+    impl StateStoreRead for BoxGenericLocalStateStore {
+        type Iter = Box<dyn GenericStateStoreIter>;
+
+        define_state_store_read_associated_type!();
+
+        fn get<'a>(
+            &'a self,
+            key: &'a [u8],
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> Self::GetFuture<'_> {
+            self.deref().get(key, epoch, read_options)
+        }
+
+        fn iter(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> Self::IterFuture<'_> {
+            self.deref().iter(key_range, epoch, read_options)
+        }
+    }
+
+    impl StateStoreWrite for BoxGenericLocalStateStore {
+        define_state_store_write_associated_type!();
+
+        fn ingest_batch(
+            &self,
+            kv_pairs: Vec<(Bytes, StorageValue)>,
+            write_options: WriteOptions,
+        ) -> Self::IngestBatchFuture<'_> {
+            self.deref().ingest_batch(kv_pairs, write_options)
+        }
+    }
+    impl LocalStateStore for BoxGenericLocalStateStore {}
+
+    // For global StateStore
+
+    #[async_trait::async_trait]
+    pub trait GenericStateStoreExt: StaticSendSync {
+        async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
+
+        async fn sync(&self, epoch: u64) -> StorageResult<SyncResult>;
+
+        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
+
+        async fn clear_shared_buffer(&self) -> StorageResult<()>;
+
+        async fn new_local(&self, table_id: TableId) -> BoxGenericLocalStateStore;
+    }
+
+    #[async_trait::async_trait]
+    impl<S: StateStore> GenericStateStoreExt for S {
+        async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+            self.try_wait_epoch(epoch).await
+        }
+
+        async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
+            self.sync(epoch).await
+        }
+
+        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
+            self.seal_epoch(epoch, is_checkpoint);
+        }
+
+        async fn clear_shared_buffer(&self) -> StorageResult<()> {
+            self.clear_shared_buffer().await
+        }
+
+        async fn new_local(&self, table_id: TableId) -> BoxGenericLocalStateStore {
+            Box::new(self.new_local(table_id).await)
+        }
+    }
+
+    pub type BoxGenericStateStore = Box<dyn GenericStateStore>;
+    // With this trait, we can implement `Clone` for BoxGenericStateStore
+    pub trait GenericStateStoreCloneBox {
+        fn clone_box(&self) -> BoxGenericStateStore;
+    }
+    pub trait AsHummock {
+        fn as_hummock(&self) -> Option<&HummockStorage>;
+    }
+    impl AsHummock for MemoryStateStore {
+        fn as_hummock(&self) -> Option<&HummockStorage> {
+            None
+        }
+    }
+    impl AsHummock for HummockStorageV1 {
+        fn as_hummock(&self) -> Option<&HummockStorage> {
+            None
+        }
+    }
+    impl AsHummock for HummockStorage {
+        fn as_hummock(&self) -> Option<&HummockStorage> {
+            Some(self)
+        }
+    }
+    pub trait GenericStateStore:
+        GenericStateStoreCloneBox
+        + GenericStateStoreRead
+        + GenericStateStoreWrite
+        + GenericStateStoreExt
+        + AsHummock
+    {
+    }
+    impl<
+            S: GenericStateStoreCloneBox
+                + GenericStateStoreRead
+                + GenericStateStoreWrite
+                + GenericStateStoreExt
+                + AsHummock,
+        > GenericStateStore for S
+    {
+    }
+
+    impl<S: StateStore + AsHummock> GenericStateStoreCloneBox for S {
+        fn clone_box(&self) -> BoxGenericStateStore {
+            Box::new(self.clone())
+        }
+    }
+
+    impl Clone for BoxGenericStateStore {
+        fn clone(&self) -> Self {
+            self.clone_box()
+        }
+    }
+
+    impl StateStoreRead for BoxGenericStateStore {
+        type Iter = Box<dyn GenericStateStoreIter>;
+
+        define_state_store_read_associated_type!();
+
+        fn get<'a>(
+            &'a self,
+            key: &'a [u8],
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> Self::GetFuture<'_> {
+            self.deref().get(key, epoch, read_options)
+        }
+
+        fn iter(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> Self::IterFuture<'_> {
+            self.deref().iter(key_range, epoch, read_options)
+        }
+    }
+
+    impl StateStoreWrite for BoxGenericStateStore {
+        define_state_store_write_associated_type!();
+
+        fn ingest_batch(
+            &self,
+            kv_pairs: Vec<(Bytes, StorageValue)>,
+            write_options: WriteOptions,
+        ) -> Self::IngestBatchFuture<'_> {
+            self.deref().ingest_batch(kv_pairs, write_options)
+        }
+    }
+
+    impl StateStore for BoxGenericStateStore {
+        type Local = BoxGenericLocalStateStore;
+
+        type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
+
+        define_state_store_associated_type!();
+
+        fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+            self.deref().try_wait_epoch(epoch)
+        }
+
+        fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
+            self.deref().sync(epoch)
+        }
+
+        fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+            self.deref().clear_shared_buffer()
+        }
+
+        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
+            self.deref().seal_epoch(epoch, is_checkpoint)
+        }
+
+        fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
+            self.deref().new_local(table_id)
+        }
     }
 }
