@@ -62,7 +62,6 @@ impl SplitEnumerator for PubsubSplitEnumerator {
 
         // We need the `retain_acked_messages` configuration to be true to seek back to timestamps
         // as done in the [`PubsubSplitReader`] and here.
-        // ? Should we enforce this policy
         let (_, subscription_config) = sub.config(None, None).await?;
         if let SubscriptionConfig {
             retain_acked_messages: false,
