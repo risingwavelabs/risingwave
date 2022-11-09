@@ -22,43 +22,38 @@ use risingwave_common::types::{DatumRef, ScalarRefImpl};
 
 use crate::sink::{Result, Sink};
 
-pub const PRINT_SINK: &str = "print";
+pub const CONSOLE_SINK: &str = "console";
 
 #[derive(Clone, Debug)]
-pub struct PrintConfig {
-    pub prefix: String,
-    pub suffix: String,
+pub struct ConsoleConfig {
+    pub prefix: Option<String>,
+    pub suffix: Option<String>,
 }
 
-impl PrintConfig {
+impl ConsoleConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let prefix = values
-            .get("prefix")
-            .expect("prefix is required")
-            .to_string();
-        let suffix = values
-            .get("suffix")
-            .expect("suffix is required")
-            .to_string();
-        Ok(PrintConfig { prefix, suffix })
+        Ok(ConsoleConfig {
+            prefix: values.get("prefix").cloned(),
+            suffix: values.get("suffix").cloned(),
+        })
     }
 }
 
 #[derive(Debug)]
-pub struct PrintSink {
+pub struct ConsoleSink {
     pub epoch: u64,
     pub buffer: Vec<String>,
     pub prefix: String,
     pub suffix: String,
 }
 
-impl PrintSink {
-    pub async fn new(config: PrintConfig) -> Result<Self> {
-        Ok(PrintSink {
+impl ConsoleSink {
+    pub async fn new(config: ConsoleConfig) -> Result<Self> {
+        Ok(ConsoleSink {
             epoch: 0,
             buffer: vec![],
-            prefix: config.prefix,
-            suffix: config.suffix,
+            prefix: config.prefix.unwrap_or("".to_string()),
+            suffix: config.suffix.unwrap_or("".to_string()),
         })
     }
 
@@ -81,7 +76,7 @@ impl PrintSink {
 }
 
 #[async_trait]
-impl Sink for PrintSink {
+impl Sink for ConsoleSink {
     async fn write_batch(&mut self, chunk: StreamChunk, _schema: &Schema) -> Result<()> {
         for (op, row_ref) in chunk.rows() {
             let row_repr = join(row_ref.values().map(Self::parse_datum), ",");
@@ -106,7 +101,7 @@ impl Sink for PrintSink {
         for row in self.buffer.clone() {
             println!("{}{}{}", self.prefix, row, self.suffix)
         }
-        self.buffer = vec![];
+        self.buffer.clear();
         Ok(())
     }
 
@@ -125,15 +120,15 @@ mod test {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
-    use crate::sink::print::{PrintConfig, PrintSink};
+    use crate::sink::console::{ConsoleConfig, ConsoleSink};
     use crate::sink::Sink;
 
     #[test]
-    fn test_print_sink() {
+    fn test_console_sink() {
         futures::executor::block_on(async {
-            let mut print_sink = PrintSink::new(PrintConfig {
-                prefix: "[PRINT_SINK_TEST] ".to_string(),
-                suffix: ";".to_string(),
+            let mut console_sink = ConsoleSink::new(ConsoleConfig {
+                prefix: Option::from("[CONSOLE] ".to_string()),
+                suffix: Option::from(";".to_string()),
             })
             .await
             .unwrap();
@@ -183,19 +178,19 @@ mod test {
                 None,
             );
 
-            print_sink.begin_epoch(0).await.unwrap();
-            print_sink
+            console_sink.begin_epoch(0).await.unwrap();
+            console_sink
                 .write_batch(chunk.clone(), &schema)
                 .await
                 .expect("Error");
-            print_sink.commit().await.expect("Error");
+            console_sink.commit().await.expect("Error");
 
-            print_sink.begin_epoch(1).await.unwrap();
-            print_sink
+            console_sink.begin_epoch(1).await.unwrap();
+            console_sink
                 .write_batch(chunk_2.clone(), &schema)
                 .await
                 .expect("Error");
-            print_sink.commit().await.expect("Error");
+            console_sink.commit().await.expect("Error");
         });
     }
 }
