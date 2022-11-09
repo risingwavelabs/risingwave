@@ -121,7 +121,6 @@ impl Binder {
             let column_name = &query_column.value; // value or real_value() ?
             let mut col_exists = false;
             for (col_idx, table_column) in table_source.columns.iter().enumerate() {
-                // TODO: is there a better comparison then by col name?
                 if *column_name.to_lowercase() == table_column.name.to_lowercase() {
                     target_table_col_idxs.push(ColumnIdx::from(col_idx));
                     col_exists = true;
