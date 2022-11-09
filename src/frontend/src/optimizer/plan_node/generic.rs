@@ -876,7 +876,6 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
         self.i2r_col_mapping().inverse()
     }
 }
-
 /// [`Expand`] expand one row multiple times according to `column_subsets` and also keep
 /// original columns of input. It can be used to implement distinct aggregation and group set.
 ///
