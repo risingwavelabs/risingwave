@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{CompactTask, CompactTaskAssignment, SubscribeCompactTasksResponse};
@@ -55,9 +54,6 @@ pub trait CompactionSchedulePolicy: Send + Sync {
     ///
     /// Note: It is allowed to remove a non-existent compactor.
     fn remove_compactor(&mut self, context_id: HummockContextId);
-
-    /// Sets config for a compactor.
-    fn set_compactor_config(&self, context_id: HummockContextId, config: CompactorRuntimeConfig);
 
     fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>>;
 
@@ -163,12 +159,6 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
     fn remove_compactor(&mut self, context_id: HummockContextId) {
         self.compactors.retain(|c| *c != context_id);
         self.compactor_map.remove(&context_id);
-    }
-
-    fn set_compactor_config(&self, context_id: HummockContextId, config: CompactorRuntimeConfig) {
-        if let Some(compactor) = self.get_compactor(context_id) {
-            compactor.set_config(config);
-        }
     }
 
     fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {
@@ -329,12 +319,6 @@ impl CompactionSchedulePolicy for ScoredPolicy {
     fn remove_compactor(&mut self, context_id: HummockContextId) {
         if let Some(pending_bytes) = self.context_id_to_score.remove(&context_id) {
             self.score_to_compactor.remove(&(pending_bytes, context_id));
-        }
-    }
-
-    fn set_compactor_config(&self, context_id: HummockContextId, config: CompactorRuntimeConfig) {
-        if let Some(compactor) = self.get_compactor(context_id) {
-            compactor.set_config(config);
         }
     }
 

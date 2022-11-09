@@ -224,7 +224,9 @@ impl CompactorManager {
         context_id: HummockContextId,
         config: CompactorRuntimeConfig,
     ) {
-        self.policy.read().set_compactor_config(context_id, config);
+        if let Some(compactor) = self.policy.read().get_compactor(context_id) {
+            compactor.set_config(config);
+        }
     }
 
     pub fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {
