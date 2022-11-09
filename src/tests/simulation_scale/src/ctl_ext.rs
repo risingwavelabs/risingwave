@@ -78,7 +78,7 @@ pub mod predicate {
         Box::new(p)
     }
 
-    /// There exists operators whose identity contains `s` in the fragment.
+    /// There does not exist any operator whose identity contains `s` in the fragment.
     pub fn identity_not_contains(s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
         let p = move |f: &ProstFragment| {
