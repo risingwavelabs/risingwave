@@ -245,7 +245,7 @@ impl Compactor {
             Ok(agg) => agg,
             Err(err) => {
                 tracing::warn!("Failed to build delete range aggregator {:#?}", err);
-                return TaskStatus::TrackSstIdFailed;
+                return TaskStatus::ExecuteFailed;
             }
         };
 
