@@ -23,8 +23,9 @@ use crate::executor::{LookupExecutor, LookupExecutorParams};
 
 pub struct LookupExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for LookupExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -51,7 +52,8 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             lookup.arrangement_table.as_ref().unwrap(),
             store,
             params.vnode_bitmap.map(Arc::new),
-        );
+        )
+        .await;
 
         Ok(Box::new(LookupExecutor::new(LookupExecutorParams {
             schema: Schema::new(node.fields.iter().map(Field::from).collect()),

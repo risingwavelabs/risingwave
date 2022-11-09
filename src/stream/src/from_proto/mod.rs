@@ -75,9 +75,10 @@ use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
+#[async_trait::async_trait]
 trait ExecutorBuilder {
     /// Create a [`BoxedExecutor`] from [`StreamNode`].
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -90,7 +91,7 @@ macro_rules! build_executor {
         match $node.get_node_body().unwrap() {
             $(
                 $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor($source, $node, $store, $stream)
+                    <$data_type>::new_boxed_executor($source, $node, $store, $stream).await
                 },
             )*
             NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) => unreachable!()
@@ -99,7 +100,7 @@ macro_rules! build_executor {
 }
 
 /// Create an executor from protobuf [`StreamNode`].
-pub fn create_executor(
+pub async fn create_executor(
     params: ExecutorParams,
     stream: &mut LocalStreamManagerCore,
     node: &StreamNode,
