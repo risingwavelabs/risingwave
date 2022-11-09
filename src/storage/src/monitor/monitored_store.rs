@@ -143,10 +143,6 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            if kv_pairs.is_empty() {
-                return Ok(0);
-            }
-
             self.stats
                 .write_batch_tuple_counts
                 .inc_by(kv_pairs.len() as _);

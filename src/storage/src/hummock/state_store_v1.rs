@@ -485,6 +485,10 @@ impl StateStoreWrite for HummockStorageV1 {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            if kv_pairs.is_empty() {
+                return Ok(0);
+            }
+
             let epoch = write_options.epoch;
             // See comments in HummockStorage::iter_inner for details about using
             // compaction_group_id in read/write path.
