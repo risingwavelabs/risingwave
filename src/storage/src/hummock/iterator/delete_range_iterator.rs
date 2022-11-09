@@ -17,8 +17,7 @@ use std::collections::BinaryHeap;
 
 use risingwave_hummock_sdk::HummockEpoch;
 
-use crate::hummock::iterator::Forward;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferDeleteRangeIterator;
 use crate::hummock::SstableDeleteRangeIterator;
 
 /// `DeleteRangeIterator` defines the interface of all delete-range iterators, which is used to
@@ -102,7 +101,7 @@ pub trait DeleteRangeIterator {
 
 pub enum RangeIteratorTyped {
     Sst(SstableDeleteRangeIterator),
-    Batch(SharedBufferBatchIterator<Forward>),
+    Batch(SharedBufferDeleteRangeIterator),
 }
 
 impl DeleteRangeIterator for RangeIteratorTyped {
@@ -192,7 +191,7 @@ pub struct ForwardMergeRangeIterator {
 }
 
 impl ForwardMergeRangeIterator {
-    pub fn add_batch_iter(&mut self, iter: SharedBufferBatchIterator<Forward>) {
+    pub fn add_batch_iter(&mut self, iter: SharedBufferDeleteRangeIterator) {
         self.unused_iters.push(RangeIteratorTyped::Batch(iter));
     }
 

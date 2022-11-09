@@ -229,7 +229,14 @@ impl UserIterator<ForwardUserIteratorType> {
         iterator: ForwardUserIteratorType,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::new(iterator, key_range, HummockEpoch::MAX, 0, None)
+        Self::new(
+            iterator,
+            key_range,
+            HummockEpoch::MAX,
+            0,
+            None,
+            DeleteRangeAggregator::new(ForwardMergeRangeIterator::default(), HummockEpoch::MAX),
+        )
     }
 
     pub(crate) fn for_test_with_epoch(
@@ -238,7 +245,14 @@ impl UserIterator<ForwardUserIteratorType> {
         read_epoch: u64,
         min_epoch: u64,
     ) -> Self {
-        Self::new(iterator, key_range, read_epoch, min_epoch, None)
+        Self::new(
+            iterator,
+            key_range,
+            read_epoch,
+            min_epoch,
+            None,
+            DeleteRangeAggregator::new(ForwardMergeRangeIterator::default(), read_epoch),
+        )
     }
 }
 

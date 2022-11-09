@@ -174,7 +174,7 @@ impl SharedBufferBatch {
             .inner
             .range_tombstone_list
             .partition_point(|item| item.end_user_key.as_slice().le(user_key));
-        idx >= self.inner.range_tombstone_list.len()
+        idx < self.inner.range_tombstone_list.len()
             && self.inner.range_tombstone_list[idx]
                 .start_user_key
                 .as_slice()
@@ -191,6 +191,10 @@ impl SharedBufferBatch {
 
     pub fn into_backward_iter(self) -> SharedBufferBatchIterator<Backward> {
         self.into_directed_iter()
+    }
+
+    pub fn delete_range_iter(&self) -> SharedBufferDeleteRangeIterator {
+        SharedBufferDeleteRangeIterator::new(self.inner.clone())
     }
 
     pub fn get_payload(&self) -> &[SharedBufferItem] {
@@ -426,8 +430,21 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 
     fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
 }
+pub struct SharedBufferDeleteRangeIterator {
+    inner: Arc<SharedBufferBatchInner>,
+    current_idx: usize,
+}
 
-impl DeleteRangeIterator for SharedBufferBatchIterator<Forward> {
+impl SharedBufferDeleteRangeIterator {
+    pub(crate) fn new(inner: Arc<SharedBufferBatchInner>) -> Self {
+        Self {
+            inner,
+            current_idx: 0,
+        }
+    }
+}
+
+impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
     fn start_user_key(&self) -> &[u8] {
         &self.inner.range_tombstone_list[self.current_idx].start_user_key
     }
@@ -462,7 +479,6 @@ impl DeleteRangeIterator for SharedBufferBatchIterator<Forward> {
 
 #[cfg(test)]
 mod tests {
-
     use itertools::Itertools;
     use risingwave_hummock_sdk::key::user_key;
 
@@ -692,5 +708,27 @@ mod tests {
             iter.next().await.unwrap();
         }
         assert!(!iter.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_shared_buffer_batch_delete_range() {
+        let epoch = 1;
+        let shared_buffer_items = vec![
+            (Bytes::from(b"aaa".to_vec()), Bytes::from(b"bbb".to_vec())),
+            (Bytes::from(b"ccc".to_vec()), Bytes::from(b"ddd".to_vec())),
+            (Bytes::from(b"ddd".to_vec()), Bytes::from(b"eee".to_vec())),
+        ];
+        let shared_buffer_batch = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            vec![],
+            shared_buffer_items,
+            Default::default(),
+            None,
+        )
+        .await;
+        assert!(shared_buffer_batch.check_delete_by_range(b"aaa"));
+        assert!(!shared_buffer_batch.check_delete_by_range(b"bbb"));
+        assert!(shared_buffer_batch.check_delete_by_range(b"ddd"));
+        assert!(!shared_buffer_batch.check_delete_by_range(b"eee"));
     }
 }

@@ -353,6 +353,7 @@ pub async fn get_from_sstable_info(
         if agg.should_delete(ukey, 0) {
             return Ok(Some(HummockValue::Delete));
         }
+        return Ok(None);
     }
 
     // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
