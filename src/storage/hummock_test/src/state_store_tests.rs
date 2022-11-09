@@ -95,10 +95,26 @@ async fn test_basic_inner(
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
 
+    // try to write an empty batch, and hummock should write nothing
+    let size = hummock_storage
+        .ingest_batch(
+            vec![],
+            vec![],
+            WriteOptions {
+                epoch: epoch1,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(size, 0);
+
     // Write the first batch.
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -160,6 +176,7 @@ async fn test_basic_inner(
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -190,6 +207,7 @@ async fn test_basic_inner(
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -402,6 +420,7 @@ async fn test_state_store_sync_inner(
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -429,6 +448,7 @@ async fn test_state_store_sync_inner(
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -457,6 +477,7 @@ async fn test_state_store_sync_inner(
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -537,6 +558,7 @@ async fn test_reload_storage() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -594,6 +616,7 @@ async fn test_reload_storage() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -813,6 +836,7 @@ async fn test_write_anytime_inner(
     hummock_storage
         .ingest_batch(
             batch1.clone(),
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -914,6 +938,7 @@ async fn test_write_anytime_inner(
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -930,6 +955,7 @@ async fn test_write_anytime_inner(
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -993,6 +1019,7 @@ async fn test_delete_get_inner(
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1011,6 +1038,7 @@ async fn test_delete_get_inner(
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1075,6 +1103,7 @@ async fn test_multiple_epoch_sync_inner(
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1088,6 +1117,7 @@ async fn test_multiple_epoch_sync_inner(
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1110,6 +1140,7 @@ async fn test_multiple_epoch_sync_inner(
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -1232,6 +1263,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1252,6 +1284,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),

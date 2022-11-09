@@ -20,6 +20,7 @@ use async_trait::async_trait;
 use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
     SstIdRange,
@@ -525,6 +526,15 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn set_compactor_runtime_config(&self, config: CompactorRuntimeConfig) -> Result<()> {
+        let req = SetCompactorRuntimeConfigRequest {
+            context_id: self.worker_id,
+            config: Some(config.into()),
+        };
+        let _resp = self.inner.set_compactor_runtime_config(req).await?;
+        Ok(())
+    }
+
     pub async fn replay_version_delta(
         &self,
         version_delta: HummockVersionDelta,
@@ -900,6 +910,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_list_compaction_group, RiseCtlListCompactionGroupRequest, RiseCtlListCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
+            ,{ hummock_client, set_compactor_runtime_config, SetCompactorRuntimeConfigRequest, SetCompactorRuntimeConfigResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
