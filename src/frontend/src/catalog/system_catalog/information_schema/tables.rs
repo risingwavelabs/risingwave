@@ -16,11 +16,17 @@ use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-/// The catalog `pg_index` contains part of the information about indexes.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-index.html`]
-pub const PG_INDEX_TABLE_NAME: &str = "pg_index";
-pub const PG_INDEX_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "indexrelid"),
-    (DataType::Int32, "indrelid"),
-    (DataType::Int16, "indnatts"),
+/// The view tables contains all tables and views defined in the current database. Only those tables
+/// and views are shown that the current user has access to (by way of being the owner or having
+/// some privilege).
+/// Ref: [`https://www.postgresql.org/docs/current/infoschema-tables.html`]
+///
+/// In RisingWave, `tables` also contains all materialized views.
+pub const TABLES_TABLE_NAME: &str = "tables";
+pub const TABLES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
+    (DataType::Varchar, "table_catalog"),
+    (DataType::Varchar, "table_schema"),
+    (DataType::Varchar, "table_name"),
+    (DataType::Varchar, "table_type"),
+    (DataType::Varchar, "is_insertable_into"),
 ];
