@@ -215,7 +215,7 @@ impl StateStoreWrite for LocalHummockStorage {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            if kv_pairs.is_empty() {
+            if kv_pairs.is_empty() && delete_ranges.is_empty() {
                 return Ok(0);
             }
 

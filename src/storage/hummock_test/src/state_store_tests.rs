@@ -99,6 +99,7 @@ async fn test_basic_inner(
     let size = hummock_storage
         .ingest_batch(
             vec![],
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
