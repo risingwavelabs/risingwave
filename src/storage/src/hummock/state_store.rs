@@ -34,11 +34,9 @@ use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::{HummockEpoch, HummockError};
-use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore,
+    define_state_store_associated_type, define_state_store_read_associated_type, StateStore,
 };
 
 impl HummockStorage {
@@ -65,7 +63,7 @@ impl HummockStorage {
             (Vec::default(), Vec::default(), (**pinned_version).clone())
         } else {
             // TODO: use read_version_mapping for batch query
-            let read_version_vec = vec![self.storage_core.read_version()];
+            let read_version_vec = vec![self.read_version.clone()];
             let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
             read_filter_for_batch(epoch, table_id, &key_range, read_version_vec)?
         };
@@ -91,7 +89,7 @@ impl HummockStorage {
             (Vec::default(), Vec::default(), (**pinned_version).clone())
         } else {
             // TODO: use read_version_mapping for batch query
-            let read_version_vec = vec![self.storage_core.read_version()];
+            let read_version_vec = vec![self.read_version.clone()];
             read_filter_for_batch(epoch, table_id, &key_range, read_version_vec)?
         };
 
@@ -171,29 +169,6 @@ impl StateStoreRead for HummockStorage {
         }
 
         self.iter_inner(key_range, epoch, read_options)
-    }
-}
-
-impl StateStoreWrite for HummockStorage {
-    define_state_store_write_associated_type!();
-
-    /// Writes a batch to storage. The batch should be:
-    /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
-    /// * Locally unique. There should not be two or more operations on the same key in one write
-    ///   batch.
-    /// * Globally unique. The streaming operators should ensure that different operators won't
-    ///   operate on the same key. The operator operating on one keyspace should always wait for all
-    ///   changes to be committed before reading and writing new keys to the engine. That is because
-    ///   that the table with lower epoch might be committed after a table with higher epoch has
-    ///   been committed. If such case happens, the outcome is non-predictable.
-    fn ingest_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
-        write_options: WriteOptions,
-    ) -> Self::IngestBatchFuture<'_> {
-        self.storage_core
-            .ingest_batch(kv_pairs, delete_ranges, write_options)
     }
 }
 
@@ -317,8 +292,14 @@ impl StateStore for HummockStorage {
 
     fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
         async move {
-            // TODO: initialize a new local state store instance
-            self.storage_core.clone()
+            LocalHummockStorage::new(
+                self.read_version.clone(),
+                self.hummock_version_reader.clone(),
+                self.hummock_event_sender.clone(),
+                self.buffer_tracker.get_memory_limiter().clone(),
+                #[cfg(not(madsim))]
+                self.tracing.clone(),
+            )
         }
     }
 }
