@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -33,7 +34,7 @@ use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
-    Executor, ExecutorInfo, Message, PkIndicesRef,
+    Executor, ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
 };
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
@@ -165,7 +166,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     .into_iter()
                     .zip_eq(pks.iter_mut())
                     .for_each(|(vnode, vnode_and_pk)| vnode_and_pk.extend(vnode.to_be_bytes()));
-
                     let key_chunk = data_chunk
                         .clone()
                         .reorder_columns(self.state_table.pk_indices());
@@ -177,11 +177,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
                         },
                     );
 
-                    let (_, vis) = data_chunk.into_parts();
+                    let (_, vis) = key_chunk.into_parts();
 
-                    // create hash_map from chunk
-                    let mut buffer = HashMap::new();
-
+                    // create buffer from chunk
+                    let mut buffer = MaterializeBuffer::new();
                     match vis {
                         Vis::Bitmap(vis) => {
                             for ((op, key, value), vis) in
@@ -189,20 +188,11 @@ impl<S: StateStore> MaterializeExecutor<S> {
                             {
                                 if vis {
                                     match op {
-                                        Op::Insert => buffer.insert(key, RowOp::Insert(value)),
-                                        Op::Delete => buffer.insert(key, RowOp::Delete(value)),
-                                        Op::UpdateDelete => {
-                                            buffer.insert(key, RowOp::Update((value, vec![])))
+                                        Op::Insert | Op::UpdateInsert => {
+                                            buffer.insert(key, value)?
                                         }
-                                        Op::UpdateInsert => {
-                                            let old_value = if let RowOp::Update((old_value, _)) =
-                                                buffer.remove(&key).unwrap()
-                                            {
-                                                old_value
-                                            } else {
-                                                unreachable!()
-                                            };
-                                            buffer.insert(key, RowOp::Update((old_value, value)))
+                                        Op::Delete | Op::UpdateDelete => {
+                                            buffer.delete(key, value)?
                                         }
                                     };
                                 }
@@ -211,33 +201,21 @@ impl<S: StateStore> MaterializeExecutor<S> {
                         Vis::Compact(_) => {
                             for (op, key, value) in izip!(ops, pks, values) {
                                 match op {
-                                    Op::Insert => buffer.insert(key, RowOp::Insert(value)),
-                                    Op::Delete => buffer.insert(key, RowOp::Delete(value)),
-                                    Op::UpdateDelete => {
-                                        buffer.insert(key, RowOp::Update((value, vec![])))
-                                    }
-                                    Op::UpdateInsert => {
-                                        let old_value = if let RowOp::Update((old_value, _)) =
-                                            buffer.remove(&key).unwrap()
-                                        {
-                                            old_value
-                                        } else {
-                                            unreachable!()
-                                        };
-                                        buffer.insert(key, RowOp::Update((old_value, value)))
-                                    }
+                                    Op::Insert | Op::UpdateInsert => buffer.insert(key, value)?,
+                                    Op::Delete | Op::UpdateDelete => buffer.delete(key, value)?,
                                 };
                             }
                         }
                     }
-
-                    if buffer.len() == 0 {
+                    println!("12312312312312312 = {:?}", 1 << 16);
+                    if buffer.is_empty() {
                         // empty chunk
                         continue;
                     } else {
                         // ensure all key in cache, get from storage
-                        for key in buffer.keys() {
+                        for key in buffer.buffer.keys() {
                             if self.materialize_cache.get(&key).is_none() {
+                                // key do not exsit in cache
                                 if let Some(storage_value) = self
                                     .state_table
                                     .keyspace()
@@ -255,66 +233,63 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 }
                             }
                         }
-
+                        // println!("cache size = {:?}", self.materialize_cache.data.len());
                         // do check
-                        let mut output = buffer.clone();
-                        // for (key, row_op) in buffer.into_iter() {
-                        //     match row_op {
-                        //         RowOp::Insert(row) => {
-                        //             if let Some(cache_row) =
-                        //                 self.materialize_cache.get(&key).unwrap()
-                        //             {
-                        //                 // double insert => update
-                        //                 println!("check 1");
-                        //                 output.remove(&key);
-                        //                 output.insert(
-                        //                     key.clone(),
-                        //                     RowOp::Update((cache_row.clone(), row.clone())),
-                        //                 );
-                        //                 self.materialize_cache.remove(&key);
-                        //                 self.materialize_cache.insert(key, Some(row.clone()));
-                        //             }
-                        //         }
-                        //         RowOp::Delete(old_row) => {
-                        //             if let Some(cache_row) =
-                        //                 self.materialize_cache.get(&key).unwrap()
-                        //             {
-                        //                 if cache_row != &old_row {
-                        //                     println!("check 2");
-                        //                     output.remove(&key);
-                        //                     output.insert(key, RowOp::Delete(cache_row.clone()));
-                        //                 }
-                        //             } else {
-                        //                 println!("check 3");
-                        //                 // output.remove(&key);
-                        //                 // self.materialize_cache.remove(&key);
-                        //             }
-                        //         }
-                        //         RowOp::Update((old_row, new_row)) => {
-                        //             if let Some(cache_row) =
-                        //                 self.materialize_cache.get(&key).unwrap()
-                        //             {
-                        //                 if cache_row != &old_row {
-                        //                     println!("check 4");
-                        //                     output.remove(&key);
-                        //                     output.insert(
-                        //                         key.clone(),
-                        //                         RowOp::Update((cache_row.clone(),
-                        // new_row.clone())),                     );
-                        //                     self.materialize_cache.remove(&key);
-                        //                     self.materialize_cache.insert(key, Some(new_row));
-                        //                 }
-                        //             } else {
-                        //                 println!("check 5");
-                        //                 // output.remove(&key);
-                        //                 // output.insert(key.clone(),
-                        // RowOp::Insert(new_row.clone()));
-                        // self.materialize_cache.remove(&key);
-                        // self.materialize_cache.insert(key, Some(new_row));
-                        //             }
-                        //         }
-                        //     }
-                        // }
+                        let mut output = buffer.buffer.clone();
+                        for (key, row_op) in buffer.buffer.into_iter() {
+                            match row_op {
+                                RowOp::Insert(row) => {
+                                    if let Some(cache_row) =
+                                        self.materialize_cache.get(&key).unwrap()
+                                    {
+                                        // double insert => update
+                                        output.remove(&key);
+                                        output.insert(
+                                            key.clone(),
+                                            RowOp::Update((cache_row.clone(), row.clone())),
+                                        );
+                                        self.materialize_cache.remove(&key);
+                                        self.materialize_cache.insert(key, Some(row.clone()));
+                                    }
+                                }
+                                RowOp::Delete(old_row) => {
+                                    if let Some(cache_row) =
+                                        self.materialize_cache.get(&key).unwrap()
+                                    {
+                                        if cache_row != &old_row {
+                                            println!("check 2");
+                                            output.remove(&key);
+                                            output.insert(key, RowOp::Delete(cache_row.to_vec()));
+                                        }
+                                    } else {
+                                        // println!("check 3");
+                                        // output.remove(&key);
+                                    }
+                                }
+                                RowOp::Update((old_row, new_row)) => {
+                                    if let Some(cache_row) =
+                                        self.materialize_cache.get(&key).unwrap()
+                                    {
+                                        if cache_row != &old_row {
+                                            output.remove(&key);
+                                            output.insert(
+                                                key.clone(),
+                                                RowOp::Update((cache_row.clone(), new_row.clone())),
+                                            );
+                                            self.materialize_cache.remove(&key);
+                                            self.materialize_cache.insert(key, Some(new_row));
+                                        }
+                                    } else {
+                                        // println!("check 5");
+                                        // output.remove(&key);
+                                        // output.insert(key.clone(),
+                                        // RowOp::Insert(new_row.clone()));
+                                        // self.materialize_cache.remove(&key);
+                                        // self.materialize_cache.insert(key, Some(new_row));
+                                    }
+                                }
+                            }
+                        }
 
                         // construct output chunk
                         let mut new_ops: Vec<Op> = vec![];
@@ -373,6 +348,68 @@ impl<S: StateStore> MaterializeExecutor<S> {
     }
 }
 
+pub struct MaterializeBuffer {
+    buffer: HashMap<Vec<u8>, RowOp>,
+}
+
+impl MaterializeBuffer {
+    pub fn new() -> Self {
+        Self {
+            buffer: HashMap::new(),
+        }
+    }
+
+    /// write methods
+    pub fn insert(&mut self, pk: Vec<u8>, value: Vec<u8>) -> StreamExecutorResult<()> {
+        let entry = self.buffer.entry(pk);
+        match entry {
+            Entry::Vacant(e) => {
+                e.insert(RowOp::Insert(value));
+                Ok(())
+            }
+            Entry::Occupied(mut e) => match e.get_mut() {
+                RowOp::Delete(ref mut old_value) => {
+                    let old_val = std::mem::take(old_value);
+                    e.insert(RowOp::Update((old_val, value)));
+                    Ok(())
+                }
+                _ => panic!("conflict"),
+            },
+        }
+    }
+
+    pub fn delete(&mut self, pk: Vec<u8>, old_value: Vec<u8>) -> StreamExecutorResult<()> {
+        let entry = self.buffer.entry(pk);
+        match entry {
+            Entry::Vacant(e) => {
+                e.insert(RowOp::Delete(old_value));
+                Ok(())
+            }
+            Entry::Occupied(mut e) => match e.get_mut() {
+                RowOp::Insert(original_value) => {
+                    debug_assert_eq!(original_value, &old_value);
+                    e.remove();
+                    Ok(())
+                }
+                RowOp::Delete(_) => panic!("conflict"),
+                RowOp::Update(value) => {
+                    let (original_old_value, original_new_value) = std::mem::take(value);
+                    debug_assert_eq!(original_new_value, old_value);
+                    e.insert(RowOp::Delete(original_old_value));
+                    Ok(())
+                }
+            },
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
+    pub fn into_parts(self) -> HashMap<Vec<u8>, RowOp> {
+        self.buffer
+    }
+}
 impl<S: StateStore> Executor for MaterializeExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()

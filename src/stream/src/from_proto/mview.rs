@@ -47,7 +47,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.vnode_bitmap.map(Arc::new),
             table,
             stream.context.lru_manager.clone(),
-            10000,
+            1 << 16,
         );
 
         Ok(executor.boxed())
@@ -88,7 +88,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             vnodes,
             table,
             stream.context.lru_manager.clone(),
-            10000,
+            1 << 16,
         );
 
         Ok(executor.boxed())

@@ -130,7 +130,7 @@ fn create_arrangement(
         column_ids,
         1,
         None,
-        0,
+        100,
     ))
 }
 

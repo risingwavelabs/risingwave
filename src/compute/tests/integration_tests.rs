@@ -154,7 +154,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         all_column_ids.clone(),
         2,
         None,
-        100,
+        1000,
     )
     .boxed()
     .execute();
