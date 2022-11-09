@@ -56,10 +56,52 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "end-to-end test (dev mode)"
+    command: "ci/scripts/e2e-test.sh -p ci-dev"
+    depends_on:
+      - "build-dev"
+      - "docslt"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - test-collector#v1.0.0:
+          files: "*-junit.xml"
+          format: "junit"
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "end-to-end test (release mode)"
     command: "ci/scripts/e2e-test.sh -p ci-release"
     depends_on:
       - "build-release"
+      - "docslt"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - test-collector#v1.0.0:
+          files: "*-junit.xml"
+          format: "junit"
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end test (parallel) (dev mode)"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
+    depends_on:
+      - "build-dev"
       - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -100,7 +142,7 @@ steps:
 
   - label: "end-to-end test (parallel, in-memory) (release mode)"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-release"
-    depends_on: 
+    depends_on:
       - "build-release"
       - "docslt"
     plugins:
@@ -124,27 +166,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
-    retry: *auto-retry
-
-  - label: "end-to-end test (dev mode)"
-    command: "ci/scripts/e2e-test.sh -p ci-dev"
-    depends_on:
-      - "build-dev"
-      - "docslt"
-    plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
-      - docker-compose#v3.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - test-collector#v1.0.0:
-          files: "*-junit.xml"
-          format: "junit"
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "release"
