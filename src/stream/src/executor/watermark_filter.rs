@@ -289,7 +289,7 @@ mod tests {
 
     const WATERMARK_TYPE: DataType = DataType::Timestamp;
 
-    fn create_in_memory_state_table(
+    async fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
         data_types: &[DataType],
         order_types: &[OrderType],
@@ -311,9 +311,10 @@ mod tests {
             Distribution::all_vnodes(vec![0]),
             val_indices.to_vec(),
         )
+        .await
     }
 
-    fn create_watermark_filter_executor(
+    async fn create_watermark_filter_executor(
         mem_state: MemoryStateStore,
     ) -> (BoxedExecutor, MessageSender) {
         let interval_type = DataType::Interval;
@@ -344,7 +345,8 @@ mod tests {
             &[0],
             &[1],
             0,
-        );
+        )
+        .await;
 
         let (tx, source) = MockSource::channel(schema, vec![0]);
 
@@ -384,7 +386,7 @@ mod tests {
 
         let mem_state = MemoryStateStore::new();
 
-        let (executor, mut tx) = create_watermark_filter_executor(mem_state.clone());
+        let (executor, mut tx) = create_watermark_filter_executor(mem_state.clone()).await;
         let mut executor = executor.execute();
 
         // push the init barrier
@@ -455,7 +457,7 @@ mod tests {
         drop(executor);
 
         // Build new executor
-        let (executor, mut tx) = create_watermark_filter_executor(mem_state.clone());
+        let (executor, mut tx) = create_watermark_filter_executor(mem_state.clone()).await;
         let mut executor = executor.execute();
 
         // push the 1st barrier after failover

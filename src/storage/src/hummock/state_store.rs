@@ -198,7 +198,7 @@ impl StateStoreWrite for HummockStorage {
 impl StateStore for HummockStorage {
     type Local = LocalHummockStorage;
 
-    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + 'a;
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
     define_state_store_associated_type!();
 

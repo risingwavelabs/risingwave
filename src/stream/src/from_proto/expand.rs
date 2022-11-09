@@ -17,8 +17,9 @@ use crate::executor::ExpandExecutor;
 
 pub struct ExpandExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for ExpandExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,

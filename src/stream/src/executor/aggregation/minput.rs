@@ -318,7 +318,7 @@ mod tests {
         chunk
     }
 
-    fn create_mem_state_table(
+    async fn create_mem_state_table(
         input_schema: &Schema,
         upstream_columns: Vec<usize>,
         order_types: Vec<OrderType>,
@@ -339,7 +339,8 @@ mod tests {
             columns,
             order_types,
             (0..pk_len).collect(),
-        );
+        )
+        .await;
         (table, mapping)
     }
 
@@ -376,7 +377,8 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
-        );
+        )
+        .await;
 
         let mut state = MaterializedInputState::new(
             &agg_call,
@@ -490,7 +492,8 @@ mod tests {
                 OrderType::Descending, // for AggKind::Max
                 OrderType::Ascending,
             ],
-        );
+        )
+        .await;
 
         let mut state = MaterializedInputState::new(
             &agg_call,
@@ -605,7 +608,8 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
-        );
+        )
+        .await;
         let (mut table_2, mapping_2) = create_mem_state_table(
             &input_schema,
             vec![1, 3],
@@ -613,7 +617,8 @@ mod tests {
                 OrderType::Descending, // for AggKind::Max
                 OrderType::Ascending,
             ],
-        );
+        )
+        .await;
 
         let epoch = EpochPair::new_test_epoch(1);
         table_1.init_epoch(epoch);
@@ -715,7 +720,8 @@ mod tests {
                 OrderType::Descending, // b DESC for AggKind::Max
                 OrderType::Ascending,  // _row_id ASC
             ],
-        );
+        )
+        .await;
 
         let mut state = MaterializedInputState::new(
             &agg_call,
@@ -826,7 +832,8 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
-        );
+        )
+        .await;
 
         let epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
@@ -940,7 +947,8 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
-        );
+        )
+        .await;
 
         let mut state = MaterializedInputState::new(
             &agg_call,
@@ -1073,7 +1081,8 @@ mod tests {
                 OrderType::Descending, // a DESC
                 OrderType::Ascending,  // b ASC
             ],
-        );
+        )
+        .await;
 
         let mut state = MaterializedInputState::new(
             &agg_call,
@@ -1174,7 +1183,8 @@ mod tests {
                 OrderType::Descending, // a DESC
                 OrderType::Ascending,  // _row_id ASC
             ],
-        );
+        )
+        .await;
 
         let mut state = MaterializedInputState::new(
             &agg_call,

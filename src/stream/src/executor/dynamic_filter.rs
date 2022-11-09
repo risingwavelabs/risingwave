@@ -414,8 +414,8 @@ mod tests {
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::ActorContext;
 
-    fn create_in_memory_state_table() -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>)
-    {
+    async fn create_in_memory_state_table(
+    ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let mem_state = MemoryStateStore::new();
 
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
@@ -425,18 +425,20 @@ mod tests {
             vec![column_descs.clone()],
             vec![OrderType::Ascending],
             vec![0],
-        );
+        )
+        .await;
         let state_table_r = StateTable::new_without_distribution(
             mem_state,
             TableId::new(1),
             vec![column_descs],
             vec![OrderType::Ascending],
             vec![0],
-        );
+        )
+        .await;
         (state_table_l, state_table_r)
     }
 
-    fn create_executor(
+    async fn create_executor(
         comparator: ExprNodeType,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let schema = Schema {
@@ -446,7 +448,7 @@ mod tests {
         let (tx_r, source_r) = MockSource::channel(schema, vec![]);
 
         let fallback = Distribution::fallback();
-        let (mem_state_l, mem_state_r) = create_in_memory_state_table();
+        let (mem_state_l, mem_state_r) = create_in_memory_state_table().await;
         let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
             ActorContext::create(123),
             Box::new(source_l),
@@ -490,7 +492,8 @@ mod tests {
             "  I
              + 4",
         );
-        let (mut tx_l, mut tx_r, mut dynamic_filter) = create_executor(ExprNodeType::GreaterThan);
+        let (mut tx_l, mut tx_r, mut dynamic_filter) =
+            create_executor(ExprNodeType::GreaterThan).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -594,7 +597,7 @@ mod tests {
              + 5",
         );
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor(ExprNodeType::GreaterThanOrEqual);
+            create_executor(ExprNodeType::GreaterThanOrEqual).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -697,7 +700,8 @@ mod tests {
             "  I
              + 1",
         );
-        let (mut tx_l, mut tx_r, mut dynamic_filter) = create_executor(ExprNodeType::LessThan);
+        let (mut tx_l, mut tx_r, mut dynamic_filter) =
+            create_executor(ExprNodeType::LessThan).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -801,7 +805,7 @@ mod tests {
              + 0",
         );
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor(ExprNodeType::LessThanOrEqual);
+            create_executor(ExprNodeType::LessThanOrEqual).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);

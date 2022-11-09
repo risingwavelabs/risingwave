@@ -97,7 +97,7 @@ impl ExchangeService for ExchangeServiceImpl {
 
         let up_down_actor_ids = (get_req.up_actor_id, get_req.down_actor_id);
         let up_down_fragment_ids = (get_req.up_fragment_id, get_req.down_fragment_id);
-        let receiver = self.stream_mgr.take_receiver(up_down_actor_ids)?;
+        let receiver = self.stream_mgr.take_receiver(up_down_actor_ids).await?;
 
         // Map the remaining stream to add-permits.
         let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
