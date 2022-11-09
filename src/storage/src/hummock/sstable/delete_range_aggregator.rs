@@ -59,7 +59,7 @@ pub struct DeleteRangeAggregatorBuilder {
 }
 
 pub struct RangeTombstonesCollector {
-    delete_tombstones: Vec<DeleteRangeTombstone>,
+    range_tombstone_list: Vec<DeleteRangeTombstone>,
     watermark: u64,
     gc_delete_keys: bool,
 }
@@ -79,7 +79,7 @@ impl DeleteRangeAggregatorBuilder {
             }
         });
         Arc::new(RangeTombstonesCollector {
-            delete_tombstones: self.delete_tombstones,
+            range_tombstone_list: self.delete_tombstones,
             gc_delete_keys,
             watermark,
         })
@@ -89,7 +89,7 @@ impl DeleteRangeAggregatorBuilder {
 impl RangeTombstonesCollector {
     pub fn for_test() -> Self {
         Self {
-            delete_tombstones: vec![],
+            range_tombstone_list: vec![],
             gc_delete_keys: false,
             watermark: 0,
         }
@@ -109,7 +109,7 @@ impl RangeTombstonesCollector {
         largest_user_key: &[u8],
     ) -> Vec<DeleteRangeTombstone> {
         let mut delete_ranges = vec![];
-        for tombstone in &self.delete_tombstones {
+        for tombstone in &self.range_tombstone_list {
             if !largest_user_key.is_empty()
                 && tombstone.start_user_key.as_slice().ge(largest_user_key)
             {
@@ -147,15 +147,15 @@ pub struct SingleDeleteRangeIterator {
 
 impl DeleteRangeIterator for SingleDeleteRangeIterator {
     fn start_user_key(&self) -> &[u8] {
-        &self.agg.delete_tombstones[self.seek_idx].start_user_key
+        &self.agg.range_tombstone_list[self.seek_idx].start_user_key
     }
 
     fn end_user_key(&self) -> &[u8] {
-        &self.agg.delete_tombstones[self.seek_idx].end_user_key
+        &self.agg.range_tombstone_list[self.seek_idx].end_user_key
     }
 
     fn current_epoch(&self) -> HummockEpoch {
-        self.agg.delete_tombstones[self.seek_idx].sequence
+        self.agg.range_tombstone_list[self.seek_idx].sequence
     }
 
     fn next(&mut self) {
@@ -167,7 +167,14 @@ impl DeleteRangeIterator for SingleDeleteRangeIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.seek_idx < self.agg.delete_tombstones.len()
+        self.seek_idx < self.agg.range_tombstone_list.len()
+    }
+
+    fn seek(&mut self, target_user_key: &[u8]) {
+        self.seek_idx = self
+            .agg
+            .range_tombstone_list
+            .partition_point(|tombstone| tombstone.end_user_key.as_slice().le(target_user_key));
     }
 }
 
@@ -267,6 +274,15 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
 
     fn rewind(&mut self) {
         self.current_idx = 0;
+    }
+
+    fn seek(&mut self, target_user_key: &[u8]) {
+        self.current_idx = self
+            .table
+            .value()
+            .meta
+            .range_tombstone_list
+            .partition_point(|tombstone| tombstone.end_user_key.as_slice().le(target_user_key));
     }
 
     fn is_valid(&self) -> bool {

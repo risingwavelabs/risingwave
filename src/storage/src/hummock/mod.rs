@@ -72,6 +72,7 @@ use risingwave_common_service::observer_manager::{NotificationClient, ObserverMa
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
 };
+use risingwave_hummock_sdk::key::get_epoch;
 pub use validator::*;
 use value::*;
 
@@ -84,8 +85,8 @@ use crate::hummock::compactor::Context;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::iterator::{
-    Backward, BackwardUserIteratorType, DirectedUserIteratorBuilder, DirectionEnum, Forward,
-    ForwardUserIteratorType, HummockIteratorDirection,
+    Backward, BackwardUserIteratorType, DeleteRangeIterator, DirectedUserIteratorBuilder,
+    DirectionEnum, Forward, ForwardUserIteratorType, HummockIteratorDirection,
 };
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
@@ -344,8 +345,14 @@ pub async fn get_from_sstable_info(
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
     let ukey = user_key(internal_key);
+    let mut iter = SstableDeleteRangeIterator::new(sstable.clone());
+    iter.seek(ukey);
+    let read_snapshot = get_epoch(internal_key);
+    let mut agg = DeleteRangeAggregator::new(iter, read_snapshot);
     if check_bloom_filter && !hit_sstable_bloom_filter(sstable.value(), ukey, local_stats) {
-        return Ok(None);
+        if agg.should_delete(ukey, 0) {
+            return Ok(Some(HummockValue::Delete));
+        }
     }
 
     // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
@@ -358,14 +365,24 @@ pub async fn get_from_sstable_info(
     iter.seek(internal_key).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
+        if agg.should_delete(ukey, 0) {
+            return Ok(Some(HummockValue::Delete));
+        }
         return Ok(None);
     }
 
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
-    let value = match key::user_key(iter.key()) == ukey {
-        true => Some(iter.value().to_bytes()),
-        false => None,
+    let value = if key::user_key(iter.key()) == ukey {
+        if agg.should_delete(ukey, get_epoch(iter.key())) {
+            Some(HummockValue::Delete)
+        } else {
+            Some(iter.value().to_bytes())
+        }
+    } else if agg.should_delete(ukey, 0) {
+        Some(HummockValue::Delete)
+    } else {
+        None
     };
     iter.collect_local_statistic(local_stats);
 
@@ -435,6 +452,9 @@ pub fn get_from_batch(
     key: &[u8],
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
+    if batch.check_delete_by_range(key) {
+        return Some(HummockValue::Delete);
+    }
     batch.get(key).map(|v| {
         local_stats.get_shared_buffer_hit_counts += 1;
         v

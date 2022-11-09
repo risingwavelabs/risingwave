@@ -39,7 +39,7 @@ pub type SharedBufferBatchId = u64;
 
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
-    delete_range_tombstones: Vec<DeleteRangeTombstone>,
+    range_tombstone_list: Vec<DeleteRangeTombstone>,
     largest_user_key: Vec<u8>,
     size: usize,
     _tracker: Option<MemoryTracker>,
@@ -49,12 +49,12 @@ pub(crate) struct SharedBufferBatchInner {
 impl SharedBufferBatchInner {
     fn new(
         payload: Vec<SharedBufferItem>,
-        delete_range_tombstones: Vec<DeleteRangeTombstone>,
+        range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
         let mut largest_user_key = vec![];
-        for tombstone in &delete_range_tombstones {
+        for tombstone in &range_tombstone_list {
             // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary of
             // `SharedBufferBatch` because it just expands an useless query and does not affect
             // correctness.
@@ -72,7 +72,7 @@ impl SharedBufferBatchInner {
         }
         SharedBufferBatchInner {
             payload,
-            delete_range_tombstones,
+            range_tombstone_list,
             size,
             largest_user_key,
             _tracker,
@@ -166,6 +166,21 @@ impl SharedBufferBatch {
         }
     }
 
+    pub fn check_delete_by_range(&self, user_key: &[u8]) -> bool {
+        if self.inner.range_tombstone_list.is_empty() {
+            return false;
+        }
+        let idx = self
+            .inner
+            .range_tombstone_list
+            .partition_point(|item| item.end_user_key.as_slice().le(user_key));
+        idx >= self.inner.range_tombstone_list.len()
+            && self.inner.range_tombstone_list[idx]
+                .start_user_key
+                .as_slice()
+                .le(user_key)
+    }
+
     pub fn into_directed_iter<D: HummockIteratorDirection>(self) -> SharedBufferBatchIterator<D> {
         SharedBufferBatchIterator::<D>::new(self.inner)
     }
@@ -197,7 +212,7 @@ impl SharedBufferBatch {
             && (self.inner.is_empty()
                 || self
                     .inner
-                    .delete_range_tombstones
+                    .range_tombstone_list
                     .first()
                     .unwrap()
                     .start_user_key
@@ -205,7 +220,7 @@ impl SharedBufferBatch {
                     .le(key::user_key(&self.inner.first().unwrap().0)))
         {
             self.inner
-                .delete_range_tombstones
+                .range_tombstone_list
                 .first()
                 .unwrap()
                 .start_user_key
@@ -217,7 +232,7 @@ impl SharedBufferBatch {
 
     #[inline(always)]
     pub fn has_range_tombstone(&self) -> bool {
-        !self.inner.delete_range_tombstones.is_empty()
+        !self.inner.range_tombstone_list.is_empty()
     }
 
     /// return inclusive right endpoint, which means that all data in this batch should be smaller
@@ -299,7 +314,7 @@ impl SharedBufferBatch {
     }
 
     pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
-        self.inner.delete_range_tombstones.clone()
+        self.inner.range_tombstone_list.clone()
     }
 }
 
@@ -414,15 +429,15 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 
 impl DeleteRangeIterator for SharedBufferBatchIterator<Forward> {
     fn start_user_key(&self) -> &[u8] {
-        &self.inner.delete_range_tombstones[self.current_idx].start_user_key
+        &self.inner.range_tombstone_list[self.current_idx].start_user_key
     }
 
     fn end_user_key(&self) -> &[u8] {
-        &self.inner.delete_range_tombstones[self.current_idx].end_user_key
+        &self.inner.range_tombstone_list[self.current_idx].end_user_key
     }
 
     fn current_epoch(&self) -> HummockEpoch {
-        self.inner.delete_range_tombstones[self.current_idx].sequence
+        self.inner.range_tombstone_list[self.current_idx].sequence
     }
 
     fn next(&mut self) {
@@ -433,8 +448,15 @@ impl DeleteRangeIterator for SharedBufferBatchIterator<Forward> {
         self.current_idx = 0;
     }
 
+    fn seek(&mut self, target_user_key: &[u8]) {
+        self.current_idx = self
+            .inner
+            .range_tombstone_list
+            .partition_point(|tombstone| tombstone.end_user_key.as_slice().le(target_user_key));
+    }
+
     fn is_valid(&self) -> bool {
-        self.current_idx < self.inner.delete_range_tombstones.len()
+        self.current_idx < self.inner.range_tombstone_list.len()
     }
 }
 

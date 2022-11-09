@@ -82,16 +82,14 @@ pub trait DeleteRangeIterator {
     ///   before starting iteration.
     fn rewind(&mut self);
 
-    /// Resets iterator and seeks to the first tombstone whose left-end  >= provided key, or
-    /// right-end <= provided key if this is a backward iterator.
+    /// Resets iterator and seeks to the first tombstone whose left-end >= provided key, we use this
+    /// method to skip tombstones which do not overlap with the provided key.
     ///
     /// Note:
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    fn seek(&mut self, _target_user_key: &[u8]) {
-        unimplemented!("Support seek operation");
-    }
+    fn seek(&mut self, target_user_key: &[u8]);
 
     /// Indicates whether the iterator can be used.
     ///
@@ -148,6 +146,13 @@ impl DeleteRangeIterator for RangeIteratorTyped {
             RangeIteratorTyped::Batch(batch) => {
                 batch.rewind();
             }
+        }
+    }
+
+    fn seek(&mut self, target_user_key: &[u8]) {
+        match self {
+            RangeIteratorTyped::Sst(sst) => sst.seek(target_user_key),
+            RangeIteratorTyped::Batch(batch) => batch.seek(target_user_key),
         }
     }
 
@@ -226,6 +231,16 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
         self.unused_iters.extend(self.heap.drain());
         for mut node in self.unused_iters.drain(..) {
             node.rewind();
+            if node.is_valid() {
+                self.heap.push(node);
+            }
+        }
+    }
+
+    fn seek(&mut self, target_user_key: &[u8]) {
+        self.unused_iters.extend(self.heap.drain());
+        for mut node in self.unused_iters.drain(..) {
+            node.seek(target_user_key);
             if node.is_valid() {
                 self.heap.push(node);
             }
