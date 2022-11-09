@@ -231,6 +231,12 @@ impl ops::Index<usize> for Row {
     }
 }
 
+impl ops::IndexMut<usize> for Row {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
+
 // TODO: remove this due to implicit allocation
 impl From<RowRef<'_>> for Row {
     fn from(row_ref: RowRef<'_>) -> Self {
