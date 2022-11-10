@@ -330,11 +330,7 @@ where
                 actor.vnode_bitmap = env.actor_vnode_bitmaps.remove(&actor.actor_id).unwrap();
 
                 // setup upstream actor id
-                // since the upstream_actor_id is not set here, it affects some of the scale's
-                // behavior and needs to be set, please remove this code if this is fixed in the
-                // future in somewhere else.
-                assert!(actor.upstream_actor_id.is_empty());
-                actor.upstream_actor_id = vec![upstream_actor_ids[idx]];
+                actor.upstream_actor_id.push(upstream_actor_ids[idx]);
             }
 
             // Note: it's possible that there're some other normal `Merge` nodes in the fragment of
