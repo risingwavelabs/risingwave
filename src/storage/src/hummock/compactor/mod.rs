@@ -64,12 +64,12 @@ use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
-use crate::hummock::sstable::DeleteRangeAggregator;
 use crate::hummock::utils::MemoryLimiter;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, CachePolicy, HummockError, SstableBuilder,
-    SstableIdManagerRef, SstableWriterFactory, StreamingSstableWriterFactory,
+    validate_ssts, BatchSstableWriterFactory, CachePolicy, DeleteRangeAggregator, HummockError,
+    RangeTombstonesCollector, SstableBuilder, SstableIdManagerRef, SstableWriterFactory,
+    StreamingSstableWriterFactory,
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -235,6 +235,18 @@ impl Compactor {
         let mut compaction_futures = vec![];
         let task_progress_guard =
             TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
+        let delete_range_agg = match CompactorRunner::build_delete_range_iter(
+            &compact_task,
+            &compactor_context.sstable_store,
+        )
+        .await
+        {
+            Ok(agg) => agg,
+            Err(err) => {
+                tracing::warn!("Failed to build delete range aggregator {:#?}", err);
+                return TaskStatus::ExecuteFailed;
+            }
+        };
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let filter = multi_filter.clone();
@@ -244,10 +256,11 @@ impl Compactor {
                 compactor_context.as_ref(),
                 compact_task.clone(),
             );
+            let del_agg = delete_range_agg.clone();
             let task_progress = task_progress_guard.progress.clone();
             let handle = tokio::spawn(async move {
                 compactor_runner
-                    .run(filter, multi_filter_key_extractor, task_progress)
+                    .run(filter, multi_filter_key_extractor, del_agg, task_progress)
                     .await
             });
             compaction_futures.push(handle);
@@ -363,7 +376,6 @@ impl Compactor {
     pub fn start_compactor(
         compactor_context: Arc<CompactorContext>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        max_concurrent_task_number: u64,
     ) -> (JoinHandle<()>, Sender<()>) {
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -386,8 +398,9 @@ impl Compactor {
                     }
                 }
 
+                let config = compactor_context.lock_config().await;
                 let mut stream = match hummock_meta_client
-                    .subscribe_compact_tasks(max_concurrent_task_number)
+                    .subscribe_compact_tasks(config.max_concurrent_task_number)
                     .await
                 {
                     Ok(stream) => {
@@ -402,8 +415,9 @@ impl Compactor {
                         continue 'start_stream;
                     }
                 };
-                let executor = compactor_context.context.compaction_executor.clone();
+                drop(config);
 
+                let executor = compactor_context.context.compaction_executor.clone();
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
                     let message = tokio::select! {
@@ -425,14 +439,12 @@ impl Compactor {
                         message = stream.message() => {
                             message
                         },
-                        // Shutdown compactor
                         _ = &mut shutdown_rx => {
                             tracing::info!("Compactor is shutting down");
                             return
                         }
                     };
                     match message {
-                        // The inner Some is the side effect of generated code.
                         Ok(Some(SubscribeCompactTasksResponse { task })) => {
                             let task = match task {
                                 Some(task) => task,
@@ -540,7 +552,8 @@ impl Compactor {
         let mut last_key = FullKey::default();
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
-        let mut del_iter = sst_builder.del_agg.iter();
+        let del_iter = sst_builder.del_agg.iter();
+        let mut del_agg = DeleteRangeAggregator::new(del_iter, task_config.watermark);
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -577,7 +590,7 @@ impl Compactor {
             if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
                 || (epoch < task_config.watermark
                     && (watermark_can_see_last_key
-                        || del_iter.should_delete(&iter_key.user_key, epoch)))
+                        || del_agg.should_delete(&iter_key.user_key, epoch)))
             {
                 drop = true;
             }
@@ -639,7 +652,7 @@ impl Compactor {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        del_agg: Arc<DeleteRangeAggregator>,
+        del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SstableInfo>> {
@@ -728,7 +741,7 @@ impl Compactor {
         writer_factory: F,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        del_agg: Arc<DeleteRangeAggregator>,
+        del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SplitTableOutput>> {

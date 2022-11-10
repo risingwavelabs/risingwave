@@ -145,7 +145,7 @@ pub fn get_sys_catalogs_in_schema(schema_name: &str) -> Option<Vec<SystemCatalog
 }
 
 macro_rules! prepare_sys_catalog {
-    ($( { $catalog_id:expr, $schema_name:expr, $catalog_name:ident, $pk:expr, $func:tt $($await:tt)? } ),*) => {
+    ($( { $catalog_id:expr, $schema_name:expr, $catalog_name:ident, $pk:expr, $func:tt $($await:tt)? } ),* $(,)?) => {
         /// `SYS_CATALOG_MAP` includes all system catalogs.
         pub(crate) static SYS_CATALOG_MAP: LazyLock<HashMap<&str, Vec<SystemCatalog>>> = LazyLock::new(|| {
             let mut hash_map: HashMap<&str, Vec<SystemCatalog>> = HashMap::new();
@@ -186,5 +186,9 @@ prepare_sys_catalog! {
     { 6, PG_CATALOG, PG_CLASS, vec![0], read_class_info },
     { 7, PG_CATALOG, PG_INDEX, vec![0], read_index_info },
     { 8, PG_CATALOG, PG_OPCLASS, vec![0], read_opclass_info },
-    { 9, INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info }
+    { 9, PG_CATALOG, PG_COLLATION, vec![0], read_collation_info },
+    { 10, PG_CATALOG, PG_AM, vec![0], read_am_info },
+    { 11, PG_CATALOG, PG_OPERATOR, vec![0], read_operator_info },
+    { 12, INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
+    { 13, INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
 }

@@ -18,6 +18,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
+use super::generic::GenericPlanNode;
 use super::{
     gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch, ToStream,
@@ -41,22 +42,24 @@ impl LogicalTopN {
         if with_ties {
             assert!(offset == 0, "WITH TIES is not supported with OFFSET");
         }
-        let ctx = input.ctx();
-        let schema = input.schema().clone();
-        let pk_indices = input.logical_pk().to_vec();
-        let functional_dependency = input.functional_dependency().clone();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
-        LogicalTopN {
-            base,
-            core: generic::TopN {
-                input,
-                limit,
-                offset,
-                with_ties,
-                order,
-                group_key: vec![],
-            },
-        }
+
+        let core = generic::TopN {
+            input,
+            limit,
+            offset,
+            with_ties,
+            order,
+            group_key: vec![],
+        };
+
+        let ctx = core.ctx();
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+        let functional_dependency = core.input.functional_dependency().clone();
+
+        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
+
+        LogicalTopN { base, core }
     }
 
     pub fn with_group(

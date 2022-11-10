@@ -300,6 +300,7 @@ impl StateStoreWrite for MemoryStateStore {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        _delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
@@ -323,7 +324,7 @@ impl LocalStateStore for MemoryStateStore {}
 impl StateStore for MemoryStateStore {
     type Local = Self;
 
-    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + 'a;
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
     define_state_store_associated_type!();
 
@@ -411,6 +412,7 @@ mod tests {
                     (b"a".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
                     (b"b".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
                 ],
+                vec![],
                 WriteOptions {
                     epoch: 0,
                     table_id: Default::default(),
@@ -424,6 +426,7 @@ mod tests {
                     (b"a".to_vec().into(), StorageValue::new_put(b"v2".to_vec())),
                     (b"b".to_vec().into(), StorageValue::new_delete()),
                 ],
+                vec![],
                 WriteOptions {
                     epoch: 1,
                     table_id: Default::default(),

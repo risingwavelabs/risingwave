@@ -42,7 +42,8 @@ async fn test_state_table() -> StorageResult<()> {
         column_descs,
         order_types,
         pk_index,
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
@@ -167,7 +168,8 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
         column_descs,
         order_types,
         pk_index,
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
@@ -336,7 +338,8 @@ async fn test_state_table_iter() {
         column_descs.clone(),
         order_types.clone(),
         pk_index,
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
@@ -555,7 +558,8 @@ async fn test_state_table_iter_with_prefix() {
         column_descs.clone(),
         order_types.clone(),
         pk_index,
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
@@ -672,7 +676,8 @@ async fn test_state_table_iter_with_pk_range() {
         column_descs.clone(),
         order_types.clone(),
         pk_index,
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
@@ -798,7 +803,8 @@ async fn test_mem_table_assertion() {
         column_descs,
         order_types,
         pk_index,
-    );
+    )
+    .await;
     let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
     state_table.insert(Row(vec![
@@ -832,7 +838,8 @@ async fn test_state_table_iter_with_value_indices() {
         order_types.clone(),
         pk_index,
         vec![2],
-    );
+    )
+    .await;
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
 
@@ -984,7 +991,8 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         order_types.clone(),
         pk_index,
         vec![2, 1, 0],
-    );
+    )
+    .await;
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
 
@@ -1210,7 +1218,8 @@ async fn test_state_table_write_chunk() {
         column_descs,
         order_types,
         pk_index,
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
@@ -1331,7 +1340,8 @@ async fn test_state_table_write_chunk_visibility() {
         column_descs,
         order_types,
         pk_index,
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
@@ -1450,7 +1460,8 @@ async fn test_state_table_write_chunk_value_indices() {
         order_types,
         pk_index,
         vec![2, 1],
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);

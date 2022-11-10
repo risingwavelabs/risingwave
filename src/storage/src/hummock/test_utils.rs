@@ -226,13 +226,18 @@ pub async fn gen_test_sstable(
     gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::NotFill).await
 }
 
-/// Generates a user key with table id 0
+/// Generates a user key with table id 0 and the given `table_key`
+pub fn test_user_key(table_key: impl AsRef<[u8]>) -> UserKey<Vec<u8>> {
+    UserKey::new(TableId::default(), table_key.as_ref().to_vec())
+}
+
+/// Generates a user key with table id 0 and table key format of `key_test_{idx * 2}`
 pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
     let table_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
     UserKey::new(TableId::default(), table_key)
 }
 
-/// Generates a full key with table id 0 and epoch 123
+/// Generates a full key with table id 0 and epoch 123. User key is created with `test_user_key_of`.
 pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: test_user_key_of(idx),

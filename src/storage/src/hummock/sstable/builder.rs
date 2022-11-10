@@ -252,6 +252,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
             if largest_key.is_empty()
                 || user_key(&largest_key).lt(tombstone.end_user_key.as_slice())
             {
+                // use MAX as epoch because `end_user_key` of the range-tombstone is exclusive, so
+                // we can not include any version of this key.
                 largest_key = key_with_epoch(tombstone.end_user_key.clone(), HummockEpoch::MAX);
             }
             if smallest_key.is_empty()
@@ -353,6 +355,9 @@ impl<W: SstableWriter> SstableBuilder<W> {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::UserKey;
+
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -386,16 +391,24 @@ pub(super) mod tests {
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
         };
+        let table_id = TableId::default();
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
         b.add_delete_range(DeleteRangeTombstone::new(
+            table_id,
             b"abcd".to_vec(),
             b"eeee".to_vec(),
             0,
         ));
         let s = b.finish().await.unwrap();
         let key_range = s.sst_info.key_range.unwrap();
-        assert_eq!(user_key(&key_range.left), b"abcd");
-        assert_eq!(user_key(&key_range.right), b"eeee");
+        assert_eq!(
+            user_key(&key_range.left),
+            UserKey::new(TableId::default(), b"abcd").encode()
+        );
+        assert_eq!(
+            user_key(&key_range.right),
+            UserKey::new(TableId::default(), b"eeee").encode()
+        );
     }
 
     #[tokio::test]

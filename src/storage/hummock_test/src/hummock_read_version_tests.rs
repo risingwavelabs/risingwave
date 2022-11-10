@@ -52,6 +52,7 @@ async fn test_read_version_basic() {
         let imm = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
             kv_pairs,
+            vec![],
             TableId::from(table_id),
             None,
         )
@@ -85,6 +86,7 @@ async fn test_read_version_basic() {
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
                 kv_pairs,
+                vec![],
                 TableId::from(table_id),
                 None,
             )
@@ -256,6 +258,7 @@ async fn test_read_filter_basic() {
         let imm = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
             kv_pairs,
+            vec![],
             TableId::from(table_id),
             None,
         )

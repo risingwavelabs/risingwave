@@ -108,6 +108,7 @@ async fn test_snapshot_inner(
                 (Bytes::from("1"), StorageValue::new_put("test")),
                 (Bytes::from("2"), StorageValue::new_put("test")),
             ],
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -142,6 +143,7 @@ async fn test_snapshot_inner(
                 (Bytes::from("3"), StorageValue::new_put("test")),
                 (Bytes::from("4"), StorageValue::new_put("test")),
             ],
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -177,6 +179,7 @@ async fn test_snapshot_inner(
                 (Bytes::from("3"), StorageValue::new_delete()),
                 (Bytes::from("4"), StorageValue::new_delete()),
             ],
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -222,6 +225,7 @@ async fn test_snapshot_range_scan_inner(
                 (Bytes::from("3"), StorageValue::new_put("test")),
                 (Bytes::from("4"), StorageValue::new_put("test")),
             ],
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -291,6 +295,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 (Bytes::from("5"), StorageValue::new_put("test")),
                 (Bytes::from("6"), StorageValue::new_put("test")),
             ],
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -323,6 +328,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 (Bytes::from("7"), StorageValue::new_put("test")),
                 (Bytes::from("8"), StorageValue::new_put("test")),
             ],
+            vec![],
             WriteOptions {
                 epoch: epoch + 1,
                 table_id: Default::default(),

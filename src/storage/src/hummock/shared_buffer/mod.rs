@@ -60,7 +60,7 @@ impl UncommittedData {
                 let key_range = get_sst_key_range(info);
                 UserKey::decode(user_key(key_range.left.as_slice()))
             }
-            UncommittedData::Batch(batch) => UserKey::new(batch.table_id, batch.start_table_key()),
+            UncommittedData::Batch(batch) => batch.start_user_key(),
         }
     }
 
@@ -70,7 +70,7 @@ impl UncommittedData {
                 let key_range = get_sst_key_range(info);
                 UserKey::decode(user_key(key_range.right.as_slice()))
             }
-            UncommittedData::Batch(batch) => UserKey::new(batch.table_id, batch.end_table_key()),
+            UncommittedData::Batch(batch) => batch.start_user_key(),
         }
     }
 }
