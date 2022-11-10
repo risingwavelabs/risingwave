@@ -540,7 +540,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         yield Message::Chunk(chunk?);
                     }
 
-                    for buffered_watermark in buffered_watermarks.iter_mut() {
+                    for buffered_watermark in &mut buffered_watermarks {
                         if let Some(watermark) = buffered_watermark.take() {
                             // TODO("https://github.com/risingwavelabs/risingwave/issues/6112"): do some state cleaning
                             yield Message::Watermark(watermark);
