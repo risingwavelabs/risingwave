@@ -37,11 +37,9 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::{HummockEpoch, HummockError};
-use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore,
+    define_state_store_associated_type, define_state_store_read_associated_type, StateStore,
 };
 
 impl HummockStorage {
@@ -192,28 +190,6 @@ impl StateStoreRead for HummockStorage {
         }
 
         self.iter_inner(key_range, epoch, read_options)
-    }
-}
-
-impl StateStoreWrite for HummockStorage {
-    define_state_store_write_associated_type!();
-
-    /// Writes a batch to storage. The batch should be:
-    /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
-    /// * Locally unique. There should not be two or more operations on the same key in one write
-    ///   batch.
-    /// * Globally unique. The streaming operators should ensure that different operators won't
-    ///   operate on the same key. The operator operating on one keyspace should always wait for all
-    ///   changes to be committed before reading and writing new keys to the engine. That is because
-    ///   that the table with lower epoch might be committed after a table with higher epoch has
-    ///   been committed. If such case happens, the outcome is non-predictable.
-    fn ingest_batch(
-        &self,
-        _kv_pairs: Vec<(Bytes, StorageValue)>,
-        _write_options: WriteOptions,
-    ) -> Self::IngestBatchFuture<'_> {
-        // self.storage_core.ingest_batch(kv_pairs, write_options)
-        async move { unimplemented!() }
     }
 }
 

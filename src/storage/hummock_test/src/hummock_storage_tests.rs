@@ -121,6 +121,26 @@ async fn sync_epoch(event_tx: &UnboundedSender<HummockEvent>, epoch: HummockEpoc
     rx.await.unwrap().unwrap()
 }
 
+async fn get_local_hummock_storage(
+    table_id: TableId,
+    instance_id: u64,
+    event_tx: UnboundedSender<HummockEvent>,
+    hummock_version_reader: HummockVersionReader,
+) -> LocalHummockStorage {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    event_tx
+        .send(HummockEvent::RegisterHummockInstance {
+            table_id,
+            instance_id,
+            event_tx_for_instance: event_tx.clone(),
+            hummock_version_reader,
+            sync_result_sender: tx,
+        })
+        .unwrap();
+
+    rx.await.unwrap()
+}
+
 #[tokio::test]
 async fn test_storage_basic() {
     let sstable_store = mock_sstable_store();
@@ -150,17 +170,16 @@ async fn test_storage_basic() {
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
-    event_tx
-        .send(HummockEvent::RegisterHummockInstance {
-            table_id: TableId::default(),
-            instance_id: 0,
-            event_tx_for_instance: event_tx.clone(),
-            sync_result_sender: tx,
-        })
-        .unwrap();
+    let hummock_version_reader =
+        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
 
-    let hummock_storage = rx.await.unwrap();
+    let hummock_storage = get_local_hummock_storage(
+        Default::default(),
+        1,
+        event_tx.clone(),
+        hummock_version_reader,
+    )
+    .await;
 
     // First batch inserts the anchor and others.
     let mut batch1 = vec![
@@ -197,6 +216,7 @@ async fn test_storage_basic() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -257,6 +277,7 @@ async fn test_storage_basic() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -287,6 +308,7 @@ async fn test_storage_basic() {
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -503,24 +525,20 @@ async fn test_state_store_sync() {
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
-    event_tx
-        .send(HummockEvent::RegisterHummockInstance {
-            table_id: TableId::default(),
-            instance_id: 0,
-            event_tx_for_instance: event_tx.clone(),
-            sync_result_sender: tx,
-        })
-        .unwrap();
+    let hummock_version_reader =
+        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
 
-    let hummock_storage = rx.await.unwrap();
+    let hummock_storage = get_local_hummock_storage(
+        Default::default(),
+        1,
+        event_tx.clone(),
+        hummock_version_reader,
+    )
+    .await;
 
-    let epoch1: _ = hummock_storage
-        .read_version()
-        .read()
-        .committed()
-        .max_committed_epoch()
-        + 1;
+    let read_version = hummock_storage.read_version();
+
+    let epoch1: _ = read_version.read().committed().max_committed_epoch() + 1;
 
     // ingest 26B batch
     let mut batch1 = vec![
@@ -538,6 +556,7 @@ async fn test_state_store_sync() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -565,6 +584,7 @@ async fn test_state_store_sync() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -584,6 +604,7 @@ async fn test_state_store_sync() {
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -764,26 +785,24 @@ async fn test_delete_get() {
     .await;
 
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
-
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
-    event_tx
-        .send(HummockEvent::RegisterHummockInstance {
-            table_id: TableId::default(),
-            instance_id: 0,
-            event_tx_for_instance: event_tx.clone(),
-            sync_result_sender: tx,
-        })
-        .unwrap();
+    let hummock_version_reader =
+        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
 
-    let hummock_storage = rx.await.unwrap();
+    let hummock_storage = get_local_hummock_storage(
+        Default::default(),
+        1,
+        event_tx.clone(),
+        hummock_version_reader,
+    )
+    .await;
+
     let initial_epoch = hummock_storage
         .read_version()
         .read()
         .committed()
         .max_committed_epoch();
-
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
         (
@@ -798,6 +817,7 @@ async fn test_delete_get() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -816,6 +836,7 @@ async fn test_delete_get() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -875,17 +896,17 @@ async fn test_multiple_epoch_sync() {
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
-    event_tx
-        .send(HummockEvent::RegisterHummockInstance {
-            table_id: TableId::default(),
-            instance_id: 0,
-            event_tx_for_instance: event_tx.clone(),
-            sync_result_sender: tx,
-        })
-        .unwrap();
+    let hummock_version_reader =
+        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
 
-    let hummock_storage = rx.await.unwrap();
+    let hummock_storage = get_local_hummock_storage(
+        Default::default(),
+        1,
+        event_tx.clone(),
+        hummock_version_reader,
+    )
+    .await;
+
     let initial_epoch = hummock_storage
         .read_version()
         .read()
@@ -906,6 +927,7 @@ async fn test_multiple_epoch_sync() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -919,6 +941,7 @@ async fn test_multiple_epoch_sync() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -941,6 +964,7 @@ async fn test_multiple_epoch_sync() {
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -1053,17 +1077,16 @@ async fn test_iter_with_min_epoch() {
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
-    event_tx
-        .send(HummockEvent::RegisterHummockInstance {
-            table_id: TableId::default(),
-            instance_id: 0,
-            event_tx_for_instance: event_tx.clone(),
-            sync_result_sender: tx,
-        })
-        .unwrap();
+    let hummock_version_reader =
+        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
 
-    let hummock_storage = rx.await.unwrap();
+    let hummock_storage = get_local_hummock_storage(
+        Default::default(),
+        1,
+        event_tx.clone(),
+        hummock_version_reader,
+    )
+    .await;
 
     let epoch1 = (31 * 1000) << 16;
 
@@ -1085,6 +1108,7 @@ async fn test_iter_with_min_epoch() {
     hummock_storage
         .ingest_batch(
             batch_epoch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1108,6 +1132,7 @@ async fn test_iter_with_min_epoch() {
     hummock_storage
         .ingest_batch(
             batch_epoch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1280,20 +1305,16 @@ async fn test_hummock_version_reader() {
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
-    event_tx
-        .send(HummockEvent::RegisterHummockInstance {
-            table_id: TableId::default(),
-            instance_id: 0,
-            event_tx_for_instance: event_tx.clone(),
-            sync_result_sender: tx,
-        })
-        .unwrap();
-
-    let hummock_storage = rx.await.unwrap();
-
     let hummock_version_reader =
         HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
+
+    let hummock_storage = get_local_hummock_storage(
+        Default::default(),
+        1,
+        event_tx.clone(),
+        hummock_version_reader.clone(),
+    )
+    .await;
 
     let epoch1 = (31 * 1000) << 16;
 
@@ -1339,6 +1360,7 @@ async fn test_hummock_version_reader() {
         hummock_storage
             .ingest_batch(
                 batch_epoch1,
+                vec![],
                 WriteOptions {
                     epoch: epoch1,
                     table_id: Default::default(),
@@ -1350,6 +1372,7 @@ async fn test_hummock_version_reader() {
         hummock_storage
             .ingest_batch(
                 batch_epoch2,
+                vec![],
                 WriteOptions {
                     epoch: epoch2,
                     table_id: Default::default(),
@@ -1361,6 +1384,7 @@ async fn test_hummock_version_reader() {
         hummock_storage
             .ingest_batch(
                 batch_epoch3,
+                vec![],
                 WriteOptions {
                     epoch: epoch3,
                     table_id: Default::default(),

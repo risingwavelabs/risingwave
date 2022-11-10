@@ -29,6 +29,7 @@ use risingwave_source::row_id::RowIdGenerator;
 use risingwave_source::*;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::time::Instant;
 
 use super::reader::SourceReaderStream;
 use crate::error::StreamResult;
@@ -70,7 +71,6 @@ pub struct SourceExecutor<S: StateStore> {
 
     state_cache: HashMap<SplitId, SplitImpl>,
 
-    #[expect(dead_code)]
     /// Expected barrier latency
     expected_barrier_latency_ms: u64,
 }
@@ -300,8 +300,12 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
+        tracing::info!(
+            "start actor {:?} with state {:?}",
+            self.ctx.id,
+            recover_state
+        );
 
-        // todo: use epoch from msg to restore state from state store
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
             .stack_trace("source_build_reader")
@@ -315,10 +319,20 @@ impl<S: StateStore> SourceExecutor<S> {
 
         yield Message::Barrier(barrier);
 
+        // We allow data to flow for 5 * `expected_barrier_latency_ms` milliseconds, considering
+        // some other latencies like network and cost in Meta.
+        let max_wait_barrier_time_ms = self.expected_barrier_latency_ms as u128 * 5;
+        let mut last_barrier_time = Instant::now();
+        let mut self_paused = false;
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
                 Either::Left(barrier) => {
+                    last_barrier_time = Instant::now();
+                    if self_paused {
+                        stream.resume_source();
+                        self_paused = false;
+                    }
                     let epoch = barrier.epoch;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
@@ -363,6 +377,13 @@ impl<S: StateStore> SourceExecutor<S> {
                     mut chunk,
                     split_offset_mapping,
                 }) => {
+                    if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
+                        // Exceeds the max wait barrier time, the source will be paused. Currently
+                        // we can guarantee the source is not paused since it received stream
+                        // chunks.
+                        self_paused = true;
+                        stream.pause_source();
+                    }
                     if let Some(mapping) = split_offset_mapping {
                         let state: HashMap<_, _> = mapping
                             .iter()

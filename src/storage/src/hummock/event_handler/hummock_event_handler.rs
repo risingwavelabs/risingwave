@@ -371,8 +371,6 @@ impl HummockEventHandler {
 
         {
             let read_version_mapping_guard = self.read_version_mapping.write();
-            let pinned_version = (**self.pinned_version.load()).clone();
-
             // todo: do some prune for version update
             read_version_mapping_guard
                 .values()
@@ -380,7 +378,7 @@ impl HummockEventHandler {
                 .for_each(|read_version| {
                     read_version
                         .write()
-                        .update(VersionUpdate::CommittedSnapshot(pinned_version.clone()))
+                        .update(VersionUpdate::CommittedSnapshot(new_pinned_version.clone()))
                 });
         }
 
@@ -486,6 +484,7 @@ impl HummockEventHandler {
                     HummockEvent::RegisterHummockInstance {
                         table_id,
                         instance_id,
+                        hummock_version_reader,
                         event_tx_for_instance,
                         sync_result_sender,
                     } => {
@@ -495,17 +494,12 @@ impl HummockEventHandler {
                         )));
 
                         let storage_instance = LocalHummockStorage::new(
-                            self.context.options.clone(),
-                            self.context.sstable_store.clone(),
-                            self.context.hummock_meta_client.clone(),
-                            self.context.stats.clone(),
                             basic_read_version.clone(),
+                            hummock_version_reader,
                             event_tx_for_instance.clone(),
                             self.buffer_tracker().get_memory_limiter().clone(),
-                            self.context.sstable_id_manager.clone(),
                             self.context.tracing.clone(),
-                        )
-                        .expect("storage_core mut be init");
+                        );
 
                         let mut read_version_mapping_guard = self.read_version_mapping.write();
 

@@ -25,6 +25,7 @@ use crate::store::SyncResult;
 pub mod hummock_event_handler;
 pub use hummock_event_handler::HummockEventHandler;
 
+use super::store::version::HummockVersionReader;
 use crate::hummock::store::state_store::LocalHummockStorage;
 
 #[derive(Debug)]
@@ -67,6 +68,7 @@ pub enum HummockEvent {
     RegisterHummockInstance {
         table_id: TableId,
         instance_id: u64,
+        hummock_version_reader: HummockVersionReader,
         event_tx_for_instance: mpsc::UnboundedSender<HummockEvent>,
         sync_result_sender: oneshot::Sender<LocalHummockStorage>,
     },
@@ -108,6 +110,7 @@ impl HummockEvent {
                 table_id,
                 instance_id,
                 event_tx_for_instance: _,
+                hummock_version_reader: _,
                 sync_result_sender: _,
             } => format!(
                 "RegisterHummockInstance table_id {:?} instance_id {:?}",

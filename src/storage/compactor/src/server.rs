@@ -21,10 +21,11 @@ use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
+use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext, Context};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -130,27 +131,33 @@ pub async fn compactor_serve(
         task_progress_manager: Default::default(),
         tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
     });
-    let compactor_context = Arc::new(CompactorContext {
+    let compactor_context = Arc::new(CompactorContext::with_config(
         context,
-        sstable_store: compact_sstable_store,
-    });
+        compact_sstable_store,
+        CompactorRuntimeConfig {
+            max_concurrent_task_number: opts.max_concurrent_task_number,
+        },
+    ));
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
             vec![sstable_id_manager],
         ),
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
-            compactor_context,
+            compactor_context.clone(),
             hummock_meta_client,
-            opts.max_concurrent_task_number,
         ),
     ];
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
-            .add_service(CompactorServiceServer::new(CompactorServiceImpl {}))
+            .add_service(CompactorServiceServer::new(CompactorServiceImpl::new(
+                compactor_context,
+                meta_client.clone(),
+            )))
             .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
