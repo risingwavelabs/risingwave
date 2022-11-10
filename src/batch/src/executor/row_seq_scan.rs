@@ -442,7 +442,8 @@ mod tests {
             column_descs.clone(),
             order_types.clone(),
             pk_indices.clone(),
-        );
+        )
+        .await;
         let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
         let value_indices: Vec<usize> = vec![0, 1, 2];
         let table = StorageTable::new_partial(

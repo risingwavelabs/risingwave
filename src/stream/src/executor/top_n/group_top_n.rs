@@ -392,7 +392,8 @@ mod tests {
                 OrderType::Ascending,
             ],
             &[1, 2, 0],
-        );
+        )
+        .await;
         let top_n_executor = Box::new(
             GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
@@ -489,7 +490,8 @@ mod tests {
                 OrderType::Ascending,
             ],
             &[1, 2, 0],
-        );
+        )
+        .await;
         let top_n_executor = Box::new(
             GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
@@ -578,7 +580,8 @@ mod tests {
                 OrderType::Ascending,
             ],
             &[1, 2, 0],
-        );
+        )
+        .await;
         let top_n_executor = Box::new(
             GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,

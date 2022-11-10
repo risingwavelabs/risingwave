@@ -25,8 +25,9 @@ pub struct ChainExecutorBuilder;
 
 const USE_BACKFILL: bool = true;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for ChainExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         state_store: impl StateStore,
@@ -51,7 +52,14 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         let schema = snapshot.schema().clone();
 
         if node.disable_rearrange {
-            let executor = ChainExecutor::new(snapshot, mview, upstream_indices, progress, schema);
+            let executor = ChainExecutor::new(
+                snapshot,
+                mview,
+                upstream_indices,
+                progress,
+                schema,
+                params.pk_indices,
+            );
             Ok(executor.boxed())
         } else {
             let executor = if USE_BACKFILL {
@@ -125,7 +133,9 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 )
                 .boxed()
             } else {
-                RearrangedChainExecutor::new(snapshot, mview, upstream_indices, progress, schema)
+                RearrangedChainExecutor::new(snapshot, mview, upstream_indices, progress, schema,
+                params.pk_indices,
+            )
                     .boxed()
             };
             Ok(executor)

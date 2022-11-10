@@ -26,9 +26,9 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{from_datum_prost, DataType, Datum};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum_to_bytes};
+use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
@@ -79,6 +79,7 @@ pub mod source;
 pub mod subtask;
 mod top_n;
 mod union;
+mod watermark_filter;
 mod wrapper;
 
 mod backfill;
@@ -118,6 +119,7 @@ pub use sort::SortExecutor;
 pub use source::*;
 pub use top_n::{AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor};
 pub use union::UnionExecutor;
+pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;
@@ -547,6 +549,10 @@ impl Ord for Watermark {
 }
 
 impl Watermark {
+    pub fn new(col_idx: usize, val: Datum) -> Self {
+        Self { col_idx, val }
+    }
+
     pub fn to_protobuf(&self) -> ProstWatermark {
         ProstWatermark {
             col_idx: self.col_idx as _,
@@ -562,7 +568,7 @@ impl Watermark {
     ) -> StreamExecutorResult<Self> {
         Ok(Watermark {
             col_idx: prost.col_idx as _,
-            val: deserialize_datum(&*prost.get_val()?.body, data_type)?,
+            val: from_datum_prost(prost.get_val()?, data_type)?,
         })
     }
 }

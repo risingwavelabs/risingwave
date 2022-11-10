@@ -65,6 +65,7 @@ impl StateStoreWrite for PanicStateStore {
     fn ingest_batch(
         &self,
         _kv_pairs: Vec<(Bytes, StorageValue)>,
+        _delete_ranges: Vec<(Bytes, Bytes)>,
         _write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
@@ -78,7 +79,7 @@ impl LocalStateStore for PanicStateStore {}
 impl StateStore for PanicStateStore {
     type Local = Self;
 
-    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + 'a;
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
     define_state_store_associated_type!();
 
