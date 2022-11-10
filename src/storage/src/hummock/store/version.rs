@@ -229,10 +229,19 @@ impl HummockReadVersion {
                     // iter().map(|imm| imm.batch_id()).sorted().collect_vec(),
                     // );
 
-                    if check_subset_preserve_order(
-                        staging_sst.imm_ids.iter().cloned().sorted(),
-                        self.staging.imm.iter().map(|imm| imm.batch_id()).sorted(),
-                    ) {
+                    let staging_imm_ids_from_sst: HashSet<u64> =
+                        staging_sst.imm_ids.iter().cloned().sorted().collect();
+                    let staging_imm_ids_from_imms: HashSet<u64> = self
+                        .staging
+                        .imm
+                        .iter()
+                        .map(|imm| imm.batch_id())
+                        .sorted()
+                        .collect();
+                    let intersection =
+                        staging_imm_ids_from_sst.intersection(&staging_imm_ids_from_imms);
+
+                    if intersection.count() > 0 {
                         let imm_id_set: HashSet<ImmId> =
                             HashSet::from_iter(staging_sst.imm_ids.iter().cloned());
                         self.staging
