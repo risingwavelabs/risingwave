@@ -81,12 +81,22 @@ impl PgStatement {
     {
         let instance_query_string = self.prepared_statement.instance(params, param_format)?;
 
+        let row_description: Vec<PgFieldDescriptor> = if result_format {
+            let mut row_description = self.row_description.clone();
+            row_description
+                .iter_mut()
+                .for_each(|desc| desc.set_to_binary());
+            row_description
+        } else {
+            self.row_description.clone()
+        };
+
         Ok(PgPortal {
             name: portal_name,
             query_string: instance_query_string,
             result_format,
             is_query: self.is_query,
-            row_description: self.row_description.clone(),
+            row_description,
             result: None,
             row_cache: vec![].into_iter(),
         })
