@@ -296,7 +296,7 @@ mod tests {
         let mut mock_writer = MockTraceWriter::new();
 
         mock_writer.expect_write_all().returning(|_| Ok(0));
-
+        mock_writer.expect_flush().times(1).returning(|| Ok(()));
         let _collector = collector.clone();
 
         let runner_handle = tokio::spawn(async move {
