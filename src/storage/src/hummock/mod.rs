@@ -28,6 +28,7 @@ use risingwave_pb::hummock::HummockVersion;
 use risingwave_pb::hummock::{pin_version_response, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::watch;
 use tracing::log::error;
 
 mod block_cache;
@@ -191,21 +192,8 @@ impl HummockStorage {
             tracing,
         ));
 
-        let buffer_tracker = BufferTracker::from_storage_config(&options);
-
-        let local_version_manager = LocalVersionManager::new(
-            pinned_version.clone(),
-            compactor_context.clone(),
-            buffer_tracker,
-            event_tx.clone(),
-        );
-
-        let hummock_event_handler = HummockEventHandler::new(
-            local_version_manager,
-            event_rx,
-            pinned_version,
-            compactor_context.clone(),
-        );
+        let hummock_event_handler =
+            HummockEventHandler::new(event_rx, pinned_version, compactor_context.clone());
 
         let instance = Self {
             context: compactor_context,
@@ -453,8 +441,6 @@ pub struct HummockStorageV1 {
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 
-    seal_epoch: Arc<AtomicU64>,
-
     #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
@@ -517,19 +503,35 @@ impl HummockStorageV1 {
 
         let buffer_tracker = BufferTracker::from_storage_config(&options);
 
-        let local_version_manager = LocalVersionManager::new(
-            pinned_version.clone(),
-            compactor_context.clone(),
-            buffer_tracker,
-            event_tx.clone(),
-        );
+        let local_version_manager =
+            LocalVersionManager::new(pinned_version.clone(), compactor_context, buffer_tracker);
 
-        let hummock_event_handler = HummockEventHandler::new(
-            local_version_manager.clone(),
-            event_rx,
-            pinned_version,
-            compactor_context,
-        );
+        let local_version_manager_clone = local_version_manager.clone();
+        let (epoch_update_tx, _) = watch::channel(pinned_version.max_committed_epoch());
+        let epoch_update_tx = Arc::new(epoch_update_tx);
+        let epoch_update_tx_clone = epoch_update_tx.clone();
+
+        tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                match event {
+                    HummockEvent::Shutdown => {
+                        break;
+                    }
+                    HummockEvent::VersionUpdate(version_update) => {
+                        local_version_manager_clone.try_update_pinned_version(version_update);
+                        // TODO: this is
+                        epoch_update_tx.send_replace(
+                            local_version_manager_clone
+                                .get_pinned_version()
+                                .max_committed_epoch(),
+                        );
+                    }
+                    _ => {
+                        unreachable!("for hummock v1, there should only be shutdown and version update event");
+                    }
+                }
+            }
+        });
 
         let instance = Self {
             options,
@@ -541,14 +543,11 @@ impl HummockStorageV1 {
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx.clone(),
             }),
-            version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
-            seal_epoch: hummock_event_handler.sealed_epoch(),
+            version_update_notifier_tx: epoch_update_tx_clone,
             hummock_event_sender: event_tx,
             #[cfg(not(madsim))]
             tracing,
         };
-
-        tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
         Ok(instance)
     }

@@ -68,6 +68,7 @@ pub struct StagingSstableInfo {
     epochs: Vec<HummockEpoch>,
     #[allow(dead_code)]
     imm_ids: Vec<ImmId>,
+    imm_size: usize,
 }
 
 impl StagingSstableInfo {
@@ -75,6 +76,7 @@ impl StagingSstableInfo {
         sstable_infos: Vec<SstableInfo>,
         epochs: Vec<HummockEpoch>,
         imm_ids: Vec<ImmId>,
+        imm_size: usize,
     ) -> Self {
         // the epochs are sorted from higher epoch to lower epoch
         assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2.partial_cmp(epoch1)));
@@ -82,11 +84,16 @@ impl StagingSstableInfo {
             sstable_infos,
             epochs,
             imm_ids,
+            imm_size,
         }
     }
 
     pub fn sstable_infos(&self) -> &Vec<SstableInfo> {
         &self.sstable_infos
+    }
+
+    pub fn imm_size(&self) -> usize {
+        self.imm_size
     }
 }
 

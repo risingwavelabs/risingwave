@@ -163,6 +163,7 @@ async fn test_read_version_basic() {
             ],
             epoch_id_vec_for_clear,
             batch_id_vec_for_clear,
+            1,
         );
 
         {

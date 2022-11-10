@@ -16,7 +16,6 @@ use std::cmp::Ordering;
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::{Bound, RangeBounds};
-use std::sync::atomic::Ordering as MemOrdering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -520,7 +519,11 @@ impl StateStore for HummockStorageV1 {
                 HummockReadEpoch::Committed(epoch) => epoch,
                 HummockReadEpoch::Current(epoch) => {
                     // let sealed_epoch = self.local_version.read().get_sealed_epoch();
-                    let sealed_epoch = (*self.seal_epoch).load(MemOrdering::SeqCst);
+                    let sealed_epoch = self
+                        .local_version_manager
+                        .local_version
+                        .read()
+                        .get_sealed_epoch();
                     assert!(
                             epoch <= sealed_epoch
                                 && epoch != HummockEpoch::MAX
@@ -587,14 +590,10 @@ impl StateStore for HummockStorageV1 {
                     uncommitted_ssts: vec![],
                 });
             }
-            let (tx, rx) = oneshot::channel();
-            self.hummock_event_sender
-                .send(HummockEvent::SyncEpoch {
-                    new_sync_epoch: epoch,
-                    sync_result_sender: tx,
-                })
-                .expect("should send success");
-            Ok(rx.await.expect("should wait success")?)
+            self.local_version_manager
+                .await_sync_shared_buffer(epoch)
+                .await
+                .map_err(StorageError::Hummock)
         }
     }
 
@@ -603,12 +602,7 @@ impl StateStore for HummockStorageV1 {
             warn!("sealing invalid epoch");
             return;
         }
-        self.hummock_event_sender
-            .send(HummockEvent::SealEpoch {
-                epoch,
-                is_checkpoint,
-            })
-            .expect("should send success");
+        self.local_version_manager.seal_epoch(epoch, is_checkpoint);
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
