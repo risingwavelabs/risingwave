@@ -28,6 +28,7 @@ use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
 use smallvec::SmallVec;
 
 use super::ops::IsNegative;
+use super::to_binary::ToBinary;
 use super::*;
 use crate::error::{ErrorCode, Result, RwError};
 
@@ -532,6 +533,14 @@ impl<'a> FromSql<'a> for IntervalUnit {
 
     fn accepts(ty: &Type) -> bool {
         matches!(*ty, Type::INTERVAL)
+    }
+}
+
+impl ToBinary for IntervalUnit {
+    fn to_binary(&self) -> Option<Bytes> {
+        let mut output = BytesMut::new();
+        self.to_sql(&Type::ANY, &mut output).unwrap();
+        Some(output.freeze())
     }
 }
 

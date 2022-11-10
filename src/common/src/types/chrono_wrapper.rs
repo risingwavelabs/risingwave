@@ -15,9 +15,11 @@
 use std::hash::Hash;
 use std::io::Write;
 
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use postgres_types::{ToSql, Type};
 
+use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, IntervalUnit};
 use crate::array::ArrayResult;
@@ -83,6 +85,30 @@ impl ToText for NaiveTimeWrapper {
 impl ToText for NaiveDateTimeWrapper {
     fn to_text(&self) -> String {
         self.0.to_string()
+    }
+}
+
+impl ToBinary for NaiveDateWrapper {
+    fn to_binary(&self) -> Option<Bytes> {
+        let mut output = BytesMut::new();
+        self.0.to_sql(&Type::ANY, &mut output).unwrap();
+        Some(output.freeze())
+    }
+}
+
+impl ToBinary for NaiveTimeWrapper {
+    fn to_binary(&self) -> Option<Bytes> {
+        let mut output = BytesMut::new();
+        self.0.to_sql(&Type::ANY, &mut output).unwrap();
+        Some(output.freeze())
+    }
+}
+
+impl ToBinary for NaiveDateTimeWrapper {
+    fn to_binary(&self) -> Option<Bytes> {
+        let mut output = BytesMut::new();
+        self.0.to_sql(&Type::ANY, &mut output).unwrap();
+        Some(output.freeze())
     }
 }
 
