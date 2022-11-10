@@ -324,7 +324,8 @@ mod tests {
                 &[DataType::Varchar, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             tb.init_epoch(EpochPair::new_test_epoch(1));
             tb
         };
@@ -403,7 +404,8 @@ mod tests {
                 &[DataType::Varchar, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             tb.init_epoch(EpochPair::new_test_epoch(1));
             tb
         };

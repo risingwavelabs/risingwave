@@ -21,8 +21,9 @@ use crate::executor::HopWindowExecutor;
 
 pub struct HopWindowExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for HopWindowExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,

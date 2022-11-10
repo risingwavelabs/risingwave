@@ -383,7 +383,8 @@ mod tests {
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
@@ -480,7 +481,8 @@ mod tests {
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
@@ -589,7 +591,8 @@ mod tests {
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties(
                     source as Box<dyn Executor>,
@@ -697,7 +700,8 @@ mod tests {
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
@@ -910,7 +914,8 @@ mod tests {
                 ],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 3],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
@@ -990,7 +995,8 @@ mod tests {
                 ],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 3],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     create_source_new_before_recovery() as Box<dyn Executor>,
@@ -1147,7 +1153,8 @@ mod tests {
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     source as Box<dyn Executor>,
@@ -1296,7 +1303,8 @@ mod tests {
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     create_source_before_recovery() as Box<dyn Executor>,

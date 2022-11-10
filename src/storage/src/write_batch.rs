@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use bytes::Bytes;
+use risingwave_hummock_sdk::key::next_key;
 
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
@@ -26,6 +27,8 @@ pub struct WriteBatch<'a, S: StateStoreWrite> {
 
     batch: Vec<(Bytes, StorageValue)>,
 
+    delete_ranges: Vec<(Bytes, Bytes)>,
+
     write_options: WriteOptions,
 }
 
@@ -34,7 +37,8 @@ impl<'a, S: StateStoreWrite> WriteBatch<'a, S> {
     pub fn new(store: &'a S, write_options: WriteOptions) -> Self {
         Self {
             store,
-            batch: Vec::new(),
+            batch: vec![],
+            delete_ranges: vec![],
             write_options,
         }
     }
@@ -44,6 +48,7 @@ impl<'a, S: StateStoreWrite> WriteBatch<'a, S> {
         Self {
             store,
             batch: Vec::with_capacity(capacity),
+            delete_ranges: vec![],
             write_options,
         }
     }
@@ -85,7 +90,7 @@ impl<'a, S: StateStoreWrite> WriteBatch<'a, S> {
     pub async fn ingest(mut self) -> StorageResult<()> {
         self.preprocess()?;
         self.store
-            .ingest_batch(self.batch, self.write_options)
+            .ingest_batch(self.batch, self.delete_ranges, self.write_options)
             .await?;
         Ok(())
     }
@@ -121,6 +126,22 @@ impl<'a, S: StateStoreWrite> KeySpaceWriteBatch<'a, S> {
     /// key]`.
     pub fn put(&mut self, key: impl AsRef<[u8]>, value: StorageValue) {
         self.do_push(key.as_ref(), value);
+    }
+
+    /// Delete all keys with the key prepended by the prefix of `keyspace`, like `[prefix | given
+    /// key]`.
+    pub fn delete_prefix(&mut self, prefix: impl AsRef<[u8]>) {
+        let start_key = Bytes::from(self.keyspace.prefixed_key(prefix.as_ref()));
+        let end_key = Bytes::from(next_key(&start_key));
+        self.global.delete_ranges.push((start_key, end_key));
+    }
+
+    /// Delete all keys in this range prepended by the prefix of `keyspace` which is [prefix|start,
+    /// prefix|end).
+    pub fn delete_range(&mut self, start: impl AsRef<[u8]>, end: impl AsRef<[u8]>) {
+        let start_key = Bytes::from(self.keyspace.prefixed_key(start.as_ref()));
+        let end_key = Bytes::from(self.keyspace.prefixed_key(end.as_ref()));
+        self.global.delete_ranges.push((start_key, end_key));
     }
 
     /// Deletes a value, with the key prepended by the prefix of `keyspace`, like `[prefix | given
