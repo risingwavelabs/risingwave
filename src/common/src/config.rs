@@ -52,6 +52,10 @@ pub struct ServerConfig {
     #[serde(default = "default::heartbeat_interval_ms")]
     pub heartbeat_interval_ms: u32,
 
+    /// The maximum allowed heartbeat interval for workers.
+    #[serde(default = "default::max_heartbeat_interval_secs")]
+    pub max_heartbeat_interval_secs: u32,
+
     #[serde(default = "default::connection_pool_size")]
     pub connection_pool_size: u16,
 }
@@ -261,6 +265,10 @@ pub struct DeveloperConfig {
     #[serde(default = "default::developer::stream_enable_executor_row_count")]
     pub stream_enable_executor_row_count: bool,
 
+    /// Whether to use a managed lru cache (evict by epoch)
+    #[serde(default = "default::developer::stream_enable_managed_cache")]
+    pub stream_enable_managed_cache: bool,
+
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
     #[serde(default = "default::developer::stream_connector_message_buffer_size")]
@@ -294,6 +302,10 @@ mod default {
 
     pub fn heartbeat_interval_ms() -> u32 {
         1000
+    }
+
+    pub fn max_heartbeat_interval_secs() -> u32 {
+        600
     }
 
     pub fn connection_pool_size() -> u16 {
@@ -433,6 +445,10 @@ mod default {
 
         pub fn stream_enable_executor_row_count() -> bool {
             false
+        }
+
+        pub fn stream_enable_managed_cache() -> bool {
+            true
         }
 
         pub fn stream_connector_message_buffer_size() -> usize {

@@ -24,7 +24,7 @@ use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::catalog::pg_catalog::pg_user::{
+use crate::catalog::system_catalog::pg_catalog::{
     PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
 };
 use crate::expr::{

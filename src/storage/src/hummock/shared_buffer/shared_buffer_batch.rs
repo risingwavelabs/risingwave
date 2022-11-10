@@ -21,15 +21,16 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{user_key, FullKey};
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
 };
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{key, HummockEpoch, HummockResult, MemoryLimiter};
+use crate::hummock::{key, DeleteRangeTombstone, HummockEpoch, HummockResult, MemoryLimiter};
 use crate::storage_value::StorageValue;
 
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
@@ -37,9 +38,46 @@ pub type SharedBufferBatchId = u64;
 
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
+    delete_range_tombstones: Vec<DeleteRangeTombstone>,
+    largest_user_key: Vec<u8>,
     size: usize,
     _tracker: Option<MemoryTracker>,
     batch_id: SharedBufferBatchId,
+}
+
+impl SharedBufferBatchInner {
+    fn new(
+        payload: Vec<SharedBufferItem>,
+        delete_range_tombstones: Vec<DeleteRangeTombstone>,
+        size: usize,
+        _tracker: Option<MemoryTracker>,
+    ) -> Self {
+        let mut largest_user_key = vec![];
+        for tombstone in &delete_range_tombstones {
+            // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary of
+            // `SharedBufferBatch` because it just expands an useless query and does not affect
+            // correctness.
+            if largest_user_key.lt(&tombstone.end_user_key) {
+                largest_user_key.clear();
+                largest_user_key.extend_from_slice(&tombstone.end_user_key);
+            }
+        }
+        if let Some(item) = payload.last() {
+            let ukey = user_key(&item.0);
+            if ukey.gt(largest_user_key.as_slice()) {
+                largest_user_key.clear();
+                largest_user_key.extend_from_slice(ukey);
+            }
+        }
+        SharedBufferBatchInner {
+            payload,
+            delete_range_tombstones,
+            size,
+            largest_user_key,
+            _tracker,
+            batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
+        }
+    }
 }
 
 impl Deref for SharedBufferBatchInner {
@@ -89,42 +127,12 @@ impl SharedBufferBatch {
         }
 
         Self {
-            inner: Arc::new(SharedBufferBatchInner {
-                payload: sorted_items,
+            inner: Arc::new(SharedBufferBatchInner::new(
+                sorted_items,
+                vec![],
                 size,
-                _tracker: None,
-                batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
-            }),
-            epoch,
-            table_id,
-        }
-    }
-
-    pub async fn build(
-        sorted_items: Vec<SharedBufferItem>,
-        epoch: HummockEpoch,
-        limiter: Option<&MemoryLimiter>,
-        table_id: TableId,
-    ) -> Self {
-        let size = Self::measure_batch_size(&sorted_items);
-        let tracker = if let Some(limiter) = limiter {
-            limiter.require_memory(size as u64).await
-        } else {
-            None
-        };
-
-        #[cfg(debug_assertions)]
-        {
-            Self::check_table_prefix(table_id, &sorted_items)
-        }
-
-        Self {
-            inner: Arc::new(SharedBufferBatchInner {
-                payload: sorted_items,
-                size,
-                _tracker: tracker,
-                batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
-            }),
+                None,
+            )),
             epoch,
             table_id,
         }
@@ -181,12 +189,35 @@ impl SharedBufferBatch {
         &self.inner.last().unwrap().0
     }
 
+    /// return inclusive left endpoint, which means that all data in this batch should be larger or
+    /// equal than this key.
     pub fn start_user_key(&self) -> &[u8] {
-        key::user_key(&self.inner.first().unwrap().0)
+        if !self.inner.delete_range_tombstones.is_empty()
+            && (self.inner.is_empty()
+                || self
+                    .inner
+                    .delete_range_tombstones
+                    .first()
+                    .unwrap()
+                    .start_user_key
+                    .as_slice()
+                    .le(key::user_key(&self.inner.first().unwrap().0)))
+        {
+            self.inner
+                .delete_range_tombstones
+                .first()
+                .unwrap()
+                .start_user_key
+                .as_slice()
+        } else {
+            key::user_key(&self.inner.first().unwrap().0)
+        }
     }
 
+    /// return inclusive right endpoint, which means that all data in this batch should be smaller
+    /// or equal than this key.
     pub fn end_user_key(&self) -> &[u8] {
-        key::user_key(&self.inner.last().unwrap().0)
+        &self.inner.largest_user_key
     }
 
     pub fn epoch(&self) -> u64 {
@@ -235,11 +266,34 @@ impl SharedBufferBatch {
     pub async fn build_shared_buffer_batch(
         epoch: HummockEpoch,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         table_id: TableId,
         memory_limit: Option<&MemoryLimiter>,
     ) -> Self {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
-        SharedBufferBatch::build(sorted_items, epoch, memory_limit, table_id).await
+        let delete_range_tombstones = delete_ranges
+            .into_iter()
+            .map(|(start_user_key, end_user_key)| {
+                DeleteRangeTombstone::new(start_user_key.to_vec(), end_user_key.to_vec(), epoch)
+            })
+            .collect_vec();
+        let size = Self::measure_batch_size(&sorted_items);
+        let tracker = if let Some(limiter) = memory_limit {
+            limiter.require_memory(size as u64).await
+        } else {
+            None
+        };
+        let inner =
+            SharedBufferBatchInner::new(sorted_items, delete_range_tombstones, size, tracker);
+        SharedBufferBatch {
+            inner: Arc::new(inner),
+            table_id,
+            epoch,
+        }
+    }
+
+    pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
+        self.inner.delete_range_tombstones.clone()
     }
 }
 

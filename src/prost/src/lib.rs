@@ -54,6 +54,9 @@ pub mod stream_service;
 #[cfg_attr(madsim, path = "sim/hummock.rs")]
 pub mod hummock;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/compactor.rs")]
+pub mod compactor;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/user.rs")]
 pub mod user;
 #[rustfmt::skip]
@@ -102,6 +105,9 @@ pub mod stream_service_serde;
 #[rustfmt::skip]
 #[path = "hummock.serde.rs"]
 pub mod hummock_serde;
+#[rustfmt::skip]
+#[path = "compactor.serde.rs"]
+pub mod compactor_serde;
 #[rustfmt::skip]
 #[path = "user.serde.rs"]
 pub mod user_serde;
