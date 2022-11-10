@@ -51,7 +51,7 @@ pub struct MaterializeExecutor<S: StateStore> {
     info: ExecutorInfo,
 
     materialize_cache: MaterializeCache,
-    _ignore_on_conflict: bool,
+    ignore_on_conflict: bool,
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
@@ -69,7 +69,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         table_catalog: &Table,
         lru_manager: Option<LruManagerRef>,
         cache_size: usize,
-        _ignore_on_conflict: bool,
+        ignore_on_conflict: bool,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
 
@@ -88,7 +88,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(lru_manager, cache_size),
-            _ignore_on_conflict,
+            ignore_on_conflict,
         }
     }
 
@@ -132,7 +132,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(lru_manager, cache_size),
-            _ignore_on_conflict: true,
+            ignore_on_conflict: true,
         }
     }
 
@@ -155,191 +155,223 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                 }
                 Message::Chunk(chunk) => {
-                    let (data_chunk, ops) = chunk.clone().into_parts();
+                    match self.ignore_on_conflict {
+                        false | true => {
+                            let (data_chunk, ops) = chunk.clone().into_parts();
 
-                    let value_chunk =
-                        if let Some(ref value_indices) = self.state_table.value_indices() {
-                            data_chunk.clone().reorder_columns(value_indices)
-                        } else {
-                            data_chunk.clone()
-                        };
-                    let values = value_chunk.serialize();
-
-                    let size = data_chunk.capacity();
-                    let mut pks = vec![vec![]; size];
-                    compute_chunk_vnode(
-                        &data_chunk,
-                        self.state_table.dist_key_indices(),
-                        self.state_table.vnodes(),
-                    )
-                    .into_iter()
-                    .zip_eq(pks.iter_mut())
-                    .for_each(|(vnode, vnode_and_pk)| vnode_and_pk.extend(vnode.to_be_bytes()));
-                    let key_chunk = data_chunk
-                        .clone()
-                        .reorder_columns(self.state_table.pk_indices());
-                    key_chunk.rows_with_holes().zip_eq(pks.iter_mut()).for_each(
-                        |(r, vnode_and_pk)| {
-                            if let Some(r) = r {
-                                self.state_table.pk_serde().serialize_ref(r, vnode_and_pk);
-                            }
-                        },
-                    );
-
-                    let (_, vis) = key_chunk.into_parts();
-
-                    // create buffer from chunk
-                    let mut buffer = MaterializeBuffer::new();
-                    match vis {
-                        Vis::Bitmap(vis) => {
-                            for ((op, key, value), vis) in
-                                izip!(ops, pks, values).zip_eq(vis.iter())
-                            {
-                                if vis {
-                                    match op {
-                                        Op::Insert | Op::UpdateInsert => {
-                                            buffer.insert(key, value)?
-                                        }
-                                        Op::Delete | Op::UpdateDelete => {
-                                            buffer.delete(key, value)?
-                                        }
-                                    };
-                                }
-                            }
-                        }
-                        Vis::Compact(_) => {
-                            for (op, key, value) in izip!(ops, pks, values) {
-                                match op {
-                                    Op::Insert | Op::UpdateInsert => buffer.insert(key, value)?,
-                                    Op::Delete | Op::UpdateDelete => buffer.delete(key, value)?,
-                                };
-                            }
-                        }
-                    }
-                    println!("12312312312312312 = {:?}", 1 << 16);
-                    if buffer.is_empty() {
-                        // empty chunk
-                        continue;
-                    } else {
-                        // ensure all key in cache, get from storage
-                        for key in buffer.buffer.keys() {
-                            if self.materialize_cache.get(&key).is_none() {
-                                // key do not exsit in cache
-                                if let Some(storage_value) = self
-                                    .state_table
-                                    .keyspace()
-                                    .get(
-                                        &key,
-                                        self.state_table.epoch(),
-                                        self.state_table.get_read_option(self.state_table.epoch()),
-                                    )
-                                    .await?
-                                {
-                                    self.materialize_cache
-                                        .insert(key.clone(), Some(storage_value.to_vec()));
+                            let value_chunk =
+                                if let Some(ref value_indices) = self.state_table.value_indices() {
+                                    data_chunk.clone().reorder_columns(value_indices)
                                 } else {
-                                    self.materialize_cache.insert(key.clone(), None);
-                                }
-                            }
-                        }
-                        // println!("cache size = {:?}", self.materialize_cache.data.len());
-                        // do check
-                        let mut output = buffer.buffer.clone();
-                        for (key, row_op) in buffer.buffer.into_iter() {
-                            match row_op {
-                                RowOp::Insert(row) => {
-                                    if let Some(cache_row) =
-                                        self.materialize_cache.get(&key).unwrap()
-                                    {
-                                        // double insert => update
-                                        output.remove(&key);
-                                        output.insert(
-                                            key.clone(),
-                                            RowOp::Update((cache_row.clone(), row.clone())),
-                                        );
-                                        self.materialize_cache.remove(&key);
-                                        self.materialize_cache.insert(key, Some(row.clone()));
-                                    }
-                                }
-                                RowOp::Delete(old_row) => {
-                                    if let Some(cache_row) =
-                                        self.materialize_cache.get(&key).unwrap()
-                                    {
-                                        if cache_row != &old_row {
-                                            println!("check 2");
-                                            output.remove(&key);
-                                            output.insert(key, RowOp::Delete(cache_row.to_vec()));
-                                        }
-                                    } else {
-                                        // println!("check 3");
-                                        // output.remove(&key);
-                                    }
-                                }
-                                RowOp::Update((old_row, new_row)) => {
-                                    if let Some(cache_row) =
-                                        self.materialize_cache.get(&key).unwrap()
-                                    {
-                                        if cache_row != &old_row {
-                                            output.remove(&key);
-                                            output.insert(
-                                                key.clone(),
-                                                RowOp::Update((cache_row.clone(), new_row.clone())),
-                                            );
-                                            self.materialize_cache.remove(&key);
-                                            self.materialize_cache.insert(key, Some(new_row));
-                                        }
-                                    } else {
-                                        // println!("check 5");
-                                        // output.remove(&key);
-                                        // output.insert(key.clone(),
-                                        // RowOp::Insert(new_row.clone()));
-                                        // self.materialize_cache.remove(&key);
-                                        // self.materialize_cache.insert(key, Some(new_row));
-                                    }
-                                }
-                            }
-                        }
+                                    data_chunk.clone()
+                                };
+                            let values = value_chunk.serialize();
 
-                        // construct output chunk
-                        let mut new_ops: Vec<Op> = vec![];
-                        let mut new_rows: Vec<Vec<u8>> = vec![];
-                        let row_deserializer = RowDeserializer::new(data_types.clone());
-                        for (_, row_op) in output.into_iter() {
-                            match row_op {
-                                RowOp::Insert(value) => {
-                                    new_ops.push(Op::Insert);
-                                    new_rows.push(value);
-                                }
-                                RowOp::Delete(old_value) => {
-                                    new_ops.push(Op::Delete);
-                                    new_rows.push(old_value);
-                                }
-                                RowOp::Update((old_value, new_value)) => {
-                                    new_ops.push(Op::UpdateDelete);
-                                    new_ops.push(Op::UpdateInsert);
-                                    new_rows.push(old_value);
-                                    new_rows.push(new_value);
-                                }
-                            }
-                        }
-                        let mut data_chunk_builder =
-                            DataChunkBuilder::new(data_types.clone(), new_rows.len() + 1);
-
-                        for row_bytes in new_rows {
-                            let res = data_chunk_builder.append_one_row_from_datums(
-                                row_deserializer.deserialize(row_bytes.as_ref())?.0.iter(),
+                            let size = data_chunk.capacity();
+                            let mut pks = vec![vec![]; size];
+                            compute_chunk_vnode(
+                                &data_chunk,
+                                self.state_table.dist_key_indices(),
+                                self.state_table.vnodes(),
+                            )
+                            .into_iter()
+                            .zip_eq(pks.iter_mut())
+                            .for_each(|(vnode, vnode_and_pk)| {
+                                vnode_and_pk.extend(vnode.to_be_bytes())
+                            });
+                            let key_chunk = data_chunk
+                                .clone()
+                                .reorder_columns(self.state_table.pk_indices());
+                            key_chunk.rows_with_holes().zip_eq(pks.iter_mut()).for_each(
+                                |(r, vnode_and_pk)| {
+                                    if let Some(r) = r {
+                                        self.state_table.pk_serde().serialize_ref(r, vnode_and_pk);
+                                    }
+                                },
                             );
-                            debug_assert!(res.is_none());
-                        }
 
-                        if let Some(new_data_chunk) = data_chunk_builder.consume_all() {
-                            let new_stream_chunk =
-                                StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
-                            self.state_table.write_chunk(new_stream_chunk.clone());
-                            Message::Chunk(new_stream_chunk)
-                        } else {
-                            continue;
-                        }
+                            let (_, vis) = key_chunk.into_parts();
+
+                            // create buffer from chunk
+                            let mut buffer = MaterializeBuffer::new();
+                            match vis {
+                                Vis::Bitmap(vis) => {
+                                    for ((op, key, value), vis) in
+                                        izip!(ops, pks, values).zip_eq(vis.iter())
+                                    {
+                                        if vis {
+                                            match op {
+                                                Op::Insert | Op::UpdateInsert => {
+                                                    buffer.insert(key, value)?
+                                                }
+                                                Op::Delete | Op::UpdateDelete => {
+                                                    buffer.delete(key, value)?
+                                                }
+                                            };
+                                        }
+                                    }
+                                }
+                                Vis::Compact(_) => {
+                                    for (op, key, value) in izip!(ops, pks, values) {
+                                        match op {
+                                            Op::Insert | Op::UpdateInsert => {
+                                                buffer.insert(key, value)?
+                                            }
+                                            Op::Delete | Op::UpdateDelete => {
+                                                buffer.delete(key, value)?
+                                            }
+                                        };
+                                    }
+                                }
+                            }
+                            if buffer.is_empty() {
+                                // empty chunk
+                                continue;
+                            } else {
+                                // ensure all key in cache, get from storage
+                                for key in buffer.buffer.keys() {
+                                    if self.materialize_cache.get(&key).is_none() {
+                                        // key do not exsit in cache
+                                        if let Some(storage_value) = self
+                                            .state_table
+                                            .keyspace()
+                                            .get(
+                                                &key,
+                                                self.state_table.epoch(),
+                                                self.state_table.get_read_option(),
+                                            )
+                                            .await?
+                                        {
+                                            self.materialize_cache
+                                                .insert(key.clone(), Some(storage_value.to_vec()));
+                                        } else {
+                                            self.materialize_cache.insert(key.clone(), None);
+                                        }
+                                    }
+                                }
+
+
+                                // do check
+
+                                let mut output = buffer.buffer.clone();
+                                for (key, row_op) in buffer.buffer.into_iter() {
+                                    match row_op {
+                                        RowOp::Insert(row) => {
+                                            if let Some(cache_row) =
+                                                self.materialize_cache.get(&key).unwrap()
+                                            {
+                                                // double insert => update
+                                                output.insert(
+                                                    key.clone(),
+                                                    RowOp::Update((cache_row.clone(), row.clone())),
+                                                );
+                                                self.materialize_cache
+                                                    .insert(key, Some(row.clone()));
+                                            } else {
+                                                // cache key is None
+                                                self.materialize_cache
+                                                    .insert(key, Some(row.clone()));
+                                            }
+                                        }
+                                        RowOp::Delete(old_row) => {
+                                            if let Some(cache_row) =
+                                                self.materialize_cache.get(&key).unwrap()
+                                            {
+                                                if cache_row != &old_row {
+                                                    println!("check 2");
+                                                    output.insert(
+                                                        key.clone(),
+                                                        RowOp::Delete(cache_row.to_vec()),
+                                                    );
+                                                    self.materialize_cache.insert(key, None);
+                                                } else {
+                                                    self.materialize_cache.insert(key, None);
+                                                }
+                                            } else {
+                                                println!("这里漏了1");
+                                                output.remove(&key);
+                                                self.materialize_cache.remove(&key);
+                                            }
+                                        }
+                                        RowOp::Update((old_row, new_row)) => {
+                                            if let Some(cache_row) =
+                                                self.materialize_cache.get(&key).unwrap()
+                                            {
+                                                if cache_row != &old_row {
+                                                    // output.remove(&key);
+                                                    output.insert(
+                                                        key.clone(),
+                                                        RowOp::Update((
+                                                            cache_row.clone(),
+                                                            new_row.clone(),
+                                                        )),
+                                                    );
+                                                    self.materialize_cache
+                                                        .insert(key, Some(new_row));
+                                                } else {
+                                                    println!("这里漏了1");
+                                                    self.materialize_cache
+                                                        .insert(key, Some(new_row));
+                                                }
+                                            } else {
+                                                output.insert(
+                                                    key.clone(),
+                                                    RowOp::Insert(new_row.clone()),
+                                                );
+                                                self.materialize_cache.insert(key, Some(new_row));
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // construct output chunk
+                                let mut new_ops: Vec<Op> = vec![];
+                                let mut new_rows: Vec<Vec<u8>> = vec![];
+                                let row_deserializer = RowDeserializer::new(data_types.clone());
+                                for (_, row_op) in output.into_iter() {
+                                    match row_op {
+                                        RowOp::Insert(value) => {
+                                            new_ops.push(Op::Insert);
+                                            new_rows.push(value);
+                                        }
+                                        RowOp::Delete(old_value) => {
+                                            new_ops.push(Op::Delete);
+                                            new_rows.push(old_value);
+                                        }
+                                        RowOp::Update((old_value, new_value)) => {
+                                            new_ops.push(Op::UpdateDelete);
+                                            new_ops.push(Op::UpdateInsert);
+                                            new_rows.push(old_value);
+                                            new_rows.push(new_value);
+                                        }
+                                    }
+                                }
+                                let mut data_chunk_builder =
+                                    DataChunkBuilder::new(data_types.clone(), new_rows.len() + 1);
+
+                                for row_bytes in new_rows {
+                                    let res = data_chunk_builder.append_one_row_from_datums(
+                                        row_deserializer.deserialize(row_bytes.as_ref())?.0.iter(),
+                                    );
+                                    debug_assert!(res.is_none());
+                                }
+
+                                if let Some(new_data_chunk) = data_chunk_builder.consume_all() {
+                                    let new_stream_chunk = StreamChunk::new(
+                                        new_ops,
+                                        new_data_chunk.columns().to_vec(),
+                                        None,
+                                    );
+                                    self.state_table.write_chunk(new_stream_chunk.clone());
+                                    Message::Chunk(new_stream_chunk)
+                                } else {
+                                    continue;
+                                }
+                            }
+                        } /* true => {
+                           *     self.state_table.write_chunk(chunk.clone());
+                           *     Message::Chunk(chunk)
+                           * } */
                     }
                 }
                 Message::Barrier(b) => {
@@ -471,6 +503,11 @@ impl MaterializeCache {
 
     pub fn remove(&mut self, key: &[u8]) {
         self.data.pop(key);
+    }
+
+    /// Flush the cache and evict the items.
+    pub fn flush(&mut self) {
+        self.data.evict();
     }
 }
 

@@ -832,7 +832,7 @@ mod tests {
             column_ids.clone(),
             2,
             None,
-            100,
+            1<<16,
         )
         .await
         .boxed()

@@ -94,7 +94,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             table,
             stream.context.lru_manager.clone(),
             1 << 16,
-            false,
+            ignore_on_conflict,
         )
         .await;
 

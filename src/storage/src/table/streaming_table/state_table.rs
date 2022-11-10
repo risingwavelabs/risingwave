@@ -400,7 +400,7 @@ impl<S: StateStore> StateTable<S> {
         self.mem_table.is_dirty()
     }
 
-    pub fn get_read_option(&self, epoch: u64) -> ReadOptions {
+    pub fn get_read_option(&self) -> ReadOptions {
         ReadOptions {
             prefix_hint: None,
             table_id: self.table_id(),
