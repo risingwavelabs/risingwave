@@ -377,7 +377,7 @@ mod tests {
             + 60 8",
         );
         let watermark1 = ScalarImpl::Int64(3);
-        let watermark2 = ScalarImpl::Int64(7);
+        let watermark2 = ScalarImpl::Int64(8);
 
         let state_table = create_state_table().await;
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table);
@@ -402,8 +402,7 @@ mod tests {
         // Push watermark1 on an irrelevant column
         tx.push_watermark(0, watermark1.clone());
 
-        // Consume the watermark
-        sort_executor.next().await.unwrap().unwrap();
+        // Irrelevant Watermark1 is blocked because `chunk1` is buffered.
 
         // Push watermark1 on sorted column
         tx.push_watermark(sort_column_index, watermark1);
@@ -435,8 +434,7 @@ mod tests {
         // Push watermark2 on an irrelevant column
         tx.push_watermark(0, watermark2.clone());
 
-        // Consume the watermark
-        sort_executor.next().await.unwrap().unwrap();
+        // Irrelevant Watermark2 is blocked because `chunk1` is buffered.
 
         // Push watermark2 on sorted column
         tx.push_watermark(sort_column_index, watermark2);
@@ -449,12 +447,18 @@ mod tests {
                 " I I
                 + 98 4
                 + 37 5
-                + 3 6"
+                + 3 6
+                + 4 7"
             )
         );
 
-        // Consume the watermark
+        // Buffered Irrelevant Watermark 1 is emitted because chunk1 is wholly emitted.
         sort_executor.next().await.unwrap().unwrap();
+
+        // Consume the relevant watermark
+        sort_executor.next().await.unwrap().unwrap();
+
+        // Buffered Irrelevant Watermark 2 is still blocked.
     }
 
     #[tokio::test]
