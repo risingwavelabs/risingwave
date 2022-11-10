@@ -218,23 +218,29 @@ impl HummockReadVersion {
                     //     self.staging.imm.pop_back();
                     // }
 
-                    debug_assert!(
-                        check_subset_preserve_order(
-                            staging_sst.imm_ids.iter().cloned().sorted(),
-                            self.staging.imm.iter().map(|imm| imm.batch_id()).sorted()
-                        ),
-                        "the set of imm ids in the staging_sst {:?} is not a subset of current staging imms {:?}",
-                        staging_sst.imm_ids.iter().cloned().sorted().collect_vec(),
-                        self.staging.imm.iter().map(|imm| imm.batch_id()).sorted().collect_vec(),
-                    );
+                    // debug_assert!(
+                    //     check_subset_preserve_order(
+                    //         staging_sst.imm_ids.iter().cloned().sorted(),
+                    //         self.staging.imm.iter().map(|imm| imm.batch_id()).sorted()
+                    //     ),
+                    //     "the set of imm ids in the staging_sst {:?} is not a subset of current
+                    // staging imms {:?}",     staging_sst.imm_ids.iter().
+                    // cloned().sorted().collect_vec(),     self.staging.imm.
+                    // iter().map(|imm| imm.batch_id()).sorted().collect_vec(),
+                    // );
 
-                    let imm_id_set: HashSet<ImmId> =
-                        HashSet::from_iter(staging_sst.imm_ids.iter().cloned());
-                    self.staging
-                        .imm
-                        .retain(|imm| !imm_id_set.contains(&imm.batch_id()));
+                    if check_subset_preserve_order(
+                        staging_sst.imm_ids.iter().cloned().sorted(),
+                        self.staging.imm.iter().map(|imm| imm.batch_id()).sorted(),
+                    ) {
+                        let imm_id_set: HashSet<ImmId> =
+                            HashSet::from_iter(staging_sst.imm_ids.iter().cloned());
+                        self.staging
+                            .imm
+                            .retain(|imm| !imm_id_set.contains(&imm.batch_id()));
 
-                    self.staging.sst.push_front(staging_sst);
+                        self.staging.sst.push_front(staging_sst);
+                    }
                 }
             },
 
