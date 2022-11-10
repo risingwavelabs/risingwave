@@ -535,6 +535,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     Self::apply_chunk(&mut extra, &mut agg_states, chunk).await?;
                 }
                 Message::Barrier(barrier) => {
+                    // TODO("https://github.com/risingwavelabs/risingwave/issues/6112"): use watermarks do some state cleaning
                     #[for_await]
                     for chunk in Self::flush_data(&mut extra, &mut agg_states, barrier.epoch) {
                         yield Message::Chunk(chunk?);
@@ -542,7 +543,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     for buffered_watermark in &mut buffered_watermarks {
                         if let Some(watermark) = buffered_watermark.take() {
-                            // TODO("https://github.com/risingwavelabs/risingwave/issues/6112"): do some state cleaning
                             yield Message::Watermark(watermark);
                         }
                     }
