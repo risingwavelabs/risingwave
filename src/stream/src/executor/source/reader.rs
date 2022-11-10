@@ -69,25 +69,44 @@ impl SourceReaderStream {
         barrier_receiver: UnboundedReceiver<Barrier>,
         source_stream: BoxSourceWithStateStream,
     ) -> Self {
-        let barrier_receiver = Self::barrier_receiver(barrier_receiver);
-        let source_stream = Self::source_stream(source_stream);
-
-        let inner = select_with_strategy(
-            barrier_receiver.map_ok(Either::Left).boxed(),
-            source_stream.map_ok(Either::Right).boxed(),
-            // We prefer barrier on the left hand side over source chunks.
-            |_: &mut ()| PollNext::Left,
-        );
-
         Self {
-            inner,
+            inner: Self::new_inner(
+                Self::barrier_receiver(barrier_receiver)
+                    .map_ok(Either::Left)
+                    .boxed(),
+                Self::source_stream(source_stream)
+                    .map_ok(Either::Right)
+                    .boxed(),
+            ),
             paused: false,
         }
     }
 
+    fn new_inner(
+        barrier_receiver_arm: SourceReaderArm,
+        source_stream_arm: SourceReaderArm,
+    ) -> SourceReaderStreamInner {
+        select_with_strategy(
+            barrier_receiver_arm,
+            source_stream_arm,
+            // We prefer barrier on the left hand side over source chunks.
+            |_: &mut ()| PollNext::Left,
+        )
+    }
+
     /// Replace the source stream with a new one for given `stream`. Used for split change.
-    pub fn replace_source_stream(&mut self, stream: BoxSourceWithStateStream) {
-        *self.inner.get_mut().1 = Self::source_stream(stream).map_ok(Either::Right).boxed();
+    pub fn replace_source_stream(&mut self, source_stream: BoxSourceWithStateStream) {
+        let barrier_receiver_arm = std::mem::replace(
+            self.inner.get_mut().0,
+            futures::stream::once(async { unreachable!("placeholder") }).boxed(),
+        );
+
+        self.inner = Self::new_inner(
+            barrier_receiver_arm,
+            Self::source_stream(source_stream)
+                .map_ok(Either::Right)
+                .boxed(),
+        );
     }
 
     /// Pause the source stream.
