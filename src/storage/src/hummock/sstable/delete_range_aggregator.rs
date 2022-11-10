@@ -162,6 +162,7 @@ impl RangeTombstonesCollector {
                         && last.end_user_key.eq(&tombstone.end_user_key)
                         && last.sequence <= self.watermark
                     {
+                        assert!(last.sequence > tombstone.sequence);
                         continue;
                     }
                 }
@@ -361,7 +362,7 @@ mod tests {
         assert!(split_ranges.len() > origin.len());
         let mut sequence_index: HashMap<u64, Vec<DeleteRangeTombstone>> = HashMap::default();
         for tombstone in split_ranges {
-            let data = sequence_index.entry(tombstone.sequence).or_insert(vec![]);
+            let data = sequence_index.entry(tombstone.sequence).or_default();
             data.push(tombstone);
         }
         assert_eq!(SEQUENCE_COUNT, sequence_index.len() as u64);

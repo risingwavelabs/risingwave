@@ -38,7 +38,7 @@ pub type SharedBufferBatchId = u64;
 
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
-    delete_range_tombstones: Vec<DeleteRangeTombstone>,
+    range_tombstone_list: Vec<DeleteRangeTombstone>,
     largest_user_key: Vec<u8>,
     size: usize,
     _tracker: Option<MemoryTracker>,
@@ -48,20 +48,35 @@ pub(crate) struct SharedBufferBatchInner {
 impl SharedBufferBatchInner {
     fn new(
         payload: Vec<SharedBufferItem>,
-        delete_range_tombstones: Vec<DeleteRangeTombstone>,
+        mut range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
         let mut largest_user_key = vec![];
-        for tombstone in &delete_range_tombstones {
-            // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary of
-            // `SharedBufferBatch` because it just expands an useless query and does not affect
-            // correctness.
-            if largest_user_key.lt(&tombstone.end_user_key) {
-                largest_user_key.clear();
-                largest_user_key.extend_from_slice(&tombstone.end_user_key);
+        if !range_tombstone_list.is_empty() {
+            range_tombstone_list.sort();
+            let mut range_tombstones: Vec<DeleteRangeTombstone> = vec![];
+            for tombstone in range_tombstone_list {
+                // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary
+                // of `SharedBufferBatch` because it just expands an useless query
+                // and does not affect correctness.
+                if largest_user_key.lt(&tombstone.end_user_key) {
+                    largest_user_key.clear();
+                    largest_user_key.extend_from_slice(&tombstone.end_user_key);
+                }
+                if let Some(last) = range_tombstones.last_mut() {
+                    if last.end_user_key.gt(&tombstone.start_user_key) {
+                        if last.end_user_key.lt(&tombstone.end_user_key) {
+                            last.end_user_key = tombstone.end_user_key;
+                        }
+                        continue;
+                    }
+                }
+                range_tombstones.push(tombstone);
             }
+            range_tombstone_list = range_tombstones;
         }
+
         if let Some(item) = payload.last() {
             let ukey = user_key(&item.0);
             if ukey.gt(largest_user_key.as_slice()) {
@@ -71,7 +86,7 @@ impl SharedBufferBatchInner {
         }
         SharedBufferBatchInner {
             payload,
-            delete_range_tombstones,
+            range_tombstone_list,
             size,
             largest_user_key,
             _tracker,
@@ -192,11 +207,11 @@ impl SharedBufferBatch {
     /// return inclusive left endpoint, which means that all data in this batch should be larger or
     /// equal than this key.
     pub fn start_user_key(&self) -> &[u8] {
-        if !self.inner.delete_range_tombstones.is_empty()
+        if !self.inner.range_tombstone_list.is_empty()
             && (self.inner.is_empty()
                 || self
                     .inner
-                    .delete_range_tombstones
+                    .range_tombstone_list
                     .first()
                     .unwrap()
                     .start_user_key
@@ -204,7 +219,7 @@ impl SharedBufferBatch {
                     .le(key::user_key(&self.inner.first().unwrap().0)))
         {
             self.inner
-                .delete_range_tombstones
+                .range_tombstone_list
                 .first()
                 .unwrap()
                 .start_user_key
@@ -293,7 +308,7 @@ impl SharedBufferBatch {
     }
 
     pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
-        self.inner.delete_range_tombstones.clone()
+        self.inner.range_tombstone_list.clone()
     }
 }
 
