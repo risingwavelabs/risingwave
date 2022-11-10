@@ -22,6 +22,7 @@ use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
 use crate::common::HummockServiceOpts;
 
 pub async fn list_kv(epoch: u64, table_id: u32) -> anyhow::Result<()> {
+    let mut raw_key = BytesMut::new();
     let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (_meta_client, hummock) = hummock_opts.create_hummock_store().await?;
     if epoch == u64::MAX {
@@ -49,8 +50,9 @@ pub async fn list_kv(epoch: u64, table_id: u32) -> anyhow::Result<()> {
             .await?
     };
     for (k, v) in scan_result {
-        let mut buf = &k[..];
-        let print_string = format!("[t{}]", buf.get_u32());
+        raw_key.clear();
+        k.encode_into(&mut raw_key);
+        let print_string = format!("[t{}]", raw_key.get_u32());
         println!("{} {:?} => {:?}", print_string, k, v)
     }
     hummock_opts.shutdown().await;

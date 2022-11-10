@@ -17,7 +17,7 @@ use std::ops::{Bound, RangeBounds};
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::EPOCH_LEN;
+use risingwave_hummock_sdk::key::FullKey;
 
 use crate::error::StorageResult;
 use crate::store::{ReadOptions, StateStoreRead, StateStoreReadExt, StateStoreWrite, WriteOptions};
@@ -110,10 +110,11 @@ impl<S: StateStoreRead> Keyspace<S> {
         B: AsRef<[u8]>,
     {
         let range = to_owned_range(range);
-        let mut pairs = self.store.scan(range, epoch, limit, read_options).await?;
-        pairs
-            .iter_mut()
-            .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
+        let pairs = self.store.scan(range, epoch, limit, read_options).await?;
+        let pairs = pairs
+            .into_iter()
+            .map(|(k, v)| (Bytes::from(k.user_key.table_key), v))
+            .collect();
         Ok(pairs)
     }
 
@@ -144,10 +145,7 @@ impl<S: StateStoreRead> Keyspace<S> {
     {
         let range = to_owned_range(range);
         let iter = self.store.iter(range, epoch, read_options).await?;
-        let extract_table_key_iter = ExtractTableKeyIterator {
-            iter,
-            prefix_len: self.prefix.len(),
-        };
+        let extract_table_key_iter = ExtractTableKeyIterator { iter };
 
         Ok(extract_table_key_iter)
     }
@@ -171,12 +169,13 @@ where
     )
 }
 
-pub struct ExtractTableKeyIterator<I: StateStoreIter<Item = (Bytes, Bytes)> + 'static> {
+pub struct ExtractTableKeyIterator<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + 'static> {
     iter: I,
-    prefix_len: usize,
 }
 
-impl<I: StateStoreIter<Item = (Bytes, Bytes)>> StateStoreIter for ExtractTableKeyIterator<I> {
+impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> StateStoreIter
+    for ExtractTableKeyIterator<I>
+{
     type Item = (Bytes, Bytes);
 
     type NextFuture<'a> =
@@ -184,13 +183,11 @@ impl<I: StateStoreIter<Item = (Bytes, Bytes)>> StateStoreIter for ExtractTableKe
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            Ok(self.iter.next().await?.map(|(key, value)| {
-                let epoch_pos = key
-                    .len()
-                    .checked_sub(EPOCH_LEN)
-                    .unwrap_or_else(|| panic!("bad full key format: {:?}", key));
-                (key.slice(self.prefix_len..epoch_pos), value)
-            }))
+            Ok(self
+                .iter
+                .next()
+                .await?
+                .map(|(key, value)| (Bytes::from(key.user_key.table_key), value)))
         }
     }
 }

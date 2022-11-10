@@ -656,7 +656,7 @@ impl HummockStateStoreIter {
 
 impl StateStoreIter for HummockStateStoreIter {
     // TODO: directly return `&[u8]` to user instead of `Bytes`.
-    type Item = (Bytes, Bytes);
+    type Item = (FullKey<Vec<u8>>, Bytes);
 
     type NextFuture<'a> =
         impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
@@ -666,10 +666,7 @@ impl StateStoreIter for HummockStateStoreIter {
             let iter = &mut self.inner;
 
             if iter.is_valid() {
-                let kv = (
-                    Bytes::from(iter.key().encode()),
-                    Bytes::copy_from_slice(iter.value()),
-                );
+                let kv = (iter.key().clone(), Bytes::copy_from_slice(iter.value()));
                 iter.next().await?;
                 Ok(Some(kv))
             } else {

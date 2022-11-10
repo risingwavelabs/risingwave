@@ -742,7 +742,7 @@ mod tests {
             .unwrap();
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = get_table_id(&k);
+            let table_id = k.user_key.table_id.table_id();
             assert_eq!(table_id, existing_table_ids);
             scan_count += 1;
         }
@@ -912,7 +912,7 @@ mod tests {
             .unwrap();
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = get_table_id(&k);
+            let table_id = k.user_key.table_id.table_id();
             assert_eq!(table_id, existing_table_id);
             scan_count += 1;
         }
@@ -1086,7 +1086,7 @@ mod tests {
 
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = get_table_id(&k);
+            let table_id = k.user_key.table_id.table_id();
             assert_eq!(table_id, existing_table_id);
             scan_count += 1;
         }

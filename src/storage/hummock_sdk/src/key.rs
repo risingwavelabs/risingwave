@@ -360,6 +360,11 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     pub fn is_empty(&self) -> bool {
         self.table_key.as_ref().is_empty()
     }
+
+    /// Get the length of the encoded format.
+    pub fn len(&self) -> usize {
+        self.table_key.as_ref().len() + TABLE_PREFIX_LEN
+    }
 }
 
 impl<'a> UserKey<&'a [u8]> {
@@ -435,6 +440,11 @@ impl<T: AsRef<[u8]>> FullKey<T> {
 
     pub fn is_empty(&self) -> bool {
         self.user_key.is_empty()
+    }
+
+    /// Get the length of the encoded format.
+    pub fn len(&self) -> usize {
+        self.user_key.len() + EPOCH_LEN
     }
 }
 

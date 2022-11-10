@@ -377,7 +377,7 @@ impl MemoryStateStoreIter {
 }
 
 impl StateStoreIter for MemoryStateStoreIter {
-    type Item = (Bytes, Bytes);
+    type Item = (FullKey<Vec<u8>>, Bytes);
 
     type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
 
@@ -390,7 +390,7 @@ impl StateStoreIter for MemoryStateStoreIter {
                 if Some(&key.user_key) != self.last_key.as_ref() {
                     self.last_key = Some(key.user_key.clone());
                     if let Some(value) = value {
-                        return Ok(Some((Bytes::from(key.encode()), value)));
+                        return Ok(Some((key, value)));
                     }
                 }
             }

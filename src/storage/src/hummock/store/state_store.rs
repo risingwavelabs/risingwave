@@ -20,6 +20,7 @@ use bytes::Bytes;
 #[cfg(not(madsim))]
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
+use risingwave_hummock_sdk::key::FullKey;
 use tokio::sync::mpsc;
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
@@ -279,7 +280,7 @@ pub struct HummockStorageIterator {
 }
 
 impl StateStoreIter for HummockStorageIterator {
-    type Item = (Bytes, Bytes);
+    type Item = (FullKey<Vec<u8>>, Bytes);
 
     type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
 
@@ -288,10 +289,7 @@ impl StateStoreIter for HummockStorageIterator {
             let iter = &mut self.inner;
 
             if iter.is_valid() {
-                let kv = (
-                    Bytes::from(iter.key().encode()),
-                    Bytes::copy_from_slice(iter.value()),
-                );
+                let kv = (iter.key().clone(), Bytes::copy_from_slice(iter.value()));
                 iter.next().await?;
                 Ok(Some(kv))
             } else {
