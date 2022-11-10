@@ -195,6 +195,22 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
         }
     }
 
+    fn add_all_overlap_range(&mut self, include_key: &[u8]) {
+        while self.inner.is_valid() && self.inner.start_user_key().le(include_key) {
+            let sequence = self.inner.current_epoch();
+            if sequence > self.watermark || self.inner.end_user_key().le(include_key) {
+                self.inner.next();
+                continue;
+            }
+            self.end_user_key_index.push(SortedBoundary {
+                user_key: self.inner.end_user_key().to_vec(),
+                sequence,
+            });
+            self.epoch_index.insert(sequence);
+            self.inner.next();
+        }
+    }
+
     /// Check whether the target-key is deleted by some range-tombstone. Target-key must be given
     /// in order.
     pub fn should_delete(&mut self, target_key: &[u8], epoch: HummockEpoch) -> bool {
@@ -215,19 +231,8 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
             self.epoch_index.remove(&item.sequence);
             self.end_user_key_index.pop();
         }
-        while self.inner.is_valid() && self.inner.start_user_key().le(target_key) {
-            let sequence = self.inner.current_epoch();
-            if sequence > self.watermark || self.inner.end_user_key().le(target_key) {
-                self.inner.next();
-                continue;
-            }
-            self.end_user_key_index.push(SortedBoundary {
-                user_key: self.inner.end_user_key().to_vec(),
-                sequence,
-            });
-            self.epoch_index.insert(sequence);
-            self.inner.next();
-        }
+
+        self.add_all_overlap_range(target_key);
 
         // There may be several epoch, we only care the largest one.
         self.epoch_index
@@ -238,6 +243,15 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
 
     pub fn rewind(&mut self) {
         self.inner.rewind();
+        self.epoch_index.clear();
+        self.end_user_key_index.clear();
+    }
+
+    pub fn seek(&mut self, target_user_key: &[u8]) {
+        self.inner.seek(target_user_key);
+        self.epoch_index.clear();
+        self.end_user_key_index.clear();
+        self.add_all_overlap_range(target_user_key);
     }
 }
 

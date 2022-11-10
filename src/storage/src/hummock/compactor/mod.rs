@@ -539,17 +539,20 @@ impl Compactor {
     where
         F: TableBuilderFactory,
     {
+        let del_iter = sst_builder.del_agg.iter();
+        let mut del_agg = DeleteRangeAggregator::new(del_iter, task_config.watermark);
+
         if !task_config.key_range.left.is_empty() {
             iter.seek(&task_config.key_range.left).await?;
+            del_agg.seek(user_key(&task_config.key_range.left));
         } else {
             iter.rewind().await?;
+            del_agg.rewind();
         }
 
         let mut last_key = BytesMut::new();
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
-        let del_iter = sst_builder.del_agg.iter();
-        let mut del_agg = DeleteRangeAggregator::new(del_iter, task_config.watermark);
 
         while iter.is_valid() {
             let iter_key = iter.key();

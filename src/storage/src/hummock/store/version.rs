@@ -33,8 +33,8 @@ use super::memtable::{ImmId, ImmutableMemtable};
 use super::state_store::StagingDataIterator;
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
-    ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
-    UnorderedMergeIteratorInner, UserIterator,
+    ConcatIterator, DeleteRangeIterator, ForwardMergeRangeIterator, HummockIteratorUnion,
+    OrderedMergeIteratorInner, UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;

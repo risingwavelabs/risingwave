@@ -169,14 +169,17 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             Included(begin_key) => {
                 let full_key = &key_with_epoch(begin_key.clone(), self.read_epoch);
                 self.iterator.seek(full_key).await?;
+                self.delete_range_aggregator.seek(begin_key);
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
-            Unbounded => self.iterator.rewind().await?,
+            Unbounded => {
+                self.iterator.rewind().await?;
+                self.delete_range_aggregator.rewind();
+            }
         };
 
         // Handle multi-version
         self.last_key.clear();
-        self.delete_range_aggregator.rewind();
         // Handles range scan when key > end_key
         self.next().await
     }
