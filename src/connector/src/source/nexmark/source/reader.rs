@@ -130,18 +130,22 @@ mod tests {
         });
 
         let mut enumerator = NexmarkSplitEnumerator::new(props.clone()).await?;
-        let list_splits_resp = enumerator
+        let list_splits_resp: Vec<SplitImpl> = enumerator
             .list_splits()
             .await?
             .into_iter()
             .map(SplitImpl::Nexmark)
             .collect();
 
-        let state = Some(list_splits_resp);
-        let mut reader = NexmarkSplitReader::new(props, state, None)
-            .await?
-            .into_stream();
-        let _chunk = reader.next().await.unwrap()?;
+        assert_eq!(list_splits_resp.len(), 2);
+
+        for split in list_splits_resp {
+            let state = Some(vec![split]);
+            let mut reader = NexmarkSplitReader::new(props.clone(), state, None)
+                .await?
+                .into_stream();
+            let _chunk = reader.next().await.unwrap()?;
+        }
 
         Ok(())
     }
