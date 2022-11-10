@@ -498,6 +498,7 @@ impl HummockEventHandler {
                             hummock_version_reader,
                             event_tx_for_instance.clone(),
                             self.buffer_tracker().get_memory_limiter().clone(),
+                            #[cfg(not(madsim))]
                             self.context.tracing.clone(),
                         );
 

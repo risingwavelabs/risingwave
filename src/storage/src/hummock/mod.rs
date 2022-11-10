@@ -187,6 +187,7 @@ impl HummockStorage {
             stats.clone(),
             sstable_id_manager.clone(),
             filter_key_extractor_manager.clone(),
+            #[cfg(not(madsim))]
             tracing,
         ));
 
@@ -500,6 +501,7 @@ impl HummockStorageV1 {
             hummock_meta_client.clone(),
         ));
 
+        #[cfg(not(madsim))]
         let tracing = Arc::new(risingwave_tracing::RwTracingService::new());
 
         let compactor_context = Arc::new(Context::new_local_compact_context(
@@ -509,6 +511,7 @@ impl HummockStorageV1 {
             stats.clone(),
             sstable_id_manager.clone(),
             filter_key_extractor_manager.clone(),
+            #[cfg(not(madsim))]
             tracing.clone(),
         ));
 
