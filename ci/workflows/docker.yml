@@ -22,7 +22,7 @@ steps:
     if: build.source != "schedule"
     env:
       BUILDPIPE_SCOPE: project
-      PUSH_GHCR: false
+      PUSH: false
     retry: *auto-retry
 
   - label: "docker-build-push: amd64"

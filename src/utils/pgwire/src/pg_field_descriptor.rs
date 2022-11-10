@@ -61,6 +61,12 @@ impl PgFieldDescriptor {
         }
     }
 
+    /// Set the format code as binary format.
+    /// NOTE: Format code is text format by default.
+    pub fn set_to_binary(&mut self) {
+        self.format_code = 1;
+    }
+
     pub fn get_name(&self) -> &str {
         &self.name
     }
