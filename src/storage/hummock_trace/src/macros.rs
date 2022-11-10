@@ -78,7 +78,9 @@ macro_rules! trace {
     };
     (METAMSG, $resp:ident) => {
         let _span = $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::MetaMessage($crate::record::TraceSubResp($resp.clone())),
+            $crate::record::Operation::MetaMessage(Box::new($crate::record::TraceSubResp(
+                $resp.clone(),
+            ))),
             risingwave_common::hm_trace::TraceLocalId::None,
         );
     };
@@ -87,43 +89,35 @@ macro_rules! trace {
 #[macro_export]
 macro_rules! trace_result {
     (GET, $span:ident, $result:ident) => {
-        // convert type to Option<Option<Vec<u8>>>
-        let res = $result
+        let res: Option<Option<Vec<u8>>> = $result
             .as_ref()
             .map(Clone::clone)
             .ok()
             .map(|b| b.map(|c| c.to_vec()));
-        $span.send(
-            $crate::record::Operation::Result(OperationResult::Get(res)),
-            risingwave_common::hm_trace::task_local_get(),
-        );
+        $span.send($crate::record::Operation::Result(OperationResult::Get(res)));
     };
     (INGEST, $span:ident, $result:ident) => {
         let res = $result.as_ref().map(Clone::clone).ok();
-        $span.send(
-            $crate::record::Operation::Result(OperationResult::Ingest(res)),
-            risingwave_common::hm_trace::task_local_get(),
-        );
+        $span.send($crate::record::Operation::Result(OperationResult::Ingest(
+            res,
+        )));
     };
     (ITER, $span:ident, $result:ident) => {
         let res = $result.as_ref().map(|_| ()).ok();
-        $span.send(
-            $crate::record::Operation::Result(OperationResult::Iter(res)),
-            risingwave_common::hm_trace::task_local_get(),
-        );
+        $span.send($crate::record::Operation::Result(OperationResult::Iter(
+            res,
+        )));
     };
     (ITER_NEXT, $span:ident, $pair:ident) => {
         let res = $pair.clone().map(|(k, v)| (k.to_vec(), v.to_vec()));
-        $span.send(
-            $crate::record::Operation::Result(OperationResult::IterNext(res)),
-            risingwave_common::hm_trace::task_local_get(),
-        );
+        $span.send($crate::record::Operation::Result(
+            OperationResult::IterNext(res),
+        ));
     };
     (SYNC, $span:ident, $result:ident) => {
         let res = $result.as_ref().map(|res| res.sync_size.clone()).ok();
-        $span.send(
-            $crate::record::Operation::Result(OperationResult::Sync(res)),
-            risingwave_common::hm_trace::TraceLocalId::None,
-        );
+        $span.send($crate::record::Operation::Result(OperationResult::Sync(
+            res,
+        )));
     };
 }

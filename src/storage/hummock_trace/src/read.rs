@@ -99,10 +99,13 @@ mod test {
     use bincode::config::{self};
     use bincode::encode_to_vec;
     use mockall::mock;
+    use risingwave_pb::common::Status;
+    use risingwave_pb::meta::SubscribeResponse;
 
     use super::{TraceReader, TraceReaderImpl};
     use crate::{
-        BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record, MAGIC_BYTES,
+        BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record, TraceSubResp,
+        MAGIC_BYTES,
     };
 
     mock! {
@@ -154,7 +157,30 @@ mod test {
 
         assert_eq!(expected, actual);
     }
+    #[test]
+    fn test_bincode_serialize_resp() {
+        let deserializer = BincodeDeserializer::new();
+        let resp = TraceSubResp(SubscribeResponse {
+            status: Some(Status {
+                code: 0,
+                message: "abc".to_string(),
+            }),
+            info: None,
+            operation: 1,
+            version: 100,
+        });
+        let op = Operation::MetaMessage(Box::new(resp));
+        let expected = Record::new_local_none(123, op);
 
+        let mut buf = MemTraceStore::default();
+
+        let record_bytes = encode_to_vec(expected.clone(), config::standard()).unwrap();
+        let _ = buf.write(&record_bytes).unwrap();
+
+        let actual = deserializer.deserialize(&mut buf).unwrap();
+
+        assert_eq!(expected, actual);
+    }
     #[test]
     fn test_bincode_deserialize_many() {
         let count = 5000;

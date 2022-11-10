@@ -5416,6 +5416,7 @@ dependencies = [
  "async-trait",
  "bincode 2.0.0-rc.2",
  "byteorder",
+ "either",
  "flume",
  "lazy_static",
  "madsim-tokio",

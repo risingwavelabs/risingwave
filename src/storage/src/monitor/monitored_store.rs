@@ -97,7 +97,7 @@ where
     pub fn inner(&self) -> &S {
         #[cfg(hm_trace)]
         {
-            &self.inner.inner()
+            self.inner.inner()
         }
         #[cfg(not(hm_trace))]
         &self.inner

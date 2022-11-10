@@ -48,10 +48,6 @@ impl Record {
         Self(local_id, record_id, op)
     }
 
-    pub(crate) fn new_local_none(record_id: RecordId, op: Operation) -> Self {
-        Self::new(TraceLocalId::None, record_id, op)
-    }
-
     pub(crate) fn local_id(&self) -> TraceLocalId {
         self.0
     }
@@ -62,6 +58,11 @@ impl Record {
 
     pub(crate) fn op(&self) -> &Operation {
         &self.2
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_local_none(record_id: RecordId, op: Operation) -> Self {
+        Self::new(TraceLocalId::None, record_id, op)
     }
 }
 
@@ -109,12 +110,12 @@ pub enum Operation {
     Finish,
 
     /// SubscribeResponse implements Serde's Serialize and Deserialize, so use serde
-    MetaMessage(TraceSubResp),
+    MetaMessage(Box<TraceSubResp>),
 
     Result(OperationResult),
 }
 
-/// TraceResult discards Error and only marks whether succeeded or not.
+/// `TraceResult` discards Error and only marks whether succeeded or not.
 /// Use Option rather than Result because it's overhead to serialize Error.
 type TraceResult<T> = Option<T>;
 
@@ -137,6 +138,9 @@ impl Encode for TraceSubResp {
         &self,
         encoder: &mut E,
     ) -> Result<(), bincode::error::EncodeError> {
+        // SubscribeResponse and its implementation of Serialize is generated
+        // by prost and pbjson for ProtoBuf mapping.
+        // Serialization methods like Bincode may not correctly serialize it.
         let encoded = ron::to_string(&self.0).unwrap();
         Encode::encode(&encoded, encoder)
     }
@@ -147,8 +151,6 @@ impl Decode for TraceSubResp {
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
         let s: String = Decode::decode(decoder)?;
-        // Bincode cannot decode serialized data with meta info
-        // And we cannot derive `Bincode::Decode` for `SubscribeResponse`
         let resp: SubscribeResponse = ron::from_str(&s).unwrap();
         Ok(Self(resp))
     }
@@ -171,7 +173,7 @@ mod tests {
 
     use parking_lot::Mutex;
 
-    use crate::RecordIdGenerator;
+    use super::*;
 
     // test atomic id
     #[tokio::test(flavor = "multi_thread")]

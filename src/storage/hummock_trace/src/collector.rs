@@ -17,6 +17,7 @@ use std::fs::{create_dir_all, OpenOptions};
 use std::io::BufWriter;
 use std::path::Path;
 
+use either::Either;
 use flume::{unbounded, Receiver, Sender};
 use risingwave_common::hm_trace::TraceLocalId;
 
@@ -24,7 +25,6 @@ use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{Operation, Record, RecordId, RecordIdGenerator};
 
 // create a global singleton of collector as well as record id generator
-// https://stackoverflow.com/questions/27791532/how-do-i-create-a-global-mutable-singleton
 lazy_static! {
     static ref GLOBAL_COLLECTOR: GlobalCollector = GlobalCollector::new();
     static ref GLOBAL_RECORD_ID: RecordIdGenerator = RecordIdGenerator::new();
@@ -54,8 +54,8 @@ pub fn init_collector() {
         .create(true)
         .open(path)
         .expect("failed to open log file");
-
-    let writer = BufWriter::new(f);
+    //
+    let writer = BufWriter::with_capacity(WRITER_BUFFER_SIZE, f);
     let writer = TraceWriterImpl::new_bincode(writer).unwrap();
     tokio::spawn(GLOBAL_COLLECTOR.run(Box::new(writer)));
 }
@@ -88,40 +88,45 @@ impl GlobalCollector {
         writer_handle.await.expect("failed to stop writer thread");
     }
 
-    async fn start_writer_worker(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter + Send>) {
-        let mut size = 0;
+    async fn start_collect_worker(rx: Receiver<RecordMsg>, writer_tx: Sender<WriteMsg>) {
+        let mut records = Vec::new();
         loop {
-            if let Ok(msg) = rx.recv_async().await {
-                match msg {
-                    WriteMsg::Write(record) => {
-                        size += writer.write(record).expect("failed to write the log file");
-                        // default to use a BufWriter, must flush memory
-                        if size > WRITER_BUFFER_SIZE {
-                            writer.flush().expect("failed to sync file");
-                            size = 0;
-                        }
+            if let Ok(message) = rx.recv_async().await {
+                match message {
+                    RecordMsg::Left(record) => {
+                        records.push(record);
                     }
-                    WriteMsg::Shutdown => {
+                    RecordMsg::Right(()) => {
+                        writer_tx
+                            .send(WriteMsg::Left(records))
+                            .expect("failed to send write req");
+                        writer_tx
+                            .send(WriteMsg::Right(()))
+                            .expect("failed to kill writer thread");
                         return;
                     }
                 }
             }
+            if !records.is_empty() && !rx.is_empty() {
+                writer_tx
+                    .send(WriteMsg::Left(records))
+                    .expect("failed to send write req");
+                records = Vec::new();
+            }
         }
     }
 
-    async fn start_collect_worker(rx: Receiver<RecordMsg>, writer_tx: Sender<WriteMsg>) {
+    async fn start_writer_worker(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter + Send>) {
         loop {
-            if let Ok(message) = rx.recv_async().await {
-                match message {
-                    RecordMsg::Record(record) => {
-                        writer_tx
-                            .send(WriteMsg::Write(record))
-                            .expect("failed to send write req");
+            if let Ok(msg) = rx.recv_async().await {
+                match msg {
+                    WriteMsg::Left(records) => {
+                        writer
+                            .write_all(records)
+                            .expect("failed to write the log file");
                     }
-                    RecordMsg::Shutdown => {
-                        writer_tx
-                            .send(WriteMsg::Shutdown)
-                            .expect("failed to kill writer thread");
+                    WriteMsg::Right(()) => {
+                        writer.flush().expect("failed to flush content");
                         return;
                     }
                 }
@@ -131,7 +136,7 @@ impl GlobalCollector {
 
     fn finish(&self) {
         self.tx
-            .send(RecordMsg::Shutdown)
+            .send(Either::Right(()))
             .expect("failed to finish collector");
     }
 
@@ -159,22 +164,24 @@ impl Drop for GlobalCollector {
 pub struct TraceSpan {
     tx: Sender<RecordMsg>,
     id: RecordId,
+    local_id: TraceLocalId,
 }
 
 impl TraceSpan {
-    pub fn new(tx: Sender<RecordMsg>, id: RecordId) -> Self {
-        Self { tx, id }
+    pub fn new(tx: Sender<RecordMsg>, id: RecordId, local_id: TraceLocalId) -> Self {
+        Self { tx, id, local_id }
     }
 
-    pub fn send(&self, op: Operation, local_id: TraceLocalId) {
+    pub fn send(&self, op: Operation) {
         self.tx
-            .send(RecordMsg::Record(Record::new(local_id, self.id, op)))
+            .send(Either::Left(Record::new(self.local_id, self.id, op)))
             .expect("failed to log record");
     }
 
     pub fn finish(&self) {
         self.tx
-            .send(RecordMsg::Record(Record::new_local_none(
+            .send(Either::Left(Record::new(
+                self.local_id,
                 self.id,
                 Operation::Finish,
             )))
@@ -187,15 +194,15 @@ impl TraceSpan {
 
     /// Create a span and send operation to the `GLOBAL_COLLECTOR`
     pub fn new_to_global(op: Operation, local_id: TraceLocalId) -> Self {
-        let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next());
-        span.send(op, local_id);
+        let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next(), local_id);
+        span.send(op);
         span
     }
 
     #[cfg(test)]
     pub fn new_op(tx: Sender<RecordMsg>, id: RecordId, op: Operation) -> Self {
-        let span = TraceSpan::new(tx, id);
-        span.send(op, TraceLocalId::None);
+        let span = TraceSpan::new(tx, id, TraceLocalId::None);
+        span.send(op);
         span
     }
 }
@@ -206,17 +213,8 @@ impl Drop for TraceSpan {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum RecordMsg {
-    Record(Record),
-    Shutdown,
-}
-
-#[derive(Debug, PartialEq)]
-pub(crate) enum WriteMsg {
-    Write(Record),
-    Shutdown,
-}
+pub type RecordMsg = Either<Record, ()>;
+pub type WriteMsg = Either<Vec<Record>, ()>;
 
 #[cfg(test)]
 mod tests {
@@ -242,8 +240,8 @@ mod tests {
         let msg2 = rx.recv().unwrap();
 
         assert!(rx.is_empty());
-        assert_eq!(msg1, RecordMsg::Record(record1));
-        assert_eq!(msg2, RecordMsg::Record(record2));
+        assert_eq!(msg1, Either::Left(record1));
+        assert_eq!(msg2, Either::Left(record2));
 
         drop(_span1);
         drop(_span2);
@@ -254,11 +252,11 @@ mod tests {
         assert!(rx.is_empty());
         assert_eq!(
             msg1,
-            RecordMsg::Record(Record::new_local_none(0, Operation::Finish))
+            Either::Left(Record::new_local_none(0, Operation::Finish))
         );
         assert_eq!(
             msg2,
-            RecordMsg::Record(Record::new_local_none(1, Operation::Finish))
+            Either::Left(Record::new_local_none(1, Operation::Finish))
         );
     }
 
@@ -297,10 +295,7 @@ mod tests {
         let op = Operation::Get(vec![103, 200, 234], true, 1, 1, Some(1));
         let mut mock_writer = MockTraceWriter::new();
 
-        mock_writer
-            .expect_write()
-            .times(count * 2)
-            .returning(|_| Ok(0));
+        mock_writer.expect_write_all().returning(|_| Ok(0));
 
         let _collector = collector.clone();
 

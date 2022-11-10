@@ -191,6 +191,7 @@ impl HummockStorageCore {
 
         for local_sst in staging_sst {
             table_counts += 1;
+
             if let Some(data) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 &local_sst,
@@ -427,6 +428,7 @@ impl HummockStorageCore {
             .iter_merge_sstable_counts
             .with_label_values(&["committed-non-overlapping-iter"])
             .observe(non_overlapping_iters.len() as f64);
+
         // 3. build user_iterator
         let merge_iter = UnorderedMergeIteratorInner::new(
             once(HummockIteratorUnion::First(staging_iter))
@@ -441,6 +443,7 @@ impl HummockStorageCore {
                         .map(HummockIteratorUnion::Third),
                 ),
         );
+
         // the epoch_range left bound for iterator read
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
         let mut user_iter =
@@ -516,11 +519,12 @@ impl StateStore for HummockStorage {
             let imm_size = imm.size();
             self.core
                 .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
+
             // insert imm to uploader
             self.core
                 .event_sender
                 .send(HummockEvent::ImmToUploader(imm))
-                .expect("failed to send imm");
+                .unwrap();
             Ok(imm_size)
         }
     }

@@ -95,14 +95,14 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
 pub struct ReplayNotificationClient<S: MetaStore> {
     addr: HostAddr,
     notification_manager: NotificationManagerRef<S>,
-    first_resp: TraceSubResp,
+    first_resp: Box<TraceSubResp>,
 }
 
 impl<S: MetaStore> ReplayNotificationClient<S> {
     pub fn new(
         addr: HostAddr,
         notification_manager: NotificationManagerRef<S>,
-        first_resp: TraceSubResp,
+        first_resp: Box<TraceSubResp>,
     ) -> Self {
         Self {
             addr,
@@ -136,7 +136,7 @@ impl<S: MetaStore> NotificationClient for ReplayNotificationClient<S> {
 pub fn get_replay_notification_client(
     env: MetaSrvEnv<MemStore>,
     worker_node: WorkerNode,
-    first_resp: TraceSubResp,
+    first_resp: Box<TraceSubResp>,
 ) -> ReplayNotificationClient<MemStore> {
     ReplayNotificationClient::new(
         worker_node.get_host().unwrap().into(),

@@ -8,6 +8,7 @@ edition = "2021"
 async-trait = "0.1"
 bincode = { version = "=2.0.0-rc.2", features = ["serde"] }
 byteorder = "1"
+either = "1"
 flume = "0.10.14"
 lazy_static = "1.4.0"
 parking_lot = "0.12"
