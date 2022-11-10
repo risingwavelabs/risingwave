@@ -99,7 +99,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             }
 
             if KeyComparator::compare_user_key(&self.last_key.user_key, key) != Ordering::Equal {
-                self.last_key.set(&full_key);
+                self.last_key.set(full_key);
                 // handle delete operation
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
@@ -169,7 +169,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     user_key: begin_key.clone(),
                     epoch: self.read_epoch,
                 };
-                self.iterator.seek(&full_key.table_key_as_slice()).await?;
+                self.iterator.seek(full_key.table_key_as_slice()).await?;
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => self.iterator.rewind().await?,
@@ -182,22 +182,22 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
-    pub async fn seek(&mut self, user_key: &UserKey<&[u8]>) -> HummockResult<()> {
+    pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
         // Handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
             Included(begin_key) => {
                 let begin_key = begin_key.table_key_as_slice();
-                if &begin_key > user_key {
-                    begin_key.clone()
+                if begin_key > user_key {
+                    begin_key
                 } else {
-                    user_key.clone()
+                    user_key
                 }
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
-            Unbounded => user_key.clone(),
+            Unbounded => user_key,
         };
 
-        let full_key = &FullKey {
+        let full_key = FullKey {
             user_key,
             epoch: self.read_epoch,
         };
@@ -395,20 +395,20 @@ mod tests {
         let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
 
         // right edge case
-        ui.seek(&iterator_test_user_key_of(3 * TEST_KEYS_COUNT).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(3 * TEST_KEYS_COUNT).table_key_as_slice())
             .await
             .unwrap();
         assert!(!ui.is_valid());
 
         // normal case
-        ui.seek(&iterator_test_user_key_of(TEST_KEYS_COUNT + 5).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(TEST_KEYS_COUNT + 5).table_key_as_slice())
             .await
             .unwrap();
         let k = ui.key();
         let v = ui.value();
         assert_eq!(v, iterator_test_value_of(TEST_KEYS_COUNT + 5).as_slice());
         assert_eq!(k, &iterator_test_key_of(TEST_KEYS_COUNT + 5));
-        ui.seek(&iterator_test_user_key_of(2 * TEST_KEYS_COUNT + 5).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(2 * TEST_KEYS_COUNT + 5).table_key_as_slice())
             .await
             .unwrap();
         let k = ui.key();
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(k, &iterator_test_key_of(2 * TEST_KEYS_COUNT + 5));
 
         // left edge case
-        ui.seek(&iterator_test_user_key_of(0).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(0).table_key_as_slice())
             .await
             .unwrap();
         let k = ui.key();
@@ -526,7 +526,7 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- before-begin-range iterate -----
-        ui.seek(&iterator_test_user_key_of(1).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(1).table_key_as_slice())
             .await
             .unwrap();
         assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
@@ -538,7 +538,7 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- begin-range iterate -----
-        ui.seek(&iterator_test_user_key_of(2).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(2).table_key_as_slice())
             .await
             .unwrap();
         assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
@@ -550,13 +550,13 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- end-range iterate -----
-        ui.seek(&iterator_test_user_key_of(7).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(7).table_key_as_slice())
             .await
             .unwrap();
         assert!(!ui.is_valid());
 
         // ----- after-end-range iterate -----
-        ui.seek(&iterator_test_user_key_of(8).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(8).table_key_as_slice())
             .await
             .unwrap();
         assert!(!ui.is_valid());
@@ -609,7 +609,7 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- before-begin-range iterate -----
-        ui.seek(&iterator_test_user_key_of(1).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(1).table_key_as_slice())
             .await
             .unwrap();
         assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
@@ -621,7 +621,7 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- begin-range iterate -----
-        ui.seek(&iterator_test_user_key_of(2).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(2).table_key_as_slice())
             .await
             .unwrap();
         assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
@@ -633,13 +633,13 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- end-range iterate -----
-        ui.seek(&iterator_test_user_key_of(7).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(7).table_key_as_slice())
             .await
             .unwrap();
         assert!(!ui.is_valid());
 
         // ----- after-end-range iterate -----
-        ui.seek(&iterator_test_user_key_of(8).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(8).table_key_as_slice())
             .await
             .unwrap();
         assert!(!ui.is_valid());
@@ -693,7 +693,7 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- begin-range iterate -----
-        ui.seek(&iterator_test_user_key_of(0).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(0).table_key_as_slice())
             .await
             .unwrap();
         assert_eq!(ui.key(), &iterator_test_key_of_epoch(1, 200));
@@ -707,7 +707,7 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- in-range iterate -----
-        ui.seek(&iterator_test_user_key_of(2).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(2).table_key_as_slice())
             .await
             .unwrap();
         assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
@@ -719,13 +719,13 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- end-range iterate -----
-        ui.seek(&iterator_test_user_key_of(7).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(7).table_key_as_slice())
             .await
             .unwrap();
         assert!(!ui.is_valid());
 
         // ----- after-end-range iterate -----
-        ui.seek(&iterator_test_user_key_of(8).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(8).table_key_as_slice())
             .await
             .unwrap();
         assert!(!ui.is_valid());
@@ -779,7 +779,7 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- begin-range iterate -----
-        ui.seek(&iterator_test_user_key_of(1).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(1).table_key_as_slice())
             .await
             .unwrap();
         assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
@@ -793,7 +793,7 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- in-range iterate -----
-        ui.seek(&iterator_test_user_key_of(2).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(2).table_key_as_slice())
             .await
             .unwrap();
         assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
@@ -807,7 +807,7 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- end-range iterate -----
-        ui.seek(&iterator_test_user_key_of(8).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(8).table_key_as_slice())
             .await
             .unwrap();
         assert_eq!(ui.key(), &iterator_test_key_of_epoch(8, 100));
@@ -815,7 +815,7 @@ mod tests {
         assert!(!ui.is_valid());
 
         // ----- after-end-range iterate -----
-        ui.seek(&iterator_test_user_key_of(9).table_key_as_slice())
+        ui.seek(iterator_test_user_key_of(9).table_key_as_slice())
             .await
             .unwrap();
         assert!(!ui.is_valid());

@@ -318,7 +318,7 @@ where
         }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             self.reset_heap();
             futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.seek(key)))

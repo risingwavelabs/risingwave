@@ -132,13 +132,13 @@ mod test {
         let mut mi = UnorderedMergeIteratorInner::new(iters);
 
         // right edge case
-        mi.seek(&iterator_test_key_of(0).table_key_as_slice())
+        mi.seek(iterator_test_key_of(0).table_key_as_slice())
             .await
             .unwrap();
         assert!(!mi.is_valid());
 
         // normal case
-        mi.seek(&iterator_test_key_of(TEST_KEYS_COUNT + 4).table_key_as_slice())
+        mi.seek(iterator_test_key_of(TEST_KEYS_COUNT + 4).table_key_as_slice())
             .await
             .unwrap();
         let k = mi.key();
@@ -152,7 +152,7 @@ mod test {
             iterator_test_key_of(TEST_KEYS_COUNT + 4).table_key_as_slice()
         );
 
-        mi.seek(&iterator_test_key_of(2 * TEST_KEYS_COUNT + 7).table_key_as_slice())
+        mi.seek(iterator_test_key_of(2 * TEST_KEYS_COUNT + 7).table_key_as_slice())
             .await
             .unwrap();
         let k = mi.key();
@@ -167,7 +167,7 @@ mod test {
         );
 
         // left edge case
-        mi.seek(&iterator_test_key_of(3 * TEST_KEYS_COUNT).table_key_as_slice())
+        mi.seek(iterator_test_key_of(3 * TEST_KEYS_COUNT).table_key_as_slice())
             .await
             .unwrap();
         let k = mi.key();

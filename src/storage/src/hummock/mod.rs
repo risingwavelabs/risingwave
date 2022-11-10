@@ -306,7 +306,7 @@ impl HummockStorage {
 pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
     sstable_info: &SstableInfo,
-    full_key: &FullKey<&[u8]>,
+    full_key: FullKey<&[u8]>,
     check_bloom_filter: bool,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
@@ -362,7 +362,7 @@ pub fn hit_sstable_bloom_filter(
 pub async fn get_from_order_sorted_uncommitted_data(
     sstable_store_ref: SstableStoreRef,
     order_sorted_uncommitted_data: OrderSortedUncommittedData,
-    full_key: &FullKey<&[u8]>,
+    full_key: FullKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
     table_key: &[u8],
     check_bloom_filter: bool,

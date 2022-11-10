@@ -538,7 +538,7 @@ impl Compactor {
         F: TableBuilderFactory,
     {
         if !task_config.key_range.left.is_empty() {
-            iter.seek(&FullKey::decode(&task_config.key_range.left))
+            iter.seek(FullKey::decode(&task_config.key_range.left))
                 .await?;
         } else {
             iter.rewind().await?;
@@ -573,7 +573,7 @@ impl Compactor {
                     break;
                 }
 
-                last_key.set(&iter_key);
+                last_key.set(iter_key);
                 watermark_can_see_last_key = false;
                 if value.is_delete() {
                     local_stats.skip_delete_key_count += 1;
@@ -590,12 +590,12 @@ impl Compactor {
             if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
                 || (epoch < task_config.watermark
                     && (watermark_can_see_last_key
-                        || del_agg.should_delete(&iter_key.user_key, epoch)))
+                        || del_agg.should_delete(iter_key.user_key, epoch)))
             {
                 drop = true;
             }
 
-            if !drop && compaction_filter.should_delete(&iter_key) {
+            if !drop && compaction_filter.should_delete(iter_key) {
                 drop = true;
             }
 

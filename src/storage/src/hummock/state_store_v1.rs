@@ -87,7 +87,7 @@ impl HummockStorageV1 {
             let (value, table_count) = get_from_order_sorted_uncommitted_data(
                 self.sstable_store.clone(),
                 uncommitted_data,
-                &full_key,
+                full_key,
                 &mut local_stats,
                 table_key,
                 read_options.check_bloom_filter,
@@ -103,7 +103,7 @@ impl HummockStorageV1 {
             let (value, table_count) = get_from_order_sorted_uncommitted_data(
                 self.sstable_store.clone(),
                 sync_uncommitted_data,
-                &full_key,
+                full_key,
                 &mut local_stats,
                 table_key,
                 read_options.check_bloom_filter,
@@ -135,7 +135,7 @@ impl HummockStorageV1 {
                         if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
-                            &full_key,
+                            full_key,
                             read_options.check_bloom_filter,
                             &mut local_stats,
                         )
@@ -173,7 +173,7 @@ impl HummockStorageV1 {
                     if let Some(v) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
-                        &full_key,
+                        full_key,
                         read_options.check_bloom_filter,
                         &mut local_stats,
                     )

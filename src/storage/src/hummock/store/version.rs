@@ -385,7 +385,7 @@ impl HummockVersionReader {
             if let Some(data) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 local_sst,
-                &full_key,
+                full_key,
                 read_options.check_bloom_filter,
                 &mut local_stats,
             )
@@ -416,7 +416,7 @@ impl HummockVersionReader {
                         if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
-                            &full_key,
+                            full_key,
                             read_options.check_bloom_filter,
                             &mut local_stats,
                         )
@@ -455,7 +455,7 @@ impl HummockVersionReader {
                     if let Some(v) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
-                        &full_key,
+                        full_key,
                         read_options.check_bloom_filter,
                         &mut local_stats,
                     )

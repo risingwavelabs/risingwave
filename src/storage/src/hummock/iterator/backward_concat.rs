@@ -134,7 +134,7 @@ mod tests {
             Arc::new(SstableIteratorReadOptions::default()),
         );
 
-        iter.seek(&iterator_test_key_of(2 * TEST_KEYS_COUNT + 1).table_key_as_slice())
+        iter.seek(iterator_test_key_of(2 * TEST_KEYS_COUNT + 1).table_key_as_slice())
             .await
             .unwrap();
 
@@ -150,7 +150,7 @@ mod tests {
         );
 
         // Left edge case
-        iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT).table_key_as_slice())
+        iter.seek(iterator_test_key_of(TEST_KEYS_COUNT).table_key_as_slice())
             .await
             .unwrap();
         let key = iter.key();
@@ -165,7 +165,7 @@ mod tests {
         );
 
         // Right edge case
-        iter.seek(&iterator_test_key_of(4 * TEST_KEYS_COUNT - 1).table_key_as_slice())
+        iter.seek(iterator_test_key_of(4 * TEST_KEYS_COUNT - 1).table_key_as_slice())
             .await
             .unwrap();
 
@@ -181,7 +181,7 @@ mod tests {
         );
 
         // Right overflow case
-        iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT - 1).table_key_as_slice())
+        iter.seek(iterator_test_key_of(TEST_KEYS_COUNT - 1).table_key_as_slice())
             .await
             .unwrap();
         assert!(!iter.is_valid());
@@ -224,7 +224,7 @@ mod tests {
             Arc::new(SstableIteratorReadOptions::default()),
         );
 
-        iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 2 + 1).table_key_as_slice())
+        iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 2 + 1).table_key_as_slice())
             .await
             .unwrap();
 
@@ -240,7 +240,7 @@ mod tests {
         );
 
         // table1 last
-        iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 4 - 1).table_key_as_slice())
+        iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 4 - 1).table_key_as_slice())
             .await
             .unwrap();
 

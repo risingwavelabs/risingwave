@@ -316,8 +316,8 @@ impl HummockIterator for ConcatSstableIterator {
     }
 
     /// Resets the iterator and seeks to the first position where the stored key >= `key`.
-    fn seek<'a>(&'a mut self, key: &'a FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+        async move {
             let encoded_key = key.encode();
             let key_slice = encoded_key.as_slice();
             let seek_key: &[u8] = if self.key_range.left.is_empty() {
@@ -396,7 +396,7 @@ mod tests {
         );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(&FullKey::decode(&kr.left)).await.unwrap();
+        iter.seek(FullKey::decode(&kr.left)).await.unwrap();
 
         for idx in start_index..end_index {
             let key = iter.key();
@@ -421,7 +421,7 @@ mod tests {
         );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(&FullKey::decode(&kr.left)).await.unwrap();
+        iter.seek(FullKey::decode(&kr.left)).await.unwrap();
         assert!(!iter.is_valid());
         let kr = KeyRange::new(
             test_key_of(start_index).encode().into(),
@@ -429,7 +429,7 @@ mod tests {
         );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(&FullKey::decode(&kr.left)).await.unwrap();
+        iter.seek(FullKey::decode(&kr.left)).await.unwrap();
         for idx in start_index..30000 {
             let key = iter.key();
             let val = iter.value();
@@ -454,7 +454,7 @@ mod tests {
         );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(&test_key_of(10000).table_key_as_slice())
+        iter.seek(test_key_of(10000).table_key_as_slice())
             .await
             .unwrap();
         assert!(
@@ -462,7 +462,7 @@ mod tests {
                 && iter.cur_idx == 1
                 && iter.key() == test_key_of(10000).table_key_as_slice()
         );
-        iter.seek(&test_key_of(10001).table_key_as_slice())
+        iter.seek(test_key_of(10001).table_key_as_slice())
             .await
             .unwrap();
         assert!(
@@ -470,7 +470,7 @@ mod tests {
                 && iter.cur_idx == 1
                 && iter.key() == test_key_of(10001).table_key_as_slice()
         );
-        iter.seek(&test_key_of(9999).table_key_as_slice())
+        iter.seek(test_key_of(9999).table_key_as_slice())
             .await
             .unwrap();
         assert!(
@@ -478,7 +478,7 @@ mod tests {
                 && iter.cur_idx == 0
                 && iter.key() == test_key_of(9999).table_key_as_slice()
         );
-        iter.seek(&test_key_of(1).table_key_as_slice())
+        iter.seek(test_key_of(1).table_key_as_slice())
             .await
             .unwrap();
         assert!(
@@ -486,7 +486,7 @@ mod tests {
                 && iter.cur_idx == 0
                 && iter.key() == test_key_of(1).table_key_as_slice()
         );
-        iter.seek(&test_key_of(29999).table_key_as_slice())
+        iter.seek(test_key_of(29999).table_key_as_slice())
             .await
             .unwrap();
         assert!(
@@ -494,7 +494,7 @@ mod tests {
                 && iter.cur_idx == 2
                 && iter.key() == test_key_of(29999).table_key_as_slice()
         );
-        iter.seek(&test_key_of(30000).table_key_as_slice())
+        iter.seek(test_key_of(30000).table_key_as_slice())
             .await
             .unwrap();
         assert!(!iter.is_valid());
@@ -506,11 +506,11 @@ mod tests {
         );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(&test_key_of(17000).table_key_as_slice())
+        iter.seek(test_key_of(17000).table_key_as_slice())
             .await
             .unwrap();
         assert!(!iter.is_valid());
-        iter.seek(&test_key_of(1).table_key_as_slice())
+        iter.seek(test_key_of(1).table_key_as_slice())
             .await
             .unwrap();
         assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == FullKey::decode(&kr.left));

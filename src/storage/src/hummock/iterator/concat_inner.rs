@@ -66,7 +66,7 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
     async fn seek_idx(
         &mut self,
         idx: usize,
-        seek_key: Option<&FullKey<&[u8]>>,
+        seek_key: Option<FullKey<&[u8]>>,
     ) -> HummockResult<()> {
         if idx >= self.tables.len() {
             if let Some(old_iter) = self.sstable_iter.take() {
@@ -134,7 +134,7 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         async move { self.seek_idx(0, None).await }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             let encoded_key = key.encode();
             let table_idx = self

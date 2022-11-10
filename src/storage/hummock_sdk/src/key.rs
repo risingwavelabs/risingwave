@@ -329,7 +329,7 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
 /// will group these two values into one struct for convenient filtering.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UserKey<T: AsRef<[u8]>> {
     pub table_id: TableId,
     pub table_key: T,
@@ -384,7 +384,7 @@ impl UserKey<Vec<u8>> {
 
     /// Use this method to override an old `UserKey<Vec<u8>>` with a `UserKey<&[u8]>` to own the
     /// table key without reallocating a new `UserKey` object.
-    pub fn set(&mut self, other: &UserKey<&[u8]>) {
+    pub fn set(&mut self, other: UserKey<&[u8]>) {
         self.table_id = other.table_id;
         self.table_key.clear();
         self.table_key.extend_from_slice(other.table_key.as_ref());
@@ -403,7 +403,7 @@ impl Default for UserKey<Vec<u8>> {
 /// [`FullKey`] is an internal concept in storage. It associates [`UserKey`] with an epoch.
 ///
 /// The encoded format is | `user_key` | `epoch` |.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FullKey<T: AsRef<[u8]>> {
     pub user_key: UserKey<T>,
     pub epoch: HummockEpoch,
@@ -466,8 +466,8 @@ impl FullKey<Vec<u8>> {
 
     /// Use this method to override an old `FullKey<Vec<u8>>` with a `FullKey<&[u8]>` to own the
     /// table key without reallocating a new `FullKey` object.
-    pub fn set(&mut self, other: &FullKey<&[u8]>) {
-        self.user_key.set(&other.user_key);
+    pub fn set(&mut self, other: FullKey<&[u8]>) {
+        self.user_key.set(other.user_key);
         self.epoch = other.epoch;
     }
 }

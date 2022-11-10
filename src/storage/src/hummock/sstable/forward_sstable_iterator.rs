@@ -144,7 +144,7 @@ impl HummockIterator for SstableIterator {
         async move { self.seek_idx(0, None).await }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             let encoded_key = key.encode();
             let block_idx = self
@@ -267,7 +267,7 @@ mod tests {
         // We seek and access all the keys in random order
         for i in all_key_to_test {
             sstable_iter
-                .seek(&test_key_of(i).table_key_as_slice())
+                .seek(test_key_of(i).table_key_as_slice())
                 .await
                 .unwrap();
             // sstable_iter.next().await.unwrap();
@@ -277,7 +277,7 @@ mod tests {
 
         // Seek to key #500 and start iterating.
         sstable_iter
-            .seek(&test_key_of(500).table_key_as_slice())
+            .seek(test_key_of(500).table_key_as_slice())
             .await
             .unwrap();
         for i in 500..TEST_KEYS_COUNT {
@@ -294,7 +294,7 @@ mod tests {
             233,
         );
         sstable_iter
-            .seek(&smallest_key.table_key_as_slice())
+            .seek(smallest_key.table_key_as_slice())
             .await
             .unwrap();
         let key = sstable_iter.key();
@@ -307,7 +307,7 @@ mod tests {
             233,
         );
         sstable_iter
-            .seek(&largest_key.table_key_as_slice())
+            .seek(largest_key.table_key_as_slice())
             .await
             .unwrap();
         assert!(!sstable_iter.is_valid());
@@ -320,7 +320,7 @@ mod tests {
             // (will produce `key_test_00004`).
             sstable_iter
                 .seek(
-                    &FullKey::new(
+                    FullKey::new(
                         TableId::default(),
                         format!("key_test_{:05}", idx * 2 - 1).as_bytes().to_vec(),
                         0,

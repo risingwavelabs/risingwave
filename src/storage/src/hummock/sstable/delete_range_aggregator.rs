@@ -192,7 +192,7 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
     /// in order.
     pub fn should_delete(
         &mut self,
-        target_key: &UserKey<impl AsRef<[u8]>>,
+        target_key: UserKey<impl AsRef<[u8]>>,
         epoch: HummockEpoch,
     ) -> bool {
         if epoch >= self.watermark {
@@ -205,7 +205,7 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
             let item = self.end_user_key_index.peek().unwrap();
             if Ordering::is_gt(KeyComparator::compare_user_key_cross_format(
                 item.user_key.as_slice(),
-                target_key,
+                &target_key,
             )) {
                 break;
             }
@@ -218,14 +218,14 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
         while self.inner.is_valid()
             && Ordering::is_le(KeyComparator::compare_user_key_cross_format(
                 self.inner.start_user_key(),
-                target_key,
+                &target_key,
             ))
         {
             let sequence = self.inner.current_epoch();
             if sequence > self.watermark
                 || Ordering::is_le(KeyComparator::compare_user_key_cross_format(
                     self.inner.end_user_key(),
-                    target_key,
+                    &target_key,
                 ))
             {
                 self.inner.next();
@@ -270,21 +270,21 @@ mod tests {
         let iter = agg.iter();
         let mut iter = DeleteRangeAggregator::new(iter, 10);
         // can not be removed by tombstone with smaller epoch.
-        assert!(!iter.should_delete(&test_user_key(b"bbb"), 13));
+        assert!(!iter.should_delete(test_user_key(b"bbb"), 13));
         // can not be removed by tombstone because its sequence is larger than epoch.
-        assert!(!iter.should_delete(&test_user_key(b"bbb"), 11));
-        assert!(iter.should_delete(&test_user_key(b"bbb"), 8));
+        assert!(!iter.should_delete(test_user_key(b"bbb"), 11));
+        assert!(iter.should_delete(test_user_key(b"bbb"), 8));
 
-        assert!(iter.should_delete(&test_user_key(b"bbbaaa"), 8));
+        assert!(iter.should_delete(test_user_key(b"bbbaaa"), 8));
 
-        assert!(iter.should_delete(&test_user_key(b"bbbccd"), 8));
+        assert!(iter.should_delete(test_user_key(b"bbbccd"), 8));
         // can not be removed by tombstone because it equals the end of delete-ranges.
-        assert!(!iter.should_delete(&test_user_key(b"bbbddd"), 8));
-        assert!(iter.should_delete(&test_user_key(b"bbbeee"), 8));
-        assert!(!iter.should_delete(&test_user_key(b"bbbeef"), 10));
-        assert!(iter.should_delete(&test_user_key(b"eeeeee"), 9));
-        assert!(iter.should_delete(&test_user_key(b"gggggg"), 8));
-        assert!(!iter.should_delete(&test_user_key(b"hhhhhh"), 8));
+        assert!(!iter.should_delete(test_user_key(b"bbbddd"), 8));
+        assert!(iter.should_delete(test_user_key(b"bbbeee"), 8));
+        assert!(!iter.should_delete(test_user_key(b"bbbeef"), 10));
+        assert!(iter.should_delete(test_user_key(b"eeeeee"), 9));
+        assert!(iter.should_delete(test_user_key(b"gggggg"), 8));
+        assert!(!iter.should_delete(test_user_key(b"hhhhhh"), 8));
 
         let split_ranges = agg.get_tombstone_between(
             &test_user_key(b"bbb").encode(),

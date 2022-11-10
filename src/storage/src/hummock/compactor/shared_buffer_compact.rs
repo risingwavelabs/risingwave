@@ -161,7 +161,7 @@ async fn compact_shared_buffer(
             if last_buffer_size >= sub_compaction_data_size
                 && KeyComparator::compare_user_key(&last_user_key, &user_key) != Ordering::Equal
             {
-                last_user_key.set(&user_key);
+                last_user_key.set(user_key);
                 key_split_append(
                     &FullKey {
                         user_key,
@@ -172,7 +172,7 @@ async fn compact_shared_buffer(
                 );
                 last_buffer_size = data_size;
             } else {
-                last_user_key.set(&user_key);
+                last_user_key.set(user_key);
                 last_buffer_size += data_size;
             }
         }

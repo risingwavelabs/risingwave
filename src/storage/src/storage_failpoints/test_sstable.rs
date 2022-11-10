@@ -59,7 +59,7 @@ async fn test_failpoints_table_read() {
     sstable_iter.rewind().await.unwrap();
 
     sstable_iter
-        .seek(&test_key_of(500).table_key_as_slice())
+        .seek(test_key_of(500).table_key_as_slice())
         .await
         .unwrap();
     assert_eq!(sstable_iter.key(), test_key_of(500).table_key_as_slice());
@@ -71,13 +71,13 @@ async fn test_failpoints_table_read() {
         format!("key_test_{:05}", 600 * 2 - 1).as_bytes().to_vec(),
         0,
     );
-    let result = sstable_iter.seek(&seek_key.table_key_as_slice()).await;
+    let result = sstable_iter.seek(seek_key.table_key_as_slice()).await;
     assert!(result.is_err());
 
     assert_eq!(sstable_iter.key(), test_key_of(500).table_key_as_slice());
     fail::remove(mem_read_err_fp);
     sstable_iter
-        .seek(&seek_key.table_key_as_slice())
+        .seek(seek_key.table_key_as_slice())
         .await
         .unwrap();
     assert_eq!(sstable_iter.key(), test_key_of(600).table_key_as_slice());

@@ -94,13 +94,13 @@ mod test {
 
         for iter in test_iters {
             // right edge case
-            iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 3).table_key_as_slice())
+            iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 3).table_key_as_slice())
                 .await
                 .unwrap();
             assert!(!iter.is_valid());
 
             // normal case
-            iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).table_key_as_slice())
+            iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).table_key_as_slice())
                 .await
                 .unwrap();
             let k = iter.key();
@@ -114,7 +114,7 @@ mod test {
                 iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).table_key_as_slice()
             );
 
-            iter.seek(&iterator_test_key_of(17).table_key_as_slice())
+            iter.seek(iterator_test_key_of(17).table_key_as_slice())
                 .await
                 .unwrap();
             let k = iter.key();
@@ -129,7 +129,7 @@ mod test {
             );
 
             // left edge case
-            iter.seek(&iterator_test_key_of(0).table_key_as_slice())
+            iter.seek(iterator_test_key_of(0).table_key_as_slice())
                 .await
                 .unwrap();
             let k = iter.key();
