@@ -443,7 +443,7 @@ mod tests {
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::ActorContext;
 
-    fn create_in_memory_state_table(
+    async fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
     ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
@@ -470,14 +470,14 @@ mod tests {
         comparator: ExprNodeType,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let mem_state = MemoryStateStore::new();
-        create_executor_inner(comparator, mem_state)
+        create_executor_inner(comparator, mem_state).await
     }
 
-    fn create_executor_inner(
+    async fn create_executor_inner(
         comparator: ExprNodeType,
         mem_state: MemoryStateStore,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
-        let (mem_state_l, mem_state_r) = create_in_memory_state_table(mem_state);
+        let (mem_state_l, mem_state_r) = create_in_memory_state_table(mem_state).await;
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
@@ -535,7 +535,7 @@ mod tests {
         );
         let mem_state = MemoryStateStore::new();
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone());
+            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone()).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -564,7 +564,7 @@ mod tests {
 
         // Recover executor from state store
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone());
+            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone()).await;
 
         // push the recovery barrier for left and right
         tx_l.push_barrier(2, false);
@@ -611,7 +611,7 @@ mod tests {
 
         // Recover executor from state store
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone());
+            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone()).await;
 
         // push recovery barrier
         tx_l.push_barrier(3, false);
