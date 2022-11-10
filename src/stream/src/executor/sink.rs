@@ -37,8 +37,8 @@ pub struct SinkExecutor<S: StateStore> {
     pk_indices: PkIndices,
 }
 
-async fn build_sink(config: SinkConfig) -> StreamExecutorResult<Box<SinkImpl>> {
-    Ok(Box::new(SinkImpl::new(config).await?))
+async fn build_sink(config: SinkConfig, schema: Schema) -> StreamExecutorResult<Box<SinkImpl>> {
+    Ok(Box::new(SinkImpl::new(config, schema).await?))
 }
 
 impl<S: StateStore> SinkExecutor<S> {
@@ -64,9 +64,6 @@ impl<S: StateStore> SinkExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let sink_config = SinkConfig::from_hashmap(self.properties.clone())?;
-        let mut sink = build_sink(sink_config.clone()).await?;
-
         // the flag is required because kafka transaction requires at least one
         // message, so we should abort the transaction if the flag is true.
         let mut empty_epoch_flag = true;
@@ -74,10 +71,12 @@ impl<S: StateStore> SinkExecutor<S> {
         let mut epoch = 0;
 
         let schema = self.schema().clone();
+        let sink_config = SinkConfig::from_hashmap(self.properties.clone())?;
+        let mut sink = build_sink(sink_config.clone(), schema).await?;
 
         // prepare the external sink before writing if needed.
         if sink.needs_preparation() {
-            sink.prepare(&schema).await?;
+            sink.prepare().await?;
         }
 
         let input = self.input.execute();
@@ -85,6 +84,9 @@ impl<S: StateStore> SinkExecutor<S> {
         #[for_await]
         for msg in input {
             match msg? {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 Message::Chunk(chunk) => {
                     if !in_transaction {
                         sink.begin_epoch(epoch).await?;
@@ -92,7 +94,7 @@ impl<S: StateStore> SinkExecutor<S> {
                     }
 
                     let visible_chunk = chunk.clone().compact();
-                    if let Err(e) = sink.write_batch(visible_chunk, &schema).await {
+                    if let Err(e) = sink.write_batch(visible_chunk).await {
                         sink.abort().await?;
                         return Err(e.into());
                     }

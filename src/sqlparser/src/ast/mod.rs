@@ -157,6 +157,8 @@ impl fmt::Display for Ident {
 }
 
 /// A name of a table, view, custom type, etc., possibly multi-part, i.e. db.schema.obj
+///
+/// Is is ensured to be non-empty.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ObjectName(pub Vec<Ident>);
@@ -257,6 +259,12 @@ pub enum Expr {
     TryCast {
         expr: Box<Expr>,
         data_type: DataType,
+    },
+    /// AT TIME ZONE converts `timestamp without time zone` to/from `timestamp with time zone` with
+    /// explicitly specified zone
+    AtTimeZone {
+        timestamp: Box<Expr>,
+        time_zone: String,
     },
     /// EXTRACT(DateTimeField FROM <expr>)
     Extract { field: String, expr: Box<Expr> },
@@ -391,6 +399,10 @@ impl fmt::Display for Expr {
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
             Expr::TryCast { expr, data_type } => write!(f, "TRY_CAST({} AS {})", expr, data_type),
+            Expr::AtTimeZone {
+                timestamp,
+                time_zone,
+            } => write!(f, "{} AT TIME ZONE '{}'", timestamp, time_zone),
             Expr::Extract { field, expr } => write!(f, "EXTRACT({} FROM {})", field, expr),
             Expr::Collate { expr, collation } => write!(f, "{} COLLATE {}", expr, collation),
             Expr::Nested(ast) => write!(f, "({})", ast),

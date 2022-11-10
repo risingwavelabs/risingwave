@@ -51,13 +51,15 @@ pub struct MaterializeExecutor<S: StateStore> {
     info: ExecutorInfo,
 
     materialize_cache: MaterializeCache,
+    _ignore_on_conflict: bool,
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
     /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
     /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
     /// should be `None`.
-    pub fn new(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new(
         input: BoxedExecutor,
         store: S,
         key: Vec<OrderPair>,
@@ -67,12 +69,13 @@ impl<S: StateStore> MaterializeExecutor<S> {
         table_catalog: &Table,
         lru_manager: Option<LruManagerRef>,
         cache_size: usize,
+        _ignore_on_conflict: bool,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
 
         let schema = input.schema().clone();
 
-        let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes);
+        let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes).await;
 
         Self {
             input,
@@ -85,11 +88,12 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(lru_manager, cache_size),
+            _ignore_on_conflict,
         }
     }
 
     /// Create a new `MaterializeExecutor` without distribution info for test purpose.
-    pub fn for_test(
+    pub async fn for_test(
         input: BoxedExecutor,
         store: S,
         table_id: TableId,
@@ -114,7 +118,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
             columns,
             arrange_order_types,
             arrange_columns.clone(),
-        );
+        )
+        .await;
 
         Self {
             input,
@@ -127,6 +132,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(lru_manager, cache_size),
+            _ignore_on_conflict: true,
         }
     }
 
@@ -145,6 +151,9 @@ impl<S: StateStore> MaterializeExecutor<S> {
         for msg in input {
             let msg = msg?;
             yield match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 Message::Chunk(chunk) => {
                     let (data_chunk, ops) = chunk.clone().into_parts();
 
@@ -221,7 +230,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                     .keyspace()
                                     .get(
                                         &key,
-                                        false,
+                                        self.state_table.epoch(),
                                         self.state_table.get_read_option(self.state_table.epoch()),
                                     )
                                     .await?
@@ -533,16 +542,19 @@ mod tests {
             vec![0],
         );
 
-        let mut materialize_executor = Box::new(MaterializeExecutor::for_test(
-            Box::new(source),
-            memory_state_store,
-            table_id,
-            vec![OrderPair::new(0, OrderType::Ascending)],
-            column_ids,
-            1,
-            None,
-            100,
-        ))
+        let mut materialize_executor = Box::new(
+            MaterializeExecutor::for_test(
+                Box::new(source),
+                memory_state_store,
+                table_id,
+                vec![OrderPair::new(0, OrderType::Ascending)],
+                column_ids,
+                1,
+                None,
+                100,
+            )
+            .await,
+        )
         .execute();
         materialize_executor.next().await.transpose().unwrap();
 

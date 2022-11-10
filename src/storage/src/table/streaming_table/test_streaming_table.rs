@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::array::Row;
+use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
@@ -41,7 +42,8 @@ async fn test_state_table() -> StorageResult<()> {
         column_descs,
         order_types,
         pk_index,
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
@@ -166,7 +168,8 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
         column_descs,
         order_types,
         pk_index,
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
@@ -335,7 +338,8 @@ async fn test_state_table_iter() {
         column_descs.clone(),
         order_types.clone(),
         pk_index,
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
@@ -558,7 +562,8 @@ async fn test_state_table_iter_with_prefix() {
         column_descs.clone(),
         order_types.clone(),
         pk_index,
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
@@ -675,7 +680,8 @@ async fn test_state_table_iter_with_pk_range() {
         column_descs.clone(),
         order_types.clone(),
         pk_index,
-    );
+    )
+    .await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
@@ -801,7 +807,8 @@ async fn test_mem_table_assertion() {
         column_descs,
         order_types,
         pk_index,
-    );
+    )
+    .await;
     let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
     state_table.insert(Row(vec![
@@ -835,7 +842,8 @@ async fn test_state_table_iter_with_value_indices() {
         order_types.clone(),
         pk_index,
         vec![2],
-    );
+    )
+    .await;
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
 
@@ -987,7 +995,8 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         order_types.clone(),
         pk_index,
         vec![2, 1, 0],
-    );
+    )
+    .await;
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
 
@@ -1188,4 +1197,335 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     // there is no row in both shared_storage and mem_table
     let res = iter.next().await;
     assert!(res.is_none());
+}
+
+#[tokio::test]
+async fn test_state_table_write_chunk() {
+    let state_store = MemoryStateStore::new();
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int64),
+        ColumnDesc::unnamed(ColumnId::from(2), DataType::Boolean),
+        ColumnDesc::unnamed(ColumnId::from(3), DataType::Float32),
+    ];
+    let data_types = [
+        DataType::Int32,
+        DataType::Int64,
+        DataType::Boolean,
+        DataType::Float32,
+    ];
+    let order_types = vec![OrderType::Ascending];
+    let pk_index = vec![0_usize];
+    let mut state_table = StateTable::new_without_distribution(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs,
+        order_types,
+        pk_index,
+    )
+    .await;
+
+    let epoch = EpochPair::new_test_epoch(1);
+    state_table.init_epoch(epoch);
+
+    let chunk = StreamChunk::from_rows(
+        &[
+            (
+                Op::Insert,
+                Row::new(vec![
+                    Some(123i32.into()),
+                    Some(456i64.into()),
+                    Some(true.into()),
+                    Some(3.15f32.into()),
+                ]),
+            ),
+            (
+                Op::Insert, // mark 1
+                Row::new(vec![
+                    Some(365i32.into()),
+                    Some(4888i64.into()),
+                    Some(false.into()),
+                    Some(0.123f32.into()),
+                ]),
+            ),
+            (
+                Op::Insert, // mark 2
+                Row::new(vec![
+                    Some(8i32.into()),
+                    Some(1000i64.into()),
+                    Some(true.into()),
+                    Some(123.987f32.into()),
+                ]),
+            ),
+            (
+                Op::UpdateDelete, // update the row with `mark 1`
+                Row::new(vec![
+                    Some(365i32.into()),
+                    Some(4888i64.into()),
+                    Some(false.into()),
+                    Some(0.123f32.into()),
+                ]),
+            ),
+            (
+                Op::UpdateInsert,
+                Row::new(vec![
+                    Some(365i32.into()),
+                    Some(4999i64.into()),
+                    Some(false.into()),
+                    Some(0.123456f32.into()),
+                ]),
+            ),
+            (
+                Op::Delete, // delete the row with `mark 2`
+                Row::new(vec![
+                    Some(8i32.into()),
+                    Some(1000i64.into()),
+                    Some(true.into()),
+                    Some(123.987f32.into()),
+                ]),
+            ),
+        ],
+        &data_types,
+    );
+
+    state_table.write_chunk(chunk);
+
+    let rows: Vec<_> = state_table
+        .iter()
+        .await
+        .unwrap()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(|row| row.unwrap())
+        .collect();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0].as_ref(),
+        &Row::new(vec![
+            Some(123i32.into()),
+            Some(456i64.into()),
+            Some(true.into()),
+            Some(3.15f32.into()),
+        ])
+    );
+    assert_eq!(
+        rows[1].as_ref(),
+        &Row::new(vec![
+            Some(365i32.into()),
+            Some(4999i64.into()),
+            Some(false.into()),
+            Some(0.123456f32.into()),
+        ])
+    );
+}
+
+#[tokio::test]
+async fn test_state_table_write_chunk_visibility() {
+    let state_store = MemoryStateStore::new();
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int64),
+        ColumnDesc::unnamed(ColumnId::from(2), DataType::Boolean),
+        ColumnDesc::unnamed(ColumnId::from(3), DataType::Float32),
+    ];
+    let data_types = [
+        DataType::Int32,
+        DataType::Int64,
+        DataType::Boolean,
+        DataType::Float32,
+    ];
+    let order_types = vec![OrderType::Ascending];
+    let pk_index = vec![0_usize];
+    let mut state_table = StateTable::new_without_distribution(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs,
+        order_types,
+        pk_index,
+    )
+    .await;
+
+    let epoch = EpochPair::new_test_epoch(1);
+    state_table.init_epoch(epoch);
+
+    let chunk = StreamChunk::from_rows(
+        &[
+            (
+                Op::Insert,
+                Row::new(vec![
+                    Some(123i32.into()),
+                    Some(456i64.into()),
+                    Some(true.into()),
+                    Some(3.15f32.into()),
+                ]),
+            ),
+            (
+                Op::Insert, // mark 1
+                Row::new(vec![
+                    Some(365i32.into()),
+                    Some(4888i64.into()),
+                    Some(false.into()),
+                    Some(0.123f32.into()),
+                ]),
+            ),
+            (
+                Op::Insert,
+                Row::new(vec![
+                    Some(8i32.into()),
+                    Some(1000i64.into()),
+                    Some(true.into()),
+                    Some(123.987f32.into()),
+                ]),
+            ),
+            (
+                Op::Delete, // delete the row with `mark 1`, but hidden
+                Row::new(vec![
+                    Some(8i32.into()),
+                    Some(1000i64.into()),
+                    Some(true.into()),
+                    Some(123.987f32.into()),
+                ]),
+            ),
+        ],
+        &data_types,
+    );
+    let (ops, columns, _) = chunk.into_inner();
+    let chunk = StreamChunk::new(
+        ops,
+        columns,
+        Some(Bitmap::from_iter([true, true, true, false])),
+    );
+
+    state_table.write_chunk(chunk);
+
+    let rows: Vec<_> = state_table
+        .iter()
+        .await
+        .unwrap()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(|row| row.unwrap())
+        .collect();
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows[0].as_ref(),
+        &Row::new(vec![
+            Some(8i32.into()),
+            Some(1000i64.into()),
+            Some(true.into()),
+            Some(123.987f32.into()),
+        ])
+    );
+    assert_eq!(
+        rows[1].as_ref(),
+        &Row::new(vec![
+            Some(123i32.into()),
+            Some(456i64.into()),
+            Some(true.into()),
+            Some(3.15f32.into()),
+        ])
+    );
+    assert_eq!(
+        rows[2].as_ref(),
+        &Row::new(vec![
+            Some(365i32.into()),
+            Some(4888i64.into()),
+            Some(false.into()),
+            Some(0.123f32.into()),
+        ])
+    );
+}
+
+#[tokio::test]
+async fn test_state_table_write_chunk_value_indices() {
+    let state_store = MemoryStateStore::new();
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int64),
+        ColumnDesc::unnamed(ColumnId::from(2), DataType::Boolean),
+        ColumnDesc::unnamed(ColumnId::from(3), DataType::Float32),
+    ];
+    let data_types = [
+        DataType::Int32,
+        DataType::Int64,
+        DataType::Boolean,
+        DataType::Float32,
+    ];
+    let order_types = vec![OrderType::Ascending];
+    let pk_index = vec![0_usize];
+    let mut state_table = StateTable::new_without_distribution_partial(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs,
+        order_types,
+        pk_index,
+        vec![2, 1],
+    )
+    .await;
+
+    let epoch = EpochPair::new_test_epoch(1);
+    state_table.init_epoch(epoch);
+
+    let chunk = StreamChunk::from_rows(
+        &[
+            (
+                Op::Insert,
+                Row::new(vec![
+                    Some(123i32.into()),
+                    Some(456i64.into()),
+                    Some(true.into()),
+                    Some(3.15f32.into()),
+                ]),
+            ),
+            (
+                Op::Insert,
+                Row::new(vec![
+                    Some(365i32.into()),
+                    Some(4888i64.into()),
+                    Some(false.into()),
+                    Some(0.123f32.into()),
+                ]),
+            ),
+            (
+                Op::Insert,
+                Row::new(vec![
+                    Some(8i32.into()),
+                    Some(1000i64.into()),
+                    Some(true.into()),
+                    Some(123.987f32.into()),
+                ]),
+            ),
+        ],
+        &data_types,
+    );
+
+    state_table.write_chunk(chunk);
+
+    let rows: Vec<_> = state_table
+        .iter()
+        .await
+        .unwrap()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(|row| row.unwrap())
+        .collect();
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows[0].as_ref(),
+        &Row::new(vec![Some(true.into()), Some(1000i64.into()),])
+    );
+    assert_eq!(
+        rows[1].as_ref(),
+        &Row::new(vec![Some(true.into()), Some(456i64.into()),])
+    );
+    assert_eq!(
+        rows[2].as_ref(),
+        &Row::new(vec![Some(false.into()), Some(4888i64.into()),])
+    );
 }

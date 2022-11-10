@@ -22,8 +22,9 @@ use crate::executor::DynamicFilterExecutor;
 
 pub struct DynamicFilterExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for DynamicFilterExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -54,10 +55,15 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         // Only write the RHS value if this actor is in charge of vnode 0
         let is_right_table_writer = vnodes.is_set(0);
 
-        let state_table_l =
-            StateTable::from_table_catalog(node.get_left_table()?, store.clone(), Some(vnodes));
+        let state_table_l = StateTable::from_table_catalog(
+            node.get_left_table()?,
+            store.clone(),
+            Some(vnodes.clone()),
+        )
+        .await;
 
-        let state_table_r = StateTable::from_table_catalog(node.get_right_table()?, store, None);
+        let state_table_r =
+            StateTable::from_table_catalog(node.get_right_table()?, store, None).await;
 
         Ok(Box::new(DynamicFilterExecutor::new(
             params.actor_context,
@@ -72,6 +78,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             is_right_table_writer,
             params.executor_stats,
             params.env.config().developer.stream_chunk_size,
+            vnodes,
         )))
     }
 }

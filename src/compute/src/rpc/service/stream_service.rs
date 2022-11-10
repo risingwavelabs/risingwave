@@ -21,6 +21,7 @@ use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_storage::dispatch_state_store;
+use risingwave_stream::error::StreamError;
 use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
@@ -45,7 +46,10 @@ impl StreamService for StreamServiceImpl {
         request: Request<UpdateActorsRequest>,
     ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
         let req = request.into_inner();
-        let res = self.mgr.update_actors(&req.actors, &req.hanging_channels);
+        let res = self
+            .mgr
+            .update_actors(&req.actors, &req.hanging_channels)
+            .await;
         match res {
             Err(e) => {
                 error!("failed to update stream actor {}", e);
@@ -63,7 +67,10 @@ impl StreamService for StreamServiceImpl {
         let req = request.into_inner();
 
         let actor_id = req.actor_id;
-        let res = self.mgr.build_actors(actor_id.as_slice(), self.env.clone());
+        let res = self
+            .mgr
+            .build_actors(actor_id.as_slice(), self.env.clone())
+            .await;
         match res {
             Err(e) => {
                 error!("failed to build actors {}", e);
@@ -83,7 +90,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
         let req = request.into_inner();
 
-        let res = self.mgr.update_actor_info(&req.info);
+        let res = self.mgr.update_actor_info(&req.info).await;
         match res {
             Err(e) => {
                 error!("failed to update actor info table actor {}", e);
@@ -102,7 +109,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<DropActorsResponse>, Status> {
         let req = request.into_inner();
         let actors = req.actor_ids;
-        self.mgr.drop_actor(&actors)?;
+        self.mgr.drop_actor(&actors).await?;
         Ok(Response::new(DropActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -129,7 +136,8 @@ impl StreamService for StreamServiceImpl {
         request: Request<InjectBarrierRequest>,
     ) -> Result<Response<InjectBarrierResponse>, Status> {
         let req = request.into_inner();
-        let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
+        let barrier =
+            Barrier::from_protobuf(req.get_barrier().unwrap()).map_err(StreamError::from)?;
 
         self.mgr
             .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;

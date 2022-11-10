@@ -104,6 +104,10 @@ impl Binder {
             } => self.bind_in_list(*expr, list, negated),
             // special syntax for date/time
             Expr::Extract { field, expr } => self.bind_extract(field, *expr),
+            Expr::AtTimeZone {
+                timestamp,
+                time_zone,
+            } => self.bind_at_time_zone(*timestamp, time_zone),
             // special syntaxt for string
             Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
             Expr::Substring {
@@ -142,6 +146,12 @@ impl Binder {
             )
         })?
         .into())
+    }
+
+    pub(super) fn bind_at_time_zone(&mut self, input: Expr, time_zone: String) -> Result<ExprImpl> {
+        let input = self.bind_expr(input)?;
+        let time_zone = self.bind_string(time_zone)?.into();
+        FunctionCall::new(ExprType::AtTimeZone, vec![input, time_zone]).map(Into::into)
     }
 
     pub(super) fn bind_in_list(
@@ -375,24 +385,15 @@ impl Binder {
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
-        let lhs = if matches!(&expr, Expr::Array(elements) if elements.is_empty())
-            && matches!(&data_type, AstDataType::Array(_))
-        {
-            // The subexpr `array[]` is invalid and cannot bind by itself without a parent cast.
-            // So we handle `array[]::T[]`/`cast(array[] as T[])` as a whole here.
-            FunctionCall::new_unchecked(
-                ExprType::Array,
-                vec![],
-                // Treat `array[]` as `varchar[]` temporarily before applying cast.
-                DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                },
-            )
-            .into()
-        } else {
-            self.bind_expr(expr)?
-        };
-        lhs.cast_explicit(bind_data_type(&data_type)?)
+        self.bind_cast_inner(expr, bind_data_type(&data_type)?)
+    }
+
+    pub fn bind_cast_inner(&mut self, expr: Expr, data_type: DataType) -> Result<ExprImpl> {
+        if let Expr::Array(ref expr) = expr && matches!(&data_type, DataType::List{ .. } ) {
+            return self.bind_array_cast(expr.clone(), data_type);
+        }
+        let lhs = self.bind_expr(expr)?;
+        lhs.cast_explicit(data_type)
     }
 }
 

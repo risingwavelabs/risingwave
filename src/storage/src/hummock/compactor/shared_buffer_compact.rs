@@ -33,10 +33,15 @@ use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
-use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::state_store::ForwardIter;
-use crate::hummock::{CachePolicy, HummockError, HummockResult, SstableBuilderOptions};
+use crate::hummock::sstable::{DeleteRangeAggregatorBuilder, SstableIteratorReadOptions};
+use crate::hummock::{
+    CachePolicy, ForwardIter, HummockError, HummockResult, RangeTombstonesCollector,
+    SstableBuilderOptions,
+};
 use crate::monitor::StoreLocalStatistic;
+
+const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
+const GC_WATERMARK_FOR_FLUSH: u64 = 0;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
@@ -101,25 +106,34 @@ async fn compact_shared_buffer(
     context: Arc<Context>,
     payload: UploadTaskPayload,
 ) -> HummockResult<Vec<SstableInfo>> {
-    let mut size_and_start_user_keys = payload
-        .iter()
-        .flat_map(|data_list| {
-            data_list.iter().map(|data| {
-                let data_size = match data {
-                    UncommittedData::Sst(sst) => sst.1.file_size,
-                    UncommittedData::Batch(batch) => {
-                        // calculate encoded bytes of key var length
-                        (batch.get_payload().len() * 8 + batch.size()) as u64
-                    }
-                };
-                (data_size, data.start_user_key())
-            })
-        })
-        .collect_vec();
-    let compact_data_size = size_and_start_user_keys
-        .iter()
-        .map(|(data_size, _)| *data_size)
-        .sum::<u64>();
+    // Local memory compaction looks at all key ranges.
+    let sstable_store = context.sstable_store.clone();
+    let mut local_stats = StoreLocalStatistic::default();
+
+    let mut size_and_start_user_keys = vec![];
+    let mut compact_data_size = 0;
+    let mut builder = DeleteRangeAggregatorBuilder::default();
+    for data_list in &payload {
+        for data in data_list {
+            let data_size = match data {
+                UncommittedData::Sst(sst) => {
+                    let table = sstable_store.sstable(&sst.1, &mut local_stats).await?;
+                    // TODO: use reference to avoid memory allocation.
+                    let tombstones = table.value().meta.range_tombstone_list.clone();
+                    builder.add_tombstone(tombstones);
+                    sst.1.file_size
+                }
+                UncommittedData::Batch(batch) => {
+                    // calculate encoded bytes of key var length
+                    let tombstones = batch.get_delete_range_tombstones();
+                    builder.add_tombstone(tombstones);
+                    (batch.get_payload().len() * 8 + batch.size()) as u64
+                }
+            };
+            compact_data_size += data_size;
+            size_and_start_user_keys.push((data_size, data.start_user_key()));
+        }
+    }
     size_and_start_user_keys.sort();
     let mut splits = Vec::with_capacity(size_and_start_user_keys.len());
     splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
@@ -182,9 +196,6 @@ async fn compact_shared_buffer(
         .acquire(existing_table_ids)
         .await;
     let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
-
-    // Local memory compaction looks at all key ranges.
-    let sstable_store = context.sstable_store.clone();
     let stats = context.stats.clone();
 
     let parallelism = splits.len();
@@ -192,7 +203,7 @@ async fn compact_shared_buffer(
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
 
-    let mut local_stats = StoreLocalStatistic::default();
+    let agg = builder.build(GC_WATERMARK_FOR_FLUSH, GC_DELETE_KEYS_FOR_FLUSH);
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,
@@ -210,8 +221,12 @@ async fn compact_shared_buffer(
         .await?;
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
-        let handle = compaction_executor
-            .spawn(async move { compactor.run(iter, multi_filter_key_extractor).await });
+        let del_range_agg = agg.clone();
+        let handle = compaction_executor.spawn(async move {
+            compactor
+                .run(iter, multi_filter_key_extractor, del_range_agg)
+                .await
+        });
         compaction_futures.push(handle);
     }
     local_stats.report(stats.as_ref());
@@ -277,7 +292,14 @@ impl SharedBufferCompactRunner {
     ) -> Self {
         let mut options: SstableBuilderOptions = context.options.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
-        let compactor = Compactor::new(context, options, key_range, CachePolicy::Fill, false, 0);
+        let compactor = Compactor::new(
+            context,
+            options,
+            key_range,
+            CachePolicy::Fill,
+            GC_DELETE_KEYS_FOR_FLUSH,
+            GC_WATERMARK_FOR_FLUSH,
+        );
         Self {
             compactor,
             split_index,
@@ -288,11 +310,18 @@ impl SharedBufferCompactRunner {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        del_agg: Arc<RangeTombstonesCollector>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
         let ssts = self
             .compactor
-            .compact_key_range(iter, dummy_compaction_filter, filter_key_extractor, None)
+            .compact_key_range(
+                iter,
+                dummy_compaction_filter,
+                del_agg,
+                filter_key_extractor,
+                None,
+            )
             .await?;
         Ok((self.split_index, ssts))
     }

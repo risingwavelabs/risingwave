@@ -17,7 +17,8 @@ use std::collections::HashMap;
 use bytes::{Buf, Bytes};
 use itertools::Itertools;
 use risingwave_common::array::RowDeserializer;
-use risingwave_common::types::{display_datum_ref, to_datum_ref};
+use risingwave_common::types::to_datum_ref;
+use risingwave_common::types::to_text::ToText;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
@@ -60,8 +61,8 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             if let Some(key_range) = sstable_info.key_range.as_ref() {
                 println!("Key Range:");
                 println!(
-                    "\tleft:\t{:?}\n\tright:\t{:?}\n\tinf:\t{:?}",
-                    key_range.left, key_range.right, key_range.inf
+                    "\tleft:\t{:?}\n\tright:\t{:?}\n\t",
+                    key_range.left, key_range.right,
                 );
             } else {
                 println!("Key Range: None");
@@ -184,10 +185,7 @@ fn print_table_column(
     table_data: &TableData,
     is_put: bool,
 ) -> anyhow::Result<()> {
-    let table_id = match get_table_id(full_key) {
-        None => return Ok(()),
-        Some(table_id) => table_id,
-    };
+    let table_id = get_table_id(full_key);
 
     print!("\t\t     table: {} - ", table_id);
     let table_catalog = match table_data.get(&table_id) {
@@ -216,11 +214,7 @@ fn print_table_column(
     let row_deserializer = RowDeserializer::new(data_types);
     let row = row_deserializer.deserialize(user_val)?;
     for (c, v) in column_desc.iter().zip_eq(row.0.iter()) {
-        println!(
-            "\t\t    column: {} {}",
-            c,
-            display_datum_ref(to_datum_ref(v))
-        );
+        println!("\t\t    column: {} {}", c, to_datum_ref(v).to_text());
     }
 
     Ok(())

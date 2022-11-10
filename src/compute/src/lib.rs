@@ -14,10 +14,9 @@
 
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(generic_associated_types)]
-#![feature(let_else)]
 #![feature(generators)]
 #![feature(type_alias_impl_trait)]
+#![feature(let_chains)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
@@ -79,10 +78,6 @@ pub struct ComputeNodeOpts {
     /// Left empty to disable file cache.
     #[clap(long, default_value = "")]
     pub file_cache_dir: String,
-
-    /// Enable managed lru cache, or use local lru cache.
-    #[clap(long)]
-    pub enable_managed_cache: bool,
 }
 
 use std::future::Future;

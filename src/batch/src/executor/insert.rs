@@ -158,11 +158,10 @@ mod tests {
     use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_source::table_test_utils::create_table_info;
-    use risingwave_source::{SourceDescBuilder, TableSourceManager, TableSourceManagerRef};
+    use risingwave_source::table_test_utils::create_table_source_desc_builder;
+    use risingwave_source::{TableSourceManager, TableSourceManagerRef};
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::store::ReadOptions;
-    use risingwave_storage::*;
+    use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -204,14 +203,17 @@ mod tests {
         let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
         mock_executor.add(data_chunk.clone());
 
-        // To match the row_id column in the schema
-        let info = create_table_info(&schema, Some(3), vec![3]);
-
         // Create the table.
         let table_id = TableId::new(0);
-        let source_builder = SourceDescBuilder::new(table_id, &info, &source_manager);
 
         // Create reader
+        let source_builder = create_table_source_desc_builder(
+            &schema,
+            table_id,
+            Some(3),
+            vec![3],
+            source_manager.clone(),
+        );
         let source_desc = source_builder.build().await?;
         let source = source_desc.source.as_table().unwrap();
         let mut reader = source
@@ -280,11 +282,12 @@ mod tests {
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
         let store_content = store
             .scan(
-                None,
                 full_range,
+                epoch,
                 None,
                 ReadOptions {
-                    epoch,
+                    prefix_hint: None,
+                    check_bloom_filter: false,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },

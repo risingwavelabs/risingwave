@@ -17,8 +17,9 @@ use crate::executor::LookupUnionExecutor;
 
 pub struct LookupUnionExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for LookupUnionExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,

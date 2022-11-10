@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::mem::size_of;
 
@@ -21,10 +20,11 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayResult, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, ArrayResult};
 use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::for_all_native_types;
+use crate::types::decimal::Decimal;
 use crate::types::interval::IntervalUnit;
 use crate::types::{
     NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
@@ -53,7 +53,6 @@ where
 
     // item methods
     fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize>;
-    fn hash_wrapper<H: Hasher>(&self, state: &mut H);
 }
 
 macro_rules! impl_array_methods {
@@ -96,10 +95,6 @@ macro_rules! impl_primitive_for_native_types {
                 fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
                     NativeType::to_protobuf(self, output)
                 }
-
-                fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
-                    NativeType::hash_wrapper(self, state)
-                }
             }
         )*
     }
@@ -117,16 +112,13 @@ macro_rules! impl_primitive_for_others {
                 fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
                     <$scalar_type>::to_protobuf(self, output)
                 }
-
-                fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
-                    self.hash(state)
-                }
             }
         )*
     }
 }
 
 impl_primitive_for_others! {
+    { Decimal, Decimal, Decimal },
     { IntervalUnit, Interval, Interval },
     { NaiveDateWrapper, Date, NaiveDate },
     { NaiveTimeWrapper, Time, NaiveTime },
@@ -215,15 +207,6 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
-    }
-
-    #[inline(always)]
-    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
-        if !self.is_null(idx) {
-            self.data[idx].hash_wrapper(state);
-        } else {
-            NULL_VAL_FOR_HASH.hash(state);
-        }
     }
 
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {

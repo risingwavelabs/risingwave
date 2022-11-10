@@ -133,7 +133,6 @@ impl CompactStatus {
             self.pick_compaction(levels, task_id, compaction_config)?
         };
 
-        let select_level_id = ret.input.input_levels[0].level_idx;
         let target_level_id = ret.input.target_level;
 
         let compression_algorithm = match ret.compression_algorithm.as_str() {
@@ -151,7 +150,7 @@ impl CompactStatus {
             target_level: target_level_id as u32,
             // only gc delete keys in last level because there may be older version in more bottom
             // level.
-            gc_delete_keys: target_level_id == self.level_handlers.len() - 1 && select_level_id > 0,
+            gc_delete_keys: target_level_id == self.level_handlers.len() - 1,
             task_status: TaskStatus::Pending as i32,
             compaction_group_id,
             existing_table_ids: vec![],
@@ -272,7 +271,6 @@ impl Default for ManualCompactionOption {
             key_range: KeyRange {
                 left: vec![],
                 right: vec![],
-                inf: true,
             },
             internal_table_id: HashSet::default(),
             level: 1,

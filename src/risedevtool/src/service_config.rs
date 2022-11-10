@@ -28,7 +28,6 @@ pub struct ComputeNodeConfig {
     pub listen_address: String,
     pub exporter_port: u16,
     pub async_stack_trace: String,
-    pub enable_managed_cache: bool,
     pub enable_tiered_cache: bool,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
@@ -213,6 +212,9 @@ pub struct AwsS3Config {
     phantom_use: Option<String>,
     pub id: String,
     pub bucket: String,
+    // 's3_compatible' is true means using other s3 compatible object store, and the access key
+    // id and access key secret is configured in a specific profile.
+    pub s3_compatible: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

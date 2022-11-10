@@ -25,6 +25,7 @@ use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
+use risingwave_pb::stream_plan::agg_call_state::{MaterializedInputState, TableState};
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -33,7 +34,7 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
-use super::CreateMaterializedViewContext;
+use super::CreateStreamingJobContext;
 use crate::manager::{DatabaseId, IdCategory, IdGeneratorManagerRef, SchemaId};
 use crate::model::FragmentId;
 use crate::storage::MetaStore;
@@ -465,7 +466,7 @@ impl StreamGraphBuilder {
     #[allow(clippy::type_complexity)]
     pub fn build(
         mut self,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
         actor_id_offset: u32,
         actor_id_len: u32,
     ) -> MetaResult<HashMap<GlobalFragmentId, Vec<StreamActor>>> {
@@ -497,7 +498,7 @@ impl StreamGraphBuilder {
             )?;
 
             actor.nodes = Some(stream_node);
-            actor.mview_definition = ctx.mview_definition.clone();
+            actor.mview_definition = ctx.streaming_definition.clone();
 
             graph
                 .entry(builder.get_fragment_id())
@@ -515,7 +516,7 @@ impl StreamGraphBuilder {
     /// ids if it is a `ChainNode`.
     fn build_inner(
         &self,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
         stream_node: &StreamNode,
         fragment_id: GlobalFragmentId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
@@ -531,7 +532,7 @@ impl StreamGraphBuilder {
             table.schema_id = ctx.schema_id;
             table.database_id = ctx.database_id;
             table.name = generate_internal_table_name_with_type(
-                &ctx.mview_name,
+                &ctx.streaming_job_name,
                 fragment_id.as_global_id(),
                 table.id,
                 table_type_name,
@@ -593,7 +594,7 @@ impl StreamGraphBuilder {
                         // In-place update the table id. Convert from local to global.
                         update_table(node.result_table.as_mut().unwrap(), "HashAggResult");
                         for state in &mut node.agg_call_states {
-                            if let agg_call_state::Inner::MaterializedState(s) =
+                            if let agg_call_state::Inner::MaterializedInputState(s) =
                                 state.inner.as_mut().unwrap()
                             {
                                 update_table(s.table.as_mut().unwrap(), "HashAgg");
@@ -623,7 +624,7 @@ impl StreamGraphBuilder {
                         // In-place update the table id. Convert from local to global.
                         update_table(node.result_table.as_mut().unwrap(), "GlobalSimpleAggResult");
                         for state in &mut node.agg_call_states {
-                            if let agg_call_state::Inner::MaterializedState(s) =
+                            if let agg_call_state::Inner::MaterializedInputState(s) =
                                 state.inner.as_mut().unwrap()
                             {
                                 update_table(s.table.as_mut().unwrap(), "GlobalSimpleAgg");
@@ -698,7 +699,7 @@ impl StreamGraphBuilder {
         let chain_input = vec![
             StreamNode {
                 input: vec![],
-                stream_key: stream_node.stream_key.clone(),
+                stream_key: merge_node.stream_key.clone(),
                 node_body: Some(NodeBody::Merge(MergeNode {
                     upstream_actor_id: vec![],
                     upstream_fragment_id: 0,
@@ -758,7 +759,7 @@ impl ActorGraphBuilder {
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_graph: StreamFragmentGraphProto,
         default_parallelism: u32,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
     ) -> MetaResult<Self>
     where
         S: MetaStore,
@@ -835,7 +836,7 @@ impl ActorGraphBuilder {
     pub async fn generate_graph<S>(
         &self,
         id_gen_manager: IdGeneratorManagerRef<S>,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
     ) -> MetaResult<BTreeMap<FragmentId, Fragment>>
     where
         S: MetaStore,
@@ -857,7 +858,7 @@ impl ActorGraphBuilder {
     async fn generate_graph_inner<S>(
         &self,
         id_gen_manager: IdGeneratorManagerRef<S>,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
     ) -> MetaResult<BTreeMap<FragmentId, Fragment>>
     where
         S: MetaStore,
@@ -930,7 +931,7 @@ impl ActorGraphBuilder {
         &self,
         state: &mut BuildActorGraphState,
         fragment_graph: &StreamFragmentGraph,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
     ) -> MetaResult<()> {
         // Use topological sort to build the graph from downstream to upstream. (The first fragment
         // popped out from the heap will be the top-most node in plan, or the sink in stream graph.)
@@ -978,7 +979,7 @@ impl ActorGraphBuilder {
         fragment_id: GlobalFragmentId,
         state: &mut BuildActorGraphState,
         fragment_graph: &StreamFragmentGraph,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let current_fragment = fragment_graph.get_fragment(fragment_id).unwrap().clone();
         let upstream_table_id = current_fragment
@@ -1073,9 +1074,11 @@ impl ActorGraphBuilder {
                 .iter()
                 .filter_map(|state| match state.get_inner().unwrap() {
                     agg_call_state::Inner::ResultValueState(_) => None,
-                    agg_call_state::Inner::MaterializedState(s) => {
-                        Some(s.get_table().unwrap().get_id())
-                    }
+                    agg_call_state::Inner::TableState(TableState { table })
+                    | agg_call_state::Inner::MaterializedInputState(MaterializedInputState {
+                        table,
+                        ..
+                    }) => Some(table.as_ref().unwrap().get_id()),
                 })
                 .chain(iter::once(node.get_result_table().unwrap().get_id()))
                 .collect_vec(),
@@ -1084,9 +1087,11 @@ impl ActorGraphBuilder {
                 .iter()
                 .filter_map(|state| match state.get_inner().unwrap() {
                     agg_call_state::Inner::ResultValueState(_) => None,
-                    agg_call_state::Inner::MaterializedState(s) => {
-                        Some(s.get_table().unwrap().get_id())
-                    }
+                    agg_call_state::Inner::TableState(TableState { table })
+                    | agg_call_state::Inner::MaterializedInputState(MaterializedInputState {
+                        table,
+                        ..
+                    }) => Some(table.as_ref().unwrap().get_id()),
                 })
                 .chain(iter::once(node.get_result_table().unwrap().get_id()))
                 .collect_vec(),

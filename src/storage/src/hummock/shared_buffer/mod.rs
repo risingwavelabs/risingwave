@@ -35,9 +35,8 @@ use crate::hummock::iterator::{
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::state_store::HummockIteratorType;
 use crate::hummock::utils::{filter_single_sst, range_overlap};
-use crate::hummock::{HummockResult, SstableIteratorType, SstableStore};
+use crate::hummock::{HummockIteratorType, HummockResult, SstableIteratorType, SstableStore};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,11 +50,6 @@ pub fn get_sst_key_range(info: &SstableInfo) -> &KeyRange {
         .key_range
         .as_ref()
         .expect("local sstable should have key range");
-    assert!(
-        !key_range.inf,
-        "local sstable should not have infinite key range. Sstable info: {:?}",
-        info,
-    );
     key_range
 }
 

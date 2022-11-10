@@ -14,9 +14,13 @@
 
 //! Hummock is the state store of the streaming system.
 
+use std::ops::Deref;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
+use arc_swap::ArcSwap;
 use bytes::Bytes;
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
@@ -25,8 +29,6 @@ use risingwave_pb::hummock::{pin_version_response, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::log::error;
-
-use super::hummock::store::state_store::HummockStorage as HummockStorageV2;
 
 mod block_cache;
 pub use block_cache::*;
@@ -49,6 +51,7 @@ pub mod iterator;
 pub mod shared_buffer;
 pub mod sstable_store;
 mod state_store;
+mod state_store_v1;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 pub mod utils;
@@ -64,35 +67,33 @@ pub mod value;
 
 pub use error::*;
 use local_version::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
-use parking_lot::RwLock;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
 };
-#[cfg(any(test, feature = "test"))]
-use risingwave_pb::hummock::pin_version_response::Payload;
-#[cfg(any(test, feature = "test"))]
-use tokio::task::yield_now;
 pub use validator::*;
 use value::*;
 
-use self::iterator::HummockIterator;
+use self::iterator::{BackwardUserIterator, HummockIterator, UserIterator};
 use self::key::user_key;
 pub use self::sstable_store::*;
-use super::hummock::store::version::HummockReadVersion;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::compactor::Context;
+use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
+use crate::hummock::iterator::{
+    Backward, BackwardUserIteratorType, DirectedUserIteratorBuilder, DirectionEnum, Forward,
+    ForwardUserIteratorType, HummockIteratorDirection,
+};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::shared_buffer::shared_buffer_uploader::SharedBufferUploader;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
-use crate::hummock::store::state_store::HummockStorageIterator;
+use crate::hummock::store::version::{HummockReadVersion, HummockVersionReader};
 use crate::monitor::StoreLocalStatistic;
 
 struct HummockStorageShutdownGuard {
@@ -111,25 +112,27 @@ impl Drop for HummockStorageShutdownGuard {
 /// Hummock is the state store backend.
 #[derive(Clone)]
 pub struct HummockStorage {
-    options: Arc<StorageConfig>,
+    hummock_event_sender: UnboundedSender<HummockEvent>,
 
-    local_version_manager: LocalVersionManagerRef,
+    // TODO: replace it with version mapping
+    read_version: Arc<RwLock<HummockReadVersion>>,
 
-    hummock_meta_client: Arc<dyn HummockMetaClient>,
+    context: Arc<Context>,
 
-    sstable_store: SstableStoreRef,
+    buffer_tracker: BufferTracker,
 
-    /// Statistics
-    #[allow(dead_code)]
-    stats: Arc<StateStoreMetrics>,
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 
-    sstable_id_manager: SstableIdManagerRef,
+    seal_epoch: Arc<AtomicU64>,
 
-    filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+    pinned_version: Arc<ArcSwap<PinnedVersion>>,
+
+    hummock_version_reader: HummockVersionReader,
 
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
-    storage_core: HummockStorageV2,
+    #[cfg(not(madsim))]
+    tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
 impl HummockStorage {
@@ -142,9 +145,6 @@ impl HummockStorage {
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Self> {
-        // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
-        // true in `StorageConfig`
-        let write_conflict_detector = ConflictDetector::new_from_config(options.clone());
         let sstable_id_manager = Arc::new(SstableIdManager::new(
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
@@ -175,7 +175,7 @@ impl HummockStorage {
             hummock_meta_client.clone(),
         ));
 
-        let shared_buffer_uploader = Arc::new(SharedBufferUploader::new(
+        let compactor_context = Arc::new(Context::new_local_compact_context(
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
@@ -184,111 +184,101 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
         ));
 
-        let memory_limiter_quota = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
-        let memory_limiter = Arc::new(MemoryLimiter::new(memory_limiter_quota as u64));
+        let buffer_tracker = BufferTracker::from_storage_config(&options);
 
         let local_version_manager = LocalVersionManager::new(
-            options.clone(),
-            pinned_version,
-            write_conflict_detector,
-            sstable_id_manager.clone(),
-            shared_buffer_uploader,
+            pinned_version.clone(),
+            compactor_context.clone(),
+            buffer_tracker,
             event_tx.clone(),
-            memory_limiter.clone(),
         );
-
-        let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-            local_version_manager.get_pinned_version(),
-        )));
 
         let hummock_event_handler = HummockEventHandler::new(
-            local_version_manager.clone(),
+            local_version_manager,
             event_rx,
-            read_version.clone(),
+            pinned_version,
+            compactor_context.clone(),
         );
 
-        // Buffer size manager.
-        tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
+        let read_version = hummock_event_handler.read_version();
 
-        let storage_core = HummockStorageV2::new(
-            options.clone(),
-            sstable_store.clone(),
-            hummock_meta_client.clone(),
-            stats.clone(),
-            read_version,
-            event_tx.clone(),
-            memory_limiter,
-        )
-        .expect("storage_core mut be init");
+        #[cfg(not(madsim))]
+        let tracing = Arc::new(risingwave_tracing::RwTracingService::new());
 
         let instance = Self {
-            options,
-            local_version_manager,
-            hummock_meta_client,
-            sstable_store,
-            stats,
-            sstable_id_manager,
-            filter_key_extractor_manager,
+            read_version,
+            context: compactor_context,
+            buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
+            version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
+            seal_epoch: hummock_event_handler.sealed_epoch(),
+            hummock_event_sender: event_tx.clone(),
+            pinned_version: hummock_event_handler.pinned_version(),
+            hummock_version_reader: HummockVersionReader::new(sstable_store, stats.clone()),
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx,
             }),
-            storage_core,
+            #[cfg(not(madsim))]
+            tracing,
         };
+
+        tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
+
         Ok(instance)
     }
 
-    pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
-        &self.hummock_meta_client
-    }
-
-    pub fn options(&self) -> &Arc<StorageConfig> {
-        &self.options
-    }
-
     pub fn sstable_store(&self) -> SstableStoreRef {
-        self.sstable_store.clone()
+        self.context.sstable_store.clone()
     }
 
     pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
-        &self.sstable_id_manager
+        &self.context.sstable_id_manager
     }
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
-        &self.filter_key_extractor_manager
+        &self.context.filter_key_extractor_manager
     }
 
     pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
-        self.local_version_manager
-            .buffer_tracker()
-            .get_memory_limiter()
-            .clone()
+        self.buffer_tracker.get_memory_limiter().clone()
     }
 
     pub fn get_pinned_version(&self) -> PinnedVersion {
-        self.local_version_manager.get_pinned_version()
+        self.pinned_version.load().deref().deref().clone()
     }
 }
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
+    /// Used in the compaction test tool
     pub async fn update_version_and_wait(&self, version: HummockVersion) {
+        use tokio::task::yield_now;
         let version_id = version.id;
-        self.local_version_manager
-            .buffer_tracker()
-            .buffer_event_sender
-            .send(HummockEvent::VersionUpdate(Payload::PinnedVersion(version)))
+        self.hummock_event_sender
+            .send(HummockEvent::VersionUpdate(
+                pin_version_response::Payload::PinnedVersion(version),
+            ))
             .unwrap();
-        // loop to wait for the version to be applied
+
         loop {
-            yield_now().await;
-            if self.storage_core.read_version().read().committed().id() >= version_id {
+            if self.pinned_version.load().id() >= version_id {
                 break;
             }
+            yield_now().await
+        }
+    }
+
+    pub async fn wait_version(&self, version: HummockVersion) {
+        use tokio::task::yield_now;
+        loop {
+            if self.pinned_version.load().id() >= version.id {
+                break;
+            }
+            yield_now().await
         }
     }
 
     pub fn get_shared_buffer_size(&self) -> usize {
-        self.local_version_manager.get_shared_buffer_size()
+        self.buffer_tracker.get_buffer_size()
     }
 
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
@@ -306,6 +296,10 @@ impl HummockStorage {
             Arc::new(StateStoreMetrics::unused()),
         )
         .await
+    }
+
+    pub fn options(&self) -> &Arc<StorageConfig> {
+        &self.context.options
     }
 }
 
@@ -414,4 +408,176 @@ pub fn get_from_batch(
         local_stats.get_shared_buffer_hit_counts += 1;
         v
     })
+}
+
+#[derive(Clone)]
+pub struct HummockStorageV1 {
+    options: Arc<StorageConfig>,
+
+    local_version_manager: LocalVersionManagerRef,
+
+    sstable_store: SstableStoreRef,
+
+    /// Statistics
+    stats: Arc<StateStoreMetrics>,
+
+    sstable_id_manager: SstableIdManagerRef,
+
+    filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+
+    hummock_event_sender: UnboundedSender<HummockEvent>,
+
+    _shutdown_guard: Arc<HummockStorageShutdownGuard>,
+
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+
+    seal_epoch: Arc<AtomicU64>,
+
+    #[cfg(not(madsim))]
+    tracing: Arc<risingwave_tracing::RwTracingService>,
+}
+
+impl HummockStorageV1 {
+    /// Creates a [`HummockStorageV1`].
+    pub async fn new(
+        options: Arc<StorageConfig>,
+        sstable_store: SstableStoreRef,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        notification_client: impl NotificationClient,
+        // TODO: separate `HummockStats` from `StateStoreMetrics`.
+        stats: Arc<StateStoreMetrics>,
+    ) -> HummockResult<Self> {
+        // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
+        // true in `StorageConfig`
+        let sstable_id_manager = Arc::new(SstableIdManager::new(
+            hummock_meta_client.clone(),
+            options.sstable_id_remote_fetch_number,
+        ));
+
+        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        let (event_tx, mut event_rx) = unbounded_channel();
+
+        let observer_manager = ObserverManager::new(
+            notification_client,
+            HummockObserverNode::new(filter_key_extractor_manager.clone(), event_tx.clone()),
+        )
+        .await;
+        let _ = observer_manager
+            .start()
+            .await
+            .expect("should be able to start the observer manager");
+
+        let hummock_version = match event_rx.recv().await {
+            Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
+            _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
+        };
+
+        let (pin_version_tx, pin_version_rx) = unbounded_channel();
+        let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
+        tokio::spawn(start_pinned_version_worker(
+            pin_version_rx,
+            hummock_meta_client.clone(),
+        ));
+
+        let compactor_context = Arc::new(Context::new_local_compact_context(
+            options.clone(),
+            sstable_store.clone(),
+            hummock_meta_client.clone(),
+            stats.clone(),
+            sstable_id_manager.clone(),
+            filter_key_extractor_manager.clone(),
+        ));
+
+        let buffer_tracker = BufferTracker::from_storage_config(&options);
+
+        let local_version_manager = LocalVersionManager::new(
+            pinned_version.clone(),
+            compactor_context.clone(),
+            buffer_tracker,
+            event_tx.clone(),
+        );
+
+        let hummock_event_handler = HummockEventHandler::new(
+            local_version_manager.clone(),
+            event_rx,
+            pinned_version,
+            compactor_context,
+        );
+
+        let instance = Self {
+            options,
+            local_version_manager,
+            sstable_store,
+            stats,
+            sstable_id_manager,
+            filter_key_extractor_manager,
+            _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
+                shutdown_sender: event_tx.clone(),
+            }),
+            version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
+            seal_epoch: hummock_event_handler.sealed_epoch(),
+            hummock_event_sender: event_tx,
+            #[cfg(not(madsim))]
+            tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
+        };
+
+        tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
+
+        Ok(instance)
+    }
+
+    pub fn options(&self) -> &Arc<StorageConfig> {
+        &self.options
+    }
+
+    pub fn sstable_store(&self) -> SstableStoreRef {
+        self.sstable_store.clone()
+    }
+
+    pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
+        &self.sstable_id_manager
+    }
+
+    pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
+        &self.filter_key_extractor_manager
+    }
+
+    pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
+        self.local_version_manager
+            .buffer_tracker()
+            .get_memory_limiter()
+            .clone()
+    }
+
+    pub fn get_pinned_version(&self) -> PinnedVersion {
+        self.local_version_manager.get_pinned_version()
+    }
+}
+
+pub(crate) trait HummockIteratorType: 'static {
+    type Direction: HummockIteratorDirection;
+    type SstableIteratorType: SstableIteratorType<Direction = Self::Direction>;
+    type UserIteratorBuilder: DirectedUserIteratorBuilder<
+        Direction = Self::Direction,
+        SstableIteratorType = Self::SstableIteratorType,
+    >;
+
+    fn direction() -> DirectionEnum {
+        Self::Direction::direction()
+    }
+}
+
+pub(crate) struct ForwardIter;
+pub(crate) struct BackwardIter;
+
+impl HummockIteratorType for ForwardIter {
+    type Direction = Forward;
+    type SstableIteratorType = SstableIterator;
+    type UserIteratorBuilder = UserIterator<ForwardUserIteratorType>;
+}
+
+impl HummockIteratorType for BackwardIter {
+    type Direction = Backward;
+    type SstableIteratorType = BackwardSstableIterator;
+    type UserIteratorBuilder = BackwardUserIterator<BackwardUserIteratorType>;
 }

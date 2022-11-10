@@ -98,10 +98,28 @@ message CreateMaterializedViewResponse {
 
 message DropMaterializedViewRequest {
   uint32 table_id = 1;
-  repeated uint32 index_ids = 3;
 }
 
 message DropMaterializedViewResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message CreateViewRequest {
+  catalog.View view = 1;
+}
+
+message CreateViewResponse {
+  common.Status status = 1;
+  uint32 view_id = 2;
+  uint64 version = 3;
+}
+
+message DropViewRequest {
+  uint32 view_id = 1;
+}
+
+message DropViewResponse {
   common.Status status = 1;
   uint64 version = 2;
 }
@@ -122,7 +140,6 @@ message CreateMaterializedSourceResponse {
 message DropMaterializedSourceRequest {
   uint32 source_id = 1;
   uint32 table_id = 2;
-  repeated uint32 index_ids = 3;
 }
 
 message DropMaterializedSourceResponse {
@@ -173,6 +190,8 @@ service DdlService {
   rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);
   rpc DropMaterializedSource(DropMaterializedSourceRequest) returns (DropMaterializedSourceResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
+  rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
+  rpc DropView(DropViewRequest) returns (DropViewResponse);
   rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);
   rpc DropIndex(DropIndexRequest) returns (DropIndexResponse);
 }

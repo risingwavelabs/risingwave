@@ -26,10 +26,11 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{from_datum_prost, DataType, Datum};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
 use risingwave_connector::source::SplitImpl;
-use risingwave_pb::data::Epoch as ProstEpoch;
+use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
@@ -37,7 +38,7 @@ use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate}
 use risingwave_pb::stream_plan::{
     AddMutation, Barrier as ProstBarrier, Dispatcher as ProstDispatcher, PauseMutation,
     ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamMessage as ProstStreamMessage,
-    UpdateMutation,
+    UpdateMutation, Watermark as ProstWatermark,
 };
 use smallvec::SmallVec;
 
@@ -73,10 +74,12 @@ mod rearranged_chain;
 mod receiver;
 mod simple;
 mod sink;
+mod sort;
 pub mod source;
 pub mod subtask;
 mod top_n;
 mod union;
+mod watermark_filter;
 mod wrapper;
 
 #[cfg(test)]
@@ -110,9 +113,11 @@ pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use sink::SinkExecutor;
+pub use sort::SortExecutor;
 pub use source::*;
 pub use top_n::{AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor};
 pub use union::UnionExecutor;
+pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;
@@ -390,7 +395,7 @@ impl Mutation {
         }
     }
 
-    fn from_protobuf(prost: &ProstMutation) -> StreamResult<Self> {
+    fn from_protobuf(prost: &ProstMutation) -> StreamExecutorResult<Self> {
         let mutation = match prost {
             ProstMutation::Stop(stop) => {
                 Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
@@ -498,14 +503,14 @@ impl Barrier {
         }
     }
 
-    pub fn from_protobuf(prost: &ProstBarrier) -> StreamResult<Self> {
+    pub fn from_protobuf(prost: &ProstBarrier) -> StreamExecutorResult<Self> {
         let mutation = prost
             .mutation
             .as_ref()
             .map(Mutation::from_protobuf)
             .transpose()?
             .map(Arc::new);
-        let epoch = prost.get_epoch().unwrap();
+        let epoch = prost.get_epoch()?;
         Ok(Barrier {
             checkpoint: prost.checkpoint,
             epoch: EpochPair::new(epoch.curr, epoch.prev),
@@ -515,10 +520,62 @@ impl Barrier {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Watermark {
+    col_idx: usize,
+    val: Datum,
+}
+
+impl PartialOrd for Watermark {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.col_idx == other.col_idx {
+            self.val
+                .as_ref()
+                .unwrap()
+                .partial_cmp(other.val.as_ref().unwrap())
+        } else {
+            None
+        }
+    }
+}
+
+impl Ord for Watermark {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other)
+            .unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
+    }
+}
+
+impl Watermark {
+    pub fn new(col_idx: usize, val: Datum) -> Self {
+        Self { col_idx, val }
+    }
+
+    pub fn to_protobuf(&self) -> ProstWatermark {
+        ProstWatermark {
+            col_idx: self.col_idx as _,
+            val: Some(ProstDatum {
+                body: serialize_datum_to_bytes(self.val.as_ref()),
+            }),
+        }
+    }
+
+    pub fn from_protobuf(
+        prost: &ProstWatermark,
+        data_type: &DataType,
+    ) -> StreamExecutorResult<Self> {
+        Ok(Watermark {
+            col_idx: prost.col_idx as _,
+            val: from_datum_prost(prost.get_val()?, data_type)?,
+        })
+    }
+}
+
 #[derive(Debug, EnumAsInner, PartialEq)]
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),
+    Watermark(Watermark),
 }
 
 impl<'a> TryFrom<&'a Message> for &'a Barrier {
@@ -528,6 +585,7 @@ impl<'a> TryFrom<&'a Message> for &'a Barrier {
         match m {
             Message::Chunk(_) => Err(()),
             Message::Barrier(b) => Ok(b),
+            Message::Watermark(_) => Err(()),
         }
     }
 }
@@ -548,21 +606,21 @@ impl Message {
         )
     }
 
-    pub fn to_protobuf(&self) -> StreamResult<ProstStreamMessage> {
+    pub fn to_protobuf(&self) -> ProstStreamMessage {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
                 let prost_stream_chunk = stream_chunk.to_protobuf();
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
             Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
+            Self::Watermark(_) => todo!("https://github.com/risingwavelabs/risingwave/issues/6042"),
         };
-        let prost_stream_msg = ProstStreamMessage {
+        ProstStreamMessage {
             stream_message: Some(prost),
-        };
-        Ok(prost_stream_msg)
+        }
     }
 
-    pub fn from_protobuf(prost: &ProstStreamMessage) -> StreamResult<Self> {
+    pub fn from_protobuf(prost: &ProstStreamMessage) -> StreamExecutorResult<Self> {
         let res = match prost.get_stream_message()? {
             StreamMessage::StreamChunk(ref stream_chunk) => {
                 Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)

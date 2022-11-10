@@ -58,10 +58,13 @@ num-traits = { version = "0.2", features = ["i128", "std"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["backtrace", "deadlock_detection", "petgraph", "thread-id"] }
 petgraph = { version = "0.6", features = ["graphmap", "matrix_graph", "stable_graph"] }
+phf = { version = "0.11", features = ["std", "uncased"] }
+phf_shared = { version = "0.11", features = ["std", "uncased"] }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
 prost = { version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
+rand_core = { version = "0.6", default-features = false, features = ["alloc", "getrandom", "std"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-automata = { version = "0.1", features = ["regex-syntax", "std"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
@@ -74,6 +77,7 @@ stable_deref_trait = { version = "1", features = ["alloc", "std"] }
 strum = { version = "0.24", features = ["derive", "std", "strum_macros"] }
 tikv-jemalloc-sys = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tikv-jemallocator = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
+time = { version = "0.3", features = ["alloc", "formatting", "itoa", "parsing", "serde", "serde-well-known", "std"] }
 tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "once_cell", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
@@ -82,7 +86,7 @@ tower-http = { version = "0.3", features = ["add-extension", "cors", "map-respon
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_trace", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["once_cell", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
-tracing-subscriber = { version = "0.3", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "parking_lot", "regex", "registry", "sharded-slab", "smallvec", "std", "thread_local", "tracing", "tracing-log"] }
+tracing-subscriber = { version = "0.3", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "parking_lot", "regex", "registry", "sharded-slab", "smallvec", "std", "thread_local", "time", "tracing", "tracing-log"] }
 url = { version = "2", default-features = false, features = ["serde"] }
 uuid = { version = "1", features = ["private_getrandom", "rng", "serde", "std", "v4"] }
 
@@ -134,10 +138,13 @@ num-traits = { version = "0.2", features = ["i128", "std"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["backtrace", "deadlock_detection", "petgraph", "thread-id"] }
 petgraph = { version = "0.6", features = ["graphmap", "matrix_graph", "stable_graph"] }
+phf = { version = "0.11", features = ["std", "uncased"] }
+phf_shared = { version = "0.11", features = ["std", "uncased"] }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
 prost = { version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
+rand_core = { version = "0.6", default-features = false, features = ["alloc", "getrandom", "std"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-automata = { version = "0.1", features = ["regex-syntax", "std"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
@@ -151,6 +158,7 @@ strum = { version = "0.24", features = ["derive", "std", "strum_macros"] }
 syn = { version = "1", features = ["clone-impls", "derive", "extra-traits", "full", "parsing", "printing", "proc-macro", "quote", "visit", "visit-mut"] }
 tikv-jemalloc-sys = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tikv-jemallocator = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
+time = { version = "0.3", features = ["alloc", "formatting", "itoa", "parsing", "serde", "serde-well-known", "std"] }
 tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "once_cell", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
@@ -159,7 +167,7 @@ tower-http = { version = "0.3", features = ["add-extension", "cors", "map-respon
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_trace", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["once_cell", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
-tracing-subscriber = { version = "0.3", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "parking_lot", "regex", "registry", "sharded-slab", "smallvec", "std", "thread_local", "tracing", "tracing-log"] }
+tracing-subscriber = { version = "0.3", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "parking_lot", "regex", "registry", "sharded-slab", "smallvec", "std", "thread_local", "time", "tracing", "tracing-log"] }
 url = { version = "2", default-features = false, features = ["serde"] }
 uuid = { version = "1", features = ["private_getrandom", "rng", "serde", "std", "v4"] }
 

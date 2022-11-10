@@ -22,9 +22,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID,
-};
+use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::pin_version_response::Payload;
@@ -107,29 +105,21 @@ async fn test_unpin_snapshot_before() {
 
 #[tokio::test]
 async fn test_hummock_compaction_task() {
-    use crate::hummock::error::Error;
     let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let sst_num = 2;
 
     // No compaction task available.
-    let task = hummock_manager
+    assert!(hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
-        .unwrap_err();
-    if let Error::InvalidCompactionGroup(group_id) = task {
-        assert_eq!(
-            group_id,
-            StaticCompactionGroupId::StateDefault as CompactionGroupId
-        );
-    } else {
-        panic!();
-    }
+        .unwrap()
+        .is_none());
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -212,7 +202,7 @@ async fn test_hummock_table() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -263,7 +253,7 @@ async fn test_hummock_transaction() {
         // Add tables in epoch1
         let tables_in_epoch1 = generate_test_tables(epoch1, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager(),
+            &hummock_manager,
             &tables_in_epoch1,
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -300,7 +290,7 @@ async fn test_hummock_transaction() {
         // Add tables in epoch2
         let tables_in_epoch2 = generate_test_tables(epoch2, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager(),
+            &hummock_manager,
             &tables_in_epoch2,
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -499,7 +489,7 @@ async fn test_hummock_manager_basic() {
     let commit_one = |epoch: HummockEpoch, hummock_manager: HummockManagerRef<MemStore>| async move {
         let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager(),
+            &hummock_manager,
             &original_tables,
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -646,7 +636,7 @@ async fn test_pin_snapshot_response_lost() {
     let mut epoch: u64 = 1;
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -668,7 +658,7 @@ async fn test_pin_snapshot_response_lost() {
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -695,7 +685,7 @@ async fn test_pin_snapshot_response_lost() {
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -717,7 +707,7 @@ async fn test_pin_snapshot_response_lost() {
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -745,7 +735,7 @@ async fn test_print_compact_task() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -785,7 +775,7 @@ async fn test_invalid_sst_id() {
     let epoch = 1;
     let ssts = generate_test_tables(epoch, vec![1]);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &ssts,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -838,7 +828,7 @@ async fn test_trigger_manual_compaction() {
             .await;
 
         assert_eq!(
-            "Failed to get compaction task: InvalidCompactionGroup(\n    2,\n) compaction_group 2",
+            "trigger_manual_compaction No compaction_task is available. compaction_group 2",
             result.err().unwrap().to_string()
         );
     }
@@ -864,7 +854,6 @@ async fn test_trigger_manual_compaction() {
         let option = ManualCompactionOption {
             level: 6,
             key_range: KeyRange {
-                inf: true,
                 ..Default::default()
             },
             ..Default::default()
@@ -915,10 +904,7 @@ async fn test_trigger_compaction_deterministic() {
     let _ = add_test_tables(&hummock_manager, context_id).await;
 
     let cur_version = hummock_manager.get_current_version().await;
-    let compaction_groups = hummock_manager
-        .compaction_group_manager()
-        .compaction_group_ids()
-        .await;
+    let compaction_groups = hummock_manager.compaction_group_ids().await;
 
     let ret = hummock_manager
         .trigger_compaction_deterministic(cur_version.id, compaction_groups)
@@ -968,24 +954,17 @@ async fn test_hummock_compaction_task_heartbeat() {
         HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
 
     // No compaction task available.
-    let task = hummock_manager
+    assert!(hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
-        .unwrap_err();
-    if let Error::InvalidCompactionGroup(group_id) = task {
-        assert_eq!(
-            group_id,
-            StaticCompactionGroupId::StateDefault as CompactionGroupId
-        );
-    } else {
-        panic!();
-    }
+        .unwrap()
+        .is_none());
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -1093,24 +1072,17 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
 
     // No compaction task available.
-    let task = hummock_manager
+    assert!(hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
-        .unwrap_err();
-    if let Error::InvalidCompactionGroup(group_id) = task {
-        assert_eq!(
-            group_id,
-            StaticCompactionGroupId::StateDefault as CompactionGroupId
-        );
-    } else {
-        panic!();
-    }
+        .unwrap()
+        .is_none());
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -1125,7 +1097,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     // Get a compaction task.
-    let mut compact_task = hummock_manager
+    let compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
         .unwrap()

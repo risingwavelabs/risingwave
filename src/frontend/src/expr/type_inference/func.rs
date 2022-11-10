@@ -118,6 +118,7 @@ fn infer_type_for_special(
                 }
             }))
             .map(Some)
+            .map_err(Into::into)
         }
         ExprType::In => {
             align_types(inputs.iter_mut())?;
@@ -125,7 +126,7 @@ fn infer_type_for_special(
         }
         ExprType::Coalesce => {
             ensure_arity!("coalesce", 1 <= | inputs |);
-            align_types(inputs.iter_mut()).map(Some)
+            align_types(inputs.iter_mut()).map(Some).map_err(Into::into)
         }
         ExprType::ConcatWs => {
             ensure_arity!("concat_ws", 2 <= | inputs |);
@@ -813,6 +814,8 @@ fn build_type_derive_map() -> FuncSigMap {
         T::Timestampz,
     );
     map.insert(E::ToTimestamp, vec![T::Float64], T::Timestampz);
+    map.insert(E::AtTimeZone, vec![T::Timestamp, T::Varchar], T::Timestampz);
+    map.insert(E::AtTimeZone, vec![T::Timestampz, T::Varchar], T::Timestamp);
 
     // string expressions
     for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper, E::Md5] {

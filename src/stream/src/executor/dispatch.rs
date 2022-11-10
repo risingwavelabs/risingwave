@@ -32,6 +32,7 @@ use smallvec::{smallvec, SmallVec};
 use tracing::event;
 
 use super::exchange::output::{new_output, BoxedOutput};
+use super::Watermark;
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
@@ -64,13 +65,18 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: Message) -> StreamResult<()> {
+        let start_time = minstant::Instant::now();
         match msg {
+            Message::Watermark(watermark) => {
+                for dispatcher in &mut self.dispatchers {
+                    dispatcher.dispatch_watermark(watermark.clone()).await?;
+                }
+            }
             Message::Chunk(chunk) => {
                 self.metrics
                     .actor_out_record_cnt
                     .with_label_values(&[&self.actor_id_str])
                     .inc_by(chunk.cardinality() as _);
-                let start_time = minstant::Instant::now();
                 if self.dispatchers.len() == 1 {
                     // special clone optimization when there is only one downstream dispatcher
                     self.single_inner_mut().dispatch_data(chunk).await?;
@@ -79,25 +85,20 @@ impl DispatchExecutorInner {
                         dispatcher.dispatch_data(chunk.clone()).await?;
                     }
                 }
-                self.metrics
-                    .actor_output_buffer_blocking_duration_ns
-                    .with_label_values(&[&self.actor_id_str])
-                    .inc_by(start_time.elapsed().as_nanos() as u64);
             }
             Message::Barrier(barrier) => {
-                let start_time = minstant::Instant::now();
                 let mutation = barrier.mutation.clone();
                 self.pre_mutate_dispatchers(&mutation)?;
                 for dispatcher in &mut self.dispatchers {
                     dispatcher.dispatch_barrier(barrier.clone()).await?;
                 }
                 self.post_mutate_dispatchers(&mutation)?;
-                self.metrics
-                    .actor_output_buffer_blocking_duration_ns
-                    .with_label_values(&[&self.actor_id_str])
-                    .inc_by(start_time.elapsed().as_nanos() as u64);
             }
         };
+        self.metrics
+            .actor_output_buffer_blocking_duration_ns
+            .with_label_values(&[&self.actor_id_str])
+            .inc_by(start_time.elapsed().as_nanos() as u64);
         Ok(())
     }
 
@@ -263,11 +264,17 @@ impl StreamConsumer for DispatchExecutor {
             #[for_await]
             for msg in input {
                 let msg: Message = msg?;
-                let barrier = msg.as_barrier().cloned();
+                let (barrier, is_watermark) = match msg {
+                    Message::Chunk(_) => (None, false),
+                    Message::Barrier(ref barrier) => (Some(barrier.clone()), false),
+                    Message::Watermark(_) => (None, true),
+                };
                 self.inner
                     .dispatch(msg)
                     .verbose_stack_trace(if barrier.is_some() {
                         "dispatch_barrier"
+                    } else if is_watermark {
+                        "dispatch_watermark"
                     } else {
                         "dispatch_chunk"
                     })
@@ -355,6 +362,12 @@ macro_rules! impl_dispatcher {
                 }
             }
 
+            pub async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.dispatch_watermark(watermark).await, )*
+                }
+            }
+
             pub fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
                 match self {
                     $(Self::$variant_name(inner) => inner.add_outputs(outputs), )*
@@ -399,6 +412,7 @@ macro_rules! define_dispatcher_associated_types {
     () => {
         type DataFuture<'a> = impl DispatchFuture<'a>;
         type BarrierFuture<'a> = impl DispatchFuture<'a>;
+        type WatermarkFuture<'a> = impl DispatchFuture<'a>;
     };
 }
 
@@ -407,11 +421,14 @@ pub trait DispatchFuture<'a> = Future<Output = StreamResult<()>> + Send;
 pub trait Dispatcher: Debug + 'static {
     type DataFuture<'a>: DispatchFuture<'a>;
     type BarrierFuture<'a>: DispatchFuture<'a>;
+    type WatermarkFuture<'a>: DispatchFuture<'a>;
 
     /// Dispatch a data chunk to downstream actors.
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_>;
     /// Dispatch a barrier to downstream actors, generally by broadcasting it.
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_>;
+    /// Dispatch a watermark to downstream actors, generally by broadcasting it.
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_>;
 
     /// Add new outputs to the dispatcher.
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
@@ -461,6 +478,16 @@ impl Dispatcher for RoundRobinDataDispatcher {
             // always broadcast barrier
             for output in &mut self.outputs {
                 output.send(Message::Barrier(barrier.clone())).await?;
+            }
+            Ok(())
+        }
+    }
+
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
+        async move {
+            // always broadcast watermark
+            for output in &mut self.outputs {
+                output.send(Message::Watermark(watermark.clone())).await?;
             }
             Ok(())
         }
@@ -533,6 +560,16 @@ impl Dispatcher for HashDataDispatcher {
             // always broadcast barrier
             for output in &mut self.outputs {
                 output.send(Message::Barrier(barrier.clone())).await?;
+            }
+            Ok(())
+        }
+    }
+
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
+        async move {
+            // always broadcast watermark
+            for output in &mut self.outputs {
+                output.send(Message::Watermark(watermark.clone())).await?;
             }
             Ok(())
         }
@@ -710,6 +747,15 @@ impl Dispatcher for BroadcastDispatcher {
         }
     }
 
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
+        async move {
+            for output in self.outputs.values_mut() {
+                output.send(Message::Watermark(watermark.clone())).await?;
+            }
+            Ok(())
+        }
+    }
+
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.outputs.extend(Self::into_pairs(outputs));
     }
@@ -788,6 +834,18 @@ impl Dispatcher for SimpleDispatcher {
         }
     }
 
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
+        async move {
+            let output = self
+                .output
+                .iter_mut()
+                .exactly_one()
+                .expect("expect exactly one output");
+
+            output.send(Message::Watermark(watermark)).await
+        }
+    }
+
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.output
             .retain(|output| !actor_ids.contains(&output.actor_id()));
@@ -816,10 +874,10 @@ mod tests {
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::stream_plan::DispatcherType;
     use static_assertions::const_assert_eq;
-    use tokio::sync::mpsc::channel;
 
     use super::*;
     use crate::executor::exchange::output::Output;
+    use crate::executor::exchange::permit::channel;
     use crate::executor::receiver::ReceiverExecutor;
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
@@ -924,7 +982,7 @@ mod tests {
     #[tokio::test]
     async fn test_configuration_change() {
         let _schema = Schema { fields: vec![] };
-        let (tx, rx) = channel(16);
+        let (tx, rx) = channel();
         let actor_id = 233;
         let input = Box::new(ReceiverExecutor::for_test(rx));
         let ctx = Arc::new(SharedContext::for_test());

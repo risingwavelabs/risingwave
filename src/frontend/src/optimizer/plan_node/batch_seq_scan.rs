@@ -93,7 +93,10 @@ impl BatchSeqScan {
                             // They are incompatible, so we just specify its distribution as
                             // `SomeShard` to force an exchange is
                             // inserted.
-                            Distribution::UpstreamHashShard(distribution_key)
+                            Distribution::UpstreamHashShard(
+                                distribution_key,
+                                self.logical.table_desc().table_id,
+                            )
                         }
                     }
                 }
@@ -220,7 +223,7 @@ impl ToBatchProst for BatchSeqScan {
 
         if self.logical.is_sys_table() {
             NodeBody::SysRowSeqScan(SysRowSeqScanNode {
-                table_name: self.logical.table_name().to_string(),
+                table_id: self.logical.table_desc().table_id.table_id,
                 column_descs,
             })
         } else {

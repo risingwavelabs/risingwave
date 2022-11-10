@@ -283,6 +283,14 @@ impl IntervalUnit {
     pub fn is_positive(&self) -> bool {
         self > &Self::new(0, 0, 0)
     }
+
+    pub fn min() -> Self {
+        Self {
+            months: i32::MIN,
+            days: i32::MIN,
+            ms: i64::MIN,
+        }
+    }
 }
 
 impl Serialize for IntervalUnit {
@@ -442,6 +450,12 @@ impl Neg for IntervalUnit {
             days: -self.days,
             ms: -self.ms,
         }
+    }
+}
+
+impl ToText for crate::types::IntervalUnit {
+    fn to_text(&self) -> String {
+        self.to_string()
     }
 }
 
@@ -762,10 +776,10 @@ impl IntervalUnit {
                     result = result + (|| match interval_unit {
                         Second => {
                             // TODO: IntervalUnit only support millisecond precision so the part smaller than millisecond will be truncated.
-                            if second < OrderedF64::from(0.001) {
+                            if second > OrderedF64::from(0) && second < OrderedF64::from(0.001) {
                                 return None;
                             }
-                            let ms = (second * 1000_f64).round() as i64;
+                            let ms = (second.into_inner() * 1000_f64).round() as i64;
                             Some(IntervalUnit::from_millis(ms))
                         }
                         _ => None,
@@ -804,6 +818,9 @@ mod tests {
 
     #[test]
     fn test_parse() {
+        let interval = "04:00:00".parse::<IntervalUnit>().unwrap();
+        assert_eq!(interval, IntervalUnit::from_millis(4 * 3600 * 1000));
+
         let interval = "1 year 2 months 3 days 00:00:01"
             .parse::<IntervalUnit>()
             .unwrap();

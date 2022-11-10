@@ -224,13 +224,13 @@ impl CompactionPicker for ManualCompactionPicker {
         let mut range_overlap_info = RangeOverlapInfo::default();
         tmp_sst_info.key_range = Some(self.option.key_range.clone());
         range_overlap_info.update(&tmp_sst_info);
-        let mut select_input_ssts = vec![];
         let level = self.option.level;
         let target_level = self.target_level;
         assert!(
             self.option.level == self.target_level || self.option.level + 1 == self.target_level
         );
-        let level_table_infos: Vec<SstableInfo> = levels
+        // We either include all `select_input_ssts` as input, or return None.
+        let mut select_input_ssts: Vec<SstableInfo> = levels
             .get_level(self.option.level)
             .table_infos
             .iter()
@@ -255,34 +255,24 @@ impl CompactionPicker for ManualCompactionPicker {
             })
             .cloned()
             .collect();
-
-        if level_table_infos.is_empty() {
+        if select_input_ssts.is_empty() {
             return None;
         }
-
-        for table in &level_table_infos {
-            if level_handlers[self.option.level].is_pending_compact(&table.id) {
-                continue;
-            }
-
-            if target_level != level {
-                let overlap_files = self.overlap_strategy.check_base_level_overlap(
-                    &[table.clone()],
-                    &levels.levels[target_level - 1].table_infos,
-                );
-
-                if overlap_files
-                    .iter()
-                    .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
-                {
-                    continue;
-                }
-            }
-
-            select_input_ssts.push(table.clone());
-        }
-
         let target_input_ssts = if target_level == level {
+            // For intra level compaction, input SSTs must be consecutive.
+            let (left, _) = levels
+                .get_level(level)
+                .table_infos
+                .iter()
+                .find_position(|p| p.id == select_input_ssts.first().unwrap().id)
+                .unwrap();
+            let (right, _) = levels
+                .get_level(level)
+                .table_infos
+                .iter()
+                .find_position(|p| p.id == select_input_ssts.last().unwrap().id)
+                .unwrap();
+            select_input_ssts = levels.get_level(level).table_infos[left..=right].to_vec();
             vec![]
         } else {
             self.overlap_strategy.check_base_level_overlap(
@@ -290,7 +280,12 @@ impl CompactionPicker for ManualCompactionPicker {
                 &levels.get_level(target_level).table_infos,
             )
         };
-
+        if select_input_ssts
+            .iter()
+            .any(|table| level_handlers[level].is_pending_compact(&table.id))
+        {
+            return None;
+        }
         if target_input_ssts
             .iter()
             .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
@@ -405,7 +400,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: iterator_test_key_of_epoch(1, 0, 1),
                     right: iterator_test_key_of_epoch(1, 201, 1),
-                    inf: false,
                 },
                 ..Default::default()
             };
@@ -492,7 +486,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: iterator_test_key_of_epoch(1, 101, 1),
                     right: iterator_test_key_of_epoch(1, 199, 1),
-                    inf: false,
                 },
                 internal_table_id: HashSet::from([2]),
             };
@@ -577,6 +570,29 @@ pub mod tests {
         (levels, levels_handler)
     }
 
+    fn generate_intra_test_levels() -> (Levels, Vec<LevelHandler>) {
+        let l0 = generate_l0_overlapping_sublevels(vec![]);
+        let levels = vec![Level {
+            level_idx: 1,
+            level_type: LevelType::Nonoverlapping as i32,
+            table_infos: vec![
+                generate_table(1, 1, 0, 100, 1),
+                generate_table(2, 2, 100, 200, 1),
+                generate_table(3, 2, 200, 300, 1),
+                generate_table(4, 2, 300, 400, 1),
+            ],
+            total_file_size: 0,
+            sub_level_id: 0,
+        }];
+        let levels = Levels {
+            levels,
+            l0: Some(l0),
+        };
+
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        (levels, levels_handler)
+    }
+
     #[test]
     fn test_l0_empty() {
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
@@ -598,7 +614,6 @@ pub mod tests {
             key_range: KeyRange {
                 left: vec![],
                 right: vec![],
-                inf: true,
             },
             internal_table_id: HashSet::default(),
         };
@@ -618,7 +633,6 @@ pub mod tests {
             key_range: KeyRange {
                 left: vec![],
                 right: vec![],
-                inf: true,
             },
             internal_table_id: HashSet::default(),
         };
@@ -660,7 +674,6 @@ pub mod tests {
             key_range: KeyRange {
                 left: iterator_test_key_of_epoch(1, 0, 2),
                 right: iterator_test_key_of_epoch(1, 200, 2),
-                inf: false,
             },
             internal_table_id: HashSet::default(),
         };
@@ -708,7 +721,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 internal_table_id: HashSet::default(),
             };
@@ -746,7 +758,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100]),
@@ -766,7 +777,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // Include all sub level's table ids
                 internal_table_id: HashSet::from([1, 2, 3]),
@@ -808,7 +818,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3]),
@@ -849,7 +858,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // Only include partial top sub level's table id, but the whole top sub level is
                 // picked.
@@ -891,7 +899,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3]),
@@ -921,7 +928,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100]),
@@ -942,7 +948,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // Only include partial input level's table id
                 internal_table_id: HashSet::from([1]),
@@ -991,7 +996,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 internal_table_id: HashSet::default(),
             };
@@ -1017,12 +1021,16 @@ pub mod tests {
 
     #[test]
     fn test_ln_to_ln() {
-        let (levels, levels_handler) = generate_test_levels();
+        let (levels, levels_handler) = generate_intra_test_levels();
         // (input_level, sst_id_filter, expected_result_input_level_ssts)
         let sst_id_filters = vec![
+            (1, vec![1], vec![vec![1], vec![]]),
             (1, vec![3], vec![vec![3], vec![]]),
             (1, vec![4], vec![vec![4], vec![]]),
             (1, vec![3, 4], vec![vec![3, 4], vec![]]),
+            (1, vec![1, 4], vec![vec![1, 2, 3, 4], vec![]]),
+            (1, vec![2, 4], vec![vec![2, 3, 4], vec![]]),
+            (1, vec![1, 3], vec![vec![1, 2, 3], vec![]]),
         ];
         for (input_level, sst_id_filter, expected) in &sst_id_filters {
             let option = ManualCompactionOption {
@@ -1031,7 +1039,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 internal_table_id: HashSet::default(),
             };

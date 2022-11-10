@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::OrderType;
 
-use super::utils::TableCatalogBuilder;
+use super::generic::GenericPlanNode;
 use super::{
     gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch, ToStream,
@@ -44,22 +42,24 @@ impl LogicalTopN {
         if with_ties {
             assert!(offset == 0, "WITH TIES is not supported with OFFSET");
         }
-        let ctx = input.ctx();
-        let schema = input.schema().clone();
-        let pk_indices = input.logical_pk().to_vec();
-        let functional_dependency = input.functional_dependency().clone();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
-        LogicalTopN {
-            base,
-            core: generic::TopN {
-                input,
-                limit,
-                offset,
-                with_ties,
-                order,
-                group_key: vec![],
-            },
-        }
+
+        let core = generic::TopN {
+            input,
+            limit,
+            offset,
+            with_ties,
+            order,
+            group_key: vec![],
+        };
+
+        let ctx = core.ctx();
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+        let functional_dependency = core.input.functional_dependency().clone();
+
+        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
+
+        LogicalTopN { base, core }
     }
 
     pub fn with_group(
@@ -146,47 +146,8 @@ impl LogicalTopN {
 
     /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
     pub fn infer_internal_table_catalog(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
-        let schema = &self.base.schema;
-        let pk_indices = &self.base.logical_pk;
-        let columns_fields = schema.fields().to_vec();
-        let field_order = &self.topn_order().field_order;
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
-
-        columns_fields.iter().for_each(|field| {
-            internal_table_catalog_builder.add_column(field);
-        });
-        let mut order_cols = HashSet::new();
-
-        // Here we want the state table to store the states in the order we want, fisrtly in
-        // ascending order by the columns specified by the group key, then by the columns
-        // specified by `order`. If we do that, when the later group topN operator
-        // does a prefix scannimg with the group key, we can fetch the data in the
-        // desired order.
-        self.group_key().iter().for_each(|idx| {
-            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
-            order_cols.insert(*idx);
-        });
-
-        field_order.iter().for_each(|field_order| {
-            if !order_cols.contains(&field_order.index) {
-                internal_table_catalog_builder
-                    .add_order_column(field_order.index, OrderType::from(field_order.direct));
-                order_cols.insert(field_order.index);
-            }
-        });
-
-        pk_indices.iter().for_each(|idx| {
-            if !order_cols.contains(idx) {
-                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
-                order_cols.insert(*idx);
-            }
-        });
-        if let Some(vnode_col_idx) = vnode_col_idx {
-            internal_table_catalog_builder.set_vnode_col_idx(vnode_col_idx);
-        }
-        internal_table_catalog_builder
-            .build(self.input().distribution().dist_column_indices().to_vec())
+        self.core
+            .infer_internal_table_catalog(&self.base, vnode_col_idx)
     }
 
     fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
@@ -210,7 +171,7 @@ impl LogicalTopN {
                 "topN does not support Broadcast".to_string(),
                 None.into(),
             ))),
-            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => {
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
                 self.gen_vnode_two_phase_streaming_top_n_plan(stream_input, &dists)
             }
         }

@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
-use risingwave_pb::stream_plan::source_node::Info as SourceNodeInfo;
 use risingwave_source::SourceDescBuilder;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -25,8 +23,9 @@ use crate::executor::SourceExecutor;
 
 pub struct SourceExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for SourceExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -42,22 +41,19 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let source_id = TableId::new(node.source_id);
         let source_builder = SourceDescBuilder::new(
             source_id,
-            node.get_info()?,
-            &params.env.source_manager_ref(),
+            node.row_id_index.clone(),
+            node.columns.clone(),
+            node.pk_column_ids.clone(),
+            node.properties.clone(),
+            node.get_info()?.clone(),
+            params.env.source_manager_ref(),
         );
 
-        let column_ids: Vec<_> = node
-            .get_column_ids()
+        let columns = node.columns.clone();
+        let column_ids: Vec<_> = columns
             .iter()
-            .map(|i| ColumnId::from(*i))
+            .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
             .collect();
-        let columns = node
-            .get_info()
-            .map(|info| match info {
-                SourceNodeInfo::StreamSource(stream) => &stream.columns,
-                SourceNodeInfo::TableSource(table) => &table.columns,
-            })
-            .map_err(|_| anyhow!("source_info not found"))?;
         let fields = columns
             .iter()
             .map(|prost| {
@@ -74,7 +70,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .expect("vnodes not set for source executor");
 
         let state_table_handler =
-            SourceStateTableHandler::from_table_catalog(node.state_table.as_ref().unwrap(), store);
+            SourceStateTableHandler::from_table_catalog(node.state_table.as_ref().unwrap(), store)
+                .await;
 
         Ok(Box::new(SourceExecutor::new(
             params.actor_context,

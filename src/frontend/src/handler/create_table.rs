@@ -22,8 +22,7 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
-    TableSourceInfo,
+    ColumnIndex as ProstColumnIndex, Source as ProstSource, Table as ProstTable, TableSourceInfo,
 };
 use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
 use risingwave_sqlparser::ast::{
@@ -35,12 +34,11 @@ use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::{check_valid_column_name, ColumnId};
-use crate::optimizer::plan_node::{LogicalSource, StreamSource};
+use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::build_graph;
-use crate::Binder;
 
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
@@ -207,15 +205,17 @@ pub(crate) fn gen_create_table_plan(
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
+    let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
+    let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
+    let properties = context.inner().with_options.inner().clone();
     let source = make_prost_source(
         session,
         table_name,
-        Info::TableSource(TableSourceInfo {
-            row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
-            columns,
-            pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
-            properties: context.inner().with_options.inner().clone(),
-        }),
+        row_id_index,
+        columns,
+        pk_column_ids,
+        properties,
+        Info::TableSource(TableSourceInfo {}),
     )?;
     let (plan, table) = gen_materialized_source_plan(context, source.clone(), session.user_id())?;
     Ok((plan, source, table))
@@ -230,13 +230,8 @@ pub(crate) fn gen_materialized_source_plan(
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
-        let source_node: PlanRef =
-            StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
-        let row_id_index = {
-            let (Info::StreamSource(StreamSourceInfo { row_id_index, .. })
-            | Info::TableSource(TableSourceInfo { row_id_index, .. })) = source.info.unwrap();
-            row_id_index.as_ref().map(|index| index.index as _)
-        };
+        let source_node: PlanRef = LogicalSource::new(Rc::new((&source).into()), context).into();
+        let row_id_index = source.row_id_index.as_ref().map(|index| index.index as _);
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
         required_cols.toggle_range(..);
         let mut out_names = source_node.schema().names();
@@ -252,7 +247,7 @@ pub(crate) fn gen_materialized_source_plan(
             required_cols,
             out_names,
         )
-        .gen_create_mv_plan(source.name.clone(), "".into())?
+        .gen_create_mv_plan(source.name.clone(), "".into(), None)?
     };
     let mut table = materialize
         .table()
@@ -268,24 +263,8 @@ pub async fn handle_create_table(
     constraints: Vec<TableConstraint>,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
-    {
-        let db_name = session.database();
-        let catalog_reader = session.env().catalog_reader().read_guard();
-        let (schema_name, table_name) = {
-            let (schema_name, table_name) =
-                Binder::resolve_table_or_source_name(db_name, table_name.clone())?;
-            let search_path = session.config().get_search_path();
-            let user_name = &session.auth_context().user_name;
-            let schema_name = match schema_name {
-                Some(schema_name) => schema_name,
-                None => catalog_reader
-                    .first_valid_schema(db_name, &search_path, user_name)?
-                    .name(),
-            };
-            (schema_name, table_name)
-        };
-        catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &table_name)?;
-    }
+
+    session.check_relation_name_duplicated(table_name.clone())?;
 
     let (graph, source, table) = {
         let (plan, source, table) = gen_create_table_plan(

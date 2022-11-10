@@ -14,6 +14,9 @@
 
 #![feature(custom_test_frameworks)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
+#![feature(bound_map)]
+#![feature(type_alias_impl_trait)]
+#![feature(associated_type_bounds)]
 
 #[cfg(test)]
 mod compactor_tests;

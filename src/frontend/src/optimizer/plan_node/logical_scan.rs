@@ -22,6 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::OrderType;
 
+use super::generic::GenericPlanNode;
 use super::{
     generic, BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown,
     StreamTableScan, ToBatch, ToStream,
@@ -56,35 +57,10 @@ impl LogicalScan {
         // here we have 3 concepts
         // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
         // 2. table_idx: usize, column index in the TableDesc or tableCatalog.
-        // 3. operator_idx: usize,  column index in the ScanOperator's schema.
-        // in a query we get the same version of catalog, so the mapping from column_id and
-        // table_idx will not changes. and the `required_col_idx is the `table_idx` of the
-        // required columns, in other word, is the mapping from operator_idx to table_idx.
-
-        let id_to_op_idx = Self::get_id_to_op_idx_mapping(&output_col_idx, &table_desc);
-
-        let fields = output_col_idx
-            .iter()
-            .map(|tb_idx| {
-                let col = &table_desc.columns[*tb_idx];
-                Field::from_with_table_name_prefix(col, &table_name)
-            })
-            .collect();
-
-        let pk_indices = table_desc
-            .stream_key
-            .iter()
-            .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
-            .collect::<Option<Vec<_>>>();
-        let schema = Schema { fields };
-        let (functional_dependency, pk_indices) = match pk_indices {
-            Some(pk_indices) => (
-                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
-                pk_indices,
-            ),
-            None => (FunctionalDependencySet::new(schema.len()), vec![]),
-        };
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
+        // 3. operator_idx: usize, column index in the ScanOperator's schema.
+        // In a query we get the same version of catalog, so the mapping from column_id and
+        // table_idx will not change. And the `required_col_idx` is the `table_idx` of the
+        // required columns, i.e., the mapping from operator_idx to table_idx.
 
         let mut required_col_idx = output_col_idx.clone();
         let mut visitor =
@@ -97,18 +73,31 @@ impl LogicalScan {
             }
         });
 
-        Self {
-            base,
-            core: generic::Scan {
-                table_name,
-                is_sys_table,
-                required_col_idx,
-                output_col_idx,
-                table_desc,
-                indexes,
-                predicate,
-            },
-        }
+        let core = generic::Scan {
+            table_name,
+            is_sys_table,
+            required_col_idx,
+            output_col_idx,
+            table_desc,
+            indexes,
+            predicate,
+        };
+
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+
+        let functional_dependency = match &pk_indices {
+            Some(pk_indices) => FunctionalDependencySet::with_key(schema.len(), pk_indices),
+            None => FunctionalDependencySet::new(schema.len()),
+        };
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
+
+        Self { base, core }
     }
 
     /// Create a [`LogicalScan`] node. Used by planner.
@@ -187,10 +176,7 @@ impl LogicalScan {
 
     /// Get the descs of the output columns.
     pub fn column_descs(&self) -> Vec<ColumnDesc> {
-        self.output_col_idx()
-            .iter()
-            .map(|i| self.table_desc().columns[*i].clone())
-            .collect()
+        self.core.column_descs()
     }
 
     /// Get the ids of the output columns.
@@ -320,22 +306,6 @@ impl LogicalScan {
             })
             .collect_vec();
         output_idx
-    }
-
-    /// Helper function to create a mapping from `column_id` to `operator_idx`
-    fn get_id_to_op_idx_mapping(
-        output_col_idx: &[usize],
-        table_desc: &Rc<TableDesc>,
-    ) -> HashMap<ColumnId, usize> {
-        let mut id_to_op_idx = HashMap::new();
-        output_col_idx
-            .iter()
-            .enumerate()
-            .for_each(|(op_idx, tb_idx)| {
-                let col = &table_desc.columns[*tb_idx];
-                id_to_op_idx.insert(col.column_id, op_idx);
-            });
-        id_to_op_idx
     }
 
     /// Undo predicate push down when predicate in scan is not supported.
@@ -561,8 +531,9 @@ impl ToBatch for LogicalScan {
                     return required_order.enforce_if_not_satisfies(scan.to_batch().unwrap());
                 } else if let Some(join) = applied.as_logical_join() {
                     // index lookup join
-                    return required_order
-                        .enforce_if_not_satisfies(join.to_batch_lookup_join().unwrap());
+                    return required_order.enforce_if_not_satisfies(
+                        join.index_lookup_join_to_batch_lookup_join().unwrap(),
+                    );
                 } else {
                     unreachable!();
                 }

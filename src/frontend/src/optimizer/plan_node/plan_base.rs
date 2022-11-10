@@ -41,6 +41,29 @@ pub struct PlanBase {
     pub functional_dependency: FunctionalDependencySet,
 }
 
+impl generic::GenericPlanRef for PlanBase {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn logical_pk(&self) -> &[usize] {
+        &self.logical_pk
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.ctx.clone()
+    }
+}
+
+impl stream::StreamPlanRef for PlanBase {
+    fn distribution(&self) -> &Distribution {
+        &self.dist
+    }
+
+    fn append_only(&self) -> bool {
+        self.append_only
+    }
+}
 impl PlanBase {
     pub fn new_logical(
         ctx: OptimizerContextRef,
@@ -112,7 +135,7 @@ macro_rules! impl_base_delegate {
                     self.plan_base().id
                 }
                  pub fn ctx(&self) -> OptimizerContextRef {
-                    self.plan_base().ctx.clone()
+                    self.plan_base().ctx()
                 }
                 pub fn schema(&self) -> &Schema {
                     &self.plan_base().schema

@@ -34,7 +34,7 @@ mod utf8_array;
 mod value_reader;
 
 use std::convert::From;
-use std::hash::Hasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub use bool_array::{BoolArray, BoolArrayBuilder};
@@ -74,7 +74,7 @@ pub type F64ArrayBuilder = PrimitiveArrayBuilder<OrderedF64>;
 pub type F32ArrayBuilder = PrimitiveArrayBuilder<OrderedF32>;
 
 /// The hash source for `None` values when hashing an item.
-pub(crate) static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
+pub(crate) const NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
 
 /// A trait over all array builders.
 ///
@@ -197,7 +197,17 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 
     fn set_bitmap(&mut self, bitmap: Bitmap);
 
-    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H);
+    /// Feed the value at `idx` into the given [`Hasher`].
+    #[inline(always)]
+    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+        // We use a default implementation for all arrays for now, as retrieving the reference
+        // should be lightweight.
+        if let Some(value) = self.value_at(idx) {
+            value.hash_scalar(state);
+        } else {
+            NULL_VAL_FOR_HASH.hash(state);
+        }
+    }
 
     fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {
         assert_eq!(hashers.len(), self.len());
@@ -313,12 +323,6 @@ impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
 impl From<BoolArray> for ArrayImpl {
     fn from(arr: BoolArray) -> Self {
         Self::Bool(arr)
-    }
-}
-
-impl From<DecimalArray> for ArrayImpl {
-    fn from(arr: DecimalArray) -> Self {
-        Self::Decimal(arr)
     }
 }
 
@@ -613,7 +617,7 @@ impl ArrayImpl {
                 read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?
             }
             ProstArrayType::Decimal => {
-                read_string_array::<DecimalArrayBuilder, DecimalValueReader>(array, cardinality)?
+                read_numeric_array::<Decimal, DecimalValueReader>(array, cardinality)?
             }
             ProstArrayType::Date => read_naive_date_array(array, cardinality)?,
             ProstArrayType::Time => read_naive_time_array(array, cardinality)?,

@@ -13,22 +13,48 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::io::{Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
-#[derive(Debug, parse_display::Display, Copy, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+use super::to_text::ToText;
+use crate::array::ArrayResult;
+
+#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     #[display("{0}")]
     Normalized(RustDecimal),
     #[display("NaN")]
     NaN,
-    #[display("+Inf")]
+    #[display("Infinity")]
     PositiveInf,
-    #[display("-Inf")]
+    #[display("-Infinity")]
     NegativeInf,
+}
+
+impl ToText for crate::types::Decimal {
+    fn to_text(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl Decimal {
+    /// Used by `PrimitiveArray` to serialize the array to protobuf.
+    pub fn to_protobuf(self, output: &mut impl Write) -> ArrayResult<usize> {
+        let buf = self.unordered_serialize();
+        output.write_all(&buf)?;
+        Ok(buf.len())
+    }
+
+    /// Used by `DecimalValueReader` to deserialize the array from protobuf.
+    pub fn from_protobuf(input: &mut impl Read) -> ArrayResult<Self> {
+        let mut buf = [0u8; 16];
+        input.read_exact(&mut buf)?;
+        Ok(Self::unordered_deserialize(buf))
+    }
 }
 
 macro_rules! impl_from_integer {
@@ -532,10 +558,10 @@ impl FromStr for Decimal {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "nan" | "NaN" | "NAN" => Ok(Decimal::NaN),
-            "inf" | "INF" | "+inf" | "+INF" | "+Inf" => Ok(Decimal::PositiveInf),
-            "-inf" | "-INF" | "-Inf" => Ok(Decimal::NegativeInf),
+        match s.to_ascii_lowercase().as_str() {
+            "nan" => Ok(Decimal::NaN),
+            "inf" | "+inf" | "infinity" | "+infinity" => Ok(Decimal::PositiveInf),
+            "-inf" | "-infinity" => Ok(Decimal::NegativeInf),
             s => RustDecimal::from_str(s).map(Decimal::Normalized),
         }
     }
@@ -611,36 +637,41 @@ mod tests {
         assert_eq!(Decimal::from_str("nan").unwrap(), Decimal::NaN,);
         assert_eq!(Decimal::from_str("NaN").unwrap(), Decimal::NaN,);
         assert_eq!(Decimal::from_str("NAN").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("nAn").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("nAN").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("Nan").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("NAn").unwrap(), Decimal::NaN,);
 
         assert_eq!(Decimal::from_str("inf").unwrap(), Decimal::PositiveInf,);
         assert_eq!(Decimal::from_str("INF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("iNF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("inF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("InF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("INf").unwrap(), Decimal::PositiveInf,);
         assert_eq!(Decimal::from_str("+inf").unwrap(), Decimal::PositiveInf,);
         assert_eq!(Decimal::from_str("+INF").unwrap(), Decimal::PositiveInf,);
         assert_eq!(Decimal::from_str("+Inf").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+iNF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+inF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+InF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+INf").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("inFINity").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(
+            Decimal::from_str("+infiNIty").unwrap(),
+            Decimal::PositiveInf,
+        );
 
         assert_eq!(Decimal::from_str("-inf").unwrap(), Decimal::NegativeInf,);
         assert_eq!(Decimal::from_str("-INF").unwrap(), Decimal::NegativeInf,);
         assert_eq!(Decimal::from_str("-Inf").unwrap(), Decimal::NegativeInf,);
-
-        assert!(Decimal::from_str("nAn").is_err());
-        assert!(Decimal::from_str("nAN").is_err());
-        assert!(Decimal::from_str("Nan").is_err());
-        assert!(Decimal::from_str("NAn").is_err());
-
-        assert!(Decimal::from_str("iNF").is_err());
-        assert!(Decimal::from_str("inF").is_err());
-        assert!(Decimal::from_str("InF").is_err());
-        assert!(Decimal::from_str("INf").is_err());
-
-        assert!(Decimal::from_str("+iNF").is_err());
-        assert!(Decimal::from_str("+inF").is_err());
-        assert!(Decimal::from_str("+InF").is_err());
-        assert!(Decimal::from_str("+INf").is_err());
-
-        assert!(Decimal::from_str("-iNF").is_err());
-        assert!(Decimal::from_str("-inF").is_err());
-        assert!(Decimal::from_str("-InF").is_err());
-        assert!(Decimal::from_str("-INf").is_err());
+        assert_eq!(Decimal::from_str("-iNF").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(Decimal::from_str("-inF").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(Decimal::from_str("-InF").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(Decimal::from_str("-INf").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(
+            Decimal::from_str("-INfinity").unwrap(),
+            Decimal::NegativeInf,
+        );
 
         assert_eq!(
             Decimal::from_f32(10.0).unwrap() / Decimal::PositiveInf,

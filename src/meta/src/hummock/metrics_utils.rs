@@ -79,10 +79,9 @@ pub fn trigger_sst_stat(
 
     let level_label = format!("cg{}_l0_sub", compaction_group_id);
     let sst_num = current_version
-        .get_compaction_group_levels(compaction_group_id)
-        .l0
-        .as_ref()
-        .map(|l0| l0.sub_levels.len())
+        .levels
+        .get(&compaction_group_id)
+        .and_then(|level| level.l0.as_ref().map(|l0| l0.sub_levels.len()))
         .unwrap_or(0);
     metrics
         .level_sst_num
@@ -120,6 +119,38 @@ pub fn trigger_sst_stat(
             }
         }
     }
+}
+
+pub fn remove_compaction_group_in_sst_stat(
+    metrics: &MetaMetrics,
+    compaction_group_id: CompactionGroupId,
+) {
+    let mut idx = 0;
+    loop {
+        let level_label = format!("{}_{}", idx, compaction_group_id);
+        let should_continue = metrics
+            .level_sst_num
+            .remove_label_values(&[&level_label])
+            .is_ok();
+        metrics
+            .level_file_size
+            .remove_label_values(&[&level_label])
+            .ok();
+        metrics
+            .level_compact_cnt
+            .remove_label_values(&[&level_label])
+            .ok();
+        if !should_continue {
+            break;
+        }
+        idx += 1;
+    }
+
+    let level_label = format!("cg{}_l0_sub", compaction_group_id);
+    metrics
+        .level_sst_num
+        .remove_label_values(&[&level_label])
+        .ok();
 }
 
 pub fn trigger_pin_unpin_version_state(

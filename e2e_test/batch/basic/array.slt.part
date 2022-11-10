@@ -171,3 +171,34 @@ query T
 select array['a', 'b']::varchar;
 ----
 {a,b}
+
+# Test array display with quoting
+query T
+select array['hello', '', null, 'nULl', 'nULlx', 'aa"bb', 'mm\nn', 'uu,vv', 'yy zz'];
+----
+{hello,"",NULL,"nULl",nULlx,"aa\"bb","mm\\nn","uu,vv","yy zz"}
+
+query T
+select array[array[1,2],array[3,4]];
+----
+{{1,2},{3,4}}
+
+query T
+select array[row(1,2)];
+----
+{"(1,2)"}
+
+query T
+select array[array[1,2]::varchar];
+----
+{"{1,2}"}
+
+query T
+select array[1,true]::bool[];
+----
+{t,t}
+
+query T
+select array[array[1,true]]::bool[][];
+----
+{{t,t}}

@@ -34,7 +34,8 @@ use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_source::{SourceDescBuilder, TableSourceManager, TableSourceManagerRef};
+use risingwave_source::table_test_utils::create_table_source_desc_builder;
+use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -88,7 +89,6 @@ impl SingleChunkExecutor {
 #[tokio::test]
 async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_common::types::DataType;
-    use risingwave_source::table_test_utils::create_table_info;
     use risingwave_stream::executor::state_table_handler::default_source_internal_table;
 
     let memory_state_store = MemoryStateStore::new();
@@ -100,8 +100,13 @@ async fn test_table_materialize() -> StreamResult<()> {
             Field::unnamed(DataType::Float64),
         ],
     };
-    let info = create_table_info(&schema, Some(0), vec![0]);
-    let source_builder = SourceDescBuilder::new(source_table_id, &info, &source_manager);
+    let source_builder = create_table_source_desc_builder(
+        &schema,
+        source_table_id,
+        Some(0),
+        vec![0],
+        source_manager.clone(),
+    );
 
     // Ensure the source exists
     let source_desc = source_builder.build().await.unwrap();
@@ -126,7 +131,8 @@ async fn test_table_materialize() -> StreamResult<()> {
     let state_table = SourceStateTableHandler::from_table_catalog(
         &default_source_internal_table(0x2333),
         MemoryStateStore::new(),
-    );
+    )
+    .await;
     let stream_source = SourceExecutor::new(
         ActorContext::create(0x3f3f3f),
         source_builder,
@@ -156,6 +162,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         None,
         1000,
     )
+    .await
     .boxed()
     .execute();
 
@@ -235,6 +242,9 @@ async fn test_table_materialize() -> StreamResult<()> {
     let message = materialize.next().await.unwrap()?;
     let mut col_row_ids = vec![];
     match message {
+        Message::Watermark(_) => {
+            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+        }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].array_ref().as_int64();
             col_row_ids.push(col_row_id.value_at(0).unwrap());
@@ -307,6 +317,9 @@ async fn test_table_materialize() -> StreamResult<()> {
     // Poll `Materialize`, should output the same deletion stream chunk
     let message = materialize.next().await.unwrap()?;
     match message {
+        Message::Watermark(_) => {
+            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+        }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].array_ref().as_int64();
             assert_eq!(col_row_id.value_at(0).unwrap(), col_row_ids[0]);
@@ -374,7 +387,8 @@ async fn test_row_seq_scan() -> Result<()> {
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0_usize],
-    );
+    )
+    .await;
     let table = StorageTable::for_test(
         memory_state_store.clone(),
         TableId::from(0x42),
