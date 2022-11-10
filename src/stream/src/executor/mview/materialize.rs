@@ -22,8 +22,10 @@ use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, RowDeserializer, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_expr::expr::data_types;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::table::compute_chunk_vnode;
 use risingwave_storage::table::streaming_table::mem_table::RowOp;
@@ -250,9 +252,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                     }
                                 }
 
-
                                 // do check
-
                                 let mut output = buffer.buffer.clone();
                                 for (key, row_op) in buffer.buffer.into_iter() {
                                     match row_op {
@@ -278,7 +278,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                 self.materialize_cache.get(&key).unwrap()
                                             {
                                                 if cache_row != &old_row {
-                                                    println!("check 2");
                                                     output.insert(
                                                         key.clone(),
                                                         RowOp::Delete(cache_row.to_vec()),
@@ -288,9 +287,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                     self.materialize_cache.insert(key, None);
                                                 }
                                             } else {
-                                                println!("这里漏了1");
                                                 output.remove(&key);
-                                                self.materialize_cache.remove(&key);
                                             }
                                         }
                                         RowOp::Update((old_row, new_row)) => {
@@ -309,7 +306,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                     self.materialize_cache
                                                         .insert(key, Some(new_row));
                                                 } else {
-                                                    println!("这里漏了1");
                                                     self.materialize_cache
                                                         .insert(key, Some(new_row));
                                                 }
@@ -324,48 +320,13 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                     }
                                 }
 
-                                // construct output chunk
-                                let mut new_ops: Vec<Op> = vec![];
-                                let mut new_rows: Vec<Vec<u8>> = vec![];
-                                let row_deserializer = RowDeserializer::new(data_types.clone());
-                                for (_, row_op) in output.into_iter() {
-                                    match row_op {
-                                        RowOp::Insert(value) => {
-                                            new_ops.push(Op::Insert);
-                                            new_rows.push(value);
-                                        }
-                                        RowOp::Delete(old_value) => {
-                                            new_ops.push(Op::Delete);
-                                            new_rows.push(old_value);
-                                        }
-                                        RowOp::Update((old_value, new_value)) => {
-                                            new_ops.push(Op::UpdateDelete);
-                                            new_ops.push(Op::UpdateInsert);
-                                            new_rows.push(old_value);
-                                            new_rows.push(new_value);
-                                        }
+                                // // construct output chunk
+                                match generator_output(output, data_types.clone())? {
+                                    Some(output_chunk) => {
+                                        self.state_table.write_chunk(output_chunk.clone());
+                                        Message::Chunk(output_chunk)
                                     }
-                                }
-                                let mut data_chunk_builder =
-                                    DataChunkBuilder::new(data_types.clone(), new_rows.len() + 1);
-
-                                for row_bytes in new_rows {
-                                    let res = data_chunk_builder.append_one_row_from_datums(
-                                        row_deserializer.deserialize(row_bytes.as_ref())?.0.iter(),
-                                    );
-                                    debug_assert!(res.is_none());
-                                }
-
-                                if let Some(new_data_chunk) = data_chunk_builder.consume_all() {
-                                    let new_stream_chunk = StreamChunk::new(
-                                        new_ops,
-                                        new_data_chunk.columns().to_vec(),
-                                        None,
-                                    );
-                                    self.state_table.write_chunk(new_stream_chunk.clone());
-                                    Message::Chunk(new_stream_chunk)
-                                } else {
-                                    continue;
+                                    None => continue,
                                 }
                             }
                         } /* true => {
@@ -389,6 +350,47 @@ impl<S: StateStore> MaterializeExecutor<S> {
     }
 }
 
+fn generator_output(
+    output: HashMap<Vec<u8>, RowOp>,
+    data_types: Vec<DataType>,
+) -> StreamExecutorResult<Option<StreamChunk>> {
+    // construct output chunk
+    let mut new_ops: Vec<Op> = vec![];
+    let mut new_rows: Vec<Vec<u8>> = vec![];
+    let row_deserializer = RowDeserializer::new(data_types.clone());
+    for (_, row_op) in output.into_iter() {
+        match row_op {
+            RowOp::Insert(value) => {
+                new_ops.push(Op::Insert);
+                new_rows.push(value);
+            }
+            RowOp::Delete(old_value) => {
+                new_ops.push(Op::Delete);
+                new_rows.push(old_value);
+            }
+            RowOp::Update((old_value, new_value)) => {
+                new_ops.push(Op::UpdateDelete);
+                new_ops.push(Op::UpdateInsert);
+                new_rows.push(old_value);
+                new_rows.push(new_value);
+            }
+        }
+    }
+    let mut data_chunk_builder = DataChunkBuilder::new(data_types.clone(), new_rows.len() + 1);
+
+    for row_bytes in new_rows {
+        let res = data_chunk_builder
+            .append_one_row_from_datums(row_deserializer.deserialize(row_bytes.as_ref())?.0.iter());
+        debug_assert!(res.is_none());
+    }
+
+    if let Some(new_data_chunk) = data_chunk_builder.consume_all() {
+        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
+        Ok(Some(new_stream_chunk))
+    } else {
+        Ok(None)
+    }
+}
 pub struct MaterializeBuffer {
     buffer: HashMap<Vec<u8>, RowOp>,
 }
