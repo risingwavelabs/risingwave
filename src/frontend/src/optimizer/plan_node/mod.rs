@@ -63,6 +63,7 @@ pub trait PlanNode:
     + PredicatePushdown
 {
     fn node_type(&self) -> PlanNodeType;
+    fn node_name(&self) -> &str;
     fn plan_base(&self) -> &PlanBase;
     fn convention(&self) -> Convention;
 }
@@ -589,6 +590,9 @@ macro_rules! enum_plan_node_type {
             $(impl PlanNode for [<$convention $name>] {
                 fn node_type(&self) -> PlanNodeType{
                     PlanNodeType::[<$convention $name>]
+                }
+                fn node_name(&self) -> &str {
+                    stringify!([<$name>])
                 }
                 fn plan_base(&self) -> &PlanBase {
                     &self.base
