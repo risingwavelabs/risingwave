@@ -383,20 +383,29 @@ impl MetaClient {
     pub fn start_heartbeat_loop(
         meta_client: MetaClient,
         min_interval: Duration,
+        max_interval: Duration,
         extra_info_sources: Vec<ExtraInfoSourceRef>,
     ) -> (JoinHandle<()>, Sender<()>) {
+        assert!(min_interval < max_interval);
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             let mut min_interval_ticker = tokio::time::interval(min_interval);
+            let mut max_interval_ticker = tokio::time::interval(max_interval);
             loop {
                 tokio::select! {
-                    // Wait for interval
-                    _ = min_interval_ticker.tick() => {},
+                    biased;
                     // Shutdown
                     _ = &mut shutdown_rx => {
                         tracing::info!("Heartbeat loop is stopped");
                         return;
                     }
+                    // Wait for interval
+                    _ = min_interval_ticker.tick() => {},
+                    _ = max_interval_ticker.tick() => {
+                        // Client has lost connection to the server and reached time limit, it should exit.
+                        tracing::error!("Heartbeat timeout, exiting...");
+                        std::process::exit(1);
+                    },
                 }
                 let mut extra_info = Vec::with_capacity(extra_info_sources.len());
                 for extra_info_source in &extra_info_sources {
@@ -414,7 +423,9 @@ impl MetaClient {
                 )
                 .await
                 {
-                    Ok(Ok(_)) => {}
+                    Ok(Ok(_)) => {
+                        max_interval_ticker.reset();
+                    }
                     Ok(Err(err)) => {
                         tracing::warn!("Failed to send_heartbeat: error {}", err);
                     }
