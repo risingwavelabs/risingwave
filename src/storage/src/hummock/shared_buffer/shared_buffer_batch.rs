@@ -212,7 +212,7 @@ impl SharedBufferBatch {
     /// return inclusive left endpoint, which means that all data in this batch should be larger or
     /// equal than this key.
     pub fn start_user_key(&self) -> &[u8] {
-        if !self.has_range_tombstone()
+        if self.has_range_tombstone()
             && (self.inner.is_empty()
                 || self
                     .inner
