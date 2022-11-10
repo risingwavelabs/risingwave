@@ -401,12 +401,7 @@ mod tests {
         for idx in start_index..end_index {
             let key = iter.key();
             let val = iter.value();
-            assert_eq!(
-                key,
-                test_key_of(idx).table_key_as_slice(),
-                "failed at {}",
-                idx
-            );
+            assert_eq!(key, test_key_of(idx).to_ref(), "failed at {}", idx);
             assert_eq!(
                 val.into_user_value().unwrap(),
                 test_value_of(idx).as_slice()
@@ -433,12 +428,7 @@ mod tests {
         for idx in start_index..30000 {
             let key = iter.key();
             let val = iter.value();
-            assert_eq!(
-                key,
-                test_key_of(idx).table_key_as_slice(),
-                "failed at {}",
-                idx
-            );
+            assert_eq!(key, test_key_of(idx).to_ref(), "failed at {}", idx);
             assert_eq!(
                 val.into_user_value().unwrap(),
                 test_value_of(idx).as_slice()
@@ -454,49 +444,17 @@ mod tests {
         );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(test_key_of(10000).table_key_as_slice())
-            .await
-            .unwrap();
-        assert!(
-            iter.is_valid()
-                && iter.cur_idx == 1
-                && iter.key() == test_key_of(10000).table_key_as_slice()
-        );
-        iter.seek(test_key_of(10001).table_key_as_slice())
-            .await
-            .unwrap();
-        assert!(
-            iter.is_valid()
-                && iter.cur_idx == 1
-                && iter.key() == test_key_of(10001).table_key_as_slice()
-        );
-        iter.seek(test_key_of(9999).table_key_as_slice())
-            .await
-            .unwrap();
-        assert!(
-            iter.is_valid()
-                && iter.cur_idx == 0
-                && iter.key() == test_key_of(9999).table_key_as_slice()
-        );
-        iter.seek(test_key_of(1).table_key_as_slice())
-            .await
-            .unwrap();
-        assert!(
-            iter.is_valid()
-                && iter.cur_idx == 0
-                && iter.key() == test_key_of(1).table_key_as_slice()
-        );
-        iter.seek(test_key_of(29999).table_key_as_slice())
-            .await
-            .unwrap();
-        assert!(
-            iter.is_valid()
-                && iter.cur_idx == 2
-                && iter.key() == test_key_of(29999).table_key_as_slice()
-        );
-        iter.seek(test_key_of(30000).table_key_as_slice())
-            .await
-            .unwrap();
+        iter.seek(test_key_of(10000).to_ref()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 1 && iter.key() == test_key_of(10000).to_ref());
+        iter.seek(test_key_of(10001).to_ref()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 1 && iter.key() == test_key_of(10001).to_ref());
+        iter.seek(test_key_of(9999).to_ref()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == test_key_of(9999).to_ref());
+        iter.seek(test_key_of(1).to_ref()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == test_key_of(1).to_ref());
+        iter.seek(test_key_of(29999).to_ref()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 2 && iter.key() == test_key_of(29999).to_ref());
+        iter.seek(test_key_of(30000).to_ref()).await.unwrap();
         assert!(!iter.is_valid());
 
         // Test seek. Result is dominated by key range rather than given seek key.
@@ -506,13 +464,9 @@ mod tests {
         );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(test_key_of(17000).table_key_as_slice())
-            .await
-            .unwrap();
+        iter.seek(test_key_of(17000).to_ref()).await.unwrap();
         assert!(!iter.is_valid());
-        iter.seek(test_key_of(1).table_key_as_slice())
-            .await
-            .unwrap();
+        iter.seek(test_key_of(1).to_ref()).await.unwrap();
         assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == FullKey::decode(&kr.left));
     }
 
@@ -562,7 +516,7 @@ mod tests {
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
         assert!(iter.is_valid() && iter.key() == FullKey::decode(block_1_smallest_key.as_slice()));
         iter.next().await.unwrap();
-        let block_1_second_key = iter.key().table_key_as_vec();
+        let block_1_second_key = iter.key().to_vec();
         // Use a big enough seek key and result in invalid iterator.
         let seek_key = test_key_of(30001);
         iter.seek_idx(0, Some(seek_key.encode().as_slice()))
@@ -586,10 +540,10 @@ mod tests {
         let seek_key = test_key_of(0).encode();
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), block_1_second_key.table_key_as_slice());
+        assert_eq!(iter.key(), block_1_second_key.to_ref());
         // Use None seek key and result in the second KV of block 1.
         iter.seek_idx(0, None).await.unwrap();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), block_1_second_key.table_key_as_slice());
+        assert_eq!(iter.key(), block_1_second_key.to_ref());
     }
 }

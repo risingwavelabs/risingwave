@@ -66,7 +66,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
         }
         while iter.is_valid() {
             key_counts += 1;
-            let current_key = iter.key().table_key_as_vec();
+            let current_key = iter.key().to_vec();
             // Locally unique and Globally unique
             if let Some((duplicate_sst_id, duplicate_worker_id)) =
                 visited_keys.get(&current_key).cloned()

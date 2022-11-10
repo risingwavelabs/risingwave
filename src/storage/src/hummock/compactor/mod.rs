@@ -543,11 +543,13 @@ impl Compactor {
         } else {
             iter.rewind().await?;
         }
+
         let max_key = if task_config.key_range.right.is_empty() {
             FullKey::default()
         } else {
-            FullKey::decode(&task_config.key_range.right).table_key_as_vec()
+            FullKey::decode(&task_config.key_range.right).to_vec()
         };
+        let max_key = max_key.to_ref();
 
         let mut last_key = FullKey::default();
         let mut watermark_can_see_last_key = false;
@@ -558,18 +560,14 @@ impl Compactor {
         while iter.is_valid() {
             let iter_key = iter.key();
 
-            let is_new_user_key = last_key.is_empty()
-                || KeyComparator::compare_user_key(&iter_key.user_key, &last_key.user_key)
-                    != std::cmp::Ordering::Equal;
+            let is_new_user_key =
+                last_key.is_empty() || iter_key.user_key != last_key.user_key.as_ref();
 
             let mut drop = false;
             let epoch = iter_key.epoch;
             let value = iter.value();
             if is_new_user_key {
-                if !max_key.is_empty()
-                    && KeyComparator::compare_full_key(&iter_key, &max_key)
-                        != std::cmp::Ordering::Less
-                {
+                if !max_key.is_empty() && iter_key >= max_key {
                     break;
                 }
 

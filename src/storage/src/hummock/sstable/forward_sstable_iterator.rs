@@ -218,7 +218,7 @@ mod tests {
         while sstable_iter.is_valid() {
             let key = sstable_iter.key();
             let value = sstable_iter.value();
-            assert_eq!(key, test_key_of(cnt).table_key_as_slice());
+            assert_eq!(key, test_key_of(cnt).to_ref());
             assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
             cnt += 1;
             sstable_iter.next().await.unwrap();
@@ -266,23 +266,17 @@ mod tests {
 
         // We seek and access all the keys in random order
         for i in all_key_to_test {
-            sstable_iter
-                .seek(test_key_of(i).table_key_as_slice())
-                .await
-                .unwrap();
+            sstable_iter.seek(test_key_of(i).to_ref()).await.unwrap();
             // sstable_iter.next().await.unwrap();
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(i).table_key_as_slice());
+            assert_eq!(key, test_key_of(i).to_ref());
         }
 
         // Seek to key #500 and start iterating.
-        sstable_iter
-            .seek(test_key_of(500).table_key_as_slice())
-            .await
-            .unwrap();
+        sstable_iter.seek(test_key_of(500).to_ref()).await.unwrap();
         for i in 500..TEST_KEYS_COUNT {
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(i).table_key_as_slice());
+            assert_eq!(key, test_key_of(i).to_ref());
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
@@ -293,12 +287,9 @@ mod tests {
             format!("key_aaaa_{:05}", 0).as_bytes().to_vec(),
             233,
         );
-        sstable_iter
-            .seek(smallest_key.table_key_as_slice())
-            .await
-            .unwrap();
+        sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
         let key = sstable_iter.key();
-        assert_eq!(key, test_key_of(0).table_key_as_slice());
+        assert_eq!(key, test_key_of(0).to_ref());
 
         // Seek to > last key
         let largest_key = FullKey::new(
@@ -306,10 +297,7 @@ mod tests {
             format!("key_zzzz_{:05}", 0).as_bytes().to_vec(),
             233,
         );
-        sstable_iter
-            .seek(largest_key.table_key_as_slice())
-            .await
-            .unwrap();
+        sstable_iter.seek(largest_key.to_ref()).await.unwrap();
         assert!(!sstable_iter.is_valid());
 
         // Seek to non-existing key
@@ -325,13 +313,13 @@ mod tests {
                         format!("key_test_{:05}", idx * 2 - 1).as_bytes().to_vec(),
                         0,
                     )
-                    .table_key_as_slice(),
+                    .to_ref(),
                 )
                 .await
                 .unwrap();
 
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(idx).table_key_as_slice());
+            assert_eq!(key, test_key_of(idx).to_ref());
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
@@ -365,7 +353,7 @@ mod tests {
         while sstable_iter.is_valid() {
             let key = sstable_iter.key();
             let value = sstable_iter.value();
-            assert_eq!(key, test_key_of(cnt).table_key_as_slice());
+            assert_eq!(key, test_key_of(cnt).to_ref());
             assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
             cnt += 1;
             sstable_iter.next().await.unwrap();

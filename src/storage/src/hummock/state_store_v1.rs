@@ -89,7 +89,6 @@ impl HummockStorageV1 {
                 uncommitted_data,
                 full_key,
                 &mut local_stats,
-                table_key,
                 read_options.check_bloom_filter,
             )
             .await?;
@@ -105,7 +104,6 @@ impl HummockStorageV1 {
                 sync_uncommitted_data,
                 full_key,
                 &mut local_stats,
-                table_key,
                 read_options.check_bloom_filter,
             )
             .await?;

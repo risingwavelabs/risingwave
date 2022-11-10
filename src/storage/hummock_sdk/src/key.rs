@@ -331,6 +331,8 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
 /// The encoded format is | `table_id` | `table_key` |.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UserKey<T: AsRef<[u8]>> {
+    // When comapring `UserKey`, we first compare `table_id`, then `table_key`. So the order of
+    // declaration matters.
     pub table_id: TableId,
     pub table_key: T,
 }
@@ -372,13 +374,13 @@ impl<'a> UserKey<&'a [u8]> {
         }
     }
 
-    pub fn table_key_as_vec(&self) -> UserKey<Vec<u8>> {
+    pub fn to_vec(self) -> UserKey<Vec<u8>> {
         UserKey::new(self.table_id, Vec::from(self.table_key))
     }
 }
 
 impl UserKey<Vec<u8>> {
-    pub fn table_key_as_slice(&self) -> UserKey<&[u8]> {
+    pub fn as_ref(&self) -> UserKey<&[u8]> {
         UserKey::new(self.table_id, self.table_key.as_slice())
     }
 
@@ -448,18 +450,18 @@ impl<'a> FullKey<&'a [u8]> {
         }
     }
 
-    pub fn table_key_as_vec(&self) -> FullKey<Vec<u8>> {
+    pub fn to_vec(self) -> FullKey<Vec<u8>> {
         FullKey {
-            user_key: self.user_key.table_key_as_vec(),
+            user_key: self.user_key.to_vec(),
             epoch: self.epoch,
         }
     }
 }
 
 impl FullKey<Vec<u8>> {
-    pub fn table_key_as_slice(&self) -> FullKey<&[u8]> {
+    pub fn to_ref(&self) -> FullKey<&[u8]> {
         FullKey {
-            user_key: self.user_key.table_key_as_slice(),
+            user_key: self.user_key.as_ref(),
             epoch: self.epoch,
         }
     }

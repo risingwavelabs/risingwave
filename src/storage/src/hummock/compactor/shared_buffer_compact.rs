@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -25,7 +24,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, KeyComparator};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
@@ -158,9 +157,7 @@ async fn compact_shared_buffer(
         let mut last_buffer_size = 0;
         let mut last_user_key = UserKey::default();
         for (data_size, user_key) in size_and_start_user_keys {
-            if last_buffer_size >= sub_compaction_data_size
-                && KeyComparator::compare_user_key(&last_user_key, &user_key) != Ordering::Equal
-            {
+            if last_buffer_size >= sub_compaction_data_size && last_user_key.as_ref() != user_key {
                 last_user_key.set(user_key);
                 key_split_append(
                     &FullKey {

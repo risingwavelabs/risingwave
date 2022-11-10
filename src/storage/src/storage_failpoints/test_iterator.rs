@@ -58,17 +58,13 @@ async fn test_failpoints_concat_read_err() {
     );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
-    let result = iter
-        .seek(iterator_test_key_of(22).table_key_as_slice())
-        .await;
+    let result = iter.seek(iterator_test_key_of(22).to_ref()).await;
     assert!(result.is_err());
     let result = iter
-        .seek(iterator_test_key_of(4 * TEST_KEYS_COUNT).table_key_as_slice())
+        .seek(iterator_test_key_of(4 * TEST_KEYS_COUNT).to_ref())
         .await;
     assert!(result.is_err());
-    let result = iter
-        .seek(iterator_test_key_of(23).table_key_as_slice())
-        .await;
+    let result = iter.seek(iterator_test_key_of(23).to_ref()).await;
     assert!(result.is_err());
     fail::remove(mem_read_err);
     iter.rewind().await.unwrap();
@@ -77,7 +73,7 @@ async fn test_failpoints_concat_read_err() {
     while iter.is_valid() {
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(i * 2).table_key_as_slice());
+        assert_eq!(key, iterator_test_key_of(i * 2).to_ref());
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(i * 2).as_slice()
@@ -123,13 +119,9 @@ async fn test_failpoints_backward_concat_read_err() {
     );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
-    let result = iter
-        .seek(iterator_test_key_of(2).table_key_as_slice())
-        .await;
+    let result = iter.seek(iterator_test_key_of(2).to_ref()).await;
     assert!(result.is_err());
-    let result = iter
-        .seek(iterator_test_key_of(3).table_key_as_slice())
-        .await;
+    let result = iter.seek(iterator_test_key_of(3).to_ref()).await;
     assert!(result.is_err());
     fail::remove(mem_read_err);
     iter.rewind().await.unwrap();
@@ -139,7 +131,7 @@ async fn test_failpoints_backward_concat_read_err() {
         i -= 1;
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(i * 2).table_key_as_slice());
+        assert_eq!(key, iterator_test_key_of(i * 2).to_ref());
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(i * 2).as_slice()
@@ -205,9 +197,7 @@ async fn test_failpoints_merge_invalid_key() {
         }
     }
     assert!(count < 200 * 2);
-    mi.seek(iterator_test_key_of(350).table_key_as_slice())
-        .await
-        .unwrap();
+    mi.seek(iterator_test_key_of(350).to_ref()).await.unwrap();
     assert!(!mi.is_valid());
     fail::remove(mem_read_err);
 }
@@ -261,9 +251,7 @@ async fn test_failpoints_backward_merge_invalid_key() {
         }
     }
     assert!(count < 200 * 2);
-    mi.seek(iterator_test_key_of(10).table_key_as_slice())
-        .await
-        .unwrap();
+    mi.seek(iterator_test_key_of(10).to_ref()).await.unwrap();
     assert!(!mi.is_valid());
     fail::remove(mem_read_err);
 }
@@ -328,7 +316,7 @@ async fn test_failpoints_user_read_err() {
         }
     }
     assert!(i < 400);
-    ui.seek(iterator_test_user_key_of(350).table_key_as_slice())
+    ui.seek(iterator_test_user_key_of(350).as_ref())
         .await
         .unwrap();
     assert!(!ui.is_valid());
@@ -394,7 +382,7 @@ async fn test_failpoints_backward_user_read_err() {
         }
     }
     assert!(i > 0);
-    ui.seek(iterator_test_user_key_of(10).table_key_as_slice())
+    ui.seek(iterator_test_user_key_of(10).as_ref())
         .await
         .unwrap();
     assert!(!ui.is_valid());
