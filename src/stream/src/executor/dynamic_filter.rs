@@ -453,18 +453,20 @@ mod tests {
             vec![column_descs.clone()],
             vec![OrderType::Ascending],
             vec![0],
-        );
+        )
+        .await;
         let state_table_r = StateTable::new_without_distribution(
             mem_state,
             TableId::new(1),
             vec![column_descs],
             vec![OrderType::Ascending],
             vec![0],
-        );
+        )
+        .await;
         (state_table_l, state_table_r)
     }
 
-    fn create_executor(
+    async fn create_executor(
         comparator: ExprNodeType,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let mem_state = MemoryStateStore::new();
@@ -692,7 +694,8 @@ mod tests {
             "  I
              + 4",
         );
-        let (mut tx_l, mut tx_r, mut dynamic_filter) = create_executor(ExprNodeType::GreaterThan);
+        let (mut tx_l, mut tx_r, mut dynamic_filter) =
+            create_executor(ExprNodeType::GreaterThan).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -796,7 +799,7 @@ mod tests {
              + 5",
         );
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor(ExprNodeType::GreaterThanOrEqual);
+            create_executor(ExprNodeType::GreaterThanOrEqual).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -899,7 +902,8 @@ mod tests {
             "  I
              + 1",
         );
-        let (mut tx_l, mut tx_r, mut dynamic_filter) = create_executor(ExprNodeType::LessThan);
+        let (mut tx_l, mut tx_r, mut dynamic_filter) =
+            create_executor(ExprNodeType::LessThan).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1003,7 +1007,7 @@ mod tests {
              + 0",
         );
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor(ExprNodeType::LessThanOrEqual);
+            create_executor(ExprNodeType::LessThanOrEqual).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);

@@ -17,7 +17,7 @@ use risingwave_common::types::DataType;
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// The catalog `pg_index` contains part of the information about indexes.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
+/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-index.html`]
 pub const PG_INDEX_TABLE_NAME: &str = "pg_index";
 pub const PG_INDEX_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "indexrelid"),
