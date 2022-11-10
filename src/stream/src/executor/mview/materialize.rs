@@ -25,7 +25,6 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_expr::expr::data_types;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::table::compute_chunk_vnode;
 use risingwave_storage::table::streaming_table::mem_table::RowOp;
@@ -95,6 +94,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     }
 
     /// Create a new `MaterializeExecutor` without distribution info for test purpose.
+    #[allow(clippy::too_many_arguments)]
     pub async fn for_test(
         input: BoxedExecutor,
         store: S,
@@ -134,7 +134,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(lru_manager, cache_size),
-            ignore_on_conflict: true,
+            ignore_on_conflict: false,
         }
     }
 
@@ -158,7 +158,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 }
                 Message::Chunk(chunk) => {
                     match self.ignore_on_conflict {
-                        false | true => {
+                        false => {
                             let (data_chunk, ops) = chunk.clone().into_parts();
 
                             let value_chunk =
@@ -232,7 +232,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                             } else {
                                 // ensure all key in cache, get from storage
                                 for key in buffer.buffer.keys() {
-                                    if self.materialize_cache.get(&key).is_none() {
+                                    if self.materialize_cache.get(key).is_none() {
                                         // key do not exsit in cache
                                         if let Some(storage_value) = self
                                             .state_table
@@ -254,7 +254,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                                 // do check
                                 let mut output = buffer.buffer.clone();
-                                for (key, row_op) in buffer.buffer.into_iter() {
+                                for (key, row_op) in buffer.buffer {
                                     match row_op {
                                         RowOp::Insert(row) => {
                                             if let Some(cache_row) =
@@ -282,6 +282,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                         key.clone(),
                                                         RowOp::Delete(cache_row.to_vec()),
                                                     );
+
                                                     self.materialize_cache.insert(key, None);
                                                 } else {
                                                     self.materialize_cache.insert(key, None);
@@ -329,10 +330,11 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                     None => continue,
                                 }
                             }
-                        } /* true => {
-                           *     self.state_table.write_chunk(chunk.clone());
-                           *     Message::Chunk(chunk)
-                           * } */
+                        }
+                        true => {
+                            self.state_table.write_chunk(chunk.clone());
+                            Message::Chunk(chunk)
+                        }
                     }
                 }
                 Message::Barrier(b) => {
@@ -358,7 +360,7 @@ fn generator_output(
     let mut new_ops: Vec<Op> = vec![];
     let mut new_rows: Vec<Vec<u8>> = vec![];
     let row_deserializer = RowDeserializer::new(data_types.clone());
-    for (_, row_op) in output.into_iter() {
+    for (_, row_op) in output {
         match row_op {
             RowOp::Insert(value) => {
                 new_ops.push(Op::Insert);
@@ -376,7 +378,7 @@ fn generator_output(
             }
         }
     }
-    let mut data_chunk_builder = DataChunkBuilder::new(data_types.clone(), new_rows.len() + 1);
+    let mut data_chunk_builder = DataChunkBuilder::new(data_types, new_rows.len() + 1);
 
     for row_bytes in new_rows {
         let res = data_chunk_builder
@@ -393,6 +395,12 @@ fn generator_output(
 }
 pub struct MaterializeBuffer {
     buffer: HashMap<Vec<u8>, RowOp>,
+}
+
+impl Default for MaterializeBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MaterializeBuffer {
@@ -552,6 +560,112 @@ mod tests {
             " i i
             + 7 8
             - 3 6",
+        );
+
+        // Prepare stream executors.
+        let source = MockSource::with_messages(
+            schema.clone(),
+            PkIndices::new(),
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(chunk1),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Chunk(chunk2),
+                Message::Barrier(Barrier::new_test_barrier(3)),
+            ],
+        );
+
+        let order_types = vec![OrderType::Ascending];
+        let column_descs = vec![
+            ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+            ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ];
+
+        let table = StorageTable::for_test(
+            memory_state_store.clone(),
+            table_id,
+            column_descs,
+            order_types,
+            vec![0],
+        );
+
+        let mut materialize_executor = Box::new(
+            MaterializeExecutor::for_test(
+                Box::new(source),
+                memory_state_store,
+                table_id,
+                vec![OrderPair::new(0, OrderType::Ascending)],
+                column_ids,
+                1,
+                None,
+                100,
+            )
+            .await,
+        )
+        .execute();
+        materialize_executor.next().await.transpose().unwrap();
+
+        materialize_executor.next().await.transpose().unwrap();
+
+        // First stream chunk. We check the existence of (3) -> (3,6)
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                let row = table
+                    .get_row(
+                        &Row(vec![Some(3_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, Some(Row(vec![Some(3_i32.into()), Some(6_i32.into())])));
+            }
+            _ => unreachable!(),
+        }
+        materialize_executor.next().await.transpose().unwrap();
+        // Second stream chunk. We check the existence of (7) -> (7,8)
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                let row = table
+                    .get_row(
+                        &Row(vec![Some(7_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, Some(Row(vec![Some(7_i32.into()), Some(8_i32.into())])));
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_materialize_executor_check_conflict() {
+        // Prepare storage and memtable.
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        // Two columns of int32 type, the first column is PK.
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let column_ids = vec![0.into(), 1.into()];
+
+        // Prepare source chunks.
+        let chunk1 = StreamChunk::from_pretty(
+            " i i
+            + 1 4
+            + 2 5
+            + 3 6",
+        );
+
+        // test invalid delete
+        let chunk2 = StreamChunk::from_pretty(
+            " i i
+            + 7 8
+            - 3 4
+            - 5 0
+            U- 6 0
+            U- 3 5",
         );
 
         // Prepare stream executors.
