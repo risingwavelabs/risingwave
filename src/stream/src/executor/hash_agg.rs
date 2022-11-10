@@ -491,6 +491,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             input, mut extra, ..
         } = self;
 
+        let mut group_key_invert_idx: Vec<isize> = vec![-1; extra.input_schema.len()];
+        for (group_key_seq, group_key_idx) in extra.group_key_indices.iter().enumerate() {
+            group_key_invert_idx[*group_key_idx] = group_key_seq as isize;
+        }
+
         // The cached state managers. `HashKey -> AggStates`.
         let mut agg_states = if let Some(lru_manager) = extra.lru_manager.clone() {
             ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
@@ -512,12 +517,18 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         yield Message::Barrier(barrier);
 
+        let mut buffered_watermarks = vec![None; extra.group_key_indices.len()];
+
         #[for_await]
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                Message::Watermark(mut watermark) => {
+                    let group_key_seq = group_key_invert_idx[watermark.col_idx];
+                    if group_key_seq != -1 {
+                        watermark.col_idx = group_key_seq as usize;
+                        buffered_watermarks[group_key_seq as usize] = Some(watermark);
+                    }
                 }
 
                 Message::Chunk(chunk) => {
@@ -527,6 +538,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     #[for_await]
                     for chunk in Self::flush_data(&mut extra, &mut agg_states, barrier.epoch) {
                         yield Message::Chunk(chunk?);
+                    }
+
+                    for buffered_watermark in buffered_watermarks.iter_mut() {
+                        if let Some(watermark) = buffered_watermark.take() {
+                            // TODO("https://github.com/risingwavelabs/risingwave/issues/6112"): do some state cleaning
+                            yield Message::Watermark(watermark);
+                        }
                     }
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
