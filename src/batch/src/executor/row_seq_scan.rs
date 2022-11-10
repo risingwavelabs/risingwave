@@ -379,7 +379,10 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             .batch_iter_with_pk_bounds(
                 HummockReadEpoch::Committed(epoch),
                 &pk_prefix,
-                next_col_bounds,
+                (
+                    next_col_bounds.0.map(|x| Row::new(vec![x])),
+                    next_col_bounds.1.map(|x| Row::new(vec![x])),
+                ),
             )
             .await?;
 

@@ -81,6 +81,7 @@ mod top_n;
 mod union;
 mod wrapper;
 
+mod backfill;
 #[cfg(test)]
 mod integration_tests;
 #[cfg(test)]
@@ -88,6 +89,7 @@ mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
+pub use backfill::*;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};

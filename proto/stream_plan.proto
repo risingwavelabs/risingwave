@@ -321,6 +321,9 @@ message ChainNode {
   // FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
   // fragment in the downstream mview. Remove this when we refactor the fragmenter.
   bool is_singleton = 6;
+
+  // The upstream materialized view info used by backfill.
+  plan_common.StorageTableDesc table_desc = 7;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
