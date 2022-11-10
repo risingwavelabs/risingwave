@@ -359,7 +359,9 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(schema.name())),
                         Some(ScalarImpl::Utf8(view.name().to_string())),
                         // TODO(zehua): after fix issue #6080, there must be Some.
-                        user_info_reader.get_user_name_by_id(view.owner).map(ScalarImpl::Utf8),
+                        user_info_reader
+                            .get_user_name_by_id(view.owner)
+                            .map(ScalarImpl::Utf8),
                         // TODO(zehua): may be not same as postgresql's "definition" column.
                         Some(ScalarImpl::Utf8(view.sql.clone())),
                     ])
