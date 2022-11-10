@@ -12,13 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::Bound;
+use std::fmt::Debug;
+use std::future::Future;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
@@ -32,11 +38,20 @@ use risingwave_storage::hummock::event_handler::HummockEvent;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
+use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
 use risingwave_storage::monitor::StateStoreMetrics;
-use risingwave_storage::store::SyncResult;
-use risingwave_storage::StateStore;
+use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::store::{
+    EmptyFutureTrait, GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, NextFutureTrait,
+    ReadOptions, StateStoreRead, StateStoreWrite, StaticSendSync, SyncFutureTrait, SyncResult,
+    WriteOptions,
+};
+use risingwave_storage::{
+    define_state_store_associated_type, define_state_store_read_associated_type,
+    define_state_store_write_associated_type, StateStore, StateStoreIter,
+};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 pub struct TestNotificationClient<S: MetaStore> {
@@ -156,7 +171,7 @@ pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
 }
 
 #[async_trait::async_trait]
-pub(crate) trait HummockStateStoreTestTrait: StateStore {
+pub(crate) trait HummockStateStoreTestTrait: StateStore + StateStoreWrite {
     fn get_pinned_version(&self) -> PinnedVersion;
     async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
         self.seal_epoch(epoch, true);
@@ -164,9 +179,157 @@ pub(crate) trait HummockStateStoreTestTrait: StateStore {
     }
 }
 
-impl HummockStateStoreTestTrait for HummockStorage {
+fn assert_result_eq<Item: PartialEq + Debug, E>(
+    first: &std::result::Result<Item, E>,
+    second: &std::result::Result<Item, E>,
+) {
+    match (first, second) {
+        (Ok(first), Ok(second)) => {
+            assert_eq!(first, second);
+        }
+        (Err(_), Err(_)) => {}
+        _ => panic!("result not equal"),
+    }
+}
+
+pub(crate) struct LocalGlobalStateStoreHolder<L, G> {
+    pub(crate) local: L,
+    pub(crate) global: G,
+}
+
+impl<L: StateStoreIter<Item: PartialEq + Debug>, G: StateStoreIter<Item = L::Item>> StateStoreIter
+    for LocalGlobalStateStoreHolder<L, G>
+{
+    type Item = L::Item;
+
+    type NextFuture<'a> = impl NextFutureTrait<'a, L::Item>;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async {
+            let local_result = self.local.next().await;
+            let global_result = self.global.next().await;
+            assert_result_eq(&local_result, &global_result);
+            local_result
+        }
+    }
+}
+
+impl<L: StateStoreRead, G: StateStoreRead> StateStoreRead for LocalGlobalStateStoreHolder<L, G> {
+    type Iter = LocalGlobalStateStoreHolder<L::Iter, G::Iter>;
+
+    define_state_store_read_associated_type!();
+
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> Self::GetFuture<'_> {
+        async move {
+            let local = self.local.get(key, epoch, read_options.clone()).await;
+            let global = self.global.get(key, epoch, read_options).await;
+            assert_result_eq(&local, &global);
+            local
+        }
+    }
+
+    fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_> {
+        async move {
+            let local_iter = self
+                .local
+                .iter(key_range.clone(), epoch, read_options.clone())
+                .await?;
+            let global_iter = self.global.iter(key_range, epoch, read_options).await?;
+            Ok(LocalGlobalStateStoreHolder {
+                local: local_iter,
+                global: global_iter,
+            })
+        }
+    }
+}
+
+impl<L: StateStoreWrite, G: StaticSendSync> StateStoreWrite for LocalGlobalStateStoreHolder<L, G> {
+    define_state_store_write_associated_type!();
+
+    fn ingest_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
+        write_options: WriteOptions,
+    ) -> Self::IngestBatchFuture<'_> {
+        self.local
+            .ingest_batch(kv_pairs, delete_ranges, write_options)
+    }
+}
+
+impl<G: Clone, L: Clone> Clone for LocalGlobalStateStoreHolder<G, L> {
+    fn clone(&self) -> Self {
+        Self {
+            local: self.local.clone(),
+            global: self.global.clone(),
+        }
+    }
+}
+
+impl<G: StateStore> StateStore for LocalGlobalStateStoreHolder<G::Local, G>
+where
+    <G as StateStore>::Local: Clone,
+{
+    type Local = G::Local;
+
+    type NewLocalFuture<'a> = impl Future<Output = G::Local> + Send;
+
+    define_state_store_associated_type!();
+
+    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+        self.global.try_wait_epoch(epoch)
+    }
+
+    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
+        self.global.sync(epoch)
+    }
+
+    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
+        self.global.seal_epoch(epoch, is_checkpoint)
+    }
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move { self.global.clear_shared_buffer().await }
+    }
+
+    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
+        async { unimplemented!("should not be called new local again") }
+    }
+}
+
+impl<G: StateStore> LocalGlobalStateStoreHolder<G::Local, G> {
+    pub(crate) async fn new(state_store: G) -> Self {
+        LocalGlobalStateStoreHolder {
+            local: state_store.new_local(TEST_TABLE_ID).await,
+            global: state_store,
+        }
+    }
+}
+
+pub(crate) type HummockV2MixedStateStore =
+    LocalGlobalStateStoreHolder<LocalHummockStorage, HummockStorage>;
+
+impl Deref for HummockV2MixedStateStore {
+    type Target = HummockStorage;
+
+    fn deref(&self) -> &Self::Target {
+        &self.global
+    }
+}
+
+impl HummockStateStoreTestTrait for HummockV2MixedStateStore {
     fn get_pinned_version(&self) -> PinnedVersion {
-        self.get_pinned_version()
+        self.global.get_pinned_version()
     }
 }
 
@@ -199,7 +362,10 @@ pub(crate) async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHumm
     (hummock_storage, meta_client)
 }
 
-pub(crate) async fn with_hummock_storage_v2() -> (HummockStorage, Arc<MockHummockMetaClient>) {
+pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+
+pub(crate) async fn with_hummock_storage_v2(
+) -> (HummockV2MixedStateStore, Arc<MockHummockMetaClient>) {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -218,5 +384,8 @@ pub(crate) async fn with_hummock_storage_v2() -> (HummockStorage, Arc<MockHummoc
     .await
     .unwrap();
 
-    (hummock_storage, meta_client)
+    (
+        HummockV2MixedStateStore::new(hummock_storage).await,
+        meta_client,
+    )
 }

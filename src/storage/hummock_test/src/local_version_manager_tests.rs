@@ -101,7 +101,7 @@ async fn test_update_pinned_version() {
     // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
     for i in 0..2 {
         local_version_manager
-            .write_shared_buffer(epochs[i], batches[i].clone(), Default::default())
+            .write_shared_buffer(epochs[i], batches[i].clone(), vec![], Default::default())
             .await
             .unwrap();
         let local_version = local_version_manager.get_local_version();
@@ -114,7 +114,7 @@ async fn test_update_pinned_version() {
     }
 
     local_version_manager
-        .write_shared_buffer(epochs[2], batches[2].clone(), Default::default())
+        .write_shared_buffer(epochs[2], batches[2].clone(), vec![], Default::default())
         .await
         .unwrap();
     let local_version = local_version_manager.get_local_version();
@@ -252,7 +252,7 @@ async fn test_update_uncommitted_ssts() {
     // Fill shared buffer with dummy batches
     for i in 0..2 {
         local_version_manager
-            .write_shared_buffer(epochs[i], kvs[i].clone(), Default::default())
+            .write_shared_buffer(epochs[i], kvs[i].clone(), vec![], Default::default())
             .await
             .unwrap();
         let local_version = local_version_manager.get_local_version();
@@ -436,7 +436,7 @@ async fn test_clear_shared_buffer() {
     // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
     for i in 0..2 {
         local_version_manager
-            .write_shared_buffer(epochs[i], batches[i].clone(), Default::default())
+            .write_shared_buffer(epochs[i], batches[i].clone(), vec![], Default::default())
             .await
             .unwrap();
         let local_version = local_version_manager.get_local_version();
@@ -485,7 +485,7 @@ async fn test_sst_gc_watermark() {
 
     for i in 0..2 {
         local_version_manager
-            .write_shared_buffer(epochs[i], batches[i].clone(), Default::default())
+            .write_shared_buffer(epochs[i], batches[i].clone(), vec![], Default::default())
             .await
             .unwrap();
     }

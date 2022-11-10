@@ -28,6 +28,7 @@ use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
 use smallvec::SmallVec;
 
 use super::ops::IsNegative;
+use super::to_binary::ToBinary;
 use super::*;
 use crate::error::{ErrorCode, Result, RwError};
 
@@ -283,6 +284,14 @@ impl IntervalUnit {
     pub fn is_positive(&self) -> bool {
         self > &Self::new(0, 0, 0)
     }
+
+    pub fn min() -> Self {
+        Self {
+            months: i32::MIN,
+            days: i32::MIN,
+            ms: i64::MIN,
+        }
+    }
 }
 
 impl Serialize for IntervalUnit {
@@ -524,6 +533,14 @@ impl<'a> FromSql<'a> for IntervalUnit {
 
     fn accepts(ty: &Type) -> bool {
         matches!(*ty, Type::INTERVAL)
+    }
+}
+
+impl ToBinary for IntervalUnit {
+    fn to_binary(&self) -> Option<Bytes> {
+        let mut output = BytesMut::new();
+        self.to_sql(&Type::ANY, &mut output).unwrap();
+        Some(output.freeze())
     }
 }
 
@@ -771,7 +788,7 @@ impl IntervalUnit {
                             if second > OrderedF64::from(0) && second < OrderedF64::from(0.001) {
                                 return None;
                             }
-                            let ms = (second * 1000_f64).round() as i64;
+                            let ms = (second.into_inner() * 1000_f64).round() as i64;
                             Some(IntervalUnit::from_millis(ms))
                         }
                         _ => None,

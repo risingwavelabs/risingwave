@@ -132,11 +132,13 @@ impl LocalVersionManager {
         &self,
         epoch: HummockEpoch,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         table_id: TableId,
     ) -> HummockResult<usize> {
         let batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
             kv_pairs,
+            delete_ranges,
             table_id,
             Some(self.buffer_tracker.get_memory_limiter().as_ref()),
         )

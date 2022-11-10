@@ -19,8 +19,9 @@ use crate::executor::LocalSimpleAggExecutor;
 
 pub struct LocalSimpleAggExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,

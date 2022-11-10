@@ -41,8 +41,10 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterato
 use crate::hummock::shared_buffer::SharedBufferIteratorType;
 use crate::hummock::{BackwardSstableIterator, SstableIterator, SstableIteratorType};
 
+mod delete_range_iterator;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
+pub use delete_range_iterator::DeleteRangeIterator;
 
 use crate::monitor::StoreLocalStatistic;
 

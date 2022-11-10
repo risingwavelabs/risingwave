@@ -304,7 +304,7 @@ where
                 let dispatcher_update = dispatcher_update.into_values().collect();
 
                 let mut merge_update = HashMap::new();
-                for (&fragment_id, reschedule) in reschedules.iter() {
+                for (&fragment_id, reschedule) in reschedules {
                     if let Some(downstream_fragment_id) = reschedule.downstream_fragment_id {
                         // Find the actors of the downstream fragment.
                         let downstream_actor_ids = self

@@ -674,6 +674,7 @@ mod tests {
         SharedBufferBatch::build_shared_buffer_batch(
             epoch,
             vec![(key, StorageValue::new_delete())],
+            vec![],
             TEST_TABLE_ID,
             None,
         )

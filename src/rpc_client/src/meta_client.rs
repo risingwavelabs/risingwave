@@ -20,6 +20,7 @@ use async_trait::async_trait;
 use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
     SstIdRange,
@@ -382,20 +383,29 @@ impl MetaClient {
     pub fn start_heartbeat_loop(
         meta_client: MetaClient,
         min_interval: Duration,
+        max_interval: Duration,
         extra_info_sources: Vec<ExtraInfoSourceRef>,
     ) -> (JoinHandle<()>, Sender<()>) {
+        assert!(min_interval < max_interval);
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             let mut min_interval_ticker = tokio::time::interval(min_interval);
+            let mut max_interval_ticker = tokio::time::interval(max_interval);
             loop {
                 tokio::select! {
-                    // Wait for interval
-                    _ = min_interval_ticker.tick() => {},
+                    biased;
                     // Shutdown
                     _ = &mut shutdown_rx => {
                         tracing::info!("Heartbeat loop is stopped");
                         return;
                     }
+                    // Wait for interval
+                    _ = min_interval_ticker.tick() => {},
+                    _ = max_interval_ticker.tick() => {
+                        // Client has lost connection to the server and reached time limit, it should exit.
+                        tracing::error!("Heartbeat timeout, exiting...");
+                        std::process::exit(1);
+                    },
                 }
                 let mut extra_info = Vec::with_capacity(extra_info_sources.len());
                 for extra_info_source in &extra_info_sources {
@@ -413,7 +423,9 @@ impl MetaClient {
                 )
                 .await
                 {
-                    Ok(Ok(_)) => {}
+                    Ok(Ok(_)) => {
+                        max_interval_ticker.reset();
+                    }
                     Ok(Err(err)) => {
                         tracing::warn!("Failed to send_heartbeat: error {}", err);
                     }
@@ -511,6 +523,15 @@ impl MetaClient {
             compaction_groups,
         };
         let _resp = self.inner.init_metadata_for_replay(req).await?;
+        Ok(())
+    }
+
+    pub async fn set_compactor_runtime_config(&self, config: CompactorRuntimeConfig) -> Result<()> {
+        let req = SetCompactorRuntimeConfigRequest {
+            context_id: self.worker_id,
+            config: Some(config.into()),
+        };
+        let _resp = self.inner.set_compactor_runtime_config(req).await?;
         Ok(())
     }
 
@@ -889,6 +910,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_list_compaction_group, RiseCtlListCompactionGroupRequest, RiseCtlListCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
+            ,{ hummock_client, set_compactor_runtime_config, SetCompactorRuntimeConfigRequest, SetCompactorRuntimeConfigResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

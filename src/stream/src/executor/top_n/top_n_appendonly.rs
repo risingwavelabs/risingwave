@@ -332,7 +332,8 @@ mod tests {
             &[DataType::Int64, DataType::Int64],
             &[OrderType::Ascending, OrderType::Ascending],
             &[0, 1],
-        );
+        )
+        .await;
 
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(
@@ -415,7 +416,8 @@ mod tests {
             &[DataType::Int64, DataType::Int64],
             &[OrderType::Ascending, OrderType::Ascending],
             &[0, 1],
-        );
+        )
+        .await;
 
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(

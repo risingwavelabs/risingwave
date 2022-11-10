@@ -481,15 +481,20 @@ impl StateStoreWrite for HummockStorageV1 {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            if kv_pairs.is_empty() {
+                return Ok(0);
+            }
+
             let epoch = write_options.epoch;
             // See comments in HummockStorage::iter_inner for details about using
             // compaction_group_id in read/write path.
             let size = self
                 .local_version_manager
-                .write_shared_buffer(epoch, kv_pairs, write_options.table_id)
+                .write_shared_buffer(epoch, kv_pairs, delete_ranges, write_options.table_id)
                 .await?;
             Ok(size)
         }
@@ -501,7 +506,7 @@ impl LocalStateStore for HummockStorageV1 {}
 impl StateStore for HummockStorageV1 {
     type Local = Self;
 
-    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + 'a;
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
     define_state_store_associated_type!();
 

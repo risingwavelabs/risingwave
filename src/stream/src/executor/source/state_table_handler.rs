@@ -31,15 +31,14 @@ use risingwave_storage::StateStore;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
-#[derive(Clone)]
 pub struct SourceStateTableHandler<S: StateStore> {
     pub state_store: StateTable<S>,
 }
 
 impl<S: StateStore> SourceStateTableHandler<S> {
-    pub fn from_table_catalog(table_catalog: &ProstTable, store: S) -> Self {
+    pub async fn from_table_catalog(table_catalog: &ProstTable, store: S) -> Self {
         Self {
-            state_store: StateTable::from_table_catalog(table_catalog, store, None),
+            state_store: StateTable::from_table_catalog(table_catalog, store, None).await,
         }
     }
 
@@ -164,7 +163,8 @@ pub(crate) mod tests {
     async fn test_from_table_catalog() {
         let store = MemoryStateStore::new();
         let mut state_table =
-            StateTable::from_table_catalog(&default_source_internal_table(0x2333), store, None);
+            StateTable::from_table_catalog(&default_source_internal_table(0x2333), store, None)
+                .await;
         let a: Arc<str> = String::from("a").into();
         let a: Datum = Some(ScalarImpl::Utf8(a.as_ref().into()));
         let b: Arc<str> = String::from("b").into();
@@ -189,7 +189,8 @@ pub(crate) mod tests {
         let mut state_table_handler = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             store,
-        );
+        )
+        .await;
         let split_impl = SplitImpl::Kafka(KafkaSplit::new(0, Some(0), None, "test".into()));
         let serialized = split_impl.encode_to_bytes();
 

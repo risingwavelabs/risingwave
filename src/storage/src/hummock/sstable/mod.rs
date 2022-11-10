@@ -42,7 +42,9 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 mod delete_range_aggregator;
 mod sstable_id_manager;
 mod utils;
-pub use delete_range_aggregator::{DeleteRangeAggregator, DeleteRangeAggregatorIterator};
+pub use delete_range_aggregator::{
+    DeleteRangeAggregator, DeleteRangeAggregatorBuilder, RangeTombstonesCollector,
+};
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
@@ -57,9 +59,9 @@ const VERSION: u32 = 1;
 #[derive(Clone, PartialEq, Eq, Debug)]
 // delete keys located in [start_user_key, end_user_key)
 pub struct DeleteRangeTombstone {
-    start_user_key: Vec<u8>,
-    end_user_key: Vec<u8>,
-    sequence: HummockEpoch,
+    pub start_user_key: Vec<u8>,
+    pub end_user_key: Vec<u8>,
+    pub sequence: HummockEpoch,
 }
 
 impl DeleteRangeTombstone {
