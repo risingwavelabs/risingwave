@@ -133,10 +133,15 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 )
                 .boxed()
             } else {
-                RearrangedChainExecutor::new(snapshot, mview, upstream_indices, progress, schema,
-                params.pk_indices,
-            )
-                    .boxed()
+                RearrangedChainExecutor::new(
+                    snapshot,
+                    mview,
+                    upstream_indices,
+                    progress,
+                    schema,
+                    params.pk_indices,
+                )
+                .boxed()
             };
             Ok(executor)
         }
