@@ -42,7 +42,7 @@ type SortBufferKey = (ScalarImpl, Row);
 /// example, up to 8x memory can be used with `Row` compared to the `CompactRow`. However, if there
 /// are only a few rows that will be temporarily stored in the buffer during an epoch, `Row` will be
 /// more efficient instead due to no ser/de needed. So here we could do further optimizations.
-type SortBufferValue = (Row, bool);
+type SortBufferValue = (Row, bool, Vec<Watermark>);
 
 /// [`SortExecutor`] consumes unordered input data and outputs ordered data to downstream.
 pub struct SortExecutor<S: StateStore> {
@@ -131,19 +131,26 @@ impl<S: StateStore> SortExecutor<S> {
                     if col_idx == self.sort_column_index {
                         let watermark_value = val.clone();
 
+                        let mut irrelevant_watermarks = BTreeMap::new();
+
                         // Find out the records to send to downstream.
                         while let Some(entry) = self.buffer.first_entry() {
                             // Only when a record's timestamp is prior to the watermark should it be
                             // sent to downstream.
                             if entry.key().0 < watermark_value {
                                 // Remove the record from memory.
-                                let (row, persisted) = entry.remove();
+                                let (row, persisted, irrel_watermarks) = entry.remove();
                                 // Remove the record from state store. It is possible that a record
                                 // is not present in state store because this watermark arrives
                                 // before a barrier since last watermark.
                                 // TODO: Use range delete instead.
                                 if persisted {
                                     self.state_table.delete(row.clone());
+                                }
+
+                                for irrel_watermark in irrel_watermarks {
+                                    irrelevant_watermarks
+                                        .insert(irrel_watermark.col_idx, irrel_watermark);
                                 }
                                 // Add the record to stream chunk data. Note that we retrieve the
                                 // record from a BTreeMap, so data in this chunk should be ordered
@@ -156,6 +163,11 @@ impl<S: StateStore> SortExecutor<S> {
                                     let ops = vec![Op::Insert; data_chunk.capacity()];
                                     let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
                                     yield Message::Chunk(stream_chunk);
+                                    let watermarks_to_emit =
+                                        std::mem::take(&mut irrelevant_watermarks);
+                                    for (_, watermark_to_emit) in watermarks_to_emit {
+                                        yield Message::Watermark(watermark_to_emit);
+                                    }
                                 }
                             } else {
                                 // We have collected all data below watermark.
@@ -169,14 +181,24 @@ impl<S: StateStore> SortExecutor<S> {
                             let ops = vec![Op::Insert; data_chunk.capacity()];
                             let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
                             yield Message::Chunk(stream_chunk);
+                            for (_, watermark_to_emit) in irrelevant_watermarks {
+                                yield Message::Watermark(watermark_to_emit);
+                            }
                         }
 
                         // Update previous watermark, which is used for range delete.
                         self._prev_watermark = Some(val);
-                    }
 
-                    // Forward the watermark message.
-                    yield Message::Watermark(watermark);
+                        // Forward the watermark message, because no chunk can block this watermark
+                        // now.
+                        yield Message::Watermark(watermark);
+                    } else if let Some(mut last_entry) = self.buffer.last_entry() {
+                        last_entry.get_mut().2.push(watermark);
+                    } else {
+                        // Forward the watermark message, because no chunk can block this watermark
+                        // since there are no chunks in buffer.
+                        yield Message::Watermark(watermark);
+                    }
                 }
 
                 Message::Chunk(chunk) => {
@@ -195,7 +217,7 @@ impl<S: StateStore> SortExecutor<S> {
                                 let pk = row.by_indices(&self.pk_indices);
                                 // Null event time should not exist in the row since the `WatermarkFilter`
                                 // before the `Sort` will filter out the Null event time.
-                                self.buffer.insert((timestamp_datum.clone().unwrap(), pk), (row, false));
+                                self.buffer.insert((timestamp_datum.clone().unwrap(), pk), (row, false, vec![]));
                             },
                             // Other operations are not supported currently.
                             _ => unimplemented!("operations other than insert currently are not supported by sort executor")
@@ -207,7 +229,10 @@ impl<S: StateStore> SortExecutor<S> {
                     if barrier.checkpoint {
                         // If the barrier is a checkpoint, then we should persist all records in
                         // buffer that have not been persisted before to state store.
-                        for (row, persisted) in self.buffer.values_mut() {
+
+                        // We do not need to persist watermarks because there will soon be new
+                        // watermarks after recovery :-)
+                        for (row, persisted, _watermarks) in self.buffer.values_mut() {
                             if !*persisted {
                                 self.state_table.insert(row.clone());
                                 // Update `persisted` so if the next barrier arrives before the
@@ -296,7 +321,7 @@ impl<S: StateStore> SortExecutor<S> {
                 // Null event time should not exist in the row since the `WatermarkFilter` before
                 // the `Sort` will filter out the Null event time.
                 self.buffer
-                    .insert((timestamp_datum.clone().unwrap(), pk), (row, true));
+                    .insert((timestamp_datum.clone().unwrap(), pk), (row, true, vec![]));
             }
         }
         Ok(())
