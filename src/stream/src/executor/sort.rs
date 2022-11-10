@@ -306,6 +306,9 @@ impl<S: StateStore> SortExecutor<S> {
             values_per_vnode.push(value_iter);
         }
         if !values_per_vnode.is_empty() {
+            self.buffer
+                .values_mut()
+                .for_each(|(_, _, irrel_watermarks)| irrel_watermarks.clear());
             let mut stream = select_all(values_per_vnode);
             while let Some(storage_result) = stream.next().await {
                 // Insert the data into buffer.
