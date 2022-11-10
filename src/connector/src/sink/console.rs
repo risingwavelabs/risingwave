@@ -103,11 +103,33 @@ fn parse_datum(datum: DatumRef<'_>) -> String {
         Some(ScalarRefImpl::Float32(v)) => format!("Float32({})", v),
         Some(ScalarRefImpl::Float64(v)) => format!("Float64({})", v),
         Some(ScalarRefImpl::Decimal(v)) => format!("Decimal({})", v),
-        Some(ScalarRefImpl::Utf8(v)) => format!("Utf8({})", v),
+        Some(ScalarRefImpl::Utf8(v)) => format!("Utf8('{}')", v),
         Some(ScalarRefImpl::Bool(v)) => format!("Bool({})", v),
         Some(ScalarRefImpl::NaiveDate(v)) => format!("Date({})", v),
         Some(ScalarRefImpl::NaiveTime(v)) => format!("Time({})", v),
         Some(ScalarRefImpl::Interval(v)) => format!("Interval({})", v),
+        Some(ScalarRefImpl::Struct(v)) => {
+            format!(
+                "Struct({})",
+                join(
+                    v.fields_ref()
+                        .iter()
+                        .map(|sub_v| parse_datum(*sub_v)),
+                    ","
+                )
+            )
+        }
+        Some(ScalarRefImpl::List(v)) => {
+            format!(
+                "List({})",
+                join(
+                    v.values_ref()
+                        .iter()
+                        .map(|sub_v| parse_datum(*sub_v)),
+                    ", "
+                )
+            )
+        }
         _ => unimplemented!(),
     }
 }
@@ -118,7 +140,9 @@ mod test {
 
     use risingwave_common::array;
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::{ArrayImpl, I32Array, Op, StreamChunk, Utf8Array};
+    use risingwave_common::array::{
+        ArrayImpl, I32Array, ListArray, Op, StreamChunk, StructArray, Utf8Array,
+    };
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
@@ -140,6 +164,24 @@ mod test {
                     name: "name".into(),
                     sub_fields: vec![],
                     type_name: "".into(),
+                },
+                Field {
+                    data_type: DataType::new_struct(
+                        vec![DataType::List {
+                            datatype: Box::new(DataType::Varchar),
+                        }],
+                        vec!["addresses".into()],
+                    ),
+                    name: "notes".to_string(),
+                    sub_fields: vec![Field {
+                        data_type: DataType::List {
+                            datatype: Box::new(DataType::Varchar),
+                        },
+                        name: "addresses".into(),
+                        sub_fields: vec![],
+                        type_name: "".into(),
+                    }],
+                    type_name: "".to_string(),
                 },
             ]);
 
@@ -163,6 +205,24 @@ mod test {
                         Utf8Array,
                         [Some("Alice"), Some("Bob"), Some("Clare")]
                     )))),
+                    Column::new(Arc::new(ArrayImpl::from(StructArray::from_slices(
+                        &[true, true, true],
+                        vec![ArrayImpl::from(ListArray::from_slices(
+                            &[true, true, true],
+                            vec![
+                                Some(ArrayImpl::from(array!(Utf8Array, [Some("1 Poultry Rd")]))),
+                                Some(ArrayImpl::from(array!(Utf8Array, [Some("50 Vesey St")]))),
+                                Some(ArrayImpl::from(array!(
+                                    Utf8Array,
+                                    [Some("1 Poultry Rd"), Some("30 Raffles Pl")]
+                                ))),
+                            ],
+                            DataType::Varchar,
+                        ))],
+                        vec![DataType::List {
+                            datatype: Box::new(DataType::Varchar),
+                        }],
+                    )))),
                 ],
                 None,
             );
@@ -177,6 +237,27 @@ mod test {
                     Column::new(Arc::new(ArrayImpl::from(array!(
                         Utf8Array,
                         [Some("David"), Some("Eve"), Some("Frank")]
+                    )))),
+                    Column::new(Arc::new(ArrayImpl::from(StructArray::from_slices(
+                        &[true, true, true],
+                        vec![ArrayImpl::from(ListArray::from_slices(
+                            &[true, true, true],
+                            vec![
+                                Some(ArrayImpl::from(array!(
+                                    Utf8Array,
+                                    [Some("30 Churchill Pl")]
+                                ))),
+                                Some(ArrayImpl::from(array!(
+                                    Utf8Array,
+                                    [Some("36 Robinson Rd"), Some("160 Spear St")]
+                                ))),
+                                Some(ArrayImpl::from(array!(Utf8Array, [Some("160 Spear St")]))),
+                            ],
+                            DataType::Varchar,
+                        ))],
+                        vec![DataType::List {
+                            datatype: Box::new(DataType::Varchar),
+                        }],
                     )))),
                 ],
                 None,
