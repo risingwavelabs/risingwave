@@ -16,10 +16,13 @@ use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
+use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
+use postgres_types::{ToSql, Type};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
+use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use crate::array::ArrayResult;
 
@@ -35,7 +38,7 @@ pub enum Decimal {
     NegativeInf,
 }
 
-impl ToText for crate::types::Decimal {
+impl ToText for Decimal {
     fn to_text(&self) -> String {
         self.to_string()
     }
@@ -54,6 +57,40 @@ impl Decimal {
         let mut buf = [0u8; 16];
         input.read_exact(&mut buf)?;
         Ok(Self::unordered_deserialize(buf))
+    }
+}
+
+impl ToBinary for Decimal {
+    fn to_binary(&self) -> Option<Bytes> {
+        let mut output = BytesMut::new();
+        match self {
+            Decimal::Normalized(d) => {
+                d.to_sql(&Type::ANY, &mut output).unwrap();
+                return Some(output.freeze());
+            }
+            Decimal::NaN => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xC000);
+                output.put_i16(0);
+            }
+            Decimal::PositiveInf => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xD000);
+                output.put_i16(0);
+            }
+            Decimal::NegativeInf => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xF000);
+                output.put_i16(0);
+            }
+        };
+        Some(output.freeze())
     }
 }
 

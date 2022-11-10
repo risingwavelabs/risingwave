@@ -16,7 +16,7 @@ use std::convert::TryFrom;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes};
 use num_traits::Float;
 use parse_display::Display;
 use risingwave_pb::data::DataType as ProstDataType;
@@ -42,6 +42,7 @@ pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;
 pub mod struct_type;
+pub mod to_binary;
 pub mod to_text;
 
 mod ordered_float;
@@ -60,6 +61,7 @@ use postgres_types::{IsNull, ToSql, Type};
 use strum_macros::EnumDiscriminants;
 
 use self::struct_type::StructType;
+use self::to_binary::ToBinary;
 use self::to_text::ToText;
 use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
@@ -789,33 +791,7 @@ impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
     pub fn binary_format(&self) -> Bytes {
-        let ty = &Type::ANY;
-        let mut output = BytesMut::new();
-        match self {
-            Self::Int64(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Float32(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Float64(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Utf8(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Bool(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Int16(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Int32(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Decimal(Decimal::Normalized(v)) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Decimal(Decimal::NaN | Decimal::PositiveInf | Decimal::NegativeInf) => {
-                output.reserve(8);
-                output.put_u16(0);
-                output.put_i16(0);
-                output.put_u16(0xC000);
-                output.put_i16(0);
-                IsNull::No
-            }
-            Self::NaiveDate(v) => v.0.to_sql(ty, &mut output).unwrap(),
-            Self::NaiveDateTime(v) => v.0.to_sql(ty, &mut output).unwrap(),
-            Self::NaiveTime(v) => v.0.to_sql(ty, &mut output).unwrap(),
-            Self::Struct(_) => todo!("Don't support struct serialization yet"),
-            Self::List(_) => todo!("Don't support list serialization yet"),
-            Self::Interval(v) => v.to_sql(ty, &mut output).unwrap(),
-        };
-        output.freeze()
+        self.to_binary().unwrap()
     }
 
     pub fn text_format(&self) -> String {
