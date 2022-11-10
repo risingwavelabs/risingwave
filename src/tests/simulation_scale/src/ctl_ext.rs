@@ -97,19 +97,9 @@ pub mod predicate {
 
     /// The fragment is able to be rescheduled. Used for locating random fragment.
     pub fn can_reschedule() -> BoxedPredicate {
-        let p = |f: &ProstFragment| {
-            // FIXME: we should already support reschedule source fragment, but there might be a bug
-            // of nexmark generator recovery.
-            let has_source = false;
-
-            // TODO: remove below after we support scaling them.
-            let has_downstream_mv = identity_contains("StreamMaterialize")(f)
-                && !f.actors.first().unwrap().dispatcher.is_empty();
-            let has_chain = identity_contains("StreamTableScan")(f);
-            !(has_source || has_downstream_mv || has_chain)
-        };
-        let p = identity_contains("StreamSource");
-        Box::new(p)
+        // The rescheduling of `Chain` must be derived from the upstream `Materialize`, not
+        // specified by the user.
+        no_identity_contains("StreamTableScan")
     }
 
     /// The fragment with the given id.
