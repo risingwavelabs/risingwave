@@ -659,6 +659,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.chunk_size,
                     ) {
                         yield chunk.map(|v| match v {
+                            Message::Watermark(_) => {
+                                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                            }
                             Message::Chunk(chunk) => Message::Chunk(chunk),
                             barrier @ Message::Barrier(_) => barrier,
                         })?;
@@ -678,6 +681,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.chunk_size,
                     ) {
                         yield chunk.map(|v| match v {
+                            Message::Watermark(_) => {
+                                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                            }
                             Message::Chunk(chunk) => Message::Chunk(chunk),
                             barrier @ Message::Barrier(_) => barrier,
                         })?;
@@ -953,7 +959,7 @@ mod tests {
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{ActorContext, Barrier, EpochPair, Message};
 
-    fn create_in_memory_state_table(
+    async fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
         data_types: &[DataType],
         order_types: &[OrderType],
@@ -971,7 +977,8 @@ mod tests {
             column_descs,
             order_types.to_vec(),
             pk_indices.to_vec(),
-        );
+        )
+        .await;
 
         // Create degree table
         let mut degree_table_column_descs = vec![];
@@ -991,7 +998,8 @@ mod tests {
             degree_table_column_descs,
             order_types.to_vec(),
             pk_indices.to_vec(),
-        );
+        )
+        .await;
         (state_table, degree_state_table)
     }
 
@@ -1007,7 +1015,7 @@ mod tests {
         .unwrap()
     }
 
-    fn create_executor<const T: JoinTypePrimitive>(
+    async fn create_executor<const T: JoinTypePrimitive>(
         with_condition: bool,
         null_safe: bool,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
@@ -1031,7 +1039,8 @@ mod tests {
             &[OrderType::Ascending, OrderType::Ascending],
             &[0, 1],
             0,
-        );
+        )
+        .await;
 
         let (state_r, degree_state_r) = create_in_memory_state_table(
             mem_state,
@@ -1039,7 +1048,8 @@ mod tests {
             &[OrderType::Ascending, OrderType::Ascending],
             &[0, 1],
             2,
-        );
+        )
+        .await;
         let schema_len = match T {
             JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
@@ -1070,7 +1080,7 @@ mod tests {
         (tx_l, tx_r, Box::new(executor).execute())
     }
 
-    fn create_append_only_executor<const T: JoinTypePrimitive>(
+    async fn create_append_only_executor<const T: JoinTypePrimitive>(
         with_condition: bool,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let schema = Schema {
@@ -1098,7 +1108,8 @@ mod tests {
             ],
             &[0, 1, 0],
             0,
-        );
+        )
+        .await;
 
         let (state_r, degree_state_r) = create_in_memory_state_table(
             mem_state,
@@ -1110,7 +1121,8 @@ mod tests {
             ],
             &[0, 1, 1],
             0,
-        );
+        )
+        .await;
         let schema_len = match T {
             JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
@@ -1166,7 +1178,7 @@ mod tests {
              + 6 11",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::Inner }>(false, false);
+            create_executor::<{ JoinType::Inner }>(false, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1242,7 +1254,7 @@ mod tests {
              + 6 11",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::Inner }>(false, true);
+            create_executor::<{ JoinType::Inner }>(false, true).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1330,7 +1342,7 @@ mod tests {
              - 6 9",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::LeftSemi }>(false, false);
+            create_executor::<{ JoinType::LeftSemi }>(false, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1441,7 +1453,7 @@ mod tests {
              - 6 9",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::LeftSemi }>(false, true);
+            create_executor::<{ JoinType::LeftSemi }>(false, true).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1541,7 +1553,7 @@ mod tests {
         );
 
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_append_only_executor::<{ JoinType::Inner }>(false);
+            create_append_only_executor::<{ JoinType::Inner }>(false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1620,7 +1632,7 @@ mod tests {
         );
 
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_append_only_executor::<{ JoinType::LeftSemi }>(false);
+            create_append_only_executor::<{ JoinType::LeftSemi }>(false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1699,7 +1711,7 @@ mod tests {
         );
 
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_append_only_executor::<{ JoinType::RightSemi }>(false);
+            create_append_only_executor::<{ JoinType::RightSemi }>(false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1789,7 +1801,7 @@ mod tests {
              - 6 9",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::RightSemi }>(false, false);
+            create_executor::<{ JoinType::RightSemi }>(false, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -1902,7 +1914,7 @@ mod tests {
              - 1 3",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::LeftAnti }>(false, false);
+            create_executor::<{ JoinType::LeftAnti }>(false, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2031,7 +2043,7 @@ mod tests {
              - 1 3",
         );
         let (mut tx_r, mut tx_l, mut hash_join) =
-            create_executor::<{ JoinType::LeftAnti }>(false, false);
+            create_executor::<{ JoinType::LeftAnti }>(false, false).await;
 
         // push the init barrier for left and right
         tx_r.push_barrier(1, false);
@@ -2146,7 +2158,7 @@ mod tests {
              + 6 11",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::Inner }>(false, false);
+            create_executor::<{ JoinType::Inner }>(false, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2243,7 +2255,7 @@ mod tests {
              + 6 11",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::Inner }>(false, false);
+            create_executor::<{ JoinType::Inner }>(false, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2340,7 +2352,7 @@ mod tests {
              + 6 11",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::LeftOuter }>(false, false);
+            create_executor::<{ JoinType::LeftOuter }>(false, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2422,7 +2434,7 @@ mod tests {
              + 6 11",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::LeftOuter }>(false, true);
+            create_executor::<{ JoinType::LeftOuter }>(false, true).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2504,7 +2516,7 @@ mod tests {
              - 5 10",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::RightOuter }>(false, false);
+            create_executor::<{ JoinType::RightOuter }>(false, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2579,7 +2591,7 @@ mod tests {
         );
 
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_append_only_executor::<{ JoinType::LeftOuter }>(false);
+            create_append_only_executor::<{ JoinType::LeftOuter }>(false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2667,7 +2679,7 @@ mod tests {
         );
 
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_append_only_executor::<{ JoinType::RightOuter }>(false);
+            create_append_only_executor::<{ JoinType::RightOuter }>(false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2742,7 +2754,7 @@ mod tests {
              - 5 10",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::FullOuter }>(false, false);
+            create_executor::<{ JoinType::FullOuter }>(false, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2829,7 +2841,7 @@ mod tests {
              + 1 2",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::FullOuter }>(true, false);
+            create_executor::<{ JoinType::FullOuter }>(true, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -2919,7 +2931,7 @@ mod tests {
              + 6 11",
         );
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::Inner }>(true, false);
+            create_executor::<{ JoinType::Inner }>(true, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);

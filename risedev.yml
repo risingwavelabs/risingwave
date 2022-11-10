@@ -8,9 +8,14 @@ risedev:
     # If you want to use the local s3 storage, enable the following line
     - use: minio
 
-    # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
+   # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
     # - use: aws-s3
-    #   bucket: some-bucket
+      
+      # bucket: test-bucket
+      
+      # If you want to use other s3 compatible object store, open this flag:
+      # s3-compatible: false
+      
 
     # if you want to enable etcd backend, uncomment the following lines.
     # - use: etcd
@@ -439,6 +444,19 @@ risedev:
     - use: compactor
     - use: redis
 
+  ci-compaction-test:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+      periodic-compaction-interval-sec: 99999
+      enable-compaction-deterministic: true
+    - use: compute-node
+      enable-tiered-cache: true
+    - use: frontend
+    - use: compactor
+
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
@@ -524,9 +542,6 @@ template:
 
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
-
-    # Whether to use a managed lru cache (evict by epoch)
-    enable-managed-cache: false
 
     # Minio instances used by this compute node
     provide-minio: "minio*"
@@ -736,6 +751,9 @@ template:
     bucket: test-bucket
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
+
+    # used to support other s3 compatible object store. 
+    s3-compatible: false
 
   # Apache Kafka service
   kafka:

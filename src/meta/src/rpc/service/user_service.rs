@@ -56,7 +56,7 @@ where
         let mut expanded_privileges = Vec::new();
         for privilege in privileges {
             if let Some(Object::AllTablesSchemaId(schema_id)) = &privilege.object {
-                let tables = self.catalog_manager.list_tables(*schema_id).await?;
+                let tables = self.catalog_manager.list_table_ids(*schema_id).await;
                 for table_id in tables {
                     let mut privilege = privilege.clone();
                     privilege.object = Some(Object::TableId(table_id));
@@ -182,7 +182,6 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
     ) -> Result<Response<RevokePrivilegeResponse>, Status> {
         let req = request.into_inner();
         let privileges = self.expand_privilege(req.get_privileges(), None).await?;
-        let revoke_grant_option = req.revoke_grant_option;
         let version = self
             .catalog_manager
             .revoke_privilege(
@@ -190,7 +189,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
                 &privileges,
                 req.granted_by,
                 req.revoke_by,
-                revoke_grant_option,
+                req.revoke_grant_option,
                 req.cascade,
             )
             .await?;

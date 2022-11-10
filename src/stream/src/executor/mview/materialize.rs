@@ -51,7 +51,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
     /// should be `None`.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub async fn new(
         input: BoxedExecutor,
         store: S,
         key: Vec<OrderPair>,
@@ -65,7 +65,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
         let schema = input.schema().clone();
 
-        let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes);
+        let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes).await;
 
         Self {
             input,
@@ -82,7 +82,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     }
 
     /// Create a new `MaterializeExecutor` without distribution info for test purpose.
-    pub fn for_test(
+    pub async fn for_test(
         input: BoxedExecutor,
         store: S,
         table_id: TableId,
@@ -105,7 +105,9 @@ impl<S: StateStore> MaterializeExecutor<S> {
             columns,
             arrange_order_types,
             arrange_columns.clone(),
-        );
+        )
+        .await;
+
         Self {
             input,
             state_table,
@@ -133,6 +135,9 @@ impl<S: StateStore> MaterializeExecutor<S> {
         for msg in input {
             let msg = msg?;
             yield match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 Message::Chunk(chunk) => {
                     self.state_table.write_chunk(chunk.clone());
                     Message::Chunk(chunk)
@@ -247,14 +252,17 @@ mod tests {
             vec![0],
         );
 
-        let mut materialize_executor = Box::new(MaterializeExecutor::for_test(
-            Box::new(source),
-            memory_state_store,
-            table_id,
-            vec![OrderPair::new(0, OrderType::Ascending)],
-            column_ids,
-            1,
-        ))
+        let mut materialize_executor = Box::new(
+            MaterializeExecutor::for_test(
+                Box::new(source),
+                memory_state_store,
+                table_id,
+                vec![OrderPair::new(0, OrderType::Ascending)],
+                column_ids,
+                1,
+            )
+            .await,
+        )
         .execute();
         materialize_executor.next().await.transpose().unwrap();
 

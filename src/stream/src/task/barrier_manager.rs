@@ -59,7 +59,7 @@ enum BarrierState {
 /// Specifically, [`LocalBarrierManager`] serve barrier injection from meta server, send the
 /// barriers to and collect them from all actors, and finally report the progress.
 pub struct LocalBarrierManager {
-    /// Stores all materialized view source sender.
+    /// Stores all streaming job source sender.
     senders: HashMap<ActorId, UnboundedSender<Barrier>>,
 
     /// Span of the current epoch.

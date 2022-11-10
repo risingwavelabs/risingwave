@@ -13,13 +13,17 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::io::{Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
-#[derive(Debug, parse_display::Display, Copy, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+use super::to_text::ToText;
+use crate::array::ArrayResult;
+
+#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     #[display("{0}")]
     Normalized(RustDecimal),
@@ -29,6 +33,28 @@ pub enum Decimal {
     PositiveInf,
     #[display("-Infinity")]
     NegativeInf,
+}
+
+impl ToText for crate::types::Decimal {
+    fn to_text(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl Decimal {
+    /// Used by `PrimitiveArray` to serialize the array to protobuf.
+    pub fn to_protobuf(self, output: &mut impl Write) -> ArrayResult<usize> {
+        let buf = self.unordered_serialize();
+        output.write_all(&buf)?;
+        Ok(buf.len())
+    }
+
+    /// Used by `DecimalValueReader` to deserialize the array from protobuf.
+    pub fn from_protobuf(input: &mut impl Read) -> ArrayResult<Self> {
+        let mut buf = [0u8; 16];
+        input.read_exact(&mut buf)?;
+        Ok(Self::unordered_deserialize(buf))
+    }
 }
 
 macro_rules! impl_from_integer {

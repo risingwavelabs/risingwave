@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use anyhow::anyhow;
 use risingwave_pb::user::UserInfo;
 
 use super::UserId;
@@ -24,33 +25,20 @@ use crate::MetaResult;
 
 pub struct UserManager {
     pub(super) user_info: BTreeMap<UserId, UserInfo>,
+    /// The mapping from privilege grantor to their granted users.
     pub(super) user_grant_relation: HashMap<UserId, HashSet<UserId>>,
-}
-
-fn get_relation(user_info: &BTreeMap<UserId, UserInfo>) -> HashMap<UserId, HashSet<UserId>> {
-    let mut user_grant_relation: HashMap<UserId, HashSet<UserId>> = HashMap::new();
-    for (user_id, info) in user_info {
-        for grant_privilege_item in &info.grant_privileges {
-            for option in &grant_privilege_item.action_with_opts {
-                user_grant_relation
-                    .entry(option.get_granted_by())
-                    .or_insert_with(HashSet::new)
-                    .insert(*user_id);
-            }
-        }
-    }
-    user_grant_relation
 }
 
 impl UserManager {
     pub async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let users = UserInfo::list(env.meta_store()).await?;
         let user_info = BTreeMap::from_iter(users.into_iter().map(|user| (user.id, user)));
-        let user_grant_relation = get_relation(&user_info);
-        Ok(Self {
+        let mut user_manager = Self {
             user_info,
-            user_grant_relation,
-        })
+            user_grant_relation: HashMap::new(),
+        };
+        user_manager.build_grant_relation_map();
+        Ok(user_manager)
     }
 
     pub fn list_users(&self) -> Vec<UserInfo> {
@@ -59,6 +47,29 @@ impl UserManager {
 
     pub fn has_user_name(&self, user: &str) -> bool {
         self.user_info.values().any(|x| x.name.eq(user))
+    }
+
+    pub fn ensure_user_id(&self, user_id: UserId) -> MetaResult<()> {
+        if self.user_info.contains_key(&user_id) {
+            Ok(())
+        } else {
+            Err(anyhow!("user {} was concurrently dropped", user_id).into())
+        }
+    }
+
+    /// Build grant relation map from exist user infos.
+    pub fn build_grant_relation_map(&mut self) {
+        self.user_grant_relation.clear();
+        for (user_id, info) in &self.user_info {
+            for grant_privilege_item in &info.grant_privileges {
+                for option in &grant_privilege_item.action_with_opts {
+                    self.user_grant_relation
+                        .entry(option.get_granted_by())
+                        .or_insert_with(HashSet::new)
+                        .insert(*user_id);
+                }
+            }
+        }
     }
 }
 

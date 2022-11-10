@@ -11,8 +11,8 @@ cp ci/risedev-components.ci.env risedev-components.user.env
 echo "--- Build deterministic simulation e2e test runner"
 cargo make sslt --profile ci-sim -- --help
 
-echo "--- Build and archive deterministic scaling imulation tests"
-cargo make sarchive-scale-test --cargo-profile ci-sim
+echo "--- Build and archive deterministic scaling simulation tests"
+NEXTEST_PROFILE=ci-scaling cargo make sarchive-scale-test --cargo-profile ci-sim
 
 echo "--- Upload artifacts"
 cp target/sim/ci-sim/risingwave_simulation ./risingwave_simulation

@@ -305,6 +305,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "065374052e7df7ee4047b1160cca5e1467a12351a40b3da123c870ba0b8eda2a"
 
 [[package]]
+name = "attohttpc"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fcf00bc6d5abb29b5f97e3c61a90b6d3caa12f3faf897d4a3e3607c050a35a7"
+dependencies = [
+ "http",
+ "log",
+ "native-tls",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -381,6 +395,23 @@ dependencies = [
  "tower",
  "tracing",
  "zeroize",
+]
+
+[[package]]
+name = "aws-creds"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1be164cb32cc9dd28dc0f6a8576c164c74516137ddc62dfe9eef584c81ee9488"
+dependencies = [
+ "attohttpc",
+ "dirs",
+ "log",
+ "rust-ini",
+ "serde",
+ "serde-xml-rs",
+ "thiserror",
+ "time 0.3.13",
+ "url",
 ]
 
 [[package]]
@@ -1846,6 +1877,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "dirs"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca3aa72a6f96ea37bbc5aa912f6788242832f75369bdfdadcb0e38423f100059"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
+name = "dirs-sys"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b1d1d91c932ef41c0f2663aa8b0ca0342d444d842c06914aa0a7e352d0bada6"
+dependencies = [
+ "libc",
+ "redox_users",
+ "winapi",
+]
+
+[[package]]
+name = "dlv-list"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0688c2a7f92e427f44895cd63841bff7b29f8d7a1648b9e7e07a4a365b2e1257"
+
+[[package]]
 name = "downcast"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3074,9 +3131,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.8"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98c6ebce9e84d0df01090c5e221e0b38091565d39335eba972b0d7a8589bf683"
+checksum = "85b32d93334a4030dad86dde50018e57ccd9e4c0f64a23e2a7be240e9d7d958c"
 dependencies = [
  "ahash",
  "async-channel",
@@ -3834,6 +3891,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7940cf2ca942593318d07fcf2596cdca60a85c9e7fab408a5e21a4f9dcd40d87"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "ordered-multimap"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccd746e37177e1711c20dd619a1620f34f5c8b569c53590a72dedd5344d8924a"
+dependencies = [
+ "dlv-list",
+ "hashbrown",
 ]
 
 [[package]]
@@ -4707,6 +4774,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "redox_users"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b033d837a7cf162d7993aded9304e30a83213c648b6e389db233191f891e5c2b"
+dependencies = [
+ "getrandom 0.2.7",
+ "redox_syscall",
+ "thiserror",
+]
+
+[[package]]
 name = "ref_slice"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4903,6 +4981,7 @@ version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
  "aws-config",
+ "aws-creds",
  "aws-sdk-s3",
  "aws-smithy-http",
  "bcc",
@@ -5077,17 +5156,16 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
- "prometheus",
  "risingwave_common",
- "risingwave_common_service",
+ "risingwave_compactor",
  "risingwave_hummock_sdk",
+ "risingwave_meta",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
+ "risingwave_rt",
  "risingwave_storage",
  "serde",
- "tokio-retry",
- "tokio-stream",
  "toml",
  "tracing",
  "workspace-hack",
@@ -5097,6 +5175,7 @@ dependencies = [
 name = "risingwave_compactor"
 version = "0.2.0-alpha"
 dependencies = [
+ "async-trait",
  "clap 3.2.17",
  "madsim-tokio",
  "madsim-tonic",
@@ -5336,6 +5415,7 @@ dependencies = [
  "paste",
  "pgwire",
  "pin-project-lite",
+ "postgres-types",
  "prometheus",
  "prost",
  "rand 0.8.5",
@@ -5498,6 +5578,7 @@ dependencies = [
  "async-trait",
  "async_stack_trace",
  "aws-config",
+ "aws-creds",
  "aws-endpoint",
  "aws-sdk-s3",
  "aws-smithy-http",
@@ -5646,19 +5727,18 @@ dependencies = [
  "async-trait",
  "clap 3.2.17",
  "futures",
- "glob",
  "itertools",
  "madsim",
  "madsim-tokio",
+ "paste",
  "rand 0.8.5",
+ "risingwave_common",
  "risingwave_compactor",
  "risingwave_compute",
  "risingwave_ctl",
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_pb",
- "sqllogictest",
- "tempfile",
  "tokio-postgres",
  "tracing",
  "workspace-hack",
@@ -5684,6 +5764,8 @@ dependencies = [
  "farmhash",
  "futures",
  "futures-async-stream",
+ "hyper",
+ "hyper-tls",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
@@ -5706,6 +5788,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "simd-json",
+ "simd-json-derive",
  "smallvec",
  "static_assertions",
  "tempfile",
@@ -5771,6 +5854,7 @@ name = "risingwave_storage"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "async-trait",
  "async_stack_trace",
  "auto_enums",
@@ -5841,6 +5925,7 @@ version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "async-recursion",
  "async-stream",
  "async-trait",
  "async_stack_trace",
@@ -5937,6 +6022,16 @@ dependencies = [
  "base64",
  "bitflags",
  "serde",
+]
+
+[[package]]
+name = "rust-ini"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6d5f2436026b4f6e79dc829837d467cc7e9a55ee40e750d716713540715a2df"
+dependencies = [
+ "cfg-if",
+ "ordered-multimap",
 ]
 
 [[package]]
@@ -6113,6 +6208,18 @@ checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float 2.10.0",
  "serde",
+]
+
+[[package]]
+name = "serde-xml-rs"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65162e9059be2f6a3421ebbb4fef3e74b7d9e7c60c50a0e292c6239f19f1edfa"
+dependencies = [
+ "log",
+ "serde",
+ "thiserror",
+ "xml-rs",
 ]
 
 [[package]]
@@ -6357,6 +6464,32 @@ dependencies = [
  "serde_json",
  "simdutf8",
  "value-trait",
+]
+
+[[package]]
+name = "simd-json-derive"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de454f4996c6ab2e8d9cfdc4cb937908c22faaed1929a425399ba3da1745c165"
+dependencies = [
+ "chrono",
+ "itoa 1.0.3",
+ "ryu",
+ "simd-json",
+ "simd-json-derive-int",
+ "value-trait",
+]
+
+[[package]]
+name = "simd-json-derive-int"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03c7f247b265426bf17854724a92608580e16f065f23b2f776fa794598737d08"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "simd-json",
+ "syn",
 ]
 
 [[package]]
@@ -6735,18 +6868,18 @@ checksum = "b1141d4d61095b28419e22cb0bbf02755f5e54e0526f97f1e3d1d160e60885fb"
 
 [[package]]
 name = "thiserror"
-version = "1.0.32"
+version = "1.0.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5f6586b7f764adc0231f4c79be7b920e766bb2f3e51b3661cdb263828f19994"
+checksum = "8c1b05ca9d106ba7d2e31a9dab4a64e7be2cce415321966ea3132c49a656e252"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.32"
+version = "1.0.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12bafc5b54507e0149cdf1b145a5d80ab80a90bcd9275df43d4fff68460f6c21"
+checksum = "e8f2591983642de85c921015f3f070c665a197ed69e417af436115e3a1407487"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6856,6 +6989,7 @@ dependencies = [
  "itoa 1.0.3",
  "libc",
  "num_threads",
+ "serde",
 ]
 
 [[package]]
@@ -7784,6 +7918,12 @@ checksum = "30b31594f29d27036c383b53b59ed3476874d518f0efb151b27a4c275141390e"
 dependencies = [
  "tap",
 ]
+
+[[package]]
+name = "xml-rs"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2d7d3948613f75c98fd9328cfdcc45acc4d360655289d0a7d4ec931392200a3"
 
 [[package]]
 name = "xmlparser"

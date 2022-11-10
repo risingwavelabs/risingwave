@@ -131,7 +131,8 @@ async fn test_table_materialize() -> StreamResult<()> {
     let state_table = SourceStateTableHandler::from_table_catalog(
         &default_source_internal_table(0x2333),
         MemoryStateStore::new(),
-    );
+    )
+    .await;
     let stream_source = SourceExecutor::new(
         ActorContext::create(0x3f3f3f),
         source_builder,
@@ -159,6 +160,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         all_column_ids.clone(),
         2,
     )
+    .await
     .boxed()
     .execute();
 
@@ -238,6 +240,9 @@ async fn test_table_materialize() -> StreamResult<()> {
     let message = materialize.next().await.unwrap()?;
     let mut col_row_ids = vec![];
     match message {
+        Message::Watermark(_) => {
+            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+        }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].array_ref().as_int64();
             col_row_ids.push(col_row_id.value_at(0).unwrap());
@@ -310,6 +315,9 @@ async fn test_table_materialize() -> StreamResult<()> {
     // Poll `Materialize`, should output the same deletion stream chunk
     let message = materialize.next().await.unwrap()?;
     match message {
+        Message::Watermark(_) => {
+            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+        }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].array_ref().as_int64();
             assert_eq!(col_row_id.value_at(0).unwrap(), col_row_ids[0]);
@@ -377,7 +385,8 @@ async fn test_row_seq_scan() -> Result<()> {
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0_usize],
-    );
+    )
+    .await;
     let table = StorageTable::for_test(
         memory_state_store.clone(),
         TableId::from(0x42),

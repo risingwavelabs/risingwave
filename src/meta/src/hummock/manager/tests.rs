@@ -119,7 +119,7 @@ async fn test_hummock_compaction_task() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -202,7 +202,7 @@ async fn test_hummock_table() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -253,7 +253,7 @@ async fn test_hummock_transaction() {
         // Add tables in epoch1
         let tables_in_epoch1 = generate_test_tables(epoch1, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager(),
+            &hummock_manager,
             &tables_in_epoch1,
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -290,7 +290,7 @@ async fn test_hummock_transaction() {
         // Add tables in epoch2
         let tables_in_epoch2 = generate_test_tables(epoch2, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager(),
+            &hummock_manager,
             &tables_in_epoch2,
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -489,7 +489,7 @@ async fn test_hummock_manager_basic() {
     let commit_one = |epoch: HummockEpoch, hummock_manager: HummockManagerRef<MemStore>| async move {
         let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager(),
+            &hummock_manager,
             &original_tables,
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -636,7 +636,7 @@ async fn test_pin_snapshot_response_lost() {
     let mut epoch: u64 = 1;
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -658,7 +658,7 @@ async fn test_pin_snapshot_response_lost() {
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -685,7 +685,7 @@ async fn test_pin_snapshot_response_lost() {
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -707,7 +707,7 @@ async fn test_pin_snapshot_response_lost() {
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -735,7 +735,7 @@ async fn test_print_compact_task() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -775,7 +775,7 @@ async fn test_invalid_sst_id() {
     let epoch = 1;
     let ssts = generate_test_tables(epoch, vec![1]);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &ssts,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -904,10 +904,7 @@ async fn test_trigger_compaction_deterministic() {
     let _ = add_test_tables(&hummock_manager, context_id).await;
 
     let cur_version = hummock_manager.get_current_version().await;
-    let compaction_groups = hummock_manager
-        .compaction_group_manager()
-        .compaction_group_ids()
-        .await;
+    let compaction_groups = hummock_manager.compaction_group_ids().await;
 
     let ret = hummock_manager
         .trigger_compaction_deterministic(cur_version.id, compaction_groups)
@@ -967,7 +964,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -1085,7 +1082,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        &hummock_manager,
         &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -1100,7 +1097,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     // Get a compaction task.
-    let mut compact_task = hummock_manager
+    let compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
         .unwrap()

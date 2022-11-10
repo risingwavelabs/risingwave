@@ -19,10 +19,11 @@ use std::time::Duration;
 use risingwave_batch::executor::BatchTaskMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
-use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE};
+use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -154,13 +155,16 @@ pub async fn compute_node_serve(
                 storage.sstable_store(),
                 Arc::new(MemoryLimiter::new(write_memory_limit)),
             );
-            let compactor_context = Arc::new(CompactorContext {
+            let compactor_context = Arc::new(CompactorContext::with_config(
                 context,
-                sstable_store: Arc::new(compactor_sstable_store),
-            });
+                Arc::new(compactor_sstable_store),
+                CompactorRuntimeConfig {
+                    max_concurrent_task_number: 1,
+                },
+            ));
 
             let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client, 1);
+                Compactor::start_compactor(compactor_context, hummock_meta_client);
             sub_tasks.push((handle, shutdown_sender));
         }
         let memory_limiter = storage.inner().get_memory_limiter();
@@ -174,6 +178,7 @@ pub async fn compute_node_serve(
     sub_tasks.push(MetaClient::start_heartbeat_loop(
         meta_client.clone(),
         Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+        Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
         extra_info_sources,
     ));
 
@@ -194,7 +199,7 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
         async_stack_trace_config.clone(),
-        opts.enable_managed_cache,
+        config.streaming.developer.stream_enable_managed_cache,
     ));
     let source_mgr = Arc::new(TableSourceManager::new(
         source_metrics,
@@ -244,6 +249,7 @@ pub async fn compute_node_serve(
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+            .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .tcp_nodelay(true)
             .layer(StackTraceMiddlewareLayer::new_optional(
                 async_stack_trace_config.map(|c| (grpc_stack_trace_mgr, c)),

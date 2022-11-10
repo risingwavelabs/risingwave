@@ -208,12 +208,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         result_table: &mut StateTable<S>,
         state_changed: &mut bool,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        // --- Flush states to the state store ---
         if *state_changed {
             let agg_group = agg_group.as_mut().unwrap();
+            agg_group.flush_state_if_needed(storages).await?;
 
-            // Batch commit data.
-            agg_group.commit_state(storages).await?;
+            // Commit all state tables except for result table.
             futures::future::try_join_all(
                 iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
             )
@@ -224,7 +223,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             // state outputs.
             let mut builders = schema.create_array_builders(2);
             let mut new_ops = Vec::with_capacity(2);
-            // --- Retrieve modified states and put the changes into the builders ---
+            // Retrieve modified states and put the changes into the builders.
             let AggChangesInfo {
                 result_row,
                 prev_outputs,
@@ -234,11 +233,12 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 .await?;
 
             if n_appended_ops == 0 {
-                // Nothing to flush.
+                // Agg result is not changed.
                 result_table.commit_no_data_expected(epoch);
                 return Ok(None);
             }
 
+            // Update the result table with latest agg outputs.
             if let Some(prev_outputs) = prev_outputs {
                 let old_row = agg_group
                     .group_key()
@@ -250,7 +250,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             }
             result_table.commit(epoch).await?;
 
-            let columns: Vec<Column> = builders
+            let columns = builders
                 .into_iter()
                 .map(|builder| builder.finish().into())
                 .collect();
@@ -260,7 +260,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             *state_changed = false;
             Ok(Some(chunk))
         } else {
-            // Nothing to flush.
+            // No state is changed.
             // Call commit on state table to increment the epoch.
             iter_table_storage(storages).for_each(|state_table| {
                 state_table.commit_no_data_expected(epoch);
@@ -300,6 +300,10 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(
                         &ctx,
@@ -427,7 +431,8 @@ mod tests {
             agg_calls,
             vec![2],
             1,
-        );
+        )
+        .await;
         let mut simple_agg = simple_agg.execute();
 
         // Consume the init barrier
