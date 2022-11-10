@@ -31,6 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "task_service",
         "stream_plan",
         "stream_service",
+        "compactor",
         "hummock",
         "user",
         "source",

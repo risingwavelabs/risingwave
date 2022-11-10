@@ -22,7 +22,8 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{count_iter, default_config_for_test};
-use risingwave_storage::hummock::HummockStorage;
+use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
+use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     ReadOptions, StateStore, StateStoreRead, StateStoreWrite, WriteOptions,
@@ -31,7 +32,7 @@ use risingwave_storage::StateStoreIter;
 
 use crate::test_utils::{
     get_test_notification_client, prefixed_key, with_hummock_storage_v1, with_hummock_storage_v2,
-    HummockStateStoreTestTrait,
+    HummockStateStoreTestTrait, HummockV2MixedStateStore,
 };
 
 #[tokio::test]
@@ -99,6 +100,7 @@ async fn test_basic_inner(
     let size = hummock_storage
         .ingest_batch(
             vec![],
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -113,6 +115,7 @@ async fn test_basic_inner(
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -174,6 +177,7 @@ async fn test_basic_inner(
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -204,6 +208,7 @@ async fn test_basic_inner(
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -416,6 +421,7 @@ async fn test_state_store_sync_inner(
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -443,6 +449,7 @@ async fn test_state_store_sync_inner(
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -471,6 +478,7 @@ async fn test_state_store_sync_inner(
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -512,7 +520,8 @@ async fn test_reload_storage() {
         worker_node.id,
     ));
 
-    let hummock_storage = HummockStorage::for_test(
+    // TODO: may also test for v2 when the unit test is enabled.
+    let hummock_storage = HummockStorageV1::new(
         hummock_options.clone(),
         sstable_store.clone(),
         meta_client.clone(),
@@ -521,6 +530,7 @@ async fn test_reload_storage() {
             hummock_manager_ref.clone(),
             worker_node.clone(),
         ),
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
@@ -551,6 +561,7 @@ async fn test_reload_storage() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -569,6 +580,8 @@ async fn test_reload_storage() {
     )
     .await
     .unwrap();
+
+    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage).await;
 
     // Get the value after flushing to remote.
     let value = hummock_storage
@@ -608,6 +621,7 @@ async fn test_reload_storage() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -827,6 +841,7 @@ async fn test_write_anytime_inner(
     hummock_storage
         .ingest_batch(
             batch1.clone(),
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -928,6 +943,7 @@ async fn test_write_anytime_inner(
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -944,6 +960,7 @@ async fn test_write_anytime_inner(
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1007,6 +1024,7 @@ async fn test_delete_get_inner(
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1025,6 +1043,7 @@ async fn test_delete_get_inner(
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1089,6 +1108,7 @@ async fn test_multiple_epoch_sync_inner(
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1102,6 +1122,7 @@ async fn test_multiple_epoch_sync_inner(
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1124,6 +1145,7 @@ async fn test_multiple_epoch_sync_inner(
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -1224,6 +1246,8 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     .await
     .unwrap();
 
+    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage).await;
+
     assert_eq!(
         hummock_storage
             .sstable_id_manager()
@@ -1246,6 +1270,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1266,6 +1291,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1313,7 +1339,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     hummock_storage.clear_shared_buffer().await.unwrap();
 
-    let read_version = hummock_storage.get_read_version();
+    let read_version = hummock_storage.local.read_version();
 
     let read_version = read_version.read();
     assert!(read_version.staging().imm.is_empty());
