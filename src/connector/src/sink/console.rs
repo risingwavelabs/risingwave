@@ -64,7 +64,7 @@ impl ConsoleSink {
 impl Sink for ConsoleSink {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         for (op, row_ref) in chunk.rows() {
-            let row_repr = join(row_ref.values().map(parse_datum), ",");
+            let row_repr = join(row_ref.values().map(parse_datum), ", ");
             let op_repr = match op {
                 Op::Insert => "INSERT",
                 Op::UpdateDelete => "UPDATE_DELETE",
@@ -103,7 +103,7 @@ fn parse_datum(datum: DatumRef<'_>) -> String {
         Some(ScalarRefImpl::Float32(v)) => format!("Float32({})", v),
         Some(ScalarRefImpl::Float64(v)) => format!("Float64({})", v),
         Some(ScalarRefImpl::Decimal(v)) => format!("Decimal({})", v),
-        Some(ScalarRefImpl::Utf8(v)) => format!("Utf8('{}')", v),
+        Some(ScalarRefImpl::Utf8(v)) => format!("Utf8(\"{}\")", v),
         Some(ScalarRefImpl::Bool(v)) => format!("Bool({})", v),
         Some(ScalarRefImpl::NaiveDate(v)) => format!("Date({})", v),
         Some(ScalarRefImpl::NaiveTime(v)) => format!("Time({})", v),
@@ -111,23 +111,13 @@ fn parse_datum(datum: DatumRef<'_>) -> String {
         Some(ScalarRefImpl::Struct(v)) => {
             format!(
                 "Struct({})",
-                join(
-                    v.fields_ref()
-                        .iter()
-                        .map(|sub_v| parse_datum(*sub_v)),
-                    ","
-                )
+                join(v.fields_ref().iter().map(|sub_v| parse_datum(*sub_v)), ", ")
             )
         }
         Some(ScalarRefImpl::List(v)) => {
             format!(
                 "List({})",
-                join(
-                    v.values_ref()
-                        .iter()
-                        .map(|sub_v| parse_datum(*sub_v)),
-                    ", "
-                )
+                join(v.values_ref().iter().map(|sub_v| parse_datum(*sub_v)), ", ")
             )
         }
         _ => unimplemented!(),
