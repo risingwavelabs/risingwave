@@ -64,6 +64,26 @@ pub struct DeleteRangeTombstone {
     pub sequence: HummockEpoch,
 }
 
+impl PartialOrd for DeleteRangeTombstone {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let ret = self
+            .start_user_key
+            .cmp(&other.start_user_key)
+            .then_with(|| self.end_user_key.cmp(&other.end_user_key))
+            .then_with(|| other.sequence.cmp(&self.sequence));
+        Some(ret)
+    }
+}
+
+impl Ord for DeleteRangeTombstone {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.start_user_key
+            .cmp(&other.start_user_key)
+            .then_with(|| other.end_user_key.cmp(&self.end_user_key))
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
+}
+
 impl DeleteRangeTombstone {
     pub fn new(start_user_key: Vec<u8>, end_user_key: Vec<u8>, sequence: HummockEpoch) -> Self {
         Self {
