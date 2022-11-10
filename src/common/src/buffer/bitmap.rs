@@ -298,13 +298,6 @@ impl Bitmap {
             .map(|(pos, _)| pos)
     }
 
-    pub fn ones(&self) -> impl Iterator<Item = usize> + '_ {
-        self.iter()
-            .enumerate()
-            .filter(|(_, bit)| *bit)
-            .map(|(pos, _)| pos)
-    }
-
     #[cfg(test)]
     fn assert_valid(&self) {
         assert_eq!(
