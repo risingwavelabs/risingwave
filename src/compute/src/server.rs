@@ -121,7 +121,7 @@ pub async fn compute_node_serve(
 
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
-        extra_info_sources.push(storage.sstable_id_manager());
+        extra_info_sources.push(storage.inner().sstable_id_manager().clone());
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.
         if opts.state_store == "hummock+memory"
@@ -138,7 +138,7 @@ pub async fn compute_node_serve(
             let context = Arc::new(Context {
                 options: storage_config,
                 hummock_meta_client: hummock_meta_client.clone(),
-                sstable_store: storage.sstable_store(),
+                sstable_store: storage.inner().sstable_store(),
                 stats: state_store_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
@@ -147,12 +147,12 @@ pub async fn compute_node_serve(
                     .filter_key_extractor_manager()
                     .clone(),
                 read_memory_limiter,
-                sstable_id_manager: storage.sstable_id_manager(),
+                sstable_id_manager: storage.inner().sstable_id_manager().clone(),
                 task_progress_manager: Default::default(),
             });
             // TODO: use normal sstable store for single-process mode.
             let compactor_sstable_store = CompactorSstableStore::new(
-                storage.sstable_store(),
+                storage.inner().sstable_store(),
                 Arc::new(MemoryLimiter::new(write_memory_limit)),
             );
             let compactor_context = Arc::new(CompactorContext::with_config(
@@ -169,7 +169,7 @@ pub async fn compute_node_serve(
         }
         let memory_limiter = storage.inner().get_memory_limiter();
         let memory_collector = Arc::new(HummockMemoryCollector::new(
-            storage.sstable_store(),
+            storage.inner().sstable_store(),
             memory_limiter,
         ));
         monitor_cache(memory_collector, &registry).unwrap();
