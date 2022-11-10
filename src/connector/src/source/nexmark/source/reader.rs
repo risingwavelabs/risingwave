@@ -17,14 +17,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
+use itertools::Itertools;
 
 use crate::source::nexmark::config::NexmarkConfig;
 use crate::source::nexmark::source::event::EventType;
 use crate::source::nexmark::source::generator::NexmarkEventGenerator;
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    spawn_data_generation_stream, BoxSourceStream, Column, ConnectorState, SplitImpl,
-    SplitMetaData, SplitReader,
+    spawn_data_generation_stream, BoxSourceStream, Column, ConnectorState, SplitMetaData,
+    SplitReader,
 };
 
 #[derive(Debug)]
@@ -83,20 +84,18 @@ impl SplitReader for NexmarkSplitReader {
 
         if let Some(splits) = state {
             tracing::debug!("Splits for nexmark found! {:?}", splits);
-            for split in splits {
-                // TODO: currently, assume there's only one split in one reader
-                let split_id = split.id();
-                if let SplitImpl::Nexmark(n) = split {
-                    generator.split_index = n.split_index;
-                    generator.split_num = n.split_num;
-                    if let Some(s) = n.start_offset {
-                        generator.events_so_far = s;
-                    };
-                    generator.split_id = split_id;
-                    assigned_split = n;
-                    break;
-                }
-            }
+            // TODO: currently, assume there's only one split in one reader
+            let split = splits.into_iter().exactly_one().unwrap();
+            let split_id = split.id();
+            let split = split.into_nexmark().unwrap();
+
+            generator.split_index = split.split_index;
+            generator.split_num = split.split_num;
+            if let Some(s) = split.start_offset {
+                generator.events_so_far = s;
+            };
+            generator.split_id = split_id;
+            assigned_split = split;
         }
 
         Ok(Self {
