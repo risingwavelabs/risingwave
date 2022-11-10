@@ -48,17 +48,11 @@ pub(crate) struct SharedBufferBatchInner {
 
 impl SharedBufferBatchInner {
     fn new(
-        table_id: TableId,
         payload: Vec<SharedBufferItem>,
         delete_range_tombstones: Vec<DeleteRangeTombstone>,
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
-        #[cfg(debug_assertions)]
-        {
-            Self::check_tombstone_prefix(table_id, &delete_range_tombstones);
-        }
-
         let mut largest_table_key = vec![];
         for tombstone in &delete_range_tombstones {
             // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary of
@@ -83,22 +77,6 @@ impl SharedBufferBatchInner {
             largest_table_key,
             _tracker,
             batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    fn check_tombstone_prefix(table_id: TableId, tombstones: &[DeleteRangeTombstone]) {
-        for tombstone in tombstones {
-            assert_eq!(
-                UserKey::decode(&tombstone.start_user_key).table_id,
-                table_id,
-                "delete range tombstone in a shared buffer batch must begin with the same table id"
-            );
-            assert_eq!(
-                UserKey::decode(&tombstone.end_user_key).table_id,
-                table_id,
-                "delete range tombstone in a shared buffer batch must begin with the same table id"
-            );
         }
     }
 }
@@ -147,7 +125,6 @@ impl SharedBufferBatch {
 
         Self {
             inner: Arc::new(SharedBufferBatchInner::new(
-                table_id,
                 sorted_items,
                 vec![],
                 size,
@@ -293,19 +270,18 @@ impl SharedBufferBatch {
                 )
             })
             .collect_vec();
+        #[cfg(test)]
+        {
+            Self::check_tombstone_prefix(table_id, &delete_range_tombstones);
+        }
         let size = Self::measure_batch_size(&sorted_items);
         let tracker = if let Some(limiter) = memory_limit {
             limiter.require_memory(size as u64).await
         } else {
             None
         };
-        let inner = SharedBufferBatchInner::new(
-            table_id,
-            sorted_items,
-            delete_range_tombstones,
-            size,
-            tracker,
-        );
+        let inner =
+            SharedBufferBatchInner::new(sorted_items, delete_range_tombstones, size, tracker);
         SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
@@ -315,6 +291,22 @@ impl SharedBufferBatch {
 
     pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
         self.inner.delete_range_tombstones.clone()
+    }
+
+    #[cfg(test)]
+    fn check_tombstone_prefix(table_id: TableId, tombstones: &[DeleteRangeTombstone]) {
+        for tombstone in tombstones {
+            assert_eq!(
+                UserKey::decode(&tombstone.start_user_key).table_id,
+                table_id,
+                "delete range tombstone in a shared buffer batch must begin with the same table id"
+            );
+            assert_eq!(
+                UserKey::decode(&tombstone.end_user_key).table_id,
+                table_id,
+                "delete range tombstone in a shared buffer batch must begin with the same table id"
+            );
+        }
     }
 }
 
