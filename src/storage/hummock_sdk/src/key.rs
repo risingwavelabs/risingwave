@@ -331,7 +331,7 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
 /// The encoded format is | `table_id` | `table_key` |.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UserKey<T: AsRef<[u8]>> {
-    // When comapring `UserKey`, we first compare `table_id`, then `table_key`. So the order of
+    // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
     // declaration matters.
     pub table_id: TableId,
     pub table_key: T,
