@@ -29,6 +29,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, CompactedRow, Row, Row2, RowDeserializer, RowExt};
+use risingwave_common::types::{ScalarImpl, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -106,6 +107,9 @@ pub struct StateTable<S: StateStore> {
 
     /// The epoch flush to the state store last time.
     epoch: Option<EpochPair>,
+
+    /// last watermark that is used to construct delete ranges in `ingest`
+    last_watermark: Option<ScalarImpl>,
 }
 
 // initialize
@@ -219,6 +223,7 @@ impl<S: StateStore> StateTable<S> {
             vnode_col_idx_in_pk,
             value_indices,
             epoch: None,
+            last_watermark: None,
         }
     }
 
@@ -321,6 +326,7 @@ impl<S: StateStore> StateTable<S> {
             vnode_col_idx_in_pk: None,
             value_indices,
             epoch: None,
+            last_watermark: None,
         }
     }
 
@@ -489,6 +495,8 @@ impl<S: StateStore> StateTable<S> {
         }
         assert_eq!(self.vnodes.len(), new_vnodes.len());
 
+        self.last_watermark = None;
+
         std::mem::replace(&mut self.vnodes, new_vnodes)
     }
 }
@@ -630,10 +638,15 @@ impl<S: StateStore> StateTable<S> {
         self.epoch = Some(new_epoch);
     }
 
-    pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
+    pub async fn commit(
+        &mut self,
+        new_epoch: EpochPair,
+        watermark: Option<&ScalarImpl>,
+    ) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch.prev).await?;
+        self.batch_write_rows(mem_table, new_epoch.prev, watermark)
+            .await?;
         self.update_epoch(new_epoch);
         Ok(())
     }
@@ -641,7 +654,8 @@ impl<S: StateStore> StateTable<S> {
     /// used for unit test, and do not need to assert epoch.
     pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch.prev).await?;
+        self.batch_write_rows(mem_table, new_epoch.prev, None)
+            .await?;
         self.update_epoch(new_epoch);
         Ok(())
     }
@@ -660,12 +674,28 @@ impl<S: StateStore> StateTable<S> {
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
+        watermark: Option<&ScalarImpl>,
     ) -> StreamExecutorResult<()> {
         let mut write_batch = self.local_store.start_write_batch(WriteOptions {
             epoch,
             table_id: self.table_id(),
         });
+
+        let prefix_serializer = if self.pk_indices().is_empty() {
+            None
+        } else {
+            Some(self.pk_serde.prefix(1))
+        };
+        let range_end_suffix = watermark.map(|watermark| {
+            serialize_pk(
+                &Row::new(vec![Some(watermark.clone())]),
+                prefix_serializer.as_ref().unwrap(),
+            )
+        });
         for (pk, row_op) in buffer {
+            if let Some(ref range_end) = range_end_suffix && &pk[VIRTUAL_NODE_SIZE..] < range_end.as_slice() {
+                continue;
+            }
             match row_op {
                 // Currently, some executors do not strictly comply with these semantics. As a
                 // workaround you may call disable the check by calling `.disable_sanity_check()` on
@@ -691,7 +721,27 @@ impl<S: StateStore> StateTable<S> {
                 }
             }
         }
+        if let Some(range_end_suffix) = range_end_suffix {
+            let range_begin_suffix = if let Some(ref last_watermark) = self.last_watermark {
+                serialize_pk(
+                    &Row::new(vec![Some(last_watermark.clone())]),
+                    prefix_serializer.as_ref().unwrap(),
+                )
+            } else {
+                vec![]
+            };
+            for vnode in self.vnodes.ones() {
+                let mut range_begin = vnode.to_be_bytes().to_vec();
+                let mut range_end = range_begin.clone();
+                range_begin.extend(&range_begin_suffix);
+                range_end.extend(&range_end_suffix);
+                write_batch.delete_range(range_begin, range_end);
+            }
+        }
         write_batch.ingest().await?;
+        if let Some(watermark) = watermark {
+            self.last_watermark = Some(watermark.clone());
+        }
         Ok(())
     }
 

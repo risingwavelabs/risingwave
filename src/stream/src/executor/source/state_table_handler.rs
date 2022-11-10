@@ -176,7 +176,7 @@ pub(crate) mod tests {
 
         state_table.init_epoch(init_epoch);
         state_table.insert(Row::new(vec![a.clone(), b.clone()]));
-        state_table.commit(next_epoch).await.unwrap();
+        state_table.commit(next_epoch, None).await.unwrap();
 
         let a: Arc<str> = String::from("a").into();
         let a: Datum = Some(ScalarImpl::Utf8(a.as_ref().into()));
@@ -202,9 +202,15 @@ pub(crate) mod tests {
         state_table_handler
             .take_snapshot(vec![split_impl.clone()])
             .await?;
-        state_table_handler.state_store.commit(epoch_2).await?;
+        state_table_handler
+            .state_store
+            .commit(epoch_2, None)
+            .await?;
 
-        state_table_handler.state_store.commit(epoch_3).await?;
+        state_table_handler
+            .state_store
+            .commit(epoch_3, None)
+            .await?;
 
         match state_table_handler
             .try_recover_from_state_store(&split_impl)

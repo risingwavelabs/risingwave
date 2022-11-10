@@ -215,7 +215,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
             // Commit all state tables except for result table.
             futures::future::try_join_all(
-                iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
+                iter_table_storage(storages).map(|state_table| state_table.commit(epoch, None)),
             )
             .await?;
 
@@ -249,7 +249,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             } else {
                 result_table.insert(result_row);
             }
-            result_table.commit(epoch).await?;
+            result_table.commit(epoch, None).await?;
 
             let columns = builders
                 .into_iter()

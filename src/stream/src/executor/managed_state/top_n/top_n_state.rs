@@ -280,7 +280,7 @@ impl<S: StateStore> ManagedTopNState<S> {
     }
 
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.state_table.commit(epoch).await?;
+        self.state_table.commit(epoch, None).await?;
         Ok(())
     }
 }
