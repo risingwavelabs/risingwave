@@ -23,6 +23,7 @@ pub mod pg_opclass;
 pub mod pg_operator;
 pub mod pg_type;
 pub mod pg_user;
+pub mod pg_views;
 
 use std::collections::HashMap;
 
@@ -38,6 +39,7 @@ pub use pg_opclass::*;
 pub use pg_operator::*;
 pub use pg_type::*;
 pub use pg_user::*;
+pub use pg_views::*;
 use risingwave_common::array::Row;
 use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
@@ -326,5 +328,31 @@ impl SysCatalogReaderImpl {
         }
 
         Ok(rows)
+    }
+
+    pub(super) fn read_views_info(&self) -> Result<Vec<Row>> {
+        // TODO(zehua): solve the deadlock problem.
+        // Get two read locks. The order must be the same as
+        // `FrontendObserverNode::handle_initialization_notification`.
+        let catalog_reader = self.catalog_reader.read_guard();
+        let user_info_reader = self.user_info_reader.read_guard();
+        let schemas = catalog_reader.iter_schemas(&self.auth_context.database)?;
+
+        Ok(schemas
+            .flat_map(|schema| {
+                schema.iter_view().map(|view| {
+                    Row::new(vec![
+                        Some(ScalarImpl::Utf8(schema.name())),
+                        Some(ScalarImpl::Utf8(view.name().to_string())),
+                        Some(ScalarImpl::Utf8(
+                            // TODO(zehua): fix issue #6080, otherwise panic may happen here.
+                            user_info_reader.get_user_name_by_id(view.owner).unwrap(),
+                        )),
+                        // TODO(zehua): may be not same as postgresql's "definition" column.
+                        Some(ScalarImpl::Utf8(view.sql.clone())),
+                    ])
+                })
+            })
+            .collect_vec())
     }
 }
