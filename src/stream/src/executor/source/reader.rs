@@ -96,11 +96,14 @@ impl SourceReaderStream {
 
     /// Replace the source stream with a new one for given `stream`. Used for split change.
     pub fn replace_source_stream(&mut self, source_stream: BoxSourceWithStateStream) {
+        // Take the barrier receiver arm.
         let barrier_receiver_arm = std::mem::replace(
             self.inner.get_mut().0,
             futures::stream::once(async { unreachable!("placeholder") }).boxed(),
         );
 
+        // Note: create a new `SelectWithStrategy` instead of replacing the source stream arm here,
+        // to ensure the internal state of the `SelectWithStrategy` is reset. (#6300)
         self.inner = Self::new_inner(
             barrier_receiver_arm,
             Self::source_stream(source_stream)
