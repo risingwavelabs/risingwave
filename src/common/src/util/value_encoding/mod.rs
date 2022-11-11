@@ -64,7 +64,7 @@ fn inner_deserialize_datum(data: &mut impl Buf, ty: &DataType) -> Result<Datum> 
     let null_tag = data.get_u8();
     match null_tag {
         0 => Ok(None),
-        1 => deserialize_value(ty, data),
+        1 => Some(deserialize_value(ty, data)).transpose(),
         _ => Err(ValueEncodingError::InvalidTagEncoding(null_tag)),
     }
 }
@@ -143,8 +143,8 @@ fn serialize_decimal(decimal: &Decimal, buf: &mut impl BufMut) {
     buf.put_slice(&decimal.unordered_serialize());
 }
 
-fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<Datum> {
-    Ok(Some(match ty {
+fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
+    Ok(match ty {
         DataType::Int16 => ScalarImpl::Int16(data.get_i16_le()),
         DataType::Int32 => ScalarImpl::Int32(data.get_i32_le()),
         DataType::Int64 => ScalarImpl::Int64(data.get_i64_le()),
@@ -162,7 +162,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<Datum> {
         DataType::List {
             datatype: item_type,
         } => deserialize_list(item_type, data)?,
-    }))
+    })
 }
 
 fn deserialize_struct(struct_def: &StructType, data: &mut impl Buf) -> Result<ScalarImpl> {
