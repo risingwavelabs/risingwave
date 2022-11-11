@@ -168,10 +168,8 @@ impl ManagedBarrierState {
                     ref remaining_actors,
                     ref mut collect_notifier,
                 } => {
-                    if remaining_actors.contains(&actor_id) && collect_notifier.is_some() {
-                        let collect_notifier = std::mem::take(collect_notifier);
+                    if remaining_actors.contains(&actor_id) && let Some(collect_notifier) = collect_notifier.take() {
                         if collect_notifier
-                            .unwrap()
                             .send(Err(anyhow!(format!(
                                 "Actor {} exit unexpectedly",
                                 actor_id
