@@ -112,6 +112,9 @@ pub async fn handle_create_source(
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
 
     let mut with_properties = context.with_options.inner().clone();
+    tracing::info!("properties: {:?}", with_properties);
+
+    // with_properties.get()
 
     let (columns, source_info) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {

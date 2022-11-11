@@ -621,6 +621,7 @@ where
         Ok(version)
     }
 
+    // todo: read this code to understand when it send rpc to CN
     async fn create_materialized_source_inner(
         &self,
         mut source: Source,
@@ -670,6 +671,21 @@ where
                 .await?;
             return Err(e);
         }
+
+        // todo: create cdc engine on connector node if it's a cdc source
+        // fixme: we should call connector node on CN, since CDC source is alway a materilized
+        // source
+
+        // if let Some(info) = source.info.as_ref() {
+        //     if let Info::StreamSource(src_info) = info && src_info.is_cdc {
+        //         if let Err(e) = self.source_manager.create_cdc_source(&source).await {
+        //             self.catalog_manager
+        //                 .cancel_create_materialized_source_procedure(&source, &mview)
+        //                 .await?;
+        //             return Err(e);
+        //         }
+        //     }
+        // }
 
         match self
             .stream_manager

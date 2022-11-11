@@ -284,6 +284,8 @@ impl SourceDescBuilder {
         let config = ConnectorProperties::extract(self.properties.clone())
             .map_err(|e| RwError::from(ConnectorError(e.into())))?;
 
+        tracing::info!("stream_source props: {:?}", self.properties);
+
         let source = SourceImpl::Connector(ConnectorSource {
             config,
             columns: columns.clone(),

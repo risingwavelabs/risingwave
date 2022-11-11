@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod base;
-pub mod cdc;
-pub mod datagen;
-pub mod dummy_connector;
-pub mod filesystem;
-pub mod kafka;
-pub mod kinesis;
-pub mod nexmark;
-pub mod pulsar;
-pub use base::*;
-pub use kafka::KAFKA_CONNECTOR;
-pub use kinesis::KINESIS_CONNECTOR;
-pub use nexmark::NEXMARK_CONNECTOR;
+use bytes::Bytes;
+use risingwave_pb::cdc_service::CdcMessage;
 
-pub use crate::source::pulsar::PULSAR_CONNECTOR;
+use crate::source::base::SourceMessage;
+
+impl From<CdcMessage> for SourceMessage {
+    fn from(message: CdcMessage) -> Self {
+        SourceMessage {
+            payload: Some(Bytes::from(message.payload)),
+            offset: message.offset,
+            split_id: message.partition.into(),
+        }
+    }
+}
