@@ -49,13 +49,18 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// All upstream messages during the two barriers interval will be buffered and decide to forward or
 /// ignore based on the `current_pos` at the end of the later barrier. Once `current_pos` reaches
 /// the end of the upstream mv pk, the backfill would finish.
+///
+/// Notice: The pk we talk about here refers to the storage primary key.
 pub struct BackfillExecutor<S: StateStore> {
+    // Upstream table
     table: StorageTable<S>,
 
     upstream: BoxedExecutor,
 
+    // The column indices need to be forwarded to the downstream
     upstream_indices: Arc<[usize]>,
 
+    // Current position of the table storage primary key
     current_pos: Row,
 
     progress: CreateMviewProgress,
@@ -63,24 +68,6 @@ pub struct BackfillExecutor<S: StateStore> {
     actor_id: ActorId,
 
     info: ExecutorInfo,
-}
-
-fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
-    match msg {
-        Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-        }
-
-        Message::Chunk(chunk) => {
-            let (ops, columns, visibility) = chunk.into_inner();
-            let mapped_columns = upstream_indices
-                .iter()
-                .map(|&i| columns[i].clone())
-                .collect();
-            Message::Chunk(StreamChunk::new(ops, mapped_columns, visibility))
-        }
-        _ => msg,
-    }
 }
 
 impl<S> BackfillExecutor<S>
@@ -112,17 +99,12 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        let backfill_pk_indices = self.pk_indices().to_vec();
-        let upstream_indices = self.upstream_indices.to_vec();
+        assert_eq!(self.table.schema(), self.upstream.schema());
+        // Table storage primary key.
         let table_pk_indices = self.table.pk_indices().to_vec();
-        let upstream_pk_indices = self.upstream.pk_indices().to_vec();
-        assert_eq!(table_pk_indices, upstream_pk_indices);
+        let upstream_indices = self.upstream_indices.to_vec();
 
-        // Project the upstream with `upstream_indices`.
-        let mut upstream = self
-            .upstream
-            .execute()
-            .map(move |result| result.map(|msg| mapping(&upstream_indices.clone(), msg)));
+        let mut upstream = self.upstream.execute();
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
@@ -204,10 +186,13 @@ where
                                         mem::swap(&mut upstream_chunk_buffer, &mut buffer);
 
                                         for chunk in buffer {
-                                            yield Message::Chunk(Self::mark_chunk(
-                                                chunk,
-                                                &self.current_pos,
-                                                &backfill_pk_indices,
+                                            yield Message::Chunk(Self::mapping_chunk(
+                                                Self::mark_chunk(
+                                                    chunk,
+                                                    &self.current_pos,
+                                                    &table_pk_indices,
+                                                ),
+                                                &upstream_indices,
                                             ));
                                         }
                                     }
@@ -248,10 +233,13 @@ where
                                     mem::swap(&mut upstream_chunk_buffer, &mut buffer);
 
                                     for chunk in buffer {
-                                        yield Message::Chunk(Self::mark_chunk(
-                                            chunk,
-                                            &self.current_pos,
-                                            &backfill_pk_indices,
+                                        yield Message::Chunk(Self::mapping_chunk(
+                                            Self::mark_chunk(
+                                                chunk,
+                                                &self.current_pos,
+                                                &table_pk_indices,
+                                            ),
+                                            &upstream_indices,
                                         ));
                                     }
 
@@ -274,7 +262,10 @@ where
                                         &self.actor_id, &self.current_pos
                                     );
 
-                                    yield mapping(&self.upstream_indices, Message::Chunk(chunk));
+                                    yield Message::Chunk(Self::mapping_chunk(
+                                        chunk,
+                                        &self.upstream_indices,
+                                    ));
                                 }
                             }
                         }
@@ -290,6 +281,8 @@ where
 
             // Backfill has already finished.
             // Forward messages directly to the downstream.
+            let upstream = upstream
+                .map(move |result| result.map(|msg| Self::mapping_message(msg, &upstream_indices)));
             #[for_await]
             for msg in upstream {
                 let msg: Message = msg?;
@@ -298,7 +291,8 @@ where
             }
         } else {
             // Forward messages directly to the downstream.
-
+            let upstream = upstream
+                .map(move |result| result.map(|msg| Self::mapping_message(msg, &upstream_indices)));
             #[for_await]
             for message in upstream {
                 yield message?;
@@ -347,7 +341,7 @@ where
     fn mark_chunk(
         chunk: StreamChunk,
         current_pos: &Row,
-        backfill_pk_indices: &PkIndices,
+        table_pk_indices: &PkIndices,
     ) -> StreamChunk {
         let chunk = chunk.compact();
         println!("apply chunk {}", chunk.to_pretty_string());
@@ -355,12 +349,28 @@ where
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
         for v in data
             .rows()
-            .map(|row| &row.row_by_indices(backfill_pk_indices) <= current_pos)
+            .map(|row| &row.row_by_indices(table_pk_indices) <= current_pos)
         {
             new_visibility.append(v);
         }
         let (columns, _) = data.into_parts();
         StreamChunk::new(ops, columns, Some(new_visibility.finish()))
+    }
+
+    fn mapping_chunk(chunk: StreamChunk, upstream_indices: &[usize]) -> StreamChunk {
+        let (ops, columns, visibility) = chunk.into_inner();
+        let mapped_columns = upstream_indices
+            .iter()
+            .map(|&i| columns[i].clone())
+            .collect();
+        StreamChunk::new(ops, mapped_columns, visibility)
+    }
+
+    fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Message {
+        match msg {
+            Message::Barrier(_) | Message::Watermark(_) => msg,
+            Message::Chunk(chunk) => Message::Chunk(Self::mapping_chunk(chunk, upstream_indices)),
+        }
     }
 }
 
