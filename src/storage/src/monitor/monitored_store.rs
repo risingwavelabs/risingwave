@@ -265,7 +265,7 @@ where
             self.total_items += 1;
             self.total_size += pair
                 .as_ref()
-                .map(|(k, v)| k.len() + v.len())
+                .map(|(k, v)| k.encoded_len() + v.len())
                 .unwrap_or_default();
 
             Ok(pair)

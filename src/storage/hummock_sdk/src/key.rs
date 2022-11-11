@@ -404,7 +404,7 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     }
 
     /// Get the length of the encoded format.
-    pub fn len(&self) -> usize {
+    pub fn encoded_len(&self) -> usize {
         self.table_key.as_ref().len() + TABLE_PREFIX_LEN
     }
 }
@@ -493,8 +493,8 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     }
 
     /// Get the length of the encoded format.
-    pub fn len(&self) -> usize {
-        self.user_key.len() + EPOCH_LEN
+    pub fn encoded_len(&self) -> usize {
+        self.user_key.encoded_len() + EPOCH_LEN
     }
 }
 

@@ -88,7 +88,7 @@ impl<S: StateStoreRead> Keyspace<S> {
         epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> StorageResult<Vec<(Bytes, Bytes)>> {
+    ) -> StorageResult<Vec<(Vec<u8>, Bytes)>> {
         self.scan_with_range::<_, &[u8]>(.., epoch, limit, read_options)
             .await
     }
@@ -104,7 +104,7 @@ impl<S: StateStoreRead> Keyspace<S> {
         epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> StorageResult<Vec<(Bytes, Bytes)>>
+    ) -> StorageResult<Vec<(Vec<u8>, Bytes)>>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
@@ -113,7 +113,7 @@ impl<S: StateStoreRead> Keyspace<S> {
         let pairs = self.store.scan(range, epoch, limit, read_options).await?;
         let pairs = pairs
             .into_iter()
-            .map(|(k, v)| (Bytes::from(k.user_key.table_key.0), v))
+            .map(|(k, v)| (k.user_key.table_key.0, v))
             .collect();
         Ok(pairs)
     }
@@ -176,7 +176,7 @@ pub struct ExtractTableKeyIterator<I: StateStoreIter<Item = (FullKey<Vec<u8>>, B
 impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> StateStoreIter
     for ExtractTableKeyIterator<I>
 {
-    type Item = (Bytes, Bytes);
+    type Item = (Vec<u8>, Bytes);
 
     type NextFuture<'a> =
         impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
@@ -187,7 +187,7 @@ impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> StateStoreIter
                 .iter
                 .next()
                 .await?
-                .map(|(key, value)| (Bytes::from(key.user_key.table_key.0), value)))
+                .map(|(key, value)| (key.user_key.table_key.0, value)))
         }
     }
 }
