@@ -210,10 +210,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                         if vis {
                                             match op {
                                                 Op::Insert | Op::UpdateInsert => {
-                                                    buffer.insert(key, value)?
+                                                    buffer.insert(key, value)
                                                 }
                                                 Op::Delete | Op::UpdateDelete => {
-                                                    buffer.delete(key, value)?
+                                                    buffer.delete(key, value)
                                                 }
                                             };
                                         }
@@ -223,10 +223,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                     for (op, key, value) in izip!(ops, pks, values) {
                                         match op {
                                             Op::Insert | Op::UpdateInsert => {
-                                                buffer.insert(key, value)?
+                                                buffer.insert(key, value)
                                             }
                                             Op::Delete | Op::UpdateDelete => {
-                                                buffer.delete(key, value)?
+                                                buffer.delete(key, value)
                                             }
                                         };
                                     }
@@ -267,7 +267,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                 self.materialize_cache.get(&key).unwrap()
                                             {
                                                 // double insert => update
-                                                println!("1---check double insert");
                                                 output.insert(
                                                     key.clone(),
                                                     RowOp::Update((cache_row.clone(), row.clone())),
@@ -285,18 +284,16 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                 self.materialize_cache.get(&key).unwrap()
                                             {
                                                 if cache_row != &old_row {
-                                                    println!("2---check delete wrong value");
+                                                    // delete a nonexistent value
                                                     output.insert(
                                                         key.clone(),
                                                         RowOp::Delete(cache_row.to_vec()),
                                                     );
-
-                                                    self.materialize_cache.insert(key, None);
-                                                } else {
-                                                    self.materialize_cache.insert(key, None);
                                                 }
+
+                                                self.materialize_cache.insert(key, None);
                                             } else {
-                                                println!("3---check delete inexsit pk");
+                                                // delete a nonexistent pk
                                                 output.remove(&key);
                                             }
                                         }
@@ -305,7 +302,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                 self.materialize_cache.get(&key).unwrap()
                                             {
                                                 if cache_row != &old_row {
-                                                    println!("4---check update delete wrong value");
+                                                    // update a nonexistent old value
                                                     output.insert(
                                                         key.clone(),
                                                         RowOp::Update((
@@ -313,16 +310,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                             new_row.clone(),
                                                         )),
                                                     );
-                                                    self.materialize_cache
-                                                        .insert(key, Some(new_row));
-                                                } else {
-                                                    self.materialize_cache
-                                                        .insert(key, Some(new_row));
                                                 }
+                                                self.materialize_cache.insert(key, Some(new_row));
                                             } else {
-                                                println!(
-                                                    "5---check update None value, change to insert"
-                                                );
+                                                // update a nonexistent pk
                                                 output.insert(
                                                     key.clone(),
                                                     RowOp::Insert(new_row.clone()),
@@ -423,43 +414,42 @@ impl MaterializeBuffer {
     }
 
     /// write methods
-    pub fn insert(&mut self, pk: Vec<u8>, value: Vec<u8>) -> StreamExecutorResult<()> {
+    pub fn insert(&mut self, pk: Vec<u8>, value: Vec<u8>) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
                 e.insert(RowOp::Insert(value));
-                Ok(())
             }
             Entry::Occupied(mut e) => match e.get_mut() {
                 RowOp::Delete(ref mut old_value) => {
                     let old_val = std::mem::take(old_value);
                     e.insert(RowOp::Update((old_val, value)));
-                    Ok(())
                 }
-                _ => panic!("conflict"),
+                _ => {
+                    e.insert(RowOp::Insert(value));
+                }
             },
         }
     }
 
-    pub fn delete(&mut self, pk: Vec<u8>, old_value: Vec<u8>) -> StreamExecutorResult<()> {
+    pub fn delete(&mut self, pk: Vec<u8>, old_value: Vec<u8>) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
                 e.insert(RowOp::Delete(old_value));
-                Ok(())
             }
             Entry::Occupied(mut e) => match e.get_mut() {
                 RowOp::Insert(original_value) => {
                     debug_assert_eq!(original_value, &old_value);
                     e.remove();
-                    Ok(())
                 }
-                RowOp::Delete(_) => panic!("conflict"),
+                RowOp::Delete(_) => {
+                    e.insert(RowOp::Delete(old_value));
+                }
                 RowOp::Update(value) => {
                     let (original_old_value, original_new_value) = std::mem::take(value);
                     debug_assert_eq!(original_new_value, old_value);
                     e.insert(RowOp::Delete(original_old_value));
-                    Ok(())
                 }
             },
         }
@@ -467,10 +457,6 @@ impl MaterializeBuffer {
 
     pub fn is_empty(&self) -> bool {
         self.buffer.is_empty()
-    }
-
-    pub fn into_parts(self) -> HashMap<Vec<u8>, RowOp> {
-        self.buffer
     }
 }
 impl<S: StateStore> Executor for MaterializeExecutor<S> {
@@ -502,6 +488,7 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
 
 /// A cache for materialize executors.
 pub struct MaterializeCache {
+    /// (pk, value)
     data: ExecutorCache<Vec<u8>, Option<Vec<u8>>>,
 }
 
@@ -521,15 +508,6 @@ impl MaterializeCache {
 
     pub fn insert(&mut self, key: Vec<u8>, value: Option<Vec<u8>>) {
         self.data.push(key, value);
-    }
-
-    pub fn remove(&mut self, key: &[u8]) {
-        self.data.pop(key);
-    }
-
-    /// Flush the cache and evict the items.
-    pub fn flush(&mut self) {
-        self.data.evict();
     }
 }
 
@@ -663,12 +641,16 @@ mod tests {
         ]);
         let column_ids = vec![0.into(), 1.into()];
 
-        // Prepare source chunks.
+        // test double insert one pk, the latter needs to override the former.
         let chunk1 = StreamChunk::from_pretty(
             " i i
+            + 1 3
             + 1 4
             + 2 5
-            + 3 6",
+            + 3 6
+            U- 8 1
+            U+ 2 2
+            + 8 3",
         );
 
         // test delete wrong value, delete inexistent pk
@@ -748,6 +730,24 @@ mod tests {
                     .await
                     .unwrap();
                 assert_eq!(row, Some(Row(vec![Some(3_i32.into()), Some(6_i32.into())])));
+
+                let row = table
+                    .get_row(
+                        &Row(vec![Some(1_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, Some(Row(vec![Some(1_i32.into()), Some(4_i32.into())])));
+
+                let row = table
+                    .get_row(
+                        &Row(vec![Some(8_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, Some(Row(vec![Some(8_i32.into()), Some(3_i32.into())])));
             }
             _ => unreachable!(),
         }

@@ -18,9 +18,3 @@
 pub struct CompactedRow {
     pub row: Vec<u8>,
 }
-
-impl CompactedRow {
-    pub fn new(row: Vec<u8>) -> Self {
-        Self { row }
-    }
-}
