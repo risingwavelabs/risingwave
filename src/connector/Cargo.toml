@@ -33,7 +33,7 @@ itertools = "0.10"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 mysql_async = "0.30"
-nexmark = { path = "../utils/nexmark" }
+nexmark = { path = "../utils/nexmark", features = ["serde-1"] }
 num-traits = "0.2"
 paste = "1"
 prost = "0.11"

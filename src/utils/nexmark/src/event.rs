@@ -33,6 +33,7 @@ use std::cmp::{max, min};
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
+#[cfg(feature = "serde-1")]
 use serde::{Deserialize, Serialize};
 
 use crate::config::{GeneratorConfig, CHANNEL_NUMBER};
@@ -41,6 +42,7 @@ use crate::utils::{milli_ts_to_timestamp_string, NexmarkRng};
 type Id = usize;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-1", derive(Serialize, Deserialize))]
 pub enum EventType {
     Person,
     Auction,
@@ -48,8 +50,8 @@ pub enum EventType {
 }
 
 /// The Nexmark Event, including [`Person`], [`Auction`], and [`Bid`].
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde-1", derive(Serialize, Deserialize))]
 pub enum Event {
     /// The Person event.
     Person(Person),
@@ -88,19 +90,12 @@ impl Event {
             Event::Bid(_) => EventType::Bid,
         }
     }
-
-    pub fn to_json(&self) -> String {
-        match self {
-            Event::Person(p) => serde_json::to_string(p).unwrap(),
-            Event::Auction(a) => serde_json::to_string(a).unwrap(),
-            Event::Bid(b) => serde_json::to_string(b).unwrap(),
-        }
-    }
 }
 
 /// Person represents a person submitting an item for auction and/or making a
 /// bid on an auction.
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde-1", derive(Serialize, Deserialize))]
 pub struct Person {
     /// A person-unique integer ID.
     pub id: Id,
@@ -170,7 +165,8 @@ impl Person {
 }
 
 /// Auction represents an item under auction.
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde-1", derive(Serialize, Deserialize))]
 pub struct Auction {
     /// An auction-unique integer ID.
     pub id: Id,
@@ -277,7 +273,8 @@ impl Auction {
 }
 
 /// Bid represents a bid for an item under auction.
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde-1", derive(Serialize, Deserialize))]
 pub struct Bid {
     /// The ID of the auction this bid is for.
     pub auction: Id,
@@ -356,8 +353,17 @@ mod tests {
         assert_eq!(event_1, event_2);
 
         assert_eq!(
-            event_1.to_json(),
-            r#"{"id":1000,"name":"vicky noris","email_address":"vzbhp@wxv.com","credit_card":"4355 0142 3460 9324","city":"boise","state":"ca","date_time":"2015-07-15 00:00:00","extra":"cllnesmssnthtljklifqbqcyhcjwiuoaudxxwcnnwgmsmwgqelplzyckqzuoaitfpxubgpkjtqjhktelmbskvjkxrhziyowxibbgnqneuaiazqduhkynvgeisbxtknbxmqmzbgnptlrcyigjginataks"}"#
+            event_1,
+            Event::Person(Person {
+                id: 1000,
+                name: "vicky noris".into(),
+                email_address: "vzbhp@wxv.com".into(),
+                credit_card: "4355 0142 3460 9324".into(),
+                city: "boise".into(),
+                state: "ca".into(),
+                date_time: "2015-07-15 00:00:00".into(),
+                extra: "cllnesmssnthtljklifqbqcyhcjwiuoaudxxwcnnwgmsmwgqelplzyckqzuoaitfpxubgpkjtqjhktelmbskvjkxrhziyowxibbgnqneuaiazqduhkynvgeisbxtknbxmqmzbgnptlrcyigjginataks".into(),
+            })
         );
     }
 }
