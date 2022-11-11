@@ -193,7 +193,6 @@ impl BlockIterator {
     /// Return: true is the iterator is advanced and false otherwise.
     fn try_prev_inner(&mut self) -> bool {
         if self.offset == 0 {
-            self.invalidate();
             return false;
         }
         if self.block.restart_point(self.restart_point_index) as usize == self.offset {
