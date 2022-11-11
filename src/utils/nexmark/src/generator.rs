@@ -12,101 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-use futures_async_stream::stream;
-
 use crate::config::GeneratorConfig;
-use crate::event::{Event, EventType};
+use crate::event::Event;
+use crate::NexmarkConfig;
 
 #[derive(Clone, Debug)]
 pub struct EventGenerator {
     pub config: GeneratorConfig,
     pub events_so_far: u64,
-    pub event_num: i64,
     pub wall_clock_base_time: usize,
-    pub split_index: i32,
-    pub split_num: i32,
-    pub event_type: EventType,
-    pub use_real_time: bool,
-    pub min_event_gap_in_ns: u64,
-    pub max_chunk_size: u64,
 }
 
 impl EventGenerator {
-    #[stream(item = Vec<Event>)]
-    pub async fn into_stream(mut self) {
-        let mut last_event = None;
-        loop {
-            let mut msgs: Vec<Event> = vec![];
-            let old_events_so_far = self.events_so_far;
-
-            // Get unix timestamp in milliseconds
-            let current_timestamp_ms = if self.use_real_time {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64
-            } else {
-                0
-            };
-
-            if let Some(event) = last_event.take() {
-                msgs.push(event);
-            }
-
-            let mut finished = false;
-
-            while (msgs.len() as u64) < self.max_chunk_size {
-                if self.event_num > 0 && self.events_so_far >= self.event_num as u64 {
-                    finished = true;
-                    break;
-                }
-
-                let (event, new_wall_clock_base_time) = Event::new(
-                    self.events_so_far as usize,
-                    &self.config,
-                    self.wall_clock_base_time,
-                );
-
-                self.wall_clock_base_time = new_wall_clock_base_time;
-                self.events_so_far += 1;
-
-                if event.event_type() != self.event_type
-                    || self.events_so_far % self.split_num as u64 != self.split_index as u64
-                {
-                    continue;
-                }
-
-                // When the generated timestamp is larger then current timestamp, if its the first
-                // event, sleep and continue. Otherwise, directly return.
-                if self.use_real_time && current_timestamp_ms < new_wall_clock_base_time as u64 {
-                    tokio::time::sleep(Duration::from_millis(
-                        new_wall_clock_base_time as u64 - current_timestamp_ms,
-                    ))
-                    .await;
-
-                    last_event = Some(event);
-                    break;
-                }
-
-                msgs.push(event);
-            }
-
-            if finished && msgs.is_empty() {
-                break;
-            } else {
-                yield msgs;
-            }
-
-            if !self.use_real_time && self.min_event_gap_in_ns > 0 {
-                tokio::time::sleep(Duration::from_nanos(
-                    (self.events_so_far - old_events_so_far) * self.min_event_gap_in_ns,
-                ))
-                .await;
-            }
+    pub fn new(config: NexmarkConfig, events_so_far: u64, wall_clock_base_time: usize) -> Self {
+        EventGenerator {
+            config: config.into(),
+            events_so_far,
+            wall_clock_base_time,
         }
+    }
+}
 
-        tracing::debug!(?self.event_type, self.split_index, "nexmark generator finished");
+impl Iterator for EventGenerator {
+    type Item = Event;
+
+    fn next(&mut self) -> Option<Event> {
+        let (event, new_wall_clock_base_time) = Event::new(
+            self.events_so_far as usize,
+            &self.config,
+            self.wall_clock_base_time,
+        );
+        self.wall_clock_base_time = new_wall_clock_base_time;
+        self.events_so_far += 1;
+        Some(event)
     }
 }

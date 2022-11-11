@@ -10,8 +10,5 @@ serde-1 = ["serde"]
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-futures-async-stream = "0.2"
 rand = { version = "0.8", features = ["small_rng"] }
 serde = { version = "1", features = ["derive"], optional = true }
-tokio = { version = "1", features = ["time"] }
-tracing = "0.1"
