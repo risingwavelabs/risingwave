@@ -34,7 +34,7 @@ use tracing::trace;
 
 use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
-use crate::keyspace::StripPrefixIterator;
+use crate::keyspace::ExtractTableKeyIterator;
 use crate::row_serde::row_serde_util::{
     parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
@@ -196,7 +196,7 @@ impl<S: StateStore> StorageTable<S> {
             })
             .collect_vec();
 
-        let keyspace = Keyspace::table_root(store, &table_id);
+        let keyspace = Keyspace::table_root(store, table_id);
         Self {
             keyspace,
             schema,
@@ -501,7 +501,7 @@ impl<S: StateStore> StorageTable<S> {
 /// [`StorageTableIterInner`] iterates on the storage table.
 struct StorageTableIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
-    iter: StripPrefixIterator<S::Iter>,
+    iter: ExtractTableKeyIterator<S::Iter>,
 
     mapping: Arc<ColumnMapping>,
 
