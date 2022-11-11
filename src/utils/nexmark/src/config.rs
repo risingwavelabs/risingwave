@@ -38,8 +38,11 @@ pub const CHANNEL_NUMBER: usize = 10_000;
 pub const NEXMARK_BASE_TIME: usize = 1_436_918_400_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RateShape {
+    #[cfg_attr(feature = "serde", serde(rename = "square"))]
     Square,
+    #[cfg_attr(feature = "serde", serde(rename = "sine"))]
     Sine,
 }
 

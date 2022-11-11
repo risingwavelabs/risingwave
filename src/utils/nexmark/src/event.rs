@@ -33,7 +33,7 @@ use std::cmp::{max, min};
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
-#[cfg(feature = "serde-1")]
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::config::{GeneratorConfig, CHANNEL_NUMBER};
@@ -42,7 +42,7 @@ use crate::utils::{milli_ts_to_timestamp_string, NexmarkRng};
 type Id = usize;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde-1", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EventType {
     Person,
     Auction,
@@ -51,7 +51,7 @@ pub enum EventType {
 
 /// The Nexmark Event, including [`Person`], [`Auction`], and [`Bid`].
 #[derive(Debug, PartialEq, Eq, Clone)]
-#[cfg_attr(feature = "serde-1", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Event {
     /// The Person event.
     Person(Person),
@@ -95,7 +95,7 @@ impl Event {
 /// Person represents a person submitting an item for auction and/or making a
 /// bid on an auction.
 #[derive(Debug, PartialEq, Eq, Clone)]
-#[cfg_attr(feature = "serde-1", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Person {
     /// A person-unique integer ID.
     pub id: Id,
@@ -166,7 +166,7 @@ impl Person {
 
 /// Auction represents an item under auction.
 #[derive(Debug, PartialEq, Eq, Clone)]
-#[cfg_attr(feature = "serde-1", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Auction {
     /// An auction-unique integer ID.
     pub id: Id,
@@ -274,7 +274,7 @@ impl Auction {
 
 /// Bid represents a bid for an item under auction.
 #[derive(Debug, PartialEq, Eq, Clone)]
-#[cfg_attr(feature = "serde-1", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Bid {
     /// The ID of the auction this bid is for.
     pub auction: Id,

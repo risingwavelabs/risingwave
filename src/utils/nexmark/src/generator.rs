@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::config::GeneratorConfig;
+use crate::config::{GeneratorConfig, NexmarkConfig};
 use crate::event::Event;
-use crate::NexmarkConfig;
 
 #[derive(Clone, Debug)]
 pub struct EventGenerator {
