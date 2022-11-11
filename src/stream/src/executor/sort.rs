@@ -192,11 +192,10 @@ impl<S: StateStore> SortExecutor<S> {
                                         row
                                     )
                                 })?;
-                                // Rows with None timestamp should be ignored.
-                                if let Some(timestamp) = timestamp_datum {
-                                    let pk = row.by_indices(&self.pk_indices);
-                                    self.buffer.insert((timestamp.clone(), pk), (row, false));
-                                }
+                                let pk = row.by_indices(&self.pk_indices);
+                                // Null event time should not exist in the row since the `WatermarkFilter`
+                                // before the `Sort` will filter out the Null event time.
+                                self.buffer.insert((timestamp_datum.clone().unwrap(), pk), (row, false));
                             },
                             // Other operations are not supported currently.
                             _ => unimplemented!("operations other than insert currently are not supported by sort executor")
@@ -293,11 +292,11 @@ impl<S: StateStore> SortExecutor<S> {
                         row
                     )
                 })?;
-                // Rows with None timestamp should be ignored.
-                if let Some(timestamp) = timestamp_datum {
-                    let pk = row.by_indices(&self.pk_indices);
-                    self.buffer.insert((timestamp.clone(), pk), (row, true));
-                }
+                let pk = row.by_indices(&self.pk_indices);
+                // Null event time should not exist in the row since the `WatermarkFilter` before
+                // the `Sort` will filter out the Null event time.
+                self.buffer
+                    .insert((timestamp_datum.clone().unwrap(), pk), (row, true));
             }
         }
         Ok(())
