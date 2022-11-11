@@ -52,7 +52,7 @@ pub struct MaterializeExecutor<S: StateStore> {
     info: ExecutorInfo,
 
     materialize_cache: MaterializeCache,
-    ignore_on_conflict: bool,
+    handle_pk_conflict: bool,
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
@@ -70,7 +70,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         table_catalog: &Table,
         lru_manager: Option<LruManagerRef>,
         cache_size: usize,
-        ignore_on_conflict: bool,
+        handle_pk_conflict: bool,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
 
@@ -89,7 +89,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(lru_manager, cache_size),
-            ignore_on_conflict,
+            handle_pk_conflict,
         }
     }
 
@@ -104,6 +104,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         executor_id: u64,
         lru_manager: Option<LruManagerRef>,
         cache_size: usize,
+        handle_pk_conflict: bool,
     ) -> Self {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
@@ -134,11 +135,16 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(lru_manager, cache_size),
-            ignore_on_conflict: false,
+            handle_pk_conflict,
         }
     }
 
+    pub fn handle_conflict(&mut self) {
+        self.handle_pk_conflict = true;
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
+    #[allow(clippy::disallowed_methods)]
     async fn execute_inner(mut self) {
         let data_types = self.schema().data_types().clone();
         let mut input = self.input.execute();
@@ -157,8 +163,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                 }
                 Message::Chunk(chunk) => {
-                    match self.ignore_on_conflict {
-                        false => {
+                    match self.handle_pk_conflict {
+                        true => {
                             let (data_chunk, ops) = chunk.clone().into_parts();
 
                             let value_chunk =
@@ -261,6 +267,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                 self.materialize_cache.get(&key).unwrap()
                                             {
                                                 // double insert => update
+                                                println!("1---check double insert");
                                                 output.insert(
                                                     key.clone(),
                                                     RowOp::Update((cache_row.clone(), row.clone())),
@@ -278,6 +285,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                 self.materialize_cache.get(&key).unwrap()
                                             {
                                                 if cache_row != &old_row {
+                                                    println!("2---check delete wrong value");
                                                     output.insert(
                                                         key.clone(),
                                                         RowOp::Delete(cache_row.to_vec()),
@@ -288,6 +296,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                     self.materialize_cache.insert(key, None);
                                                 }
                                             } else {
+                                                println!("3---check delete inexsit pk");
                                                 output.remove(&key);
                                             }
                                         }
@@ -296,7 +305,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                 self.materialize_cache.get(&key).unwrap()
                                             {
                                                 if cache_row != &old_row {
-                                                    // output.remove(&key);
+                                                    println!("4---check update delete wrong value");
                                                     output.insert(
                                                         key.clone(),
                                                         RowOp::Update((
@@ -311,6 +320,9 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                         .insert(key, Some(new_row));
                                                 }
                                             } else {
+                                                println!(
+                                                    "5---check update None value, change to insert"
+                                                );
                                                 output.insert(
                                                     key.clone(),
                                                     RowOp::Insert(new_row.clone()),
@@ -331,7 +343,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 }
                             }
                         }
-                        true => {
+                        false => {
                             self.state_table.write_chunk(chunk.clone());
                             Message::Chunk(chunk)
                         }
@@ -598,7 +610,8 @@ mod tests {
                 column_ids,
                 1,
                 None,
-                100,
+                0,
+                false,
             )
             .await,
         )
@@ -658,14 +671,22 @@ mod tests {
             + 3 6",
         );
 
-        // test invalid delete
+        // test delete wrong value, delete inexistent pk
         let chunk2 = StreamChunk::from_pretty(
             " i i
             + 7 8
             - 3 4
-            - 5 0
-            U- 6 0
-            U- 3 5",
+            - 5 0",
+        );
+
+        // test delete wrong value, delete inexistent pk
+        let chunk3 = StreamChunk::from_pretty(
+            " i i
+            + 1 5
+            U- 2 4
+            U+ 2 8
+            U- 9 0
+            U+ 9 1",
         );
 
         // Prepare stream executors.
@@ -678,6 +699,8 @@ mod tests {
                 Message::Barrier(Barrier::new_test_barrier(2)),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Chunk(chunk3),
+                Message::Barrier(Barrier::new_test_barrier(4)),
             ],
         );
 
@@ -704,7 +727,8 @@ mod tests {
                 column_ids,
                 1,
                 None,
-                100,
+                1 << 16,
+                true,
             )
             .await,
         )
@@ -739,6 +763,31 @@ mod tests {
                     .await
                     .unwrap();
                 assert_eq!(row, Some(Row(vec![Some(7_i32.into()), Some(8_i32.into())])));
+            }
+            _ => unreachable!(),
+        }
+
+        materialize_executor.next().await.transpose().unwrap();
+        // Second stream chunk. We check the existence of (7) -> (7,8)
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                let row = table
+                    .get_row(
+                        &Row(vec![Some(1_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, Some(Row(vec![Some(1_i32.into()), Some(5_i32.into())])));
+
+                let row = table
+                    .get_row(
+                        &Row(vec![Some(2_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, Some(Row(vec![Some(2_i32.into()), Some(8_i32.into())])));
             }
             _ => unreachable!(),
         }

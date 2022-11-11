@@ -657,7 +657,7 @@ pub fn to_stream_prost_body(
                 table_id: 0,
                 column_orders: me.table.pk().iter().map(FieldOrder::to_protobuf).collect(),
                 table: Some(me.table.to_internal_table_prost()),
-                ignore_on_conflict: true,
+                handle_pk_conflict: false,
             })
         }
         Node::ProjectSet(me) => {

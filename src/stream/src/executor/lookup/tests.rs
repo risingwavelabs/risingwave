@@ -131,7 +131,8 @@ async fn create_arrangement(
             column_ids,
             1,
             None,
-            100,
+            0,
+            false,
         )
         .await,
     )
