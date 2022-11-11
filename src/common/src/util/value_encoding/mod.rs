@@ -18,7 +18,6 @@
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
-use risingwave_pb::data::Datum as ProstDatum;
 
 use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::types::struct_type::StructType;
@@ -52,20 +51,6 @@ pub fn serialize_datum_ref(datum_ref: &DatumRef<'_>, buf: &mut impl BufMut) {
     } else {
         buf.put_u8(0);
     }
-}
-
-/// Serialize a `ScalarImpl` into bytes.
-pub fn serialize_scalar_impl(scalar: &ScalarImpl) -> Vec<u8> {
-    let mut bytes = vec![];
-    serialize_value(scalar.as_scalar_ref_impl(), &mut bytes);
-    bytes
-}
-
-pub fn deserialize_scalar_impl_from_prost(
-    prost: &ProstDatum,
-    data_type: &DataType,
-) -> Result<ScalarImpl> {
-    deserialize_value(data_type, &mut &*prost.body)
 }
 
 /// Deserialize bytes into a datum (Not order guarantee, used in value encoding).

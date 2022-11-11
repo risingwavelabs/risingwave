@@ -28,9 +28,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::value_encoding::{
-    deserialize_scalar_impl_from_prost, serialize_scalar_impl,
-};
+use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum_to_bytes};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
@@ -554,7 +552,7 @@ impl Watermark {
         ProstWatermark {
             col_idx: self.col_idx as _,
             val: Some(ProstDatum {
-                body: serialize_scalar_impl(&self.val),
+                body: serialize_datum_to_bytes(Some(&self.val)),
             }),
         }
     }
@@ -565,7 +563,8 @@ impl Watermark {
     ) -> StreamExecutorResult<Self> {
         Ok(Watermark {
             col_idx: prost.col_idx as _,
-            val: deserialize_scalar_impl_from_prost(prost.get_val()?, data_type)?,
+            // Should never receive a Null watermark value here
+            val: deserialize_datum(&*prost.get_val()?.body, data_type)?.unwrap(),
         })
     }
 }
