@@ -54,9 +54,19 @@ impl BlockIterator {
         self.next_inner();
     }
 
+    pub fn try_next(&mut self) -> bool {
+        assert!(self.is_valid());
+        self.try_next_inner()
+    }
+
     pub fn prev(&mut self) {
         assert!(self.is_valid());
         self.prev_inner();
+    }
+
+    pub fn try_prev(&mut self) -> bool {
+        assert!(self.is_valid());
+        self.try_prev_inner()
     }
 
     pub fn key(&self) -> &[u8] {
@@ -107,14 +117,24 @@ impl BlockIterator {
         self.entry_len = 0;
     }
 
-    /// Moves to the next entry.
+    /// Moving to the next entry
     ///
-    /// Note: Ensures that the current state is valid.
+    /// Note: The current state may be invalid if there is no more data to read
     fn next_inner(&mut self) {
+        if !self.try_next_inner() {
+            self.invalidate();
+        }
+    }
+
+    /// Try moving to the next entry.
+    ///
+    /// The current state will still be valid if there is no more data to read.
+    ///
+    /// Return: true is the iterator is advanced and false otherwise.
+    fn try_next_inner(&mut self) -> bool {
         let offset = self.offset + self.entry_len;
         if offset >= self.block.len() {
-            self.invalidate();
-            return;
+            return false;
         }
         let prefix = self.decode_prefix_at(offset);
         self.key.truncate(prefix.overlap_len());
@@ -128,6 +148,7 @@ impl BlockIterator {
         {
             self.restart_point_index += 1;
         }
+        true
     }
 
     /// Moves forward until reaching the first that equals or larger than the given `key`.
@@ -156,13 +177,24 @@ impl BlockIterator {
         }
     }
 
-    /// Moves to the previous entry.
+    /// Moving to the previous entry
     ///
-    /// Note: Ensure that the current state is valid.
+    /// Note: The current state may be invalid if there is no more data to read
     fn prev_inner(&mut self) {
+        if !self.try_prev_inner() {
+            self.invalidate();
+        }
+    }
+
+    /// Try moving to the previous entry.
+    ///
+    /// The current state will still be valid if there is no more data to read.
+    ///
+    /// Return: true is the iterator is advanced and false otherwise.
+    fn try_prev_inner(&mut self) -> bool {
         if self.offset == 0 {
             self.invalidate();
-            return;
+            return false;
         }
         if self.block.restart_point(self.restart_point_index) as usize == self.offset {
             self.restart_point_index -= 1;
@@ -170,6 +202,7 @@ impl BlockIterator {
         let origin_offset = self.offset;
         self.seek_restart_point_by_index(self.restart_point_index);
         self.next_until_prev_offset(origin_offset);
+        true
     }
 
     /// Decodes [`KeyPrefix`] at given offset.
