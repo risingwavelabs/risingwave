@@ -34,6 +34,16 @@ use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message
 use crate::executor::PkIndices;
 use crate::task::{ActorId, CreateMviewProgress};
 
+/// An implementation of the RFC: Use Backfill To Let Mv On Mv Stream Again.(https://github.com/risingwavelabs/rfcs/pull/13)
+/// `BackfillExecutor` is used to create a materialized view on another materialized view.
+/// It can only buffer chunks between two (checkpoint) barriers instead of unbundled memory usage of
+/// `RearrangedChainExecutor`. It uses the latest epoch to read the snapshot of the upstream mv
+/// during two barriers and all the `StreamChunk` of the snapshot read will forward to the
+/// downstream. It uses `current_pos` to record the progress of the backfill (the pk of the upstream
+/// mv) and `current_pos` is initiated as an empty `Row`. All upstream messages during the two
+/// barriers interval will be buffered and decide to forward or ignore based on the `current_pos` at
+/// the end of the later barrier. Once `current_pos` reaches the end of the upstream mv pk, the
+/// backfill would finish.
 pub struct BackfillExecutor<S: StateStore> {
     table: StorageTable<S>,
 
@@ -131,15 +141,19 @@ where
             // upstream       snapshot
             //
             // We construct a backfill stream with upstream as its left input and mv snapshot read
-            // stream as its right input. When a chunk comes from upstream, we will
-            // buffer it. When a checkpoint barrier comes from upstream:
+            // stream as its right input. When a chunk comes from upstream, we will buffer it.
+            //
+            // When a checkpoint barrier comes from upstream:
             //  - Update the `snapshot_read_epoch`.
             //  - For each row of the upstream chunk buffer, forward it to downstream if its pk <=
             //    `current_pos`, otherwise ignore it.
             //  - reconstruct the whole backfill stream with upstream and new mv snapshot read
             //    stream with the `snapshot_read_epoch`.
+            //
             // When a chunk comes from snapshot, we forward it to the downstream and raise
-            // `current_pos`. When none comes from snapshot, it means backfill has been
+            // `current_pos`.
+            //
+            // When we reach the end of the snapshot read stream, it means backfill has been
             // finished.
             //
             // Once the backfill loop ends, we forward the upstream directly to the downstream.
