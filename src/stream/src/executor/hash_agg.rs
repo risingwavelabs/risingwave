@@ -120,7 +120,7 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
 
-    /// Buffer watermarks on group by columns received after last barrier.
+    /// Buffer watermarks on group keys received since last barrier.
     buffered_watermarks: Vec<Option<Watermark>>,
 }
 
