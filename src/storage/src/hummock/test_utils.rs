@@ -29,8 +29,8 @@ use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, LruCache, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
-    SstableWriter,
+    CachePolicy, DeleteRangeTombstone, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
+    SstableStoreRef, SstableWriter,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
@@ -184,6 +184,7 @@ pub async fn gen_test_sstable_inner(
     opts: SstableBuilderOptions,
     sst_id: HummockSstableId,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+    range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
 ) -> Sstable {
@@ -196,6 +197,9 @@ pub async fn gen_test_sstable_inner(
     let mut b = SstableBuilder::for_test(sst_id, writer, opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice(), true).await.unwrap();
+    }
+    for tombstone in range_tombstones {
+        b.add_delete_range(tombstone);
     }
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
@@ -213,7 +217,34 @@ pub async fn gen_test_sstable(
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::NotFill).await
+    gen_test_sstable_inner(
+        opts,
+        sst_id,
+        kv_iter,
+        vec![],
+        sstable_store,
+        CachePolicy::NotFill,
+    )
+    .await
+}
+
+/// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
+pub async fn gen_test_sstable_with_range_tombstone(
+    opts: SstableBuilderOptions,
+    sst_id: HummockSstableId,
+    kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+    range_tombstones: Vec<DeleteRangeTombstone>,
+    sstable_store: SstableStoreRef,
+) -> Sstable {
+    gen_test_sstable_inner(
+        opts,
+        sst_id,
+        kv_iter,
+        range_tombstones,
+        sstable_store,
+        CachePolicy::NotFill,
+    )
+    .await
 }
 
 /// Prefix the `key` with a dummy table id.
