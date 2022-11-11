@@ -118,6 +118,6 @@ impl NexmarkEventGenerator {
             }
         }
 
-        tracing::debug!(?self.event_type, "nexmark generator finished");
+        tracing::debug!(?self.event_type, self.split_index, "nexmark generator finished");
     }
 }
