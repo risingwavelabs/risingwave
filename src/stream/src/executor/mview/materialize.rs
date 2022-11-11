@@ -24,6 +24,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::table::compute_chunk_vnode;
@@ -164,42 +165,15 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 Message::Chunk(chunk) => {
                     match self.handle_pk_conflict {
                         true => {
-                            let (data_chunk, ops) = chunk.into_parts();
-
-                            let value_chunk =
-                                if let Some(ref value_indices) = self.state_table.value_indices() {
-                                    data_chunk.clone().reorder_columns(value_indices)
-                                } else {
-                                    data_chunk.clone()
-                                };
-                            let values = value_chunk.serialize();
-
-                            let mut pks = vec![vec![]; data_chunk.capacity()];
-                            compute_chunk_vnode(
-                                &data_chunk,
-                                self.state_table.dist_key_indices(),
-                                self.state_table.vnodes(),
-                            )
-                            .into_iter()
-                            .zip_eq(pks.iter_mut())
-                            .for_each(|(vnode, vnode_and_pk)| {
-                                vnode_and_pk.extend(vnode.to_be_bytes())
-                            });
-                            let key_chunk =
-                                data_chunk.reorder_columns(self.state_table.pk_indices());
-                            key_chunk.rows_with_holes().zip_eq(pks.iter_mut()).for_each(
-                                |(r, vnode_and_pk)| {
-                                    if let Some(r) = r {
-                                        self.state_table.pk_serde().serialize_ref(r, vnode_and_pk);
-                                    }
-                                },
-                            );
-
-                            let (_, vis) = key_chunk.into_parts();
-
                             // create MaterializeBuffer from chunk
-                            let buffer =
-                                MaterializeBuffer::fill_buffer_from_chunk(ops, pks, values, vis);
+                            let buffer = MaterializeBuffer::fill_buffer_from_chunk(
+                                chunk,
+                                self.state_table.value_indices(),
+                                self.state_table.dist_key_indices(),
+                                self.state_table.pk_indices(),
+                                self.state_table.pk_serde(),
+                                self.state_table.vnodes(),
+                            );
 
                             if buffer.is_empty() {
                                 // empty chunk
@@ -380,11 +354,39 @@ impl MaterializeBuffer {
 
     #[allow(clippy::disallowed_methods)]
     fn fill_buffer_from_chunk(
-        ops: Vec<Op>,
-        pks: Vec<Vec<u8>>,
-        values: Vec<Vec<u8>>,
-        vis: Vis,
+        stream_chunk: StreamChunk,
+        value_indices: &Option<Vec<usize>>,
+        dist_key_indices: &[usize],
+        pk_indices: &[usize],
+        pk_serde: &OrderedRowSerde,
+        vnodes: &Bitmap,
     ) -> Self {
+        let (data_chunk, ops) = stream_chunk.into_parts();
+
+        let value_chunk = if let Some(ref value_indices) = value_indices {
+            data_chunk.clone().reorder_columns(value_indices)
+        } else {
+            data_chunk.clone()
+        };
+        let values = value_chunk.serialize();
+
+        let mut pks = vec![vec![]; data_chunk.capacity()];
+        compute_chunk_vnode(&data_chunk, dist_key_indices, vnodes)
+            .into_iter()
+            .zip_eq(pks.iter_mut())
+            .for_each(|(vnode, vnode_and_pk)| vnode_and_pk.extend(vnode.to_be_bytes()));
+        let key_chunk = data_chunk.reorder_columns(pk_indices);
+        key_chunk
+            .rows_with_holes()
+            .zip_eq(pks.iter_mut())
+            .for_each(|(r, vnode_and_pk)| {
+                if let Some(r) = r {
+                    pk_serde.serialize_ref(r, vnode_and_pk);
+                }
+            });
+
+        let (_, vis) = key_chunk.into_parts();
+
         let mut buffer = MaterializeBuffer::new();
         match vis {
             Vis::Bitmap(vis) => {
