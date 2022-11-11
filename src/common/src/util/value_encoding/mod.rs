@@ -18,6 +18,7 @@
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
+use risingwave_pb::data::Datum as ProstDatum;
 
 use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::types::struct_type::StructType;
@@ -53,6 +54,20 @@ pub fn serialize_datum_ref(datum_ref: &DatumRef<'_>, buf: &mut impl BufMut) {
     }
 }
 
+/// Serialize a `ScalarImpl` into bytes.
+pub fn serialize_scalar_impl(scalar: &ScalarImpl) -> Vec<u8> {
+    let mut bytes = vec![];
+    serialize_value(scalar.as_scalar_ref_impl(), &mut bytes);
+    bytes
+}
+
+pub fn deserialize_scalar_impl_from_prost(
+    prost: &ProstDatum,
+    data_type: &DataType,
+) -> Result<ScalarImpl> {
+    deserialize_value(data_type, &mut &*prost.body)
+}
+
 /// Deserialize bytes into a datum (Not order guarantee, used in value encoding).
 pub fn deserialize_datum(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
     inner_deserialize_datum(&mut data, ty)
@@ -64,7 +79,7 @@ fn inner_deserialize_datum(data: &mut impl Buf, ty: &DataType) -> Result<Datum> 
     let null_tag = data.get_u8();
     match null_tag {
         0 => Ok(None),
-        1 => deserialize_value(ty, data),
+        1 => Some(deserialize_value(ty, data)).transpose(),
         _ => Err(ValueEncodingError::InvalidTagEncoding(null_tag)),
     }
 }
@@ -143,8 +158,8 @@ fn serialize_decimal(decimal: &Decimal, buf: &mut impl BufMut) {
     buf.put_slice(&decimal.unordered_serialize());
 }
 
-fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<Datum> {
-    Ok(Some(match ty {
+fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
+    Ok(match ty {
         DataType::Int16 => ScalarImpl::Int16(data.get_i16_le()),
         DataType::Int32 => ScalarImpl::Int32(data.get_i32_le()),
         DataType::Int64 => ScalarImpl::Int64(data.get_i64_le()),
@@ -162,7 +177,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<Datum> {
         DataType::List {
             datatype: item_type,
         } => deserialize_list(item_type, data)?,
-    }))
+    })
 }
 
 fn deserialize_struct(struct_def: &StructType, data: &mut impl Buf) -> Result<ScalarImpl> {
