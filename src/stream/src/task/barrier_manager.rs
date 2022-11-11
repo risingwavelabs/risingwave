@@ -143,7 +143,7 @@ impl LocalBarrierManager {
                 assert!(!to_collect.is_empty());
 
                 let (tx, rx) = oneshot::channel();
-                state.transform_to_issued(barrier, to_collect, tx);
+                state.transform_to_issued(barrier, to_collect, tx)?;
                 Some(rx)
             }
         };
