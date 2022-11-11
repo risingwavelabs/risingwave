@@ -120,6 +120,9 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
 
+    /// Map group key column idx to its position in group keys.
+    group_key_invert_idx: Vec<isize>,
+
     /// Buffer watermarks on group keys received since last barrier.
     buffered_watermarks: Vec<Option<Watermark>>,
 }
@@ -162,6 +165,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
 
+        let mut group_key_invert_idx: Vec<isize> = vec![-1; input_info.schema.len()];
+        for (group_key_seq, group_key_idx) in group_key_indices.iter().enumerate() {
+            group_key_invert_idx[*group_key_idx] = group_key_seq as isize;
+        }
+
         Ok(Self {
             input,
             extra: HashAggExecutorExtra {
@@ -183,6 +191,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 total_lookup_count: AtomicU64::new(0),
                 metrics,
                 chunk_size,
+                group_key_invert_idx,
                 buffered_watermarks: Vec::default(),
             },
             _phantom: PhantomData,
@@ -499,11 +508,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             input, mut extra, ..
         } = self;
 
-        let mut group_key_invert_idx: Vec<isize> = vec![-1; extra.input_schema.len()];
-        for (group_key_seq, group_key_idx) in extra.group_key_indices.iter().enumerate() {
-            group_key_invert_idx[*group_key_idx] = group_key_seq as isize;
-        }
-
         // The cached state managers. `HashKey -> AggStates`.
         let mut agg_states = if let Some(lru_manager) = extra.lru_manager.clone() {
             ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
@@ -532,7 +536,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             let msg = msg?;
             match msg {
                 Message::Watermark(mut watermark) => {
-                    let group_key_seq = group_key_invert_idx[watermark.col_idx];
+                    let group_key_seq = extra.group_key_invert_idx[watermark.col_idx];
                     if group_key_seq != -1 {
                         watermark.col_idx = group_key_seq as usize;
                         extra.buffered_watermarks[group_key_seq as usize] = Some(watermark);
