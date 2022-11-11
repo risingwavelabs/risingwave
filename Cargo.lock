@@ -3990,6 +3990,7 @@ dependencies = [
  "pg_interval",
  "postgres-types",
  "regex",
+ "risingwave_common",
  "rust_decimal",
  "thiserror",
  "tokio-openssl",
