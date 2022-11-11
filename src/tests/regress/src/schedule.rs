@@ -297,9 +297,30 @@ impl TestCase {
             .map(|s| s.unwrap())
             .filter(|s| !is_empty_or_comment(s));
 
+        // We split the output lines (either expected or actual) based on matching lines from input.
+        // For example:
+        //     input      |    output
+        // --+------------+--+-----------------------------------
+        //  1| select v1  | 1| select v1
+        //  2| from t;    | 2| from t;
+        //   |            | 3|  v1
+        //   |            | 4| ----
+        //   |            | 5|   1
+        //   |            | 6|   2
+        //   |            | 7| (2 rows)
+        //   |            | 8|
+        //  3| select v1; | 9| select v1;
+        //   |            |10| ERROR:  column "v1" does not exist
+        //   |            |11| LINE 1: select v1;
+        //   |            |12|                ^
+        //
+        // We would split the output lines into 2 chunks:
+        // * query 1..=2 and output  3..= 7
+        // * query 9..=9 and output 10..=12
         let mut is_diff = false;
         let mut pending_input = vec![];
         for input_line in input_lines {
+            // Find the matching output line, and collect lines before the next matching line.
             let mut expected_output = vec![];
             while let Some(line) = expected_lines.next() && line != input_line {
                 expected_output.push(line);
@@ -310,6 +331,8 @@ impl TestCase {
                 actual_output.push(line);
             }
 
+            // If no unmatched lines skipped, this input line belongs to the same query as previous
+            // lines.
             if expected_output.is_empty() && actual_output.is_empty() {
                 pending_input.push(input_line);
                 continue;
@@ -319,6 +342,7 @@ impl TestCase {
 
             is_diff = !compare_output(&query_input, &expected_output, &actual_output) || is_diff;
         }
+        // There may be more lines after the final matching lines.
         let expected_output: Vec<_> = expected_lines.collect();
         let actual_output: Vec<_> = actual_lines.collect();
         is_diff = !compare_output(&pending_input, &expected_output, &actual_output) || is_diff;
