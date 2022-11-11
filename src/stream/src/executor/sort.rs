@@ -267,8 +267,8 @@ impl<S: StateStore> SortExecutor<S> {
         let mut values_per_vnode = Vec::new();
         for (owned_vnode, _) in newly_owned_vnodes
             .iter()
-            .filter(|is_set| *is_set)
             .enumerate()
+            .filter(|(_, is_set)| *is_set)
         {
             let value_iter = self
                 .state_table
