@@ -1280,8 +1280,7 @@ where
         new_actor: &mut StreamActor,
     ) -> MetaResult<()> {
         if let Some(no_shuffle_actor_id) = no_shuffle_upstream_actor_map.get(&new_actor.actor_id) {
-            // fixme: chain actors' upstream_actor_id is empty, uncomment follow when fixed
-            // assert_eq!(new_actor.upstream_actor_id.len(), 1);
+            assert_eq!(new_actor.upstream_actor_id.len(), 1);
             new_actor.upstream_actor_id = vec![*no_shuffle_actor_id as ActorId];
         } else {
             let upstream_fragment_ids: HashSet<_> = new_actor
