@@ -18,6 +18,8 @@ Just add another line in your schedule file with your test cast name.
 tests: boolean
 ```
 
+If you want to ignore a certain test query from an input sql file, comment it out with `--@ `. Note the extra `@` after `--`.
+
 # How to run
 
 * Install `psql` and ensure that it's in your path.

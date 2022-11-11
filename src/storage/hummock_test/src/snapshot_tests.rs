@@ -29,7 +29,7 @@ use risingwave_storage::store::{ReadOptions, StateStoreIter, StateStoreWrite, Wr
 use risingwave_storage::StateStore;
 
 use crate::test_utils::{
-    get_test_notification_client, prefixed_key, with_hummock_storage_v1, with_hummock_storage_v2,
+    get_test_notification_client, with_hummock_storage_v1, with_hummock_storage_v2,
     HummockStateStoreTestTrait,
 };
 
@@ -106,14 +106,8 @@ async fn test_snapshot_inner(
     hummock_storage
         .ingest_batch(
             vec![
-                (
-                    prefixed_key(Bytes::from("1")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    prefixed_key(Bytes::from("2")),
-                    StorageValue::new_put("test"),
-                ),
+                (Bytes::from("1"), StorageValue::new_put("test")),
+                (Bytes::from("2"), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -146,15 +140,9 @@ async fn test_snapshot_inner(
     hummock_storage
         .ingest_batch(
             vec![
-                (prefixed_key(Bytes::from("1")), StorageValue::new_delete()),
-                (
-                    prefixed_key(Bytes::from("3")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    prefixed_key(Bytes::from("4")),
-                    StorageValue::new_put("test"),
-                ),
+                (Bytes::from("1"), StorageValue::new_delete()),
+                (Bytes::from("3"), StorageValue::new_put("test")),
+                (Bytes::from("4"), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -188,9 +176,9 @@ async fn test_snapshot_inner(
     hummock_storage
         .ingest_batch(
             vec![
-                (prefixed_key(Bytes::from("2")), StorageValue::new_delete()),
-                (prefixed_key(Bytes::from("3")), StorageValue::new_delete()),
-                (prefixed_key(Bytes::from("4")), StorageValue::new_delete()),
+                (Bytes::from("2"), StorageValue::new_delete()),
+                (Bytes::from("3"), StorageValue::new_delete()),
+                (Bytes::from("4"), StorageValue::new_delete()),
             ],
             vec![],
             WriteOptions {
@@ -233,22 +221,10 @@ async fn test_snapshot_range_scan_inner(
     hummock_storage
         .ingest_batch(
             vec![
-                (
-                    prefixed_key(Bytes::from("1")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    prefixed_key(Bytes::from("2")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    prefixed_key(Bytes::from("3")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    prefixed_key(Bytes::from("4")),
-                    StorageValue::new_put("test"),
-                ),
+                (Bytes::from("1"), StorageValue::new_put("test")),
+                (Bytes::from("2"), StorageValue::new_put("test")),
+                (Bytes::from("3"), StorageValue::new_put("test")),
+                (Bytes::from("4"), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -277,7 +253,7 @@ async fn test_snapshot_range_scan_inner(
     }
     macro_rules! key {
         ($idx:expr) => {
-            prefixed_key(Bytes::from(stringify!($idx)))
+            Bytes::from(stringify!($idx))
         };
     }
 
