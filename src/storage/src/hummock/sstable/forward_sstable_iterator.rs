@@ -115,9 +115,7 @@ impl HummockIterator for SstableIterator {
         self.stats.total_key_count += 1;
         async move {
             let block_iter = self.block_iter.as_mut().expect("no block iter");
-            block_iter.next();
-
-            if block_iter.is_valid() {
+            if block_iter.try_next() {
                 Ok(())
             } else {
                 // seek to next block

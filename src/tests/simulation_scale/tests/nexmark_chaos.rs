@@ -47,6 +47,8 @@ async fn nexmark_chaos_common_inner(
     cluster.run(drop).await?;
     sleep(Duration::from_secs(5)).await;
 
+    println!("Reference run done.");
+
     cluster.run(create).await?;
 
     let _initial_result = cluster
