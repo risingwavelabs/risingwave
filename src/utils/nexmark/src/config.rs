@@ -190,6 +190,7 @@ impl Default for NexmarkConfig {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct GeneratorConfig {
     pub config: NexmarkConfig,
 

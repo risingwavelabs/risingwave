@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(generators)]
+
 mod config;
 pub mod event;
+mod generator;
 mod utils;
 
 pub use self::config::{GeneratorConfig, NexmarkConfig};
+pub use self::generator::EventGenerator;
