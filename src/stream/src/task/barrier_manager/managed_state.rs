@@ -154,7 +154,8 @@ impl ManagedBarrierState {
 
     /// Notify unexpected actor exit with given `actor_id`.
     pub(crate) fn notify_exit(&mut self, actor_id: ActorId) {
-        for (_, barrier_state) in &mut self.epoch_barrier_state_map {
+        for barrier_state in self.epoch_barrier_state_map.values_mut() {
+            #[allow(clippy::single_match)]
             match barrier_state.inner {
                 ManagedBarrierStateInner::Issued {
                     ref remaining_actors,
