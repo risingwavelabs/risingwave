@@ -437,7 +437,7 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
             if let Some(target_state) = self.get_diff(Some(target_splits)).await? {
-                tracing::debug!(
+                tracing::info!(
                     actor_id = self.ctx.id,
                     state = ?target_state,
                     "apply split change"
