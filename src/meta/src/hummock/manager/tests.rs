@@ -506,7 +506,7 @@ async fn test_hummock_manager_basic() {
     commit_one(epoch, hummock_manager.clone()).await;
     epoch += 1;
 
-    let sync_group_version_id = FIRST_VERSION_ID + 1;
+    let sync_group_version_id = FIRST_VERSION_ID;
 
     // increased version id
     assert_eq!(
@@ -1178,7 +1178,7 @@ async fn test_extend_ssts_to_delete() {
     // Checkpoint
     assert_eq!(
         hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        4
+        3
     );
     assert_eq!(
         hummock_manager
