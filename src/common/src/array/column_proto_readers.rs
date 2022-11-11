@@ -42,11 +42,6 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
     );
 
     let buf = array.get_values()[0].get_body().as_slice();
-    let value_size = std::mem::size_of::<T>();
-    ensure!(
-        buf.len() % value_size == 0,
-        "Unexpected memory layout of numeric array"
-    );
 
     let mut builder = PrimitiveArrayBuilder::<T>::new(cardinality);
     let bitmap: Bitmap = array.get_null_bitmap()?.into();

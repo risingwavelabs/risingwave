@@ -145,13 +145,13 @@ pub fn get_sys_catalogs_in_schema(schema_name: &str) -> Option<Vec<SystemCatalog
 }
 
 macro_rules! prepare_sys_catalog {
-    ($( { $catalog_id:expr, $schema_name:expr, $catalog_name:ident, $pk:expr, $func:tt $($await:tt)? } ),* $(,)?) => {
+    ($( { $schema_name:expr, $catalog_name:ident, $pk:expr, $func:tt $($await:tt)? } ),* $(,)?) => {
         /// `SYS_CATALOG_MAP` includes all system catalogs.
         pub(crate) static SYS_CATALOG_MAP: LazyLock<HashMap<&str, Vec<SystemCatalog>>> = LazyLock::new(|| {
             let mut hash_map: HashMap<&str, Vec<SystemCatalog>> = HashMap::new();
             $(
                 paste!{
-                    let sys_catalog = def_sys_catalog!($catalog_id, [<$catalog_name _TABLE_NAME>], [<$catalog_name _COLUMNS>], $pk);
+                    let sys_catalog = def_sys_catalog!(${index()} + 1, [<$catalog_name _TABLE_NAME>], [<$catalog_name _COLUMNS>], $pk);
                     hash_map.entry([<$schema_name _SCHEMA_NAME>]).or_insert(vec![]).push(sys_catalog);
                 }
             )*
@@ -161,9 +161,9 @@ macro_rules! prepare_sys_catalog {
         #[async_trait]
         impl SysCatalogReader for SysCatalogReaderImpl {
             async fn read_table(&self, table_id: &TableId) -> Result<Vec<Row>> {
-                match table_id.table_id {
+                match table_id.table_id - 1 {
                     $(
-                        $catalog_id => {
+                        ${index()} => {
                             let rows = self.$func();
                             $(let rows = rows.$await;)?
                             rows
@@ -178,14 +178,18 @@ macro_rules! prepare_sys_catalog {
 
 // If you added a new system catalog, be sure to add a corresponding entry here.
 prepare_sys_catalog! {
-    { 1, PG_CATALOG, PG_TYPE, vec![0], read_types },
-    { 2, PG_CATALOG, PG_NAMESPACE, vec![0], read_namespace },
-    { 3, PG_CATALOG, PG_CAST, vec![0], read_cast },
-    { 4, PG_CATALOG, PG_MATVIEWS_INFO, vec![0], read_mviews_info await },
-    { 5, PG_CATALOG, PG_USER, vec![0], read_user_info },
-    { 6, PG_CATALOG, PG_CLASS, vec![0], read_class_info },
-    { 7, PG_CATALOG, PG_INDEX, vec![0], read_index_info },
-    { 8, PG_CATALOG, PG_OPCLASS, vec![0], read_opclass_info },
-    { 9, INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
-    { 10, INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
+    { PG_CATALOG, PG_TYPE, vec![0], read_types },
+    { PG_CATALOG, PG_NAMESPACE, vec![0], read_namespace },
+    { PG_CATALOG, PG_CAST, vec![0], read_cast },
+    { PG_CATALOG, PG_MATVIEWS_INFO, vec![0], read_mviews_info await },
+    { PG_CATALOG, PG_USER, vec![0], read_user_info },
+    { PG_CATALOG, PG_CLASS, vec![0], read_class_info },
+    { PG_CATALOG, PG_INDEX, vec![0], read_index_info },
+    { PG_CATALOG, PG_OPCLASS, vec![0], read_opclass_info },
+    { PG_CATALOG, PG_COLLATION, vec![0], read_collation_info },
+    { PG_CATALOG, PG_AM, vec![0], read_am_info },
+    { PG_CATALOG, PG_OPERATOR, vec![0], read_operator_info },
+    { PG_CATALOG, PG_VIEWS, vec![], read_views_info },
+    { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
+    { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
 }

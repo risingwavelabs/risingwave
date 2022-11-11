@@ -27,7 +27,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
 
-use crate::test_utils::get_test_notification_client;
+use crate::test_utils::{get_test_notification_client, HummockV2MixedStateStore};
 
 #[tokio::test]
 #[ignore]
@@ -52,6 +52,8 @@ async fn test_failpoints_state_store_read_upload() {
     )
     .await
     .unwrap();
+
+    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage).await;
 
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![
