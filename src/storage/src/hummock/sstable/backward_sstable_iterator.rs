@@ -93,9 +93,7 @@ impl HummockIterator for BackwardSstableIterator {
         self.stats.total_key_count += 1;
         async move {
             let block_iter = self.block_iter.as_mut().expect("no block iter");
-            block_iter.prev();
-
-            if block_iter.is_valid() {
+            if block_iter.try_prev() {
                 Ok(())
             } else {
                 // seek to the previous block
