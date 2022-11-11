@@ -43,7 +43,9 @@ SELECT bool 'true' AS true;
 (1 row)
 
 SELECT bool 'test' AS error;
-ERROR:  Invalid input syntax: 'test' is not a valid bool
+ERROR:  invalid input syntax for type boolean: "test"
+LINE 1: SELECT bool 'test' AS error;
+                    ^
 SELECT bool 'false' AS false;
  false 
 -------
@@ -51,7 +53,9 @@ SELECT bool 'false' AS false;
 (1 row)
 
 SELECT bool 'foo' AS error;
-ERROR:  Invalid input syntax: 'foo' is not a valid bool
+ERROR:  invalid input syntax for type boolean: "foo"
+LINE 1: SELECT bool 'foo' AS error;
+                    ^
 SELECT bool 'y' AS true;
  true 
 ------
@@ -65,7 +69,9 @@ SELECT bool 'yes' AS true;
 (1 row)
 
 SELECT bool 'yeah' AS error;
-ERROR:  Invalid input syntax: 'yeah' is not a valid bool
+ERROR:  invalid input syntax for type boolean: "yeah"
+LINE 1: SELECT bool 'yeah' AS error;
+                    ^
 SELECT bool 'n' AS false;
  false 
 -------
@@ -79,7 +85,9 @@ SELECT bool 'no' AS false;
 (1 row)
 
 SELECT bool 'nay' AS error;
-ERROR:  Invalid input syntax: 'nay' is not a valid bool
+ERROR:  invalid input syntax for type boolean: "nay"
+LINE 1: SELECT bool 'nay' AS error;
+                    ^
 SELECT bool 'on' AS true;
  true 
 ------
@@ -99,11 +107,17 @@ SELECT bool 'of' AS false;
 (1 row)
 
 SELECT bool 'o' AS error;
-ERROR:  Invalid input syntax: 'o' is not a valid bool
+ERROR:  invalid input syntax for type boolean: "o"
+LINE 1: SELECT bool 'o' AS error;
+                    ^
 SELECT bool 'on_' AS error;
-ERROR:  Invalid input syntax: 'on_' is not a valid bool
+ERROR:  invalid input syntax for type boolean: "on_"
+LINE 1: SELECT bool 'on_' AS error;
+                    ^
 SELECT bool 'off_' AS error;
-ERROR:  Invalid input syntax: 'off_' is not a valid bool
+ERROR:  invalid input syntax for type boolean: "off_"
+LINE 1: SELECT bool 'off_' AS error;
+                    ^
 SELECT bool '1' AS true;
  true 
 ------
@@ -111,7 +125,9 @@ SELECT bool '1' AS true;
 (1 row)
 
 SELECT bool '11' AS error;
-ERROR:  Invalid input syntax: '11' is not a valid bool
+ERROR:  invalid input syntax for type boolean: "11"
+LINE 1: SELECT bool '11' AS error;
+                    ^
 SELECT bool '0' AS false;
  false 
 -------
@@ -119,9 +135,13 @@ SELECT bool '0' AS false;
 (1 row)
 
 SELECT bool '000' AS error;
-ERROR:  Invalid input syntax: '000' is not a valid bool
+ERROR:  invalid input syntax for type boolean: "000"
+LINE 1: SELECT bool '000' AS error;
+                    ^
 SELECT bool '' AS error;
-ERROR:  Invalid input syntax: '' is not a valid bool
+ERROR:  invalid input syntax for type boolean: ""
+LINE 1: SELECT bool '' AS error;
+                    ^
 -- and, or, not in qualifications
 SELECT bool 't' or bool 'f' AS true;
  true 
@@ -198,9 +218,9 @@ SELECT true::boolean::text AS true, false::boolean::text AS false;
 (1 row)
 
 SELECT '  tru e '::text::boolean AS invalid;    -- error
-ERROR:  Invalid input syntax: '  tru e ' is not a valid bool
+ERROR:  invalid input syntax for type boolean: "  tru e "
 SELECT ''::text::boolean AS invalid;            -- error
-ERROR:  Invalid input syntax: '' is not a valid bool
+ERROR:  invalid input syntax for type boolean: ""
 CREATE TABLE BOOLTBL1 (f1 bool);
 INSERT INTO BOOLTBL1 (f1) VALUES (bool 't');
 INSERT INTO BOOLTBL1 (f1) VALUES (bool 'True');
@@ -259,7 +279,9 @@ INSERT INTO BOOLTBL2 (f1) VALUES (bool 'FALSE');
 -- For pre-v6.3 this evaluated to false - thomas 1997-10-23
 INSERT INTO BOOLTBL2 (f1)
    VALUES (bool 'XXX');
-ERROR:  Invalid input syntax: 'XXX' is not a valid bool
+ERROR:  invalid input syntax for type boolean: "XXX"
+LINE 2:    VALUES (bool 'XXX');
+                        ^
 -- BOOLTBL2 should be full of false's at this point
 SELECT BOOLTBL2.* FROM BOOLTBL2;
  f1 

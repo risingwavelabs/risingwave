@@ -675,6 +675,8 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         value: T,
     ) -> CacheableEntry<K, T> {
         let mut to_delete = vec![];
+        // Drop the entries outside lock to avoid deadlock.
+        let mut errs = vec![];
         let handle = unsafe {
             let mut shard = self.shards[self.shard(hash)].lock();
             let pending_request = shard.write_request.remove(&key);
@@ -683,10 +685,12 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             if let Some(que) = pending_request {
                 for sender in que {
                     (*ptr).add_ref();
-                    let _ = sender.send(CacheableEntry {
+                    if let Err(e) = sender.send(CacheableEntry {
                         cache: self.clone(),
                         handle: ptr,
-                    });
+                    }) {
+                        errs.push(e);
+                    }
                 }
             }
             CacheableEntry {

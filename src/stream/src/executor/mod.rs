@@ -26,9 +26,9 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{from_datum_prost, DataType, Datum};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
+use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum_to_bytes};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
@@ -523,16 +523,13 @@ impl Barrier {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Watermark {
     col_idx: usize,
-    val: Datum,
+    val: ScalarImpl,
 }
 
 impl PartialOrd for Watermark {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         if self.col_idx == other.col_idx {
-            self.val
-                .as_ref()
-                .unwrap()
-                .partial_cmp(other.val.as_ref().unwrap())
+            self.val.partial_cmp(&other.val)
         } else {
             None
         }
@@ -547,7 +544,7 @@ impl Ord for Watermark {
 }
 
 impl Watermark {
-    pub fn new(col_idx: usize, val: Datum) -> Self {
+    pub fn new(col_idx: usize, val: ScalarImpl) -> Self {
         Self { col_idx, val }
     }
 
@@ -555,7 +552,7 @@ impl Watermark {
         ProstWatermark {
             col_idx: self.col_idx as _,
             val: Some(ProstDatum {
-                body: serialize_datum_to_bytes(self.val.as_ref()),
+                body: serialize_datum_to_bytes(Some(&self.val)),
             }),
         }
     }
@@ -566,7 +563,8 @@ impl Watermark {
     ) -> StreamExecutorResult<Self> {
         Ok(Watermark {
             col_idx: prost.col_idx as _,
-            val: from_datum_prost(prost.get_val()?, data_type)?,
+            // Should never receive a Null watermark value here
+            val: deserialize_datum(&*prost.get_val()?.body, data_type)?.unwrap(),
         })
     }
 }
