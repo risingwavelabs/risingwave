@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod config;
 pub mod enumerator;
 pub mod source;
 pub mod split;
-mod utils;
 
 use std::collections::HashMap;
 
@@ -24,8 +22,6 @@ pub use enumerator::*;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 pub use split::*;
-
-const NEXMARK_BASE_TIME: usize = 1_436_918_400_000;
 
 pub const NEXMARK_CONNECTOR: &str = "nexmark";
 

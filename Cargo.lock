@@ -3458,6 +3458,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexmark"
+version = "0.1.0"
+dependencies = [
+ "rand 0.8.5",
+ "serde",
+]
+
+[[package]]
 name = "nix"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5128,6 +5136,7 @@ dependencies = [
  "maplit",
  "memcomparable",
  "mysql_async",
+ "nexmark",
  "num-traits",
  "paste",
  "prost",

@@ -31,10 +31,11 @@
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
-use crate::source::nexmark::utils::{build_channel_url_map, get_base_url};
-use crate::source::nexmark::{NexmarkProperties, NEXMARK_BASE_TIME};
+use crate::utils::{build_channel_url_map, get_base_url};
+use crate::NexmarkProperties;
 
 pub const CHANNEL_NUMBER: usize = 10_000;
+const NEXMARK_BASE_TIME: usize = 1_436_918_400_000;
 
 #[derive(PartialEq)]
 enum RateShape {

@@ -35,8 +35,8 @@ use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
-use crate::source::nexmark::config::{NexmarkConfig, CHANNEL_NUMBER};
-use crate::source::nexmark::utils::{milli_ts_to_timestamp_string, NexmarkRng};
+use crate::config::{NexmarkConfig, CHANNEL_NUMBER};
+use crate::utils::{milli_ts_to_timestamp_string, NexmarkRng};
 
 type Id = usize;
 
@@ -47,7 +47,7 @@ pub enum EventType {
     Bid,
 }
 
-/// The `Nexmark` Event, including `Person`, `Auction`, and `Bid`.
+/// The Nexmark Event, including [`Person`], [`Auction`], and [`Bid`].
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Event {
@@ -341,7 +341,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
-    use crate::source::nexmark::{NexmarkProperties, NEXMARK_BASE_TIME};
+    use crate::{NexmarkProperties, NEXMARK_BASE_TIME};
 
     #[test]
     fn test_event() -> Result<()> {

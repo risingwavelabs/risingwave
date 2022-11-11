@@ -1,0 +1,11 @@
+[package]
+name = "nexmark"
+version = "0.1.0"
+edition = "2021"
+description = "Nexmark data stream generator."
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
