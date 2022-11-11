@@ -15,20 +15,32 @@
 use crate::config::{GeneratorConfig, NexmarkConfig};
 use crate::event::Event;
 
+/// Nexmark event generator.
 #[derive(Clone, Debug)]
 pub struct EventGenerator {
-    pub config: GeneratorConfig,
-    pub events_so_far: u64,
-    pub wall_clock_base_time: usize,
+    config: GeneratorConfig,
+    events_so_far: u64,
+    wall_clock_base_time: u64,
 }
 
 impl EventGenerator {
-    pub fn new(config: NexmarkConfig, events_so_far: u64, wall_clock_base_time: usize) -> Self {
+    /// Create a new generator.
+    pub fn new(config: NexmarkConfig, events_so_far: u64, wall_clock_base_time: u64) -> Self {
         EventGenerator {
             config: config.into(),
             events_so_far,
             wall_clock_base_time,
         }
+    }
+
+    /// Return the number of events so far.
+    pub const fn events_so_far(&self) -> u64 {
+        self.events_so_far
+    }
+
+    /// Return the wall clock base time in ms.
+    pub const fn wall_clock_base_time(&self) -> u64 {
+        self.wall_clock_base_time
     }
 }
 

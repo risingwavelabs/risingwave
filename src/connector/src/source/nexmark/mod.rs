@@ -174,7 +174,7 @@ pub struct NexmarkPropertiesInner {
 
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "nexmark.base.time", default = "none")]
-    pub base_time: Option<usize>,
+    pub base_time: Option<u64>,
 
     #[serde(rename = "nexmark.us.states")]
     pub us_states: Option<String>,

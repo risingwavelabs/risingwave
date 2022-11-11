@@ -28,6 +28,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Nexmark configurations.
+
 use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::ops::Deref;
@@ -35,7 +37,7 @@ use std::ops::Deref;
 use crate::utils::{build_channel_url_map, get_base_url};
 
 pub const CHANNEL_NUMBER: usize = 10_000;
-pub const NEXMARK_BASE_TIME: usize = 1_436_918_400_000;
+pub const NEXMARK_BASE_TIME: u64 = 1_436_918_400_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -82,7 +84,8 @@ pub struct NexmarkConfig {
     /// the event number is used to determine the event timestamp.
     pub first_event_number: usize,
     /// Time for first event (ms since epoch).
-    pub base_time: usize,
+    pub base_time: u64,
+
     // Originally constants
     /// Auction categories.
     pub num_categories: usize,
@@ -139,6 +142,7 @@ pub struct NexmarkConfig {
     pub us_per_unit: usize,
 }
 
+/// Default configuration.
 impl Default for NexmarkConfig {
     fn default() -> Self {
         let person_proportion = 1;
@@ -172,10 +176,6 @@ impl Default for NexmarkConfig {
             person_id_lead: 10,
             sine_approx_steps: 10,
             base_time: NEXMARK_BASE_TIME,
-            // step_length: Default::default(),
-            // events_per_epoch: Default::default(),
-            // epoch_period: Default::default(),
-            // inter_event_delays: Default::default(),
             us_states: split_str("az,ca,id,or,wa,wy"),
             us_cities: split_str("phoenix,los angeles,san francisco,boise,portland,bend,redmond,seattle,kent,cheyenne"),
             hot_channels: split_str("Google,Facebook,Baidu,Apple"),
@@ -194,7 +194,7 @@ impl Default for NexmarkConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct GeneratorConfig {
+pub(crate) struct GeneratorConfig {
     pub config: NexmarkConfig,
 
     /// Delay before changing the current inter-event delay.
@@ -276,10 +276,10 @@ impl From<NexmarkConfig> for GeneratorConfig {
 
 impl GeneratorConfig {
     /// Returns a new event timestamp.
-    pub fn event_timestamp(&self, event_number: usize) -> usize {
+    pub fn event_timestamp(&self, event_number: usize) -> u64 {
         if self.inter_event_delays.len() == 1 {
             return self.base_time
-                + ((event_number as f32 * self.inter_event_delays[0]) / 1000.0).round() as usize;
+                + ((event_number as f32 * self.inter_event_delays[0]) / 1000.0).round() as u64;
         }
 
         let epoch = event_number / self.events_per_epoch;
@@ -294,7 +294,7 @@ impl GeneratorConfig {
                     + (epoch as f32 * self.epoch_period
                         + offset_in_epoch
                         + offset_in_cycle / 1000.0)
-                        .round() as usize;
+                        .round() as u64;
             }
             event_i -= num_events_for_this_cycle.round() as usize;
             offset_in_epoch += (num_events_for_this_cycle * inter_event_delay) / 1000.0;

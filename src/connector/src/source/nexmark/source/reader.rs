@@ -56,7 +56,7 @@ impl SplitReader for NexmarkSplitReader {
         let wall_clock_base_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_millis() as usize;
+            .as_millis() as u64;
         let mut assigned_split = NexmarkSplit::default();
         let mut split_id = "".into();
         let mut split_index = 0;
@@ -118,7 +118,7 @@ impl NexmarkSplitReader {
         let mut last_event = None;
         loop {
             let mut msgs: Vec<SourceMessage> = vec![];
-            let old_events_so_far = self.generator.events_so_far;
+            let old_events_so_far = self.generator.events_so_far();
 
             // Get unix timestamp in milliseconds
             let current_timestamp_ms = if self.use_real_time {
@@ -137,29 +137,32 @@ impl NexmarkSplitReader {
             let mut finished = false;
 
             while (msgs.len() as u64) < self.max_chunk_size {
-                if self.event_num > 0 && self.generator.events_so_far >= self.event_num as u64 {
+                if self.event_num > 0 && self.generator.events_so_far() >= self.event_num as u64 {
                     finished = true;
                     break;
                 }
                 let event = self.generator.next().unwrap();
 
                 if event.event_type() != self.event_type
-                    || self.generator.events_so_far % self.split_num as u64
+                    || self.generator.events_so_far() % self.split_num as u64
                         != self.split_index as u64
                 {
                     continue;
                 }
 
-                let event =
-                    NexmarkMessage::new(self.split_id.clone(), self.generator.events_so_far, event);
+                let event = NexmarkMessage::new(
+                    self.split_id.clone(),
+                    self.generator.events_so_far(),
+                    event,
+                );
 
                 // When the generated timestamp is larger then current timestamp, if its the first
                 // event, sleep and continue. Otherwise, directly return.
                 if self.use_real_time
-                    && current_timestamp_ms < self.generator.wall_clock_base_time as u64
+                    && current_timestamp_ms < self.generator.wall_clock_base_time()
                 {
                     tokio::time::sleep(Duration::from_millis(
-                        self.generator.wall_clock_base_time as u64 - current_timestamp_ms,
+                        self.generator.wall_clock_base_time() - current_timestamp_ms,
                     ))
                     .await;
 
@@ -178,7 +181,7 @@ impl NexmarkSplitReader {
 
             if !self.use_real_time && self.min_event_gap_in_ns > 0 {
                 tokio::time::sleep(Duration::from_nanos(
-                    (self.generator.events_so_far - old_events_so_far) * self.min_event_gap_in_ns,
+                    (self.generator.events_so_far() - old_events_so_far) * self.min_event_gap_in_ns,
                 ))
                 .await;
             }
