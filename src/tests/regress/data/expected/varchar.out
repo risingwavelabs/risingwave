@@ -16,12 +16,12 @@ INSERT INTO VARCHAR_TBL (f1) VALUES ('c     ');
 SELECT * FROM VARCHAR_TBL;
    f1   
 --------
- A
- 
- 2
  a
- 3
+ A
  1
+ 2
+ 3
+ 
  cd
  c     
 (8 rows)
@@ -32,10 +32,10 @@ SELECT c.*
    f1   
 --------
  A
- 2
- 
- 3
  1
+ 2
+ 3
+ 
  cd
  c     
 (7 rows)
@@ -53,10 +53,10 @@ SELECT c.*
    WHERE c.f1 < 'a';
  f1 
 ----
- 1
  A
- 3
+ 1
  2
+ 3
  
 (5 rows)
 
@@ -65,12 +65,12 @@ SELECT c.*
    WHERE c.f1 <= 'a';
  f1 
 ----
- 1
- A
- 2
- 
- 3
  a
+ A
+ 1
+ 2
+ 3
+ 
 (6 rows)
 
 SELECT c.*
@@ -105,11 +105,11 @@ INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd    ');
 SELECT * FROM VARCHAR_TBL;
     f1    
 ----------
- abcd    
- abcde
+ a
  ab
  abcd
- a
+ abcde
+ abcd    
 (5 rows)
 
 DROP TABLE VARCHAR_TBL;
