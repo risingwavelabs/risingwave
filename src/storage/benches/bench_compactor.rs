@@ -64,7 +64,7 @@ pub fn default_writer_opts() -> SstableWriterOptions {
 }
 
 pub fn test_key_of(idx: usize, epoch: u64) -> FullKey<Vec<u8>> {
-    FullKey::new(
+    FullKey::for_test(
         TableId::default(),
         format!("key_test_{:08}", idx * 2).as_bytes().to_vec(),
         epoch,

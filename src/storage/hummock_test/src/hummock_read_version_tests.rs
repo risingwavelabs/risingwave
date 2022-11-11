@@ -18,7 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use risingwave_storage::hummock::iterator::test_utils::{
@@ -61,7 +61,8 @@ async fn test_read_version_basic() {
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
         let key = iterator_test_table_key_of(epoch as usize);
-        let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
+        let key_range =
+            map_table_key_range((Bound::Included(key.to_vec()), Bound::Included(key.to_vec())));
 
         let (staging_imm_iter, staging_sst_iter) =
             read_version
@@ -97,7 +98,8 @@ async fn test_read_version_basic() {
 
         for epoch in 1..epoch {
             let key = iterator_test_table_key_of(epoch as usize);
-            let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
+            let key_range =
+                map_table_key_range((Bound::Included(key.to_vec()), Bound::Included(key.to_vec())));
 
             let (staging_imm_iter, staging_sst_iter) =
                 read_version
@@ -196,10 +198,10 @@ async fn test_read_version_basic() {
         let key_range_left = iterator_test_table_key_of(0);
         let key_range_right = iterator_test_table_key_of(4_usize);
 
-        let key_range = (
+        let key_range = map_table_key_range((
             Bound::Included(key_range_left),
             Bound::Included(key_range_right),
-        );
+        ));
 
         let (staging_imm_iter, staging_sst_iter) =
             read_version
@@ -220,10 +222,10 @@ async fn test_read_version_basic() {
         let key_range_left = iterator_test_table_key_of(3);
         let key_range_right = iterator_test_table_key_of(4);
 
-        let key_range = (
+        let key_range = map_table_key_range((
             Bound::Included(key_range_left),
             Bound::Included(key_range_right),
-        );
+        ));
 
         let (staging_imm_iter, staging_sst_iter) =
             read_version
@@ -270,7 +272,7 @@ async fn test_read_filter_basic() {
 
         // directly prune_overlap
         let key = iterator_test_table_key_of(epoch as usize);
-        let key_range = (Bound::Included(key.clone()), Bound::Included(key));
+        let key_range = map_table_key_range((Bound::Included(key.clone()), Bound::Included(key)));
 
         let (staging_imm, staging_sst) = {
             let read_guard = read_version.read();

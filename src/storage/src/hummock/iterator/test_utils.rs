@@ -73,7 +73,7 @@ pub fn iterator_test_table_key_of(idx: usize) -> Vec<u8> {
 }
 
 pub fn iterator_test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
-    UserKey::new(TableId::default(), iterator_test_table_key_of(idx))
+    UserKey::for_test(TableId::default(), iterator_test_table_key_of(idx))
 }
 
 /// Generates keys like `{table_id=0}key_test_00002` with epoch 233.

@@ -88,10 +88,10 @@ pub fn gen_dummy_sst_info(
     let mut max_table_key: Vec<u8> = batches[0].end_table_key().to_vec();
     let mut file_size = 0;
     for batch in batches.iter().skip(1) {
-        if min_table_key.as_slice() > batch.start_table_key() {
+        if min_table_key.as_slice() > *batch.start_table_key() {
             min_table_key = batch.start_table_key().to_vec();
         }
-        if max_table_key.as_slice() < batch.end_table_key() {
+        if max_table_key.as_slice() < *batch.end_table_key() {
             max_table_key = batch.end_table_key().to_vec();
         }
         file_size += batch.size() as u64;
@@ -99,8 +99,8 @@ pub fn gen_dummy_sst_info(
     SstableInfo {
         id,
         key_range: Some(KeyRange {
-            left: FullKey::new(table_id, min_table_key, epoch).encode(),
-            right: FullKey::new(table_id, max_table_key, epoch).encode(),
+            left: FullKey::for_test(table_id, min_table_key, epoch).encode(),
+            right: FullKey::for_test(table_id, max_table_key, epoch).encode(),
         }),
         file_size,
         table_ids: vec![],
@@ -224,13 +224,13 @@ pub async fn gen_test_sstable(
 
 /// Generates a user key with table id 0 and the given `table_key`
 pub fn test_user_key(table_key: impl AsRef<[u8]>) -> UserKey<Vec<u8>> {
-    UserKey::new(TableId::default(), table_key.as_ref().to_vec())
+    UserKey::for_test(TableId::default(), table_key.as_ref().to_vec())
 }
 
 /// Generates a user key with table id 0 and table key format of `key_test_{idx * 2}`
 pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
     let table_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
-    UserKey::new(TableId::default(), table_key)
+    UserKey::for_test(TableId::default(), table_key)
 }
 
 /// Generates a full key with table id 0 and epoch 123. User key is created with `test_user_key_of`.

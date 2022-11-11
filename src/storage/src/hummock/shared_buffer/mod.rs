@@ -23,7 +23,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, UserKey};
+use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, TableKey, UserKey};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -208,7 +208,7 @@ impl SharedBuffer {
         table_key_range: &R,
     ) -> OrderSortedUncommittedData
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
         let user_key_range = bound_table_key_range(table_id, table_key_range);
@@ -425,11 +425,13 @@ impl SharedBuffer {
 
 #[cfg(test)]
 mod tests {
+    use core::ops::Bound::Included;
     use std::cell::RefCell;
     use std::ops::DerefMut;
 
     use bytes::Bytes;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
     use crate::hummock::iterator::test_utils::iterator_test_value_of;
@@ -481,8 +483,10 @@ mod tests {
         // Get overlap batches and verify
         for key in &keys[0..3] {
             // Single key
-            let overlap_data =
-                shared_buffer.get_overlap_data(TableId::default(), &(key.clone()..=key.clone()));
+            let overlap_data = shared_buffer.get_overlap_data(
+                TableId::default(),
+                &map_table_key_range((Included(key.clone()), Included(key.clone()))),
+            );
             assert_eq!(overlap_data.len(), 1);
             assert_eq!(
                 overlap_data[0],
@@ -490,8 +494,10 @@ mod tests {
             );
 
             // Forward key range
-            let overlap_data = shared_buffer
-                .get_overlap_data(TableId::default(), &(key.clone()..=keys[3].clone()));
+            let overlap_data = shared_buffer.get_overlap_data(
+                TableId::default(),
+                &map_table_key_range((Included(key.clone()), Included(keys[3].clone()))),
+            );
             assert_eq!(overlap_data.len(), 1);
             assert_eq!(
                 overlap_data[0],
@@ -499,13 +505,17 @@ mod tests {
             );
         }
         // Non-existent key
-        let overlap_data = shared_buffer
-            .get_overlap_data(TableId::default(), &(large_key.clone()..=large_key.clone()));
+        let overlap_data = shared_buffer.get_overlap_data(
+            TableId::default(),
+            &map_table_key_range((Included(large_key.clone()), Included(large_key.clone()))),
+        );
         assert!(overlap_data.is_empty());
 
         // Non-existent key range forward
-        let overlap_data =
-            shared_buffer.get_overlap_data(TableId::default(), &(keys[3].clone()..=large_key));
+        let overlap_data = shared_buffer.get_overlap_data(
+            TableId::default(),
+            &map_table_key_range((Included(keys[3].clone()), Included(large_key))),
+        );
         assert!(overlap_data.is_empty());
     }
 

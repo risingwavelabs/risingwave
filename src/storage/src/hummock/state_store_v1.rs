@@ -26,7 +26,10 @@ use minitrace::future::FutureExt;
 use minitrace::Span;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::key::{bound_table_key_range, next_key, user_key, FullKey, UserKey};
+use risingwave_hummock_sdk::key::{
+    bound_table_key_range, map_table_key_range, next_key, user_key, FullKey, TableKey,
+    TableKeyRange, UserKey,
+};
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 use tokio::sync::oneshot;
@@ -66,7 +69,7 @@ impl HummockStorageV1 {
     /// failed due to other non-EOF errors.
     async fn get<'a>(
         &'a self,
-        table_key: &'a [u8],
+        table_key: TableKey<&'a [u8]>,
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
@@ -116,7 +119,7 @@ impl HummockStorageV1 {
 
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
-        let encoded_user_key = UserKey::new(read_options.table_id, table_key).encode();
+        let encoded_user_key = UserKey::for_test(read_options.table_id, table_key).encode();
         // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
         // read/write path.
         assert!(pinned_version.is_valid());
@@ -199,7 +202,7 @@ impl HummockStorageV1 {
         table_key_range: &R,
     ) -> HummockResult<ReadVersion>
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
         let read_version =
@@ -215,7 +218,7 @@ impl HummockStorageV1 {
     async fn iter_inner<T>(
         &self,
         epoch: HummockEpoch,
-        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        table_key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStateStoreIter>
     where
@@ -324,7 +327,7 @@ impl HummockStorageV1 {
 
                         if hit_sstable_bloom_filter(
                             sstable.value(),
-                            UserKey::new(read_options.table_id, bloom_filter_key)
+                            UserKey::for_test(read_options.table_id, bloom_filter_key)
                                 .encode()
                                 .as_slice(),
                             &mut local_stats,
@@ -410,7 +413,7 @@ impl StateStoreRead for HummockStorageV1 {
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        self.get(key, epoch, read_options)
+        self.get(TableKey(key), epoch, read_options)
     }
 
     /// Returns an iterator that scan from the begin key to the end key
@@ -470,7 +473,8 @@ impl StateStoreRead for HummockStorageV1 {
             // not check
         }
 
-        let iter = self.iter_inner::<ForwardIter>(epoch, key_range, read_options);
+        let iter =
+            self.iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options);
         #[cfg(not(madsim))]
         return iter.in_span(self.tracing.new_tracer("hummock_iter"));
         #[cfg(madsim)]

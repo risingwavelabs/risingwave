@@ -403,11 +403,11 @@ pub(super) mod tests {
         let key_range = s.sst_info.key_range.unwrap();
         assert_eq!(
             user_key(&key_range.left),
-            UserKey::new(TableId::default(), b"abcd").encode()
+            UserKey::for_test(TableId::default(), b"abcd").encode()
         );
         assert_eq!(
             user_key(&key_range.right),
-            UserKey::new(TableId::default(), b"eeee").encode()
+            UserKey::for_test(TableId::default(), b"eeee").encode()
         );
     }
 

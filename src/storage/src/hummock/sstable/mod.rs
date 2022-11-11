@@ -74,8 +74,8 @@ impl DeleteRangeTombstone {
         sequence: HummockEpoch,
     ) -> Self {
         Self {
-            start_user_key: UserKey::new(table_id, start_table_key).encode(),
-            end_user_key: UserKey::new(table_id, end_table_key).encode(),
+            start_user_key: UserKey::for_test(table_id, start_table_key).encode(),
+            end_user_key: UserKey::for_test(table_id, end_table_key).encode(),
             sequence,
         }
     }

@@ -22,7 +22,7 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::HummockVersion;
@@ -404,7 +404,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
 /// Get `user_value` from `SharedBufferBatch`
 pub fn get_from_batch(
     batch: &SharedBufferBatch,
-    table_key: &[u8],
+    table_key: TableKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
     batch.get(table_key).map(|v| {

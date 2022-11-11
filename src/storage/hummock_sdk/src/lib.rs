@@ -17,6 +17,7 @@
 #![feature(hash_drain_filter)]
 #![feature(lint_reasons)]
 #![feature(map_many_mut)]
+#![feature(bound_map)]
 
 mod key_cmp;
 

@@ -871,7 +871,7 @@ mod tests {
 
     fn key_from_num(num: usize) -> UserKey<Vec<u8>> {
         let width = 20;
-        UserKey::new(
+        UserKey::for_test(
             TableId::default(),
             format!("{:0width$}", num, width = width)
                 .as_bytes()
@@ -887,7 +887,7 @@ mod tests {
         sstable_store: SstableStoreRef,
     ) {
         let start_key = match &start_bound {
-            Bound::Included(b) => UserKey::new(b.table_id, prev_key(&b.table_key.clone())),
+            Bound::Included(b) => UserKey::for_test(b.table_id, prev_key(&b.table_key.clone())),
             Bound::Excluded(b) => b.clone(),
             Unbounded => key_from_num(0),
         };

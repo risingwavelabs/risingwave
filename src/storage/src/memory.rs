@@ -22,7 +22,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, FullKeyRange, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyRange, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
@@ -182,26 +182,30 @@ where
     let start = match table_key_range.start_bound() {
         Included(k) => Included(FullKey::new(
             table_id,
-            k.as_ref().to_vec(),
+            TableKey(k.as_ref().to_vec()),
             HummockEpoch::MAX,
         )),
-        Excluded(k) => Excluded(FullKey::new(table_id, k.as_ref().to_vec(), 0)),
-        Unbounded => Included(FullKey::new(table_id, b"".to_vec(), HummockEpoch::MAX)),
+        Excluded(k) => Excluded(FullKey::new(table_id, TableKey(k.as_ref().to_vec()), 0)),
+        Unbounded => Included(FullKey::new(
+            table_id,
+            TableKey(b"".to_vec()),
+            HummockEpoch::MAX,
+        )),
     };
     let end = match table_key_range.end_bound() {
-        Included(k) => Included(FullKey::new(table_id, k.as_ref().to_vec(), 0)),
+        Included(k) => Included(FullKey::new(table_id, TableKey(k.as_ref().to_vec()), 0)),
         Excluded(k) => Excluded(FullKey::new(
             table_id,
-            k.as_ref().to_vec(),
+            TableKey(k.as_ref().to_vec()),
             HummockEpoch::MAX,
         )),
         Unbounded => {
             if let Some(next_table_id) = table_id.table_id().checked_add(1) {
-                Excluded(FullKey {
-                    user_key: UserKey::new(next_table_id.into(), b"".to_vec()),
-
-                    epoch: HummockEpoch::MAX,
-                })
+                Excluded(FullKey::new(
+                    next_table_id.into(),
+                    TableKey(b"".to_vec()),
+                    HummockEpoch::MAX,
+                ))
             } else {
                 Unbounded
             }
@@ -310,7 +314,7 @@ impl StateStoreWrite for MemoryStateStore {
             for (key, value) in kv_pairs {
                 size += key.len() + value.size();
                 inner.insert(
-                    FullKey::new(write_options.table_id, key.to_vec(), epoch),
+                    FullKey::new(write_options.table_id, TableKey(key.to_vec()), epoch),
                     value.user_value,
                 );
             }
@@ -448,13 +452,13 @@ mod tests {
                 .unwrap(),
             vec![
                 (
-                    FullKey::new(Default::default(), b"a".to_vec(), 0)
+                    FullKey::for_test(Default::default(), b"a".to_vec(), 0)
                         .encode()
                         .into(),
                     b"v1".to_vec().into()
                 ),
                 (
-                    FullKey::new(Default::default(), b"b".to_vec(), 0)
+                    FullKey::for_test(Default::default(), b"b".to_vec(), 0)
                         .encode()
                         .into(),
                     b"v1".to_vec().into()
@@ -474,7 +478,7 @@ mod tests {
                 )
                 .unwrap(),
             vec![(
-                FullKey::new(Default::default(), b"a".to_vec(), 0)
+                FullKey::for_test(Default::default(), b"a".to_vec(), 0)
                     .encode()
                     .into(),
                 b"v1".to_vec().into()
@@ -493,7 +497,7 @@ mod tests {
                 )
                 .unwrap(),
             vec![(
-                FullKey::new(Default::default(), b"a".to_vec(), 1)
+                FullKey::for_test(Default::default(), b"a".to_vec(), 1)
                     .encode()
                     .into(),
                 b"v2".to_vec().into()

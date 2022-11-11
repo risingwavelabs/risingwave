@@ -414,7 +414,7 @@ mod tests {
         );
         builder
             .add_full_key(
-                &FullKey::new(table_id, b"k", 233),
+                &FullKey::for_test(table_id, b"k", 233),
                 HummockValue::put(b"v"),
                 false,
             )
@@ -422,10 +422,13 @@ mod tests {
             .unwrap();
         let mut sst_infos = builder.finish().await.unwrap();
         let key_range = sst_infos.pop().unwrap().sst_info.key_range.unwrap();
-        assert_eq!(key_range.left, FullKey::new(table_id, b"aaa", 200).encode());
+        assert_eq!(
+            key_range.left,
+            FullKey::for_test(table_id, b"aaa", 200).encode()
+        );
         assert_eq!(
             key_range.right,
-            FullKey::new(table_id, b"kkk", u64::MAX).encode()
+            FullKey::for_test(table_id, b"kkk", u64::MAX).encode()
         );
     }
 }

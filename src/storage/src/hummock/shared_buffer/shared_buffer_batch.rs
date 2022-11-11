@@ -23,7 +23,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{table_key, FullKey, UserKey};
+use risingwave_hummock_sdk::key::{table_key, FullKey, TableKey, UserKey};
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
@@ -152,21 +152,21 @@ impl SharedBufferBatch {
 
     pub fn filter<R, B>(&self, table_id: TableId, table_key_range: &R) -> bool
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
         self.table_id == table_id
             && range_overlap(
                 table_key_range,
-                self.start_table_key(),
-                self.end_table_key(),
+                *self.start_table_key(),
+                *self.end_table_key(),
             )
     }
 
-    pub fn get(&self, table_key: &[u8]) -> Option<HummockValue<Bytes>> {
+    pub fn get(&self, table_key: TableKey<&[u8]>) -> Option<HummockValue<Bytes>> {
         // Perform binary search on table key because the items in SharedBufferBatch is ordered by
         // table key.
-        match self.inner.binary_search_by(|m| (m.0[..]).cmp(table_key)) {
+        match self.inner.binary_search_by(|m| (m.0[..]).cmp(*table_key)) {
             Ok(i) => Some(self.inner[i].1.clone()),
             Err(_) => None,
         }
@@ -188,12 +188,12 @@ impl SharedBufferBatch {
         &self.inner
     }
 
-    pub fn start_table_key(&self) -> &[u8] {
-        &self.inner.first().unwrap().0
+    pub fn start_table_key(&self) -> TableKey<&[u8]> {
+        TableKey(&self.inner.first().unwrap().0)
     }
 
-    pub fn end_table_key(&self) -> &[u8] {
-        &self.inner.last().unwrap().0
+    pub fn end_table_key(&self) -> TableKey<&[u8]> {
+        TableKey(&self.inner.last().unwrap().0)
     }
 
     /// return inclusive left endpoint, which means that all data in this batch should be larger or
@@ -227,7 +227,7 @@ impl SharedBufferBatch {
     /// return inclusive right endpoint, which means that all data in this batch should be smaller
     /// or equal than this key.
     pub fn end_user_key(&self) -> UserKey<&[u8]> {
-        UserKey::new(self.table_id, &self.inner.largest_table_key)
+        UserKey::new(self.table_id, TableKey(&self.inner.largest_table_key))
     }
 
     pub fn epoch(&self) -> u64 {
@@ -359,7 +359,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     }
 
     fn key(&self) -> FullKey<&[u8]> {
-        FullKey::new(self.table_id, &self.current_item().0, self.epoch)
+        FullKey::new(self.table_id, TableKey(&self.current_item().0), self.epoch)
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -384,7 +384,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
             // by table key.
             let partition_point = self
                 .inner
-                .binary_search_by(|probe| probe.0[..].cmp(key.user_key.table_key));
+                .binary_search_by(|probe| probe.0[..].cmp(*key.user_key.table_key));
             let seek_key_epoch = key.epoch;
             match D::direction() {
                 DirectionEnum::Forward => match partition_point {
@@ -468,24 +468,27 @@ mod tests {
 
         // Sketch
         assert_eq!(
-            shared_buffer_batch.start_table_key(),
+            *shared_buffer_batch.start_table_key(),
             shared_buffer_items[0].0
         );
         assert_eq!(
-            shared_buffer_batch.end_table_key(),
+            *shared_buffer_batch.end_table_key(),
             shared_buffer_items[2].0
         );
 
         // Point lookup
         for (k, v) in &shared_buffer_items {
-            assert_eq!(shared_buffer_batch.get(k.as_slice()), Some(v.clone()));
+            assert_eq!(
+                shared_buffer_batch.get(TableKey(k.as_slice())),
+                Some(v.clone())
+            );
         }
         assert_eq!(
-            shared_buffer_batch.get(iterator_test_table_key_of(3).as_slice()),
+            shared_buffer_batch.get(TableKey(iterator_test_table_key_of(3).as_slice())),
             None
         );
         assert_eq!(
-            shared_buffer_batch.get(iterator_test_table_key_of(4).as_slice()),
+            shared_buffer_batch.get(TableKey(iterator_test_table_key_of(4).as_slice())),
             None
         );
 
@@ -495,7 +498,7 @@ mod tests {
         let mut output = vec![];
         while iter.is_valid() {
             output.push((
-                iter.key().user_key.table_key.to_owned(),
+                iter.key().user_key.table_key.to_vec(),
                 iter.value().to_bytes(),
             ));
             iter.next().await.unwrap();
@@ -508,7 +511,7 @@ mod tests {
         let mut output = vec![];
         while backward_iter.is_valid() {
             output.push((
-                backward_iter.key().user_key.table_key.to_owned(),
+                backward_iter.key().user_key.table_key.to_vec(),
                 backward_iter.value().to_bytes(),
             ));
             backward_iter.next().await.unwrap();
@@ -547,7 +550,7 @@ mod tests {
             .unwrap();
         for item in &shared_buffer_items {
             assert!(iter.is_valid());
-            assert_eq!(iter.key().user_key.table_key, item.0);
+            assert_eq!(*iter.key().user_key.table_key, item.0);
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -567,7 +570,7 @@ mod tests {
             .unwrap();
         for item in &shared_buffer_items[1..] {
             assert!(iter.is_valid());
-            assert_eq!(iter.key().user_key.table_key, item.0);
+            assert_eq!(*iter.key().user_key.table_key, item.0);
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -580,7 +583,7 @@ mod tests {
             .unwrap();
         for item in &shared_buffer_items[1..] {
             assert!(iter.is_valid());
-            assert_eq!(iter.key().user_key.table_key, item.0.as_slice());
+            assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -593,7 +596,7 @@ mod tests {
             .unwrap();
         let item = shared_buffer_items.last().unwrap();
         assert!(iter.is_valid());
-        assert_eq!(iter.key().user_key.table_key, item.0.as_slice());
+        assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
         assert_eq!(iter.value(), item.1.as_slice());
         iter.next().await.unwrap();
         assert!(!iter.is_valid());
@@ -612,7 +615,7 @@ mod tests {
             .unwrap();
         for item in shared_buffer_items.iter().rev() {
             assert!(iter.is_valid());
-            assert_eq!(iter.key().user_key.table_key, item.0.as_slice());
+            assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -625,7 +628,7 @@ mod tests {
             .unwrap();
         for item in shared_buffer_items[0..=1].iter().rev() {
             assert!(iter.is_valid());
-            assert_eq!(iter.key().user_key.table_key, item.0.as_slice());
+            assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -638,7 +641,7 @@ mod tests {
             .unwrap();
         assert!(iter.is_valid());
         let item = shared_buffer_items.first().unwrap();
-        assert_eq!(iter.key().user_key.table_key, item.0.as_slice());
+        assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
         assert_eq!(iter.value(), item.1.as_slice());
         iter.next().await.unwrap();
         assert!(!iter.is_valid());
@@ -650,7 +653,7 @@ mod tests {
             .unwrap();
         for item in shared_buffer_items[0..=1].iter().rev() {
             assert!(iter.is_valid());
-            assert_eq!(iter.key().user_key.table_key, item.0.as_slice());
+            assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -664,7 +667,7 @@ mod tests {
         let shared_buffer_batch = SharedBufferBatch::for_test(vec![], epoch, Default::default());
         // Seeking to non-current epoch should panic
         let mut iter = shared_buffer_batch.into_forward_iter();
-        iter.seek(FullKey::new(TableId::new(1), vec![], epoch).to_ref())
+        iter.seek(FullKey::for_test(TableId::new(1), vec![], epoch).to_ref())
             .await
             .unwrap();
     }

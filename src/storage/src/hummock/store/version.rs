@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::collections::{HashSet, VecDeque};
 use std::iter::once;
 use std::ops::Bound::{Excluded, Included};
-use std::ops::{Bound, Deref, RangeBounds};
+use std::ops::{Deref, RangeBounds};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -25,7 +25,9 @@ use minitrace::future::FutureExt;
 use minitrace::Span;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, FullKey, UserKey};
+use risingwave_hummock_sdk::key::{
+    bound_table_key_range, user_key, FullKey, TableKey, TableKeyRange, UserKey,
+};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 
@@ -122,7 +124,7 @@ impl StagingVersion {
         min_epoch_exclusive: HummockEpoch,
         max_epoch_inclusive: HummockEpoch,
         table_id: TableId,
-        table_key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        table_key_range: &'a TableKeyRange,
     ) -> (
         impl Iterator<Item = &ImmutableMemtable> + 'a,
         impl Iterator<Item = &SstableInfo> + 'a,
@@ -277,7 +279,7 @@ impl HummockReadVersion {
 pub fn read_filter_for_batch(
     epoch: HummockEpoch, // for check
     table_id: TableId,
-    key_range: &(Bound<Vec<u8>>, Bound<Vec<u8>>),
+    key_range: &TableKeyRange,
     read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
 ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
     assert!(!read_version_vec.is_empty());
@@ -323,7 +325,7 @@ pub fn read_filter_for_batch(
 pub fn read_filter_for_local(
     epoch: HummockEpoch,
     table_id: TableId,
-    table_key_range: &(Bound<Vec<u8>>, Bound<Vec<u8>>),
+    table_key_range: &TableKeyRange,
     read_version: Arc<RwLock<HummockReadVersion>>,
 ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
     let read_version_guard = read_version.read();
@@ -361,7 +363,7 @@ impl HummockVersionReader {
 impl HummockVersionReader {
     pub async fn get<'a>(
         &'a self,
-        table_key: &'a [u8],
+        table_key: TableKey<&'a [u8]>,
         epoch: u64,
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
@@ -398,7 +400,7 @@ impl HummockVersionReader {
         // 3. read from committed_version sst file
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
-        let encoded_user_key = UserKey::new(read_options.table_id, table_key).encode();
+        let encoded_user_key = full_key.user_key.encode();
         assert!(committed_version.is_valid());
         for level in committed_version.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
@@ -479,7 +481,7 @@ impl HummockVersionReader {
 
     pub async fn iter(
         &self,
-        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
@@ -506,7 +508,7 @@ impl HummockVersionReader {
             if let Some(prefix) = read_options.prefix_hint.as_ref() {
                 if !hit_sstable_bloom_filter(
                     table_holder.value(),
-                    UserKey::new(read_options.table_id, prefix)
+                    UserKey::for_test(read_options.table_id, prefix)
                         .encode()
                         .as_slice(),
                     &mut local_stats,
@@ -572,7 +574,7 @@ impl HummockVersionReader {
 
                         if hit_sstable_bloom_filter(
                             sstable.value(),
-                            UserKey::new(read_options.table_id, bloom_filter_key)
+                            UserKey::for_test(read_options.table_id, bloom_filter_key)
                                 .encode()
                                 .as_slice(),
                             &mut local_stats,
@@ -601,7 +603,7 @@ impl HummockVersionReader {
                     if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
                         if !hit_sstable_bloom_filter(
                             sstable.value(),
-                            UserKey::new(read_options.table_id, bloom_filter_key)
+                            UserKey::for_test(read_options.table_id, bloom_filter_key)
                                 .encode()
                                 .as_slice(),
                             &mut local_stats,

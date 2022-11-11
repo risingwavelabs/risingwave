@@ -254,7 +254,7 @@ mod tests {
         }
         assert!(!sstable_iter.is_valid());
 
-        let largest_key = FullKey::new(
+        let largest_key = FullKey::for_test(
             TableId::default(),
             format!("key_zzzz_{:05}", 0).as_bytes().to_vec(),
             233,
@@ -264,7 +264,7 @@ mod tests {
         assert_eq!(key, test_key_of(TEST_KEYS_COUNT - 1).to_ref());
 
         // Seek to > last key
-        let smallest_key = FullKey::new(
+        let smallest_key = FullKey::for_test(
             TableId::default(),
             format!("key_aaaa_{:05}", 0).as_bytes().to_vec(),
             233,
@@ -280,7 +280,7 @@ mod tests {
             // (will produce `key_test_00004`).
             sstable_iter
                 .seek(
-                    FullKey::new(
+                    FullKey::for_test(
                         TableId::default(),
                         format!("key_test_{:05}", idx * 2 - 1).as_bytes().to_vec(),
                         0,

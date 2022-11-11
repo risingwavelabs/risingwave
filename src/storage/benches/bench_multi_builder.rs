@@ -92,7 +92,7 @@ fn get_builder_options(capacity_mb: usize) -> SstableBuilderOptions {
 }
 
 fn test_user_key_of(idx: u64) -> UserKey<Vec<u8>> {
-    UserKey::new(TableId::default(), idx.to_be_bytes().to_vec())
+    UserKey::for_test(TableId::default(), idx.to_be_bytes().to_vec())
 }
 
 async fn build_tables<F: SstableWriterFactory>(

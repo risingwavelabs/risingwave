@@ -63,7 +63,7 @@ async fn test_failpoints_table_read() {
     // Injection failure to read object_store
     fail::cfg(mem_read_err_fp, "return").unwrap();
 
-    let seek_key = FullKey::new(
+    let seek_key = FullKey::for_test(
         TableId::default(),
         format!("key_test_{:05}", 600 * 2 - 1).as_bytes().to_vec(),
         0,

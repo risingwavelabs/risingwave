@@ -14,7 +14,7 @@
 
 use std::cmp::Ordering;
 use std::ops::Bound::*;
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::ptr;
 
 use bytes::{Buf, BufMut};
@@ -26,6 +26,7 @@ use crate::HummockEpoch;
 pub const EPOCH_LEN: usize = std::mem::size_of::<HummockEpoch>();
 pub const TABLE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
 
+pub type TableKeyRange = (Bound<TableKey<Vec<u8>>>, Bound<TableKey<Vec<u8>>>);
 pub type UserKeyRange = (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>);
 pub type FullKeyRange = (Bound<FullKey<Vec<u8>>>, Bound<FullKey<Vec<u8>>>);
 
@@ -324,6 +325,39 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
     (start, end)
 }
 
+/// [`TableKey`] is an internal concept in storage. It's a wrapper around the key directly from the
+/// user, to make the code clearer and avoid confusion with encoded [`UserKey`] and [`FullKey`].
+///
+/// Its name come from the assumption that Hummock is always accessed by a table-like structure
+/// identified by a [`TableId`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TableKey<T: AsRef<[u8]>>(pub T);
+
+impl<T: AsRef<[u8]>> Deref for TableKey<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T: AsRef<[u8]>> DerefMut for TableKey<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+#[inline]
+pub fn map_table_key_range(range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> TableKeyRange {
+    (range.0.map(TableKey), range.1.map(TableKey))
+}
+
 /// [`UserKey`] is is an internal concept in storage. In the storage interface, user specifies
 /// `table_key` and `table_id` (in [`ReadOptions`] or [`WriteOptions`]) as the input. The storage
 /// will group these two values into one struct for convenient filtering.
@@ -334,14 +368,22 @@ pub struct UserKey<T: AsRef<[u8]>> {
     // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
     // declaration matters.
     pub table_id: TableId,
-    pub table_key: T,
+    pub table_key: TableKey<T>,
 }
 
 impl<T: AsRef<[u8]>> UserKey<T> {
-    pub fn new(table_id: TableId, table_key: T) -> Self {
+    pub fn new(table_id: TableId, table_key: TableKey<T>) -> Self {
         Self {
             table_id,
             table_key,
+        }
+    }
+
+    /// Pass the inner type of `table_key` to make the code less verbose.
+    pub fn for_test(table_id: TableId, table_key: T) -> Self {
+        Self {
+            table_id,
+            table_key: TableKey(table_key),
         }
     }
 
@@ -375,18 +417,18 @@ impl<'a> UserKey<&'a [u8]> {
 
         Self {
             table_id: TableId::new(table_id),
-            table_key: &slice[TABLE_PREFIX_LEN..],
+            table_key: TableKey(&slice[TABLE_PREFIX_LEN..]),
         }
     }
 
     pub fn to_vec(self) -> UserKey<Vec<u8>> {
-        UserKey::new(self.table_id, Vec::from(self.table_key))
+        UserKey::new(self.table_id, TableKey(Vec::from(*self.table_key)))
     }
 }
 
 impl UserKey<Vec<u8>> {
     pub fn as_ref(&self) -> UserKey<&[u8]> {
-        UserKey::new(self.table_id, self.table_key.as_slice())
+        UserKey::new(self.table_id, TableKey(self.table_key.as_slice()))
     }
 
     /// Use this method to override an old `UserKey<Vec<u8>>` with a `UserKey<&[u8]>` to own the
@@ -402,7 +444,7 @@ impl Default for UserKey<Vec<u8>> {
     fn default() -> Self {
         Self {
             table_id: TableId::default(),
-            table_key: Vec::new(),
+            table_key: TableKey(Vec::new()),
         }
     }
 }
@@ -417,9 +459,17 @@ pub struct FullKey<T: AsRef<[u8]>> {
 }
 
 impl<T: AsRef<[u8]>> FullKey<T> {
-    pub fn new(table_id: TableId, table_key: T, epoch: HummockEpoch) -> Self {
+    pub fn new(table_id: TableId, table_key: TableKey<T>, epoch: HummockEpoch) -> Self {
         Self {
             user_key: UserKey::new(table_id, table_key),
+            epoch,
+        }
+    }
+
+    /// Pass the inner type of `table_key` to make the code less verbose.
+    pub fn for_test(table_id: TableId, table_key: T, epoch: HummockEpoch) -> Self {
+        Self {
+            user_key: UserKey::for_test(table_id, table_key),
             epoch,
         }
     }
@@ -513,20 +563,20 @@ impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
 /// Bound table key range with table id to generate a new user key range.
 pub fn bound_table_key_range<T: AsRef<[u8]>>(
     table_id: TableId,
-    table_key_range: &impl RangeBounds<T>,
+    table_key_range: &impl RangeBounds<TableKey<T>>,
 ) -> UserKeyRange {
     let start = match table_key_range.start_bound() {
-        Included(b) => Included(UserKey::new(table_id, b.as_ref().to_vec())),
-        Excluded(b) => Excluded(UserKey::new(table_id, b.as_ref().to_vec())),
-        Unbounded => Included(UserKey::new(table_id, b"".to_vec())),
+        Included(b) => Included(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
+        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
+        Unbounded => Included(UserKey::new(table_id, TableKey(b"".to_vec()))),
     };
 
     let end = match table_key_range.end_bound() {
-        Included(b) => Included(UserKey::new(table_id, b.as_ref().to_vec())),
-        Excluded(b) => Excluded(UserKey::new(table_id, b.as_ref().to_vec())),
+        Included(b) => Included(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
+        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
         Unbounded => {
             if let Some(next_table_id) = table_id.table_id().checked_add(1) {
-                Excluded(UserKey::new(next_table_id.into(), b"".to_vec()))
+                Excluded(UserKey::new(next_table_id.into(), TableKey(b"".to_vec())))
             } else {
                 Unbounded
             }
@@ -545,10 +595,10 @@ mod tests {
     #[test]
     fn test_encode_decode() {
         let table_key = b"abc".to_vec();
-        let key = FullKey::new(TableId::new(0), &table_key[..], 0);
+        let key = FullKey::for_test(TableId::new(0), &table_key[..], 0);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
-        let key = FullKey::new(TableId::new(1), &table_key[..], 1);
+        let key = FullKey::for_test(TableId::new(1), &table_key[..], 1);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
     }
@@ -556,10 +606,10 @@ mod tests {
     #[test]
     fn test_key_cmp() {
         // 1 compared with 256 under little-endian encoding would return wrong result.
-        let key1 = FullKey::new(TableId::new(0), b"0".to_vec(), 1);
-        let key2 = FullKey::new(TableId::new(1), b"0".to_vec(), 1);
-        let key3 = FullKey::new(TableId::new(1), b"1".to_vec(), 256);
-        let key4 = FullKey::new(TableId::new(1), b"1".to_vec(), 1);
+        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), 1);
+        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), 1);
+        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 256);
+        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 1);
 
         assert_eq!(key1.cmp(&key1), Ordering::Equal);
         assert_eq!(key1.cmp(&key2), Ordering::Less);
@@ -582,27 +632,33 @@ mod tests {
         assert_eq!(
             bound_table_key_range(
                 TableId::default(),
-                &(Included(b"a".to_vec()), Included(b"b".to_vec()))
+                &(
+                    Included(TableKey(b"a".to_vec())),
+                    Included(TableKey(b"b".to_vec()))
+                )
             ),
             (
-                Included(UserKey::new(TableId::default(), b"a".to_vec())),
-                Included(UserKey::new(TableId::default(), b"b".to_vec()),)
+                Included(UserKey::for_test(TableId::default(), b"a".to_vec())),
+                Included(UserKey::for_test(TableId::default(), b"b".to_vec()),)
             )
         );
         assert_eq!(
-            bound_table_key_range(TableId::from(1), &(Included(b"a".to_vec()), Unbounded)),
+            bound_table_key_range(
+                TableId::from(1),
+                &(Included(TableKey(b"a".to_vec())), Unbounded)
+            ),
             (
-                Included(UserKey::new(TableId::from(1), b"a".to_vec())),
-                Excluded(UserKey::new(TableId::from(2), b"".to_vec()),)
+                Included(UserKey::for_test(TableId::from(1), b"a".to_vec())),
+                Excluded(UserKey::for_test(TableId::from(2), b"".to_vec()),)
             )
         );
         assert_eq!(
             bound_table_key_range(
                 TableId::from(u32::MAX),
-                &(Included(b"a".to_vec()), Unbounded)
+                &(Included(TableKey(b"a".to_vec())), Unbounded)
             ),
             (
-                Included(UserKey::new(TableId::from(u32::MAX), b"a".to_vec())),
+                Included(UserKey::for_test(TableId::from(u32::MAX), b"a".to_vec())),
                 Unbounded,
             )
         );

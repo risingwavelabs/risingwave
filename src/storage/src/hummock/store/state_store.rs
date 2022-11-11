@@ -20,7 +20,7 @@ use bytes::Bytes;
 #[cfg(not(madsim))]
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{map_table_key_range, FullKey, TableKey, TableKeyRange};
 use tokio::sync::mpsc;
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
@@ -104,13 +104,13 @@ impl HummockStorageCore {
 
     pub async fn get_inner<'a>(
         &'a self,
-        table_key: &'a [u8],
+        table_key: TableKey<&'a [u8]>,
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let table_key_range = (
-            Bound::Included(table_key.to_vec()),
-            Bound::Included(table_key.to_vec()),
+            Bound::Included(TableKey(table_key.to_vec())),
+            Bound::Included(TableKey(table_key.to_vec())),
         );
 
         let read_snapshot = read_filter_for_local(
@@ -127,7 +127,7 @@ impl HummockStorageCore {
 
     pub async fn iter_inner(
         &self,
-        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
@@ -155,7 +155,7 @@ impl StateStoreRead for LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        self.core.get_inner(key, epoch, read_options)
+        self.core.get_inner(TableKey(key), epoch, read_options)
     }
 
     fn iter(
@@ -164,7 +164,9 @@ impl StateStoreRead for LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        let iter = self.core.iter_inner(key_range, epoch, read_options);
+        let iter = self
+            .core
+            .iter_inner(map_table_key_range(key_range), epoch, read_options);
         #[cfg(not(madsim))]
         return iter.in_span(self.tracing.new_tracer("hummock_iter"));
         #[cfg(madsim)]

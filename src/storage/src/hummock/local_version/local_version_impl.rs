@@ -26,6 +26,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, summarize_group_deltas, GroupDeltasSummary, HummockLevelsExt,
     HummockVersionExt,
 };
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, LevelType};
@@ -117,7 +118,7 @@ impl SyncUncommittedData {
         epoch: HummockEpoch,
     ) -> OrderSortedUncommittedData
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
         match &self.stage {
@@ -381,7 +382,7 @@ impl LocalVersion {
         table_key_range: &R,
     ) -> ReadVersion
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
         use parking_lot::RwLockReadGuard;

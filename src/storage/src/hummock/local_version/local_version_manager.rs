@@ -20,6 +20,7 @@ use bytes::Bytes;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::Payload;
@@ -332,7 +333,7 @@ impl LocalVersionManager {
         table_key_range: &R,
     ) -> ReadVersion
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
         LocalVersion::read_filter(&self.local_version, read_epoch, table_id, table_key_range)

@@ -113,7 +113,7 @@ impl<S: StateStoreRead> Keyspace<S> {
         let pairs = self.store.scan(range, epoch, limit, read_options).await?;
         let pairs = pairs
             .into_iter()
-            .map(|(k, v)| (Bytes::from(k.user_key.table_key), v))
+            .map(|(k, v)| (Bytes::from(k.user_key.table_key.0), v))
             .collect();
         Ok(pairs)
     }
@@ -187,7 +187,7 @@ impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> StateStoreIter
                 .iter
                 .next()
                 .await?
-                .map(|(key, value)| (Bytes::from(key.user_key.table_key), value)))
+                .map(|(key, value)| (Bytes::from(key.user_key.table_key.0), value)))
         }
     }
 }

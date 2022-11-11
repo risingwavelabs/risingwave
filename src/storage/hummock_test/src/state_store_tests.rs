@@ -777,21 +777,21 @@ async fn test_write_anytime_inner(
                 .unwrap();
             assert_eq!(
                 (
-                    FullKey::new(TableId::default(), b"aa".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch),
                     Bytes::from("111")
                 ),
                 iter.next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
-                    FullKey::new(TableId::default(), b"bb".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch),
                     Bytes::from("222")
                 ),
                 iter.next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
-                    FullKey::new(TableId::default(), b"cc".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch),
                     Bytes::from("333")
                 ),
                 iter.next().await.unwrap().unwrap()
@@ -889,14 +889,14 @@ async fn test_write_anytime_inner(
                 .unwrap();
             assert_eq!(
                 (
-                    FullKey::new(TableId::default(), b"aa".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch),
                     Bytes::from("111_new")
                 ),
                 iter.next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
-                    FullKey::new(TableId::default(), b"cc".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch),
                     Bytes::from("333")
                 ),
                 iter.next().await.unwrap().unwrap()
@@ -1489,14 +1489,14 @@ async fn test_table_id_filter() {
             assert_eq!(
                 iter.next().await.unwrap(),
                 Some((
-                    FullKey::new(TableId::new(table_id), b"aa".to_vec(), epochs[0]),
+                    FullKey::for_test(TableId::new(table_id), b"aa".to_vec(), epochs[0]),
                     gen_value("111", table_id)
                 ))
             );
             assert_eq!(
                 iter.next().await.unwrap(),
                 Some((
-                    FullKey::new(TableId::new(table_id), b"bb".to_vec(), epochs[1]),
+                    FullKey::for_test(TableId::new(table_id), b"bb".to_vec(), epochs[1]),
                     gen_value("222", table_id)
                 ))
             );
