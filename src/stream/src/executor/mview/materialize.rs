@@ -144,7 +144,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    #[allow(clippy::disallowed_methods)]
     async fn execute_inner(mut self) {
         let data_types = self.schema().data_types().clone();
         let mut input = self.input.execute();
@@ -199,42 +198,14 @@ impl<S: StateStore> MaterializeExecutor<S> {
                             let (_, vis) = key_chunk.into_parts();
 
                             // create MaterializeBuffer from chunk
-                            let mut buffer = MaterializeBuffer::new();
-                            match vis {
-                                Vis::Bitmap(vis) => {
-                                    for ((op, key, value), vis) in
-                                        izip!(ops, pks, values).zip_eq(vis.iter())
-                                    {
-                                        if vis {
-                                            match op {
-                                                Op::Insert | Op::UpdateInsert => {
-                                                    buffer.insert(key, value)
-                                                }
-                                                Op::Delete | Op::UpdateDelete => {
-                                                    buffer.delete(key, value)
-                                                }
-                                            };
-                                        }
-                                    }
-                                }
-                                Vis::Compact(_) => {
-                                    for (op, key, value) in izip!(ops, pks, values) {
-                                        match op {
-                                            Op::Insert | Op::UpdateInsert => {
-                                                buffer.insert(key, value)
-                                            }
-                                            Op::Delete | Op::UpdateDelete => {
-                                                buffer.delete(key, value)
-                                            }
-                                        };
-                                    }
-                                }
-                            }
+                            let buffer =
+                                MaterializeBuffer::fill_buffer_from_chunk(ops, pks, values, vis);
+
                             if buffer.is_empty() {
                                 // empty chunk
                                 continue;
                             } else {
-                                // ensure all key in cache, get from storage
+                                // fill cache
                                 for key in buffer.get_keys() {
                                     if self.materialize_cache.get(key).is_none() {
                                         // cache miss
@@ -400,17 +371,42 @@ pub struct MaterializeBuffer {
     buffer: HashMap<Vec<u8>, RowOp>,
 }
 
-impl Default for MaterializeBuffer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl MaterializeBuffer {
     fn new() -> Self {
         Self {
             buffer: HashMap::new(),
         }
+    }
+
+    #[allow(clippy::disallowed_methods)]
+    fn fill_buffer_from_chunk(
+        ops: Vec<Op>,
+        pks: Vec<Vec<u8>>,
+        values: Vec<Vec<u8>>,
+        vis: Vis,
+    ) -> Self {
+        let mut buffer = MaterializeBuffer::new();
+        match vis {
+            Vis::Bitmap(vis) => {
+                for ((op, key, value), vis) in izip!(ops, pks, values).zip_eq(vis.iter()) {
+                    if vis {
+                        match op {
+                            Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
+                            Op::Delete | Op::UpdateDelete => buffer.delete(key, value),
+                        };
+                    }
+                }
+            }
+            Vis::Compact(_) => {
+                for (op, key, value) in izip!(ops, pks, values) {
+                    match op {
+                        Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
+                        Op::Delete | Op::UpdateDelete => buffer.delete(key, value),
+                    };
+                }
+            }
+        }
+        buffer
     }
 
     fn insert(&mut self, pk: Vec<u8>, value: Vec<u8>) {
@@ -489,7 +485,6 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
 
 /// A cache for materialize executors.
 pub struct MaterializeCache {
-    /// (pk, value)
     data: ExecutorCache<Vec<u8>, Option<Vec<u8>>>,
 }
 
