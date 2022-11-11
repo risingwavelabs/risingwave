@@ -47,6 +47,7 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
+use risingwave_pb::health::health_server::HealthServer;
 
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
@@ -55,6 +56,7 @@ use crate::rpc::service::monitor_service::{
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::{AsyncStackTraceOption, ComputeNodeConfig, ComputeNodeOpts};
+use crate::rpc::service::health_service::HealthServiceImpl;
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
@@ -244,6 +246,7 @@ pub async fn compute_node_serve(
         ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone(), exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
     let monitor_srv = MonitorServiceImpl::new(stream_mgr, grpc_stack_trace_mgr.clone());
+    let health_srv = HealthServiceImpl::new();
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
@@ -258,6 +261,7 @@ pub async fn compute_node_serve(
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
             .add_service(MonitorServiceServer::new(monitor_srv))
+            .add_service(HealthServer::new(health_srv))
             .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
