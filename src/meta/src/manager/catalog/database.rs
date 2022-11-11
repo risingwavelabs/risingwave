@@ -238,10 +238,6 @@ impl DatabaseManager {
             && self.views.values().all(|v| v.schema_id != schema_id)
     }
 
-    pub fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
-        self.relation_ref_count.get(&relation_id).cloned()
-    }
-
     pub fn increase_ref_count(&mut self, relation_id: RelationId) {
         *self.relation_ref_count.entry(relation_id).or_insert(0) += 1;
     }
