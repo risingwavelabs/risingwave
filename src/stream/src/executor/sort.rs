@@ -42,7 +42,7 @@ type SortBufferKey = (ScalarImpl, Row);
 /// example, up to 8x memory can be used with `Row` compared to the `CompactRow`. However, if there
 /// are only a few rows that will be temporarily stored in the buffer during an epoch, `Row` will be
 /// more efficient instead due to no ser/de needed. So here we could do further optimizations.
-type SortBufferValue = (Row, bool, Vec<Watermark>);
+type SortBufferValue = (Row, i8, Vec<Watermark>);
 
 /// [`SortExecutor`] consumes unordered input data and outputs ordered data to downstream.
 pub struct SortExecutor<S: StateStore> {
@@ -144,7 +144,7 @@ impl<S: StateStore> SortExecutor<S> {
                                 // is not present in state store because this watermark arrives
                                 // before a barrier since last watermark.
                                 // TODO: Use range delete instead.
-                                if persisted {
+                                if persisted == 1 {
                                     self.state_table.delete(row.clone());
                                 }
 
@@ -163,10 +163,12 @@ impl<S: StateStore> SortExecutor<S> {
                                     let ops = vec![Op::Insert; data_chunk.capacity()];
                                     let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
                                     yield Message::Chunk(stream_chunk);
-                                    let watermarks_to_emit =
+                                    let irrelevant_watermarks_to_emit =
                                         std::mem::take(&mut irrelevant_watermarks);
-                                    for (_, watermark_to_emit) in watermarks_to_emit {
-                                        yield Message::Watermark(watermark_to_emit);
+                                    for (_, irrelevant_watermark_to_emit) in
+                                        irrelevant_watermarks_to_emit
+                                    {
+                                        yield Message::Watermark(irrelevant_watermark_to_emit);
                                     }
                                 }
                             } else {
@@ -181,8 +183,8 @@ impl<S: StateStore> SortExecutor<S> {
                             let ops = vec![Op::Insert; data_chunk.capacity()];
                             let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
                             yield Message::Chunk(stream_chunk);
-                            for (_, watermark_to_emit) in irrelevant_watermarks {
-                                yield Message::Watermark(watermark_to_emit);
+                            for (_, irrelevant_watermark_to_emit) in irrelevant_watermarks {
+                                yield Message::Watermark(irrelevant_watermark_to_emit);
                             }
                         }
 
@@ -217,7 +219,7 @@ impl<S: StateStore> SortExecutor<S> {
                                 let pk = row.by_indices(&self.pk_indices);
                                 // Null event time should not exist in the row since the `WatermarkFilter`
                                 // before the `Sort` will filter out the Null event time.
-                                self.buffer.insert((timestamp_datum.clone().unwrap(), pk), (row, false, vec![]));
+                                self.buffer.insert((timestamp_datum.clone().unwrap(), pk), (row, 0, vec![]));
                             },
                             // Other operations are not supported currently.
                             _ => unimplemented!("operations other than insert currently are not supported by sort executor")
@@ -233,11 +235,11 @@ impl<S: StateStore> SortExecutor<S> {
                         // We do not need to persist watermarks because there will soon be new
                         // watermarks after recovery :-)
                         for (row, persisted, _watermarks) in self.buffer.values_mut() {
-                            if !*persisted {
+                            if *persisted == 0 {
                                 self.state_table.insert(row.clone());
                                 // Update `persisted` so if the next barrier arrives before the
                                 // next watermark, this record will not be persisted redundantly.
-                                *persisted = true;
+                                *persisted = 1;
                             }
                         }
                         // Commit the epoch.
@@ -252,8 +254,12 @@ impl<S: StateStore> SortExecutor<S> {
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.context.id) {
                         let prev_vnode_bitmap =
                             self.state_table.update_vnode_bitmap(vnode_bitmap.clone());
-                        self.fill_buffer(Some(&prev_vnode_bitmap), &vnode_bitmap)
+                        let irrelevant_watermarks_to_emit = self
+                            .fill_buffer(Some(&prev_vnode_bitmap), &vnode_bitmap)
                             .await?;
+                        for irrelevant_watermark_to_emit in irrelevant_watermarks_to_emit {
+                            yield Message::Watermark(irrelevant_watermark_to_emit);
+                        }
                     }
 
                     yield Message::Barrier(barrier);
@@ -273,18 +279,7 @@ impl<S: StateStore> SortExecutor<S> {
         &mut self,
         prev_vnode_bitmap: Option<&Bitmap>,
         curr_vnode_bitmap: &Bitmap,
-    ) -> StreamExecutorResult<()> {
-        // When scaling occurs, we remove data with vnodes that are no longer owned by this executor
-        // from buffer.
-        if let Some(prev_vnode_bitmap) = prev_vnode_bitmap {
-            let no_longer_owned_vnodes =
-                Bitmap::bit_saturate_subtract(prev_vnode_bitmap, curr_vnode_bitmap);
-            self.buffer.retain(|(_, pk), _| {
-                let vnode = self.state_table.compute_vnode(pk);
-                !no_longer_owned_vnodes.is_set(vnode as _)
-            });
-        }
-
+    ) -> StreamExecutorResult<Vec<Watermark>> {
         // Read data with vnodes that are newly owned by this executor from state store. This is
         // performed both on initialization and on scaling.
         let newly_owned_vnodes = if let Some(prev_vnode_bitmap) = prev_vnode_bitmap {
@@ -305,10 +300,34 @@ impl<S: StateStore> SortExecutor<S> {
             let value_iter = Box::pin(value_iter);
             values_per_vnode.push(value_iter);
         }
+
         if !values_per_vnode.is_empty() {
             self.buffer
                 .values_mut()
                 .for_each(|(_, _, irrel_watermarks)| irrel_watermarks.clear());
+        }
+
+        let mut cached_watermarks = vec![];
+        // When scaling occurs, we remove data with vnodes that are no longer owned by this executor
+        // from buffer.
+        if let Some(prev_vnode_bitmap) = prev_vnode_bitmap {
+            let no_longer_owned_vnodes =
+                Bitmap::bit_saturate_subtract(prev_vnode_bitmap, curr_vnode_bitmap);
+            self.buffer
+                .iter_mut()
+                .rev()
+                .for_each(|((_, pk), (_, flag_bit, irrel_watermarks))| {
+                    let vnode = self.state_table.compute_vnode(pk);
+                    irrel_watermarks.append(&mut cached_watermarks);
+                    if no_longer_owned_vnodes.is_set(vnode as _) {
+                        *flag_bit = -1;
+                        std::mem::swap(irrel_watermarks, &mut cached_watermarks);
+                    }
+                });
+            self.buffer.retain(|_, (_, flag_bit, _)| *flag_bit != -1);
+        }
+
+        if !values_per_vnode.is_empty() {
             let mut stream = select_all(values_per_vnode);
             while let Some(storage_result) = stream.next().await {
                 // Insert the data into buffer.
@@ -324,10 +343,11 @@ impl<S: StateStore> SortExecutor<S> {
                 // Null event time should not exist in the row since the `WatermarkFilter` before
                 // the `Sort` will filter out the Null event time.
                 self.buffer
-                    .insert((timestamp_datum.clone().unwrap(), pk), (row, true, vec![]));
+                    .insert((timestamp_datum.clone().unwrap(), pk), (row, 1, vec![]));
             }
         }
-        Ok(())
+
+        Ok(cached_watermarks)
     }
 }
 
