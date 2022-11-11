@@ -76,7 +76,7 @@ pub struct LocalBarrierManager {
 /// Information used after collection.
 pub struct CompleteReceiver {
     /// Notify all actors of completion of collection.
-    pub complete_receiver: Option<Receiver<CollectResult>>,
+    pub complete_receiver: Option<Receiver<StreamResult<CollectResult>>>,
     /// `barrier_inflight_timer`'s metrics.
     pub barrier_inflight_timer: Option<HistogramTimer>,
     /// Mark whether this is a checkpoint barrier.
@@ -205,7 +205,7 @@ impl LocalBarrierManager {
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
-    pub fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) -> StreamResult<()> {
+    pub fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}
@@ -214,8 +214,19 @@ impl LocalBarrierManager {
                 managed_state.collect(actor_id, barrier);
             }
         }
+    }
 
-        Ok(())
+    /// When a actor exit unexpectedly, it should report this event using this function, so meta
+    /// will notice actor's exit while collecting.
+    pub fn notify_exit(&mut self, actor_id: ActorId) {
+        match &mut self.state {
+            #[cfg(test)]
+            BarrierState::Local => {}
+
+            BarrierState::Managed(managed_state) => {
+                managed_state.notify_exit(actor_id);
+            }
+        }
     }
 }
 

@@ -234,7 +234,7 @@ impl LocalStreamManager {
             .complete_receiver
             .expect("no rx for local mode")
             .await
-            .context("failed to collect barrier")?;
+            .context("failed to collect barrier")??;
         complete_receiver
             .barrier_inflight_timer
             .expect("no timer for test")
@@ -620,9 +620,11 @@ impl LocalStreamManagerCore {
                 .map(|(m, _)| m.register(actor_id));
 
             let handle = {
+                let context = self.context.clone();
                 let actor = async move {
                     let _ = actor.run().await.inspect_err(|err| {
                         // TODO: check error type and panic if it's unexpected.
+                        context.lock_barrier_manager().notify_exit(actor_id);
                         tracing::error!(actor=%actor_id, error=%err, "actor exit");
                     });
                 };

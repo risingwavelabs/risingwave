@@ -15,12 +15,14 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter::once;
 
+use anyhow::anyhow;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
 
 use super::progress::ChainState;
 use super::CollectResult;
+use crate::error::StreamResult;
 use crate::executor::Barrier;
 use crate::task::ActorId;
 
@@ -40,7 +42,7 @@ enum ManagedBarrierStateInner {
         remaining_actors: HashSet<ActorId>,
 
         /// Notify that the collection is finished.
-        collect_notifier: oneshot::Sender<CollectResult>,
+        collect_notifier: Option<oneshot::Sender<StreamResult<CollectResult>>>,
     },
 }
 
@@ -134,7 +136,7 @@ impl ManagedBarrierState {
                         let result = CollectResult {
                             create_mview_progress,
                         };
-                        if collect_notifier.send(result).is_err() {
+                        if collect_notifier.unwrap().send(Ok(result)).is_err() {
                             warn!("failed to notify barrier collection with epoch {}", epoch)
                         }
                     }
@@ -148,6 +150,34 @@ impl ManagedBarrierState {
     pub(crate) fn clear_all_states(&mut self) {
         self.epoch_barrier_state_map.clear();
         self.create_mview_progress.clear();
+    }
+
+    /// Notify unexpected actor exit with given `actor_id`.
+    pub(crate) fn notify_exit(&mut self, actor_id: ActorId) {
+        for (_, barrier_state) in &mut self.epoch_barrier_state_map {
+            match barrier_state.inner {
+                ManagedBarrierStateInner::Issued {
+                    ref remaining_actors,
+                    ref mut collect_notifier,
+                } => {
+                    if remaining_actors.contains(&actor_id) {
+                        let collect_notifier = std::mem::take(collect_notifier);
+                        if collect_notifier
+                            .unwrap()
+                            .send(Err(anyhow!(format!(
+                                "Actor {} exit unexpectedly",
+                                actor_id
+                            ))
+                            .into()))
+                            .is_err()
+                        {
+                            warn!("failed to notify actor exit: {}", actor_id);
+                        };
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Collect a `barrier` from the actor with `actor_id`.
@@ -212,7 +242,7 @@ impl ManagedBarrierState {
         &mut self,
         barrier: &Barrier,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-        collect_notifier: oneshot::Sender<CollectResult>,
+        collect_notifier: oneshot::Sender<StreamResult<CollectResult>>,
     ) {
         let inner = match self.epoch_barrier_state_map.get_mut(&barrier.epoch.curr) {
             Some(&mut BarrierState {
@@ -229,7 +259,7 @@ impl ManagedBarrierState {
                 assert!(collected_actors.is_empty());
                 ManagedBarrierStateInner::Issued {
                     remaining_actors,
-                    collect_notifier,
+                    collect_notifier: Some(collect_notifier),
                 }
             }
             Some(&mut BarrierState {
@@ -245,7 +275,7 @@ impl ManagedBarrierState {
                 let remaining_actors = actor_ids_to_collect.into_iter().collect();
                 ManagedBarrierStateInner::Issued {
                     remaining_actors,
-                    collect_notifier,
+                    collect_notifier: Some(collect_notifier),
                 }
             }
         };
