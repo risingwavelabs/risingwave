@@ -235,7 +235,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 continue;
                             } else {
                                 // ensure all key in cache, get from storage
-                                for key in buffer.buffer.keys() {
+                                for key in buffer.get_keys() {
                                     if self.materialize_cache.get(key).is_none() {
                                         // cache miss
                                         if let Some(storage_value) = self
@@ -258,7 +258,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                                 // handle pk conflict
                                 let mut output = buffer.buffer.clone();
-                                for (key, row_op) in buffer.buffer {
+                                for (key, row_op) in buffer.into_parts() {
                                     match row_op {
                                         RowOp::Insert(row) => {
                                             if let Some(cache_row) =
@@ -267,15 +267,14 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                 // double insert
                                                 output.insert(
                                                     key.clone(),
-                                                    RowOp::Update((cache_row.clone(), row.clone())),
+                                                    RowOp::Update((
+                                                        cache_row.to_vec(),
+                                                        row.clone(),
+                                                    )),
                                                 );
-                                                self.materialize_cache
-                                                    .insert(key, Some(row.clone()));
-                                            } else {
-                                                // cache key is None
-                                                self.materialize_cache
-                                                    .insert(key, Some(row.clone()));
                                             }
+
+                                            self.materialize_cache.insert(key, Some(row.clone()));
                                         }
                                         RowOp::Delete(old_row) => {
                                             if let Some(cache_row) =
@@ -304,7 +303,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                     output.insert(
                                                         key.clone(),
                                                         RowOp::Update((
-                                                            cache_row.clone(),
+                                                            cache_row.to_vec(),
                                                             new_row.clone(),
                                                         )),
                                                     );
@@ -408,13 +407,13 @@ impl Default for MaterializeBuffer {
 }
 
 impl MaterializeBuffer {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             buffer: HashMap::new(),
         }
     }
 
-    pub fn insert(&mut self, pk: Vec<u8>, value: Vec<u8>) {
+    fn insert(&mut self, pk: Vec<u8>, value: Vec<u8>) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -432,7 +431,7 @@ impl MaterializeBuffer {
         }
     }
 
-    pub fn delete(&mut self, pk: Vec<u8>, old_value: Vec<u8>) {
+    fn delete(&mut self, pk: Vec<u8>, old_value: Vec<u8>) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -449,8 +448,16 @@ impl MaterializeBuffer {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.buffer.is_empty()
+    }
+
+    fn get_keys(&self) -> Vec<&Vec<u8>> {
+        self.buffer.keys().collect()
+    }
+
+    pub fn into_parts(self) -> HashMap<Vec<u8>, RowOp> {
+        self.buffer
     }
 }
 impl<S: StateStore> Executor for MaterializeExecutor<S> {
