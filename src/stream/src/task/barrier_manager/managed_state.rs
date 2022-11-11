@@ -168,17 +168,14 @@ impl ManagedBarrierState {
                     ref remaining_actors,
                     ref mut collect_notifier,
                 } => {
-                    if remaining_actors.contains(&actor_id) && let Some(collect_notifier) = collect_notifier.take() {
-                        if collect_notifier
+                    if remaining_actors.contains(&actor_id) && let Some(collect_notifier) = collect_notifier.take() && collect_notifier
                             .send(Err(anyhow!(format!(
                                 "Actor {} exit unexpectedly",
                                 actor_id
                             ))
                             .into()))
-                            .is_err()
-                        {
-                            warn!("failed to notify actor exit: {}", actor_id);
-                        };
+                            .is_err() {
+                        warn!("failed to notify actor exit: {}", actor_id);
                     }
                 }
                 _ => {}
