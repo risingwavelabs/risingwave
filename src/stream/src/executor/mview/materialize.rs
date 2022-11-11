@@ -165,7 +165,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 Message::Chunk(chunk) => {
                     match self.handle_pk_conflict {
                         true => {
-                            let (data_chunk, ops) = chunk.clone().into_parts();
+                            let (data_chunk, ops) = chunk.into_parts();
 
                             let value_chunk =
                                 if let Some(ref value_indices) = self.state_table.value_indices() {
@@ -175,8 +175,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 };
                             let values = value_chunk.serialize();
 
-                            let size = data_chunk.capacity();
-                            let mut pks = vec![vec![]; size];
+                            let mut pks = vec![vec![]; data_chunk.capacity()];
                             compute_chunk_vnode(
                                 &data_chunk,
                                 self.state_table.dist_key_indices(),
@@ -187,9 +186,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
                             .for_each(|(vnode, vnode_and_pk)| {
                                 vnode_and_pk.extend(vnode.to_be_bytes())
                             });
-                            let key_chunk = data_chunk
-                                .clone()
-                                .reorder_columns(self.state_table.pk_indices());
+                            let key_chunk =
+                                data_chunk.reorder_columns(self.state_table.pk_indices());
                             key_chunk.rows_with_holes().zip_eq(pks.iter_mut()).for_each(
                                 |(r, vnode_and_pk)| {
                                     if let Some(r) = r {
@@ -266,7 +264,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                             if let Some(cache_row) =
                                                 self.materialize_cache.get(&key).unwrap()
                                             {
-                                                // double insert 
+                                                // double insert
                                                 output.insert(
                                                     key.clone(),
                                                     RowOp::Update((cache_row.clone(), row.clone())),
@@ -398,7 +396,7 @@ fn generator_output(
     }
 }
 
-/// `MaterializeBuffer` is a buffer to handle chunk.
+/// `MaterializeBuffer` is a buffer to handle chunk into `RowOp`.
 pub struct MaterializeBuffer {
     buffer: HashMap<Vec<u8>, RowOp>,
 }
@@ -416,7 +414,6 @@ impl MaterializeBuffer {
         }
     }
 
-    /// write methods
     pub fn insert(&mut self, pk: Vec<u8>, value: Vec<u8>) {
         let entry = self.buffer.entry(pk);
         match entry {
@@ -442,17 +439,11 @@ impl MaterializeBuffer {
                 e.insert(RowOp::Delete(old_value));
             }
             Entry::Occupied(mut e) => match e.get_mut() {
-                RowOp::Insert(original_value) => {
-                    debug_assert_eq!(original_value, &old_value);
+                RowOp::Insert(_) => {
                     e.remove();
                 }
-                RowOp::Delete(_) => {
+                _ => {
                     e.insert(RowOp::Delete(old_value));
-                }
-                RowOp::Update(value) => {
-                    let (original_old_value, original_new_value) = std::mem::take(value);
-                    debug_assert_eq!(original_new_value, old_value);
-                    e.insert(RowOp::Delete(original_old_value));
                 }
             },
         }
