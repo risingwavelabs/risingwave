@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
+
 use itertools::Itertools;
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 pub trait OverlapInfo {
@@ -76,19 +78,20 @@ impl OverlapInfo for RangeOverlapInfo {
             Some(key_range) => {
                 let mut tables = vec![];
                 let overlap_begin = others.partition_point(|table_status| {
-                    VersionedComparator::less_than(
+                    KeyComparator::compare_encoded_full_key(
                         &table_status.key_range.as_ref().unwrap().right,
                         &key_range.left,
-                    )
+                    ) == Ordering::Less
                 });
                 if overlap_begin >= others.len() {
                     return vec![];
                 }
                 for table in &others[overlap_begin..] {
-                    if VersionedComparator::less_than(
+                    if KeyComparator::compare_encoded_full_key(
                         &key_range.right,
                         &table.key_range.as_ref().unwrap().left,
-                    ) {
+                    ) == Ordering::Less
+                    {
                         break;
                     }
                     tables.push(table.clone());

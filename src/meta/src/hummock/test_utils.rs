@@ -17,6 +17,9 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
+};
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
@@ -199,6 +202,20 @@ pub async fn unregister_table_ids_from_compaction_group<S>(
         .unregister_table_ids(table_ids)
         .await
         .unwrap();
+}
+
+pub fn update_filter_key_extractor_for_table_ids(
+    filter_key_extractor_manager_ref: FilterKeyExtractorManagerRef,
+    table_ids: &[u32],
+) {
+    for table_id in table_ids {
+        filter_key_extractor_manager_ref.update(
+            *table_id,
+            Arc::new(FilterKeyExtractorImpl::FullKey(
+                FullKeyFilterKeyExtractor::default(),
+            )),
+        )
+    }
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
