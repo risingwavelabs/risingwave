@@ -200,7 +200,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                             let (_, vis) = key_chunk.into_parts();
 
-                            // create buffer from chunk
+                            // create MaterializeBuffer from chunk
                             let mut buffer = MaterializeBuffer::new();
                             match vis {
                                 Vis::Bitmap(vis) => {
@@ -239,7 +239,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 // ensure all key in cache, get from storage
                                 for key in buffer.buffer.keys() {
                                     if self.materialize_cache.get(key).is_none() {
-                                        // key do not exsit in cache
+                                        // cache miss
                                         if let Some(storage_value) = self
                                             .state_table
                                             .keyspace()
@@ -258,7 +258,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                     }
                                 }
 
-                                // do check
+                                // handle pk conflict
                                 let mut output = buffer.buffer.clone();
                                 for (key, row_op) in buffer.buffer {
                                     match row_op {
@@ -266,7 +266,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                             if let Some(cache_row) =
                                                 self.materialize_cache.get(&key).unwrap()
                                             {
-                                                // double insert => update
+                                                // double insert 
                                                 output.insert(
                                                     key.clone(),
                                                     RowOp::Update((cache_row.clone(), row.clone())),
@@ -355,6 +355,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     }
 }
 
+/// Construct output `StreamChunk` from given buffer.
 fn generator_output(
     output: HashMap<Vec<u8>, RowOp>,
     data_types: Vec<DataType>,
@@ -396,6 +397,8 @@ fn generator_output(
         Ok(None)
     }
 }
+
+/// `MaterializeBuffer` is a buffer to handle chunk.
 pub struct MaterializeBuffer {
     buffer: HashMap<Vec<u8>, RowOp>,
 }
