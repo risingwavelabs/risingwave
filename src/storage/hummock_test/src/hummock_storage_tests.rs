@@ -20,6 +20,7 @@ use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_hummock_sdk::key::{map_table_key_range, FullKey};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
@@ -45,7 +46,7 @@ use risingwave_storage::StateStoreIter;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
-use crate::test_utils::{prefixed_key, prepare_first_valid_version};
+use crate::test_utils::prepare_first_valid_version;
 
 pub async fn prepare_hummock_event_handler(
     opt: Arc<StorageConfig>,
@@ -322,14 +323,14 @@ async fn test_storage_basic() {
         .unwrap();
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"aa"[..]),
+            FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch1),
             Bytes::copy_from_slice(&b"111"[..])
         )),
         iter.next().await.unwrap()
     );
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"bb"[..]),
+            FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
             Bytes::copy_from_slice(&b"222"[..])
         )),
         iter.next().await.unwrap()
@@ -385,21 +386,21 @@ async fn test_storage_basic() {
         .unwrap();
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"aa"[..]),
+            FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch2),
             Bytes::copy_from_slice(&b"111111"[..])
         )),
         iter.next().await.unwrap()
     );
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"bb"[..]),
+            FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
             Bytes::copy_from_slice(&b"222"[..])
         )),
         iter.next().await.unwrap()
     );
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"cc"[..]),
+            FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch2),
             Bytes::copy_from_slice(&b"333"[..])
         )),
         iter.next().await.unwrap()
@@ -422,28 +423,28 @@ async fn test_storage_basic() {
         .unwrap();
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"bb"[..]),
+            FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
             Bytes::copy_from_slice(&b"222"[..])
         )),
         iter.next().await.unwrap()
     );
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"cc"[..]),
+            FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch2),
             Bytes::copy_from_slice(&b"333"[..])
         )),
         iter.next().await.unwrap()
     );
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"dd"[..]),
+            FullKey::for_test(TableId::default(), b"dd".to_vec(), epoch3),
             Bytes::copy_from_slice(&b"444"[..])
         )),
         iter.next().await.unwrap()
     );
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"ee"[..]),
+            FullKey::for_test(TableId::default(), b"ee".to_vec(), epoch3),
             Bytes::copy_from_slice(&b"555"[..])
         )),
         iter.next().await.unwrap()
@@ -489,16 +490,10 @@ async fn test_state_store_sync() {
     let hummock_storage =
         LocalHummockStorage::for_test(sstable_store, read_version, event_tx.clone());
 
-    // ingest 26B batch
+    // ingest 16B batch
     let mut batch1 = vec![
-        (
-            prefixed_key(Bytes::from("aaaa")),
-            StorageValue::new_put("1111"),
-        ),
-        (
-            prefixed_key(Bytes::from("bbbb")),
-            StorageValue::new_put("2222"),
-        ),
+        (Bytes::from("aaaa"), StorageValue::new_put("1111")),
+        (Bytes::from("bbbb"), StorageValue::new_put("2222")),
     ];
 
     // Make sure the batch is sorted.
@@ -515,20 +510,11 @@ async fn test_state_store_sync() {
         .await
         .unwrap();
 
-    // ingest 39B batch
+    // ingest 24B batch
     let mut batch2 = vec![
-        (
-            prefixed_key(Bytes::from("cccc")),
-            StorageValue::new_put("3333"),
-        ),
-        (
-            prefixed_key(Bytes::from("dddd")),
-            StorageValue::new_put("4444"),
-        ),
-        (
-            prefixed_key(Bytes::from("eeee")),
-            StorageValue::new_put("5555"),
-        ),
+        (Bytes::from("cccc"), StorageValue::new_put("3333")),
+        (Bytes::from("dddd"), StorageValue::new_put("4444")),
+        (Bytes::from("eeee"), StorageValue::new_put("5555")),
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     hummock_storage
@@ -545,11 +531,8 @@ async fn test_state_store_sync() {
 
     let epoch2 = epoch1 + 1;
 
-    // ingest more 13B then will trigger a sync behind the scene
-    let mut batch3 = vec![(
-        prefixed_key(Bytes::from("eeee")),
-        StorageValue::new_put("6666"),
-    )];
+    // ingest more 8B then will trigger a sync behind the scene
+    let mut batch3 = vec![(Bytes::from("eeee"), StorageValue::new_put("6666"))];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     hummock_storage
         .ingest_batch(
@@ -588,7 +571,7 @@ async fn test_state_store_sync() {
         for (k, v) in kv_map {
             let value = hummock_storage
                 .get(
-                    &prefixed_key(k.as_bytes()),
+                    k.as_bytes(),
                     epoch1,
                     ReadOptions {
                         table_id: Default::default(),
@@ -630,7 +613,7 @@ async fn test_state_store_sync() {
         for (k, v) in kv_map {
             let value = hummock_storage
                 .get(
-                    &prefixed_key(k.as_bytes()),
+                    k.as_bytes(),
                     epoch2,
                     ReadOptions {
                         table_id: Default::default(),
@@ -650,7 +633,7 @@ async fn test_state_store_sync() {
     {
         let mut iter = hummock_storage
             .iter(
-                (Unbounded, Included(prefixed_key(b"eeee").to_vec())),
+                (Unbounded, Included(b"eeee".to_vec())),
                 epoch1,
                 ReadOptions {
                     table_id: Default::default(),
@@ -663,16 +646,22 @@ async fn test_state_store_sync() {
             .unwrap();
 
         let kv_map = [
-            ("aaaa", "1111"),
-            ("bbbb", "2222"),
-            ("cccc", "3333"),
-            ("dddd", "4444"),
-            ("eeee", "5555"),
+            (b"aaaa", "1111", epoch1),
+            (b"bbbb", "2222", epoch1),
+            (b"cccc", "3333", epoch1),
+            (b"dddd", "4444", epoch1),
+            (b"eeee", "5555", epoch1),
         ];
 
-        for (k, v) in kv_map {
+        for (k, v, e) in kv_map {
             let result = iter.next().await.unwrap();
-            assert_eq!(result, Some((prefixed_key(Bytes::from(k)), Bytes::from(v))));
+            assert_eq!(
+                result,
+                Some((
+                    FullKey::for_test(TableId::default(), k.to_vec(), e),
+                    Bytes::from(v)
+                ))
+            );
         }
 
         assert!(iter.next().await.unwrap().is_none());
@@ -681,7 +670,7 @@ async fn test_state_store_sync() {
     {
         let mut iter = hummock_storage
             .iter(
-                (Unbounded, Included(prefixed_key(b"eeee").to_vec())),
+                (Unbounded, Included(b"eeee".to_vec())),
                 epoch2,
                 ReadOptions {
                     table_id: Default::default(),
@@ -694,16 +683,22 @@ async fn test_state_store_sync() {
             .unwrap();
 
         let kv_map = [
-            ("aaaa", "1111"),
-            ("bbbb", "2222"),
-            ("cccc", "3333"),
-            ("dddd", "4444"),
-            ("eeee", "6666"),
+            (b"aaaa", "1111", epoch1),
+            (b"bbbb", "2222", epoch1),
+            (b"cccc", "3333", epoch1),
+            (b"dddd", "4444", epoch1),
+            (b"eeee", "6666", epoch2),
         ];
 
-        for (k, v) in kv_map {
+        for (k, v, e) in kv_map {
             let result = iter.next().await.unwrap();
-            assert_eq!(result, Some((prefixed_key(Bytes::from(k)), Bytes::from(v))));
+            assert_eq!(
+                result,
+                Some((
+                    FullKey::for_test(TableId::default(), k.to_vec(), e),
+                    Bytes::from(v)
+                ))
+            );
         }
     }
 }
@@ -746,14 +741,8 @@ async fn test_delete_get() {
 
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
-        (
-            prefixed_key(Bytes::from("aa")),
-            StorageValue::new_put("111"),
-        ),
-        (
-            prefixed_key(Bytes::from("bb")),
-            StorageValue::new_put("222"),
-        ),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
     hummock_storage
         .ingest_batch(
@@ -773,7 +762,7 @@ async fn test_delete_get() {
         .await
         .unwrap();
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(prefixed_key(Bytes::from("bb")), StorageValue::new_delete())];
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -794,7 +783,7 @@ async fn test_delete_get() {
     try_wait_epoch_for_test(epoch2, &version_update_notifier_tx).await;
     assert!(hummock_storage
         .get(
-            &prefixed_key("bb".as_bytes()),
+            "bb".as_bytes(),
             epoch2,
             ReadOptions {
                 prefix_hint: None,
@@ -846,14 +835,8 @@ async fn test_multiple_epoch_sync() {
 
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
-        (
-            prefixed_key(Bytes::from("aa")),
-            StorageValue::new_put("111"),
-        ),
-        (
-            prefixed_key(Bytes::from("bb")),
-            StorageValue::new_put("222"),
-        ),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
     hummock_storage
         .ingest_batch(
@@ -868,7 +851,7 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(prefixed_key(Bytes::from("bb")), StorageValue::new_delete())];
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -883,14 +866,8 @@ async fn test_multiple_epoch_sync() {
 
     let epoch3 = initial_epoch + 3;
     let batch3 = vec![
-        (
-            prefixed_key(Bytes::from("aa")),
-            StorageValue::new_put("444"),
-        ),
-        (
-            prefixed_key(Bytes::from("bb")),
-            StorageValue::new_put("555"),
-        ),
+        (Bytes::from("aa"), StorageValue::new_put("444")),
+        (Bytes::from("bb"), StorageValue::new_put("555")),
     ];
     hummock_storage
         .ingest_batch(
@@ -909,7 +886,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        &prefixed_key("bb".as_bytes()),
+                        "bb".as_bytes(),
                         epoch1,
                         ReadOptions {
                             table_id: Default::default(),
@@ -925,7 +902,7 @@ async fn test_multiple_epoch_sync() {
             );
             assert!(hummock_storage_clone
                 .get(
-                    &prefixed_key("bb".as_bytes()),
+                    "bb".as_bytes(),
                     epoch2,
                     ReadOptions {
                         table_id: Default::default(),
@@ -940,7 +917,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        &prefixed_key("bb".as_bytes()),
+                        "bb".as_bytes(),
                         epoch3,
                         ReadOptions {
                             table_id: Default::default(),
@@ -1024,7 +1001,7 @@ async fn test_iter_with_min_epoch() {
         .into_iter()
         .map(|index| {
             (
-                prefixed_key(Bytes::from(gen_key(index))),
+                Bytes::from(gen_key(index)),
                 StorageValue::new_put(gen_val(index)),
             )
         })
@@ -1048,7 +1025,7 @@ async fn test_iter_with_min_epoch() {
         .into_iter()
         .map(|index| {
             (
-                prefixed_key(Bytes::from(gen_key(index))),
+                Bytes::from(gen_key(index)),
                 StorageValue::new_put(gen_val(index)),
             )
         })
@@ -1252,7 +1229,7 @@ async fn test_hummock_version_reader() {
         .into_iter()
         .map(|index| {
             (
-                prefixed_key(Bytes::from(gen_key(index))),
+                Bytes::from(gen_key(index)),
                 StorageValue::new_put(gen_val(index)),
             )
         })
@@ -1264,7 +1241,7 @@ async fn test_hummock_version_reader() {
         .into_iter()
         .map(|index| {
             (
-                prefixed_key(Bytes::from(gen_key(index))),
+                Bytes::from(gen_key(index)),
                 StorageValue::new_put(gen_val(index)),
             )
         })
@@ -1276,7 +1253,7 @@ async fn test_hummock_version_reader() {
         .into_iter()
         .map(|index| {
             (
-                prefixed_key(Bytes::from(gen_key(index))),
+                Bytes::from(gen_key(index)),
                 StorageValue::new_put(gen_val(index)),
             )
         })
@@ -1582,10 +1559,10 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let start_key = prefixed_key(Bytes::from(gen_key(25))).to_vec();
-                let end_key = prefixed_key(Bytes::from(gen_key(50))).to_vec();
+                let start_key = Bytes::from(gen_key(25)).to_vec();
+                let end_key = Bytes::from(gen_key(50)).to_vec();
 
-                let key_range = (Included(start_key), Excluded(end_key));
+                let key_range = map_table_key_range((Included(start_key), Excluded(end_key)));
 
                 {
                     let read_snapshot = read_filter_for_batch(

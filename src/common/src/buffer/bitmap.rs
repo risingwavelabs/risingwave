@@ -276,12 +276,6 @@ impl Bitmap {
         }
     }
 
-    pub fn iter_pos(&self) -> impl Iterator<Item = usize> + '_ {
-        self.iter()
-            .enumerate()
-            .filter_map(|(pos, bit)| bit.then_some(pos))
-    }
-
     /// Performs bitwise saturate subtract on two equal-length bitmaps.
     ///
     /// For example, lhs = [01110] and rhs = [00111], then
@@ -295,6 +289,13 @@ impl Bitmap {
             .map(|(&a, &b)| (!(a & b)) & a)
             .collect();
         Bitmap::from_bytes_with_num_bits(bits, lhs.num_bits)
+    }
+
+    pub fn ones(&self) -> impl Iterator<Item = usize> + '_ {
+        self.iter()
+            .enumerate()
+            .filter(|(_, bit)| *bit)
+            .map(|(pos, _)| pos)
     }
 
     #[cfg(test)]
@@ -321,6 +322,30 @@ impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
     }
 }
 
+impl<'a> BitAnd<Bitmap> for &'a Bitmap {
+    type Output = Bitmap;
+
+    fn bitand(self, rhs: Bitmap) -> Self::Output {
+        self.bitand(&rhs)
+    }
+}
+
+impl<'b> BitAnd<&'b Bitmap> for Bitmap {
+    type Output = Bitmap;
+
+    fn bitand(self, rhs: &'b Bitmap) -> Self::Output {
+        rhs.bitand(self)
+    }
+}
+
+impl BitAnd for Bitmap {
+    type Output = Bitmap;
+
+    fn bitand(self, rhs: Bitmap) -> Self::Output {
+        (&self).bitand(&rhs)
+    }
+}
+
 impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
     type Output = Bitmap;
 
@@ -336,12 +361,44 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
     }
 }
 
+impl<'a> BitOr<Bitmap> for &'a Bitmap {
+    type Output = Bitmap;
+
+    fn bitor(self, rhs: Bitmap) -> Self::Output {
+        self.bitor(&rhs)
+    }
+}
+
+impl<'b> BitOr<&'b Bitmap> for Bitmap {
+    type Output = Bitmap;
+
+    fn bitor(self, rhs: &'b Bitmap) -> Self::Output {
+        rhs.bitor(self)
+    }
+}
+
+impl BitOr for Bitmap {
+    type Output = Bitmap;
+
+    fn bitor(self, rhs: Bitmap) -> Self::Output {
+        (&self).bitor(&rhs)
+    }
+}
+
 impl<'a> Not for &'a Bitmap {
     type Output = Bitmap;
 
     fn not(self) -> Self::Output {
         let bits = self.bits.iter().map(|b| !b).collect();
         Bitmap::from_bytes_with_num_bits(bits, self.num_bits)
+    }
+}
+
+impl Not for Bitmap {
+    type Output = Bitmap;
+
+    fn not(self) -> Self::Output {
+        (&self).not()
     }
 }
 
@@ -504,7 +561,7 @@ mod tests {
         for (input1, input2, expected) in cases {
             let bitmap1: Bitmap = input1.into_iter().map(|x| x != 0).collect();
             let bitmap2: Bitmap = input2.into_iter().map(|x| x != 0).collect();
-            let res = &bitmap1 & &bitmap2;
+            let res = bitmap1 & bitmap2;
             res.assert_valid();
             assert_eq!(res.iter().map(|x| x as i32).collect::<Vec<_>>(), expected,);
         }
@@ -529,7 +586,7 @@ mod tests {
 
         for (input, expected) in cases {
             let bitmap: Bitmap = input.into_iter().map(|x| x != 0).collect();
-            let res = !&bitmap;
+            let res = !bitmap;
             res.assert_valid();
             assert_eq!(res.iter().map(|x| x as i32).collect::<Vec<_>>(), expected);
         }
@@ -541,7 +598,7 @@ mod tests {
         let bitmap2 = Bitmap::from_bytes(Bytes::from_static(&[0b01001110]));
         assert_eq!(
             Bitmap::from_bytes(Bytes::from_static(&[0b01101110])),
-            (&bitmap1 | &bitmap2)
+            (bitmap1 | bitmap2)
         );
     }
 
