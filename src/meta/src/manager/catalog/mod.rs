@@ -91,19 +91,16 @@ pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 /// to Meta.
 pub struct CatalogManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
-    core: Mutex<CatalogManagerCore<S>>,
+    core: Mutex<CatalogManagerCore>,
 }
 
-pub struct CatalogManagerCore<S: MetaStore> {
-    pub database: DatabaseManager<S>,
+pub struct CatalogManagerCore {
+    pub database: DatabaseManager,
     pub user: UserManager,
 }
 
-impl<S> CatalogManagerCore<S>
-where
-    S: MetaStore,
-{
-    async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+impl CatalogManagerCore {
+    async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
         let user = UserManager::new(env).await?;
         Ok(Self { database, user })
@@ -127,7 +124,7 @@ where
         Ok(())
     }
 
-    pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore<S>> {
+    pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore> {
         self.core.lock().await
     }
 }

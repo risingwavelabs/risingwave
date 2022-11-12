@@ -65,6 +65,7 @@ where
         commit_multi_var!(
             self,
             None,
+            Transaction::default(),
             compact_statuses,
             compact_task_assignment,
             pinned_versions,

@@ -39,7 +39,7 @@ use tracing::trace;
 
 use super::mem_table::{MemTable, MemTableIter, RowOp};
 use crate::error::{StorageError, StorageResult};
-use crate::keyspace::StripPrefixIterator;
+use crate::keyspace::ExtractTableKeyIterator;
 use crate::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
@@ -153,7 +153,7 @@ impl<S: StateStore> StateTable<S> {
             .collect_vec();
 
         let local_state_store = store.new_local(table_id).await;
-        let keyspace = Keyspace::table_root(local_state_store, &table_id);
+        let keyspace = Keyspace::table_root(local_state_store, table_id);
 
         let pk_data_types = pk_indices
             .iter()
@@ -273,7 +273,7 @@ impl<S: StateStore> StateTable<S> {
         value_indices: Vec<usize>,
     ) -> Self {
         let local_state_store = store.new_local(table_id).await;
-        let keyspace = Keyspace::table_root(local_state_store, &table_id);
+        let keyspace = Keyspace::table_root(local_state_store, table_id);
 
         let pk_data_types = pk_indices
             .iter()
@@ -1055,7 +1055,7 @@ where
 
 struct StorageIterInner<S: LocalStateStore> {
     /// An iterator that returns raw bytes from storage.
-    iter: StripPrefixIterator<S::Iter>,
+    iter: ExtractTableKeyIterator<S::Iter>,
 
     deserializer: RowDeserializer,
 }
