@@ -640,7 +640,7 @@ mod tests {
 
     use bytes::{BufMut, BytesMut};
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::HummockEpoch;
+    use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
     use risingwave_pb::hummock::{HummockVersion, SstableInfo};
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::task::yield_now;
@@ -681,8 +681,8 @@ mod tests {
         .await
     }
 
-    fn gen_sstable_info(test_sst_id: u64) -> SstableInfo {
-        SstableInfo {
+    fn gen_sstable_info(test_sst_id: u64) -> LocalSstableInfo {
+        LocalSstableInfo::for_test(SstableInfo {
             id: test_sst_id,
             key_range: None,
             file_size: 0,
@@ -691,7 +691,7 @@ mod tests {
             stale_key_count: 0,
             total_key_count: 0,
             divide_version: 0,
-        }
+        })
     }
 
     #[tokio::test]

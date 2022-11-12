@@ -19,6 +19,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use risingwave_storage::hummock::iterator::test_utils::{
@@ -140,7 +141,7 @@ async fn test_read_version_basic() {
 
         let dummy_sst = StagingSstableInfo::new(
             vec![
-                SstableInfo {
+                LocalSstableInfo::for_test(SstableInfo {
                     id: 1,
                     key_range: Some(KeyRange {
                         left: key_with_epoch(iterator_test_user_key_of(1).encode(), 1),
@@ -152,8 +153,8 @@ async fn test_read_version_basic() {
                     stale_key_count: 1,
                     total_key_count: 1,
                     divide_version: 0,
-                },
-                SstableInfo {
+                }),
+                LocalSstableInfo::for_test(SstableInfo {
                     id: 2,
                     key_range: Some(KeyRange {
                         left: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
@@ -165,7 +166,7 @@ async fn test_read_version_basic() {
                     stale_key_count: 1,
                     total_key_count: 1,
                     divide_version: 0,
-                },
+                }),
             ],
             epoch_id_vec_for_clear,
             batch_id_vec_for_clear,

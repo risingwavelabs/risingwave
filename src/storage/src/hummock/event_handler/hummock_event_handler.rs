@@ -22,8 +22,7 @@ use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::pin_version_response::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
@@ -124,10 +123,7 @@ async fn flush_imms(
             .collect(),
         task_info.compaction_group_index,
     )
-    .await?
-    .into_iter()
-    .map(|(_, sstable_info)| sstable_info)
-    .collect();
+    .await?;
     Ok(StagingSstableInfo::new(
         sstable_infos,
         task_info.epochs,
@@ -470,12 +466,6 @@ fn to_sync_result(
                 uncommitted_ssts: staging_sstable_infos
                     .iter()
                     .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
-                    .map(|sstable_info| {
-                        (
-                            StaticCompactionGroupId::StateDefault as CompactionGroupId,
-                            sstable_info,
-                        )
-                    })
                     .collect(),
             })
         }
