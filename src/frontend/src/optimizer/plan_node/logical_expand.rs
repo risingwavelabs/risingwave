@@ -15,10 +15,10 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, FieldDisplay, Schema};
+use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 
+use super::generic::GenericPlanNode;
 use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
@@ -26,7 +26,7 @@ use super::{
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// [`LogicalExpand`] expand one row multiple times according to `column_subsets` and also keep
+/// [`LogicalExpand`] expands one row multiple times according to `column_subsets` and also keeps
 /// original columns of input. It can be used to implement distinct aggregation and group set.
 ///
 /// This is the schema of `LogicalExpand`:
@@ -42,24 +42,27 @@ pub struct LogicalExpand {
 
 impl LogicalExpand {
     pub fn new(input: PlanRef, column_subsets: Vec<Vec<usize>>) -> Self {
-        let input_schema_len = input.schema().len();
         for key in column_subsets.iter().flatten() {
-            assert!(*key < input_schema_len);
+            assert!(*key < input.schema().len());
         }
-        // The last column should be the flag.
-        let mut pk_indices = input
-            .logical_pk()
-            .iter()
-            .map(|&pk| pk + input_schema_len)
-            .collect_vec();
-        pk_indices.push(input_schema_len * 2);
 
-        let schema = Self::derive_schema(input.schema());
-        let ctx = input.ctx();
+        let core = generic::Expand {
+            column_subsets,
+            input,
+        };
+
+        let ctx = core.ctx();
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+
         // TODO(Wenzhuo): change fd according to expand's new definition.
         let flag_index = schema.len() - 1; // assume that `flag` is the last column
         let functional_dependency = {
-            let input_fd = input.functional_dependency().clone().into_dependencies();
+            let input_fd = core
+                .input
+                .functional_dependency()
+                .clone()
+                .into_dependencies();
             let mut current_fd = FunctionalDependencySet::new(schema.len());
             for mut fd in input_fd {
                 fd.grow(schema.len());
@@ -68,25 +71,14 @@ impl LogicalExpand {
             }
             current_fd
         };
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
-        LogicalExpand {
-            base,
-            core: generic::Expand {
-                column_subsets,
-                input,
-            },
-        }
+
+        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
+
+        LogicalExpand { base, core }
     }
 
     pub fn create(input: PlanRef, column_subsets: Vec<Vec<usize>>) -> PlanRef {
         Self::new(input, column_subsets).into()
-    }
-
-    fn derive_schema(input_schema: &Schema) -> Schema {
-        let mut fields = input_schema.clone().into_fields();
-        fields.extend(fields.clone());
-        fields.push(Field::with_name(DataType::Int64, "flag"));
-        Schema::new(fields)
     }
 
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {

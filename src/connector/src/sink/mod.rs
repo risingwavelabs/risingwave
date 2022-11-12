@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod console;
 pub mod kafka;
 pub mod mysql;
 pub mod redis;
@@ -27,13 +28,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 pub use tracing;
 
+use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 pub use crate::sink::mysql::{MySqlConfig, MySqlSink, MYSQL_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 
 #[async_trait]
 pub trait Sink {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()>;
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
     // the following interface is for transactions, if not supported, return Ok(())
     // start a transaction with epoch number. Note that epoch number should be increasing.
@@ -52,6 +54,7 @@ pub enum SinkConfig {
     Mysql(MySqlConfig),
     Redis(RedisConfig),
     Kafka(KafkaConfig),
+    Console(ConsoleConfig),
 }
 
 #[derive(Clone, Debug, EnumAsInner, Serialize, Deserialize)]
@@ -59,6 +62,7 @@ pub enum SinkState {
     Kafka,
     Mysql,
     Redis,
+    Console,
 }
 
 impl SinkConfig {
@@ -70,6 +74,9 @@ impl SinkConfig {
         match sink_type.to_lowercase().as_str() {
             KAFKA_SINK => Ok(SinkConfig::Kafka(KafkaConfig::from_hashmap(properties)?)),
             MYSQL_SINK => Ok(SinkConfig::Mysql(MySqlConfig::from_hashmap(properties)?)),
+            CONSOLE_SINK => Ok(SinkConfig::Console(ConsoleConfig::from_hashmap(
+                properties,
+            )?)),
             _ => unimplemented!(),
         }
     }
@@ -79,6 +86,7 @@ impl SinkConfig {
             SinkConfig::Mysql(_) => "mysql",
             SinkConfig::Kafka(_) => "kafka",
             SinkConfig::Redis(_) => "redis",
+            SinkConfig::Console(_) => "console",
         }
     }
 }
@@ -88,14 +96,16 @@ pub enum SinkImpl {
     MySql(Box<MySqlSink>),
     Redis(Box<RedisSink>),
     Kafka(Box<KafkaSink>),
+    Console(Box<ConsoleSink>),
 }
 
 impl SinkImpl {
-    pub async fn new(cfg: SinkConfig) -> Result<Self> {
+    pub async fn new(cfg: SinkConfig, schema: Schema) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Mysql(cfg) => SinkImpl::MySql(Box::new(MySqlSink::new(cfg).await?)),
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg)?)),
-            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg).await?)),
+            SinkConfig::Mysql(cfg) => SinkImpl::MySql(Box::new(MySqlSink::new(cfg, schema).await?)),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
+            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg, schema).await?)),
+            SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
         })
     }
 
@@ -104,12 +114,13 @@ impl SinkImpl {
             SinkImpl::MySql(_) => true,
             SinkImpl::Redis(_) => false,
             SinkImpl::Kafka(_) => false,
+            SinkImpl::Console(_) => false,
         }
     }
 
-    pub async fn prepare(&mut self, schema: &Schema) -> Result<()> {
+    pub async fn prepare(&mut self) -> Result<()> {
         match self {
-            SinkImpl::MySql(sink) => sink.prepare(schema).await,
+            SinkImpl::MySql(sink) => sink.prepare().await,
             _ => unreachable!(),
         }
     }
@@ -117,11 +128,12 @@ impl SinkImpl {
 
 #[async_trait]
 impl Sink for SinkImpl {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         match self {
-            SinkImpl::MySql(sink) => sink.write_batch(chunk, schema).await,
-            SinkImpl::Redis(sink) => sink.write_batch(chunk, schema).await,
-            SinkImpl::Kafka(sink) => sink.write_batch(chunk, schema).await,
+            SinkImpl::MySql(sink) => sink.write_batch(chunk).await,
+            SinkImpl::Redis(sink) => sink.write_batch(chunk).await,
+            SinkImpl::Kafka(sink) => sink.write_batch(chunk).await,
+            SinkImpl::Console(sink) => sink.write_batch(chunk).await,
         }
     }
 
@@ -130,6 +142,7 @@ impl Sink for SinkImpl {
             SinkImpl::MySql(sink) => sink.begin_epoch(epoch).await,
             SinkImpl::Redis(sink) => sink.begin_epoch(epoch).await,
             SinkImpl::Kafka(sink) => sink.begin_epoch(epoch).await,
+            SinkImpl::Console(sink) => sink.begin_epoch(epoch).await,
         }
     }
 
@@ -138,6 +151,7 @@ impl Sink for SinkImpl {
             SinkImpl::MySql(sink) => sink.commit().await,
             SinkImpl::Redis(sink) => sink.commit().await,
             SinkImpl::Kafka(sink) => sink.commit().await,
+            SinkImpl::Console(sink) => sink.commit().await,
         }
     }
 
@@ -146,6 +160,7 @@ impl Sink for SinkImpl {
             SinkImpl::MySql(sink) => sink.abort().await,
             SinkImpl::Redis(sink) => sink.abort().await,
             SinkImpl::Kafka(sink) => sink.abort().await,
+            SinkImpl::Console(sink) => sink.abort().await,
         }
     }
 }

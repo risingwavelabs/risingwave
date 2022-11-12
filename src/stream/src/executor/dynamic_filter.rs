@@ -18,7 +18,9 @@ use std::sync::Arc;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, RowDeserializer, StreamChunk};
+use risingwave_common::array::{
+    Array, ArrayImpl, DataChunk, Op, Row as RowData, RowDeserializer, StreamChunk,
+};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
@@ -72,6 +74,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         is_right_table_writer: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
+        vnodes: Arc<Bitmap>,
     ) -> Self {
         // TODO: enable sanity check for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
         state_table_l.disable_sanity_check();
@@ -86,7 +89,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
-            range_cache: RangeCache::new(state_table_l, usize::MAX),
+            range_cache: RangeCache::new(state_table_l, usize::MAX, vnodes),
             right_table: state_table_r,
             is_right_table_writer,
             metrics,
@@ -172,7 +175,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             if let Some(val) = left_val {
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        self.range_cache.insert(val, row.to_owned_row())?;
+                        self.range_cache.insert(&val, row.to_owned_row())?;
                     }
                     Op::Delete | Op::UpdateDelete => {
                         self.range_cache.delete(&val, row.to_owned_row())?;
@@ -233,6 +236,20 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         }
     }
 
+    async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
+        // Recover value for RHS if available
+        let rhs_stream = self.right_table.iter().await?;
+        pin_mut!(rhs_stream);
+
+        if let Some(res) = rhs_stream.next().await {
+            let value = res?.into_owned();
+            assert!(rhs_stream.next().await.is_none());
+            Ok(Some(value))
+        } else {
+            Ok(None)
+        }
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let input_l = self.source_l.take().unwrap();
@@ -253,10 +270,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             })
         };
 
-        let mut prev_epoch_value: Option<Datum> = None;
-        let mut current_epoch_value: Option<Datum> = None;
-        let mut current_epoch_row = None;
-
         let aligned_stream = barrier_align(
             input_l.execute(),
             input_r.execute(),
@@ -269,6 +282,15 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
         self.right_table.init_epoch(barrier.epoch);
         self.range_cache.init(barrier.epoch);
+
+        let recovered_row = self.recover_rhs().await?;
+        let recovered_value = recovered_row.as_ref().map(|r| r[0].clone());
+        // At the beginning of an epoch, the `prev_epoch_value` == `current_epoch_value`
+        let mut prev_epoch_value: Option<Datum> = recovered_value.clone();
+        let mut current_epoch_value: Option<Datum> = recovered_value;
+        // This is only required to be some if the row arrived during this epoch.
+        let mut current_epoch_row = recovered_row.clone();
+        let mut last_committed_epoch_row = recovered_row;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
@@ -343,15 +365,13 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let row_deserializer = RowDeserializer::new(self.schema.data_types());
                     if prev != curr {
                         let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
-                        for (_, rows) in self.range_cache.range(range, latest_is_lower) {
-                            for row in rows {
-                                if let Some(chunk) = stream_chunk_builder.append_row_matched(
-                                    // All rows have a single identity at this point
-                                    if is_insert { Op::Insert } else { Op::Delete },
-                                    &row_deserializer.deserialize(row.row.as_ref())?,
-                                )? {
-                                    yield Message::Chunk(chunk);
-                                }
+                        for row in self.range_cache.range(range, latest_is_lower).await? {
+                            if let Some(chunk) = stream_chunk_builder.append_row_matched(
+                                // All rows have a single identity at this point
+                                if is_insert { Op::Insert } else { Op::Delete },
+                                &row_deserializer.deserialize(row.row.as_ref())?,
+                            )? {
+                                yield Message::Chunk(chunk);
                             }
                         }
                         if let Some(chunk) = stream_chunk_builder.take()? {
@@ -360,8 +380,16 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     }
 
                     if self.is_right_table_writer {
-                        if let Some(row) = current_epoch_row.take() {
-                            self.right_table.insert(row);
+                        if last_committed_epoch_row != current_epoch_row {
+                            // If both `None`, then this branch is inactive.
+                            // Hence, at least one is `Some`, hence at least one update.
+                            if let Some(old_row) = &last_committed_epoch_row {
+                                self.right_table.delete(old_row.clone());
+                            }
+                            if let Some(row) = &current_epoch_row {
+                                self.right_table.insert(row.clone());
+                                last_committed_epoch_row = Some(row.clone());
+                            }
                             self.right_table.commit(barrier.epoch).await?;
                         } else {
                             self.right_table.commit_no_data_expected(barrier.epoch);
@@ -374,11 +402,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     // Update the vnode bitmap for the left state table if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let _previous_vnode_bitmap = self
-                            .range_cache
-                            .state_table
-                            .update_vnode_bitmap(vnode_bitmap);
-                        // TODO: evict the cache based on the vnode bitmap changes
+                        let _previous_vnode_bitmap = self.range_cache.update_vnodes(vnode_bitmap);
                     }
 
                     yield Message::Barrier(barrier);
@@ -413,15 +437,15 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::Distribution;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::ActorContext;
 
-    fn create_in_memory_state_table() -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>)
-    {
-        let mem_state = MemoryStateStore::new();
-
+    async fn create_in_memory_state_table(
+        mem_state: MemoryStateStore,
+    ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
         let state_table_l = StateTable::new_without_distribution(
             mem_state.clone(),
@@ -429,27 +453,38 @@ mod tests {
             vec![column_descs.clone()],
             vec![OrderType::Ascending],
             vec![0],
-        );
+        )
+        .await;
         let state_table_r = StateTable::new_without_distribution(
             mem_state,
             TableId::new(1),
             vec![column_descs],
             vec![OrderType::Ascending],
             vec![0],
-        );
+        )
+        .await;
         (state_table_l, state_table_r)
     }
 
-    fn create_executor(
+    async fn create_executor(
         comparator: ExprNodeType,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
+        let mem_state = MemoryStateStore::new();
+        create_executor_inner(comparator, mem_state).await
+    }
+
+    async fn create_executor_inner(
+        comparator: ExprNodeType,
+        mem_state: MemoryStateStore,
+    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
+        let (mem_state_l, mem_state_r) = create_in_memory_state_table(mem_state).await;
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![]);
 
-        let (mem_state_l, mem_state_r) = create_in_memory_state_table();
+        let fallback = Distribution::fallback();
         let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
             ActorContext::create(123),
             Box::new(source_l),
@@ -463,8 +498,175 @@ mod tests {
             true,
             Arc::new(StreamingMetrics::unused()),
             1024,
+            fallback.vnodes,
         );
         (tx_l, tx_r, Box::new(executor).execute())
+    }
+
+    #[tokio::test]
+    async fn test_dynamic_filter_rhs_recovery_gt() {
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I
+             + 1
+             + 2
+             + 3",
+        );
+        let chunk_l2 = StreamChunk::from_pretty(
+            "  I
+             + 4
+             - 3",
+        );
+        let chunk_r0 = StreamChunk::from_pretty(
+            "  I
+             + 1",
+        );
+        let chunk_r1 = StreamChunk::from_pretty(
+            "  I
+             - 1
+             + 2",
+        );
+        let chunk_r2 = StreamChunk::from_pretty(
+            "  I
+             + 1",
+        );
+        let chunk_r3 = StreamChunk::from_pretty(
+            "  I
+             + 4",
+        );
+        let mem_state = MemoryStateStore::new();
+        let (mut tx_l, mut tx_r, mut dynamic_filter) =
+            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone()).await;
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 0th right chunk
+        tx_r.push_chunk(chunk_r0);
+
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
+
+        // Get empty chunk
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap().compact(),
+            StreamChunk::from_pretty(" I")
+        );
+        // Get the barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // Drop executor corresponding to node failure
+        drop(tx_l);
+        drop(tx_r);
+        drop(dynamic_filter);
+
+        // Recover executor from state store
+        let (mut tx_l, mut tx_r, mut dynamic_filter) =
+            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone()).await;
+
+        // push the recovery barrier for left and right
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
+
+        // Get recovery barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 1st right chunk
+        tx_r.push_chunk(chunk_r1);
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(3, false);
+        tx_r.push_barrier(3, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap().compact(),
+            StreamChunk::from_pretty(
+                " I
+                + 2
+                + 3"
+            )
+        );
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                - 2"
+            )
+        );
+
+        // Get the barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // Drop executor corresponding to node failure
+        drop(tx_l);
+        drop(tx_r);
+        drop(dynamic_filter);
+
+        // Recover executor from state store
+        let (mut tx_l, mut tx_r, mut dynamic_filter) =
+            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone()).await;
+
+        // push recovery barrier
+        tx_l.push_barrier(3, false);
+        tx_r.push_barrier(3, false);
+
+        // Get the barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 2nd left chunk
+        tx_l.push_chunk(chunk_l2);
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap().compact(),
+            StreamChunk::from_pretty(
+                " I
+                + 4
+                - 3"
+            )
+        );
+
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(4, false);
+        tx_r.push_barrier(4, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 2"
+            )
+        );
+
+        // Get the barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 3rd right chunk
+        tx_r.push_chunk(chunk_r3);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(5, false);
+        tx_r.push_barrier(5, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                - 2
+                - 4"
+            )
+        );
     }
 
     #[tokio::test]
@@ -492,7 +694,8 @@ mod tests {
             "  I
              + 4",
         );
-        let (mut tx_l, mut tx_r, mut dynamic_filter) = create_executor(ExprNodeType::GreaterThan);
+        let (mut tx_l, mut tx_r, mut dynamic_filter) =
+            create_executor(ExprNodeType::GreaterThan).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -596,7 +799,7 @@ mod tests {
              + 5",
         );
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor(ExprNodeType::GreaterThanOrEqual);
+            create_executor(ExprNodeType::GreaterThanOrEqual).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -699,7 +902,8 @@ mod tests {
             "  I
              + 1",
         );
-        let (mut tx_l, mut tx_r, mut dynamic_filter) = create_executor(ExprNodeType::LessThan);
+        let (mut tx_l, mut tx_r, mut dynamic_filter) =
+            create_executor(ExprNodeType::LessThan).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -803,7 +1007,7 @@ mod tests {
              + 0",
         );
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor(ExprNodeType::LessThanOrEqual);
+            create_executor(ExprNodeType::LessThanOrEqual).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);

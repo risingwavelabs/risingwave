@@ -25,9 +25,9 @@ use database::*;
 pub use fragment::*;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    valid_table_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
-    DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID,
-    PG_CATALOG_SCHEMA_NAME,
+    valid_table_name, TableId as StreamingJobId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID,
+    DEFAULT_SUPER_USER_ID, INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -39,7 +39,7 @@ use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
-use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob, StreamingJobId};
+use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob};
 use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
@@ -91,19 +91,16 @@ pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 /// to Meta.
 pub struct CatalogManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
-    core: Mutex<CatalogManagerCore<S>>,
+    core: Mutex<CatalogManagerCore>,
 }
 
-pub struct CatalogManagerCore<S: MetaStore> {
-    pub database: DatabaseManager<S>,
+pub struct CatalogManagerCore {
+    pub database: DatabaseManager,
     pub user: UserManager,
 }
 
-impl<S> CatalogManagerCore<S>
-where
-    S: MetaStore,
-{
-    async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+impl CatalogManagerCore {
+    async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
         let user = UserManager::new(env).await?;
         Ok(Self { database, user })
@@ -127,7 +124,7 @@ where
         Ok(())
     }
 
-    pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore<S>> {
+    pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore> {
         self.core.lock().await
     }
 }
@@ -172,7 +169,11 @@ where
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         databases.insert(database.id, database.clone());
         let mut schemas_added = vec![];
-        for schema_name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
+        for schema_name in [
+            DEFAULT_SCHEMA_NAME,
+            PG_CATALOG_SCHEMA_NAME,
+            INFORMATION_SCHEMA_SCHEMA_NAME,
+        ] {
             let schema = Schema {
                 id: self
                     .env
@@ -203,12 +204,11 @@ where
         Ok(version)
     }
 
-    /// return id of streaming jobs in the database which need to be dropped in
-    /// `StreamingJobBackgroundDeleter`.
+    /// return id of streaming jobs in the database which need to be dropped by stream manager.
     pub async fn drop_database(
         &self,
         database_id: DatabaseId,
-    ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
+    ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>, Vec<SourceId>)> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -221,82 +221,62 @@ where
         let mut views = BTreeMapTransaction::new(&mut database_core.views);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
+        /// `drop_by_database_id` provides a wrapper for dropping relations by database id, it will
+        /// return the relation ids that dropped.
+        /// * $`val_txn`: transactions to the relations.
+        /// * $`database_id`: database id.
+        macro_rules! drop_by_database_id {
+            ($val_txn:expr, $database_id:ident) => {{
+                let ids_to_drop = $val_txn
+                    .tree_ref()
+                    .values()
+                    .filter(|relation| relation.database_id == $database_id)
+                    .map(|relation| relation.id)
+                    .collect_vec();
+                ids_to_drop
+                    .into_iter()
+                    .map(|id| $val_txn.remove(id).unwrap())
+                    .collect_vec()
+            }};
+        }
+
         let database = databases.remove(database_id);
         if let Some(database) = database {
-            let schema_ids = schemas.tree_ref().keys().copied().collect_vec();
-            let mut schemas_to_drop = vec![];
-            for schema_id in &schema_ids {
-                if database_id == schemas.get(schema_id).unwrap().database_id {
-                    schemas_to_drop.push(schemas.remove(*schema_id).unwrap());
-                }
-            }
+            let schemas_to_drop = drop_by_database_id!(schemas, database_id);
+            let sources_to_drop = drop_by_database_id!(sources, database_id);
+            let sinks_to_drop = drop_by_database_id!(sinks, database_id);
+            let tables_to_drop = drop_by_database_id!(tables, database_id);
+            let _ = drop_by_database_id!(indexes, database_id);
+            let views_to_drop = drop_by_database_id!(views, database_id);
 
-            let source_ids = sources.tree_ref().keys().copied().collect_vec();
-            let mut sources_to_drop = vec![];
-            for source_id in &source_ids {
-                if database_id == sources.get(source_id).unwrap().database_id {
-                    sources_to_drop.push(sources.remove(*source_id).unwrap());
-                }
-            }
-            let sink_ids = sinks.tree_ref().keys().copied().collect_vec();
-            let mut sinks_to_drop = vec![];
-            for sink_in in &sink_ids {
-                if database_id == sinks.get(sink_in).unwrap().database_id {
-                    sinks_to_drop.push(sinks.remove(*sink_in).unwrap());
-                }
-            }
-
-            let table_ids = tables.tree_ref().keys().copied().collect_vec();
-            let mut tables_to_drop = vec![];
-            for table_id in &table_ids {
-                if database_id == tables.get(table_id).unwrap().database_id {
-                    tables_to_drop.push(tables.remove(*table_id).unwrap());
-                }
-            }
-
-            let index_ids = indexes.tree_ref().keys().copied().collect_vec();
-            let mut indexes_to_drop = vec![];
-            for index_id in &index_ids {
-                if database_id == indexes.get(index_id).unwrap().database_id {
-                    indexes_to_drop.push(indexes.remove(*index_id).unwrap());
-                }
-            }
-
-            let view_ids = views.tree_ref().keys().copied().collect_vec();
-            let mut views_to_drop = vec![];
-            for view_id in &view_ids {
-                if database_id == views.get(view_id).unwrap().database_id {
-                    views_to_drop.push(views.remove(*view_id).unwrap());
-                }
-            }
-
-            let mut objects = Vec::with_capacity(
-                1 + schemas_to_drop.len()
-                    + tables_to_drop.len()
-                    + sources_to_drop.len()
-                    + views_to_drop.len(),
-            );
-            objects.push(Object::DatabaseId(database.id));
-            objects.extend(
-                schemas_to_drop
-                    .iter()
-                    .map(|schema| Object::SchemaId(schema.id)),
-            );
-            objects.extend(tables_to_drop.iter().map(|table| Object::TableId(table.id)));
-            objects.extend(
-                sources_to_drop
-                    .iter()
-                    .map(|source| Object::SourceId(source.id)),
-            );
-            objects.extend(views_to_drop.iter().map(|view| Object::ViewId(view.id)));
-
+            let objects = std::iter::once(Object::DatabaseId(database_id))
+                .chain(
+                    schemas_to_drop
+                        .into_iter()
+                        .map(|schema| Object::SchemaId(schema.id)),
+                )
+                .chain(views_to_drop.iter().map(|view| Object::ViewId(view.id)))
+                .chain(tables_to_drop.iter().map(|table| Object::TableId(table.id)))
+                .chain(
+                    sources_to_drop
+                        .iter()
+                        .map(|source| Object::SourceId(source.id)),
+                )
+                .collect_vec();
             let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
             commit_meta!(self, databases, schemas, sources, sinks, tables, indexes, views, users)?;
 
-            database_core.relation_ref_count.retain(|k, _| {
-                (!table_ids.contains(k)) && (!source_ids.contains(k) && (!view_ids.contains(k)))
-            });
+            // Update relation ref count.
+            for table in &tables_to_drop {
+                database_core.relation_ref_count.remove(&table.id);
+            }
+            for source in &sources_to_drop {
+                database_core.relation_ref_count.remove(&source.id);
+            }
+            for view in &views_to_drop {
+                database_core.relation_ref_count.remove(&view.id);
+            }
 
             for user in users_need_update {
                 self.notify_frontend(Operation::Update, Info::User(user))
@@ -308,29 +288,24 @@ where
                 .notify_frontend(Operation::Delete, Info::Database(database))
                 .await;
 
-            // prepare catalog sent to catalog background deleter.
-            let valid_tables = tables_to_drop
+            let catalog_deleted_ids = tables_to_drop
                 .into_iter()
                 .filter(|table| valid_table_name(&table.name))
+                .map(|table| StreamingJobId::new(table.id))
+                .chain(
+                    sinks_to_drop
+                        .into_iter()
+                        .map(|sink| StreamingJobId::new(sink.id)),
+                )
+                .collect_vec();
+            let source_deleted_ids = sources_to_drop
+                .into_iter()
+                .map(|source| source.id)
                 .collect_vec();
 
-            let mut catalog_deleted_ids =
-                Vec::with_capacity(valid_tables.len() + source_ids.len() + sinks_to_drop.len());
-            catalog_deleted_ids.extend(
-                valid_tables
-                    .into_iter()
-                    .map(|table| StreamingJobId::Table(table.id.into())),
-            );
-            catalog_deleted_ids.extend(source_ids.into_iter().map(StreamingJobId::Source));
-            catalog_deleted_ids.extend(
-                sinks_to_drop
-                    .into_iter()
-                    .map(|sink| StreamingJobId::Sink(sink.id.into())),
-            );
-
-            Ok((version, catalog_deleted_ids))
+            Ok((version, catalog_deleted_ids, source_deleted_ids))
         } else {
-            bail!("database doesn't exist");
+            Err(MetaError::catalog_id_not_found("database", database_id))
         }
     }
 
@@ -357,35 +332,30 @@ where
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
+        if !database_core.schemas.contains_key(&schema_id) {
+            return Err(MetaError::catalog_id_not_found("schema", schema_id));
+        }
+        if !database_core.schema_is_empty(schema_id) {
+            bail!("schema is not empty!");
+        }
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
-        let schema = schemas.remove(schema_id);
-        if let Some(schema) = schema {
-            if database_core
-                .tables
-                .values()
-                .any(|t| t.database_id == schema.database_id && t.schema_id == schema_id)
-            {
-                bail!("schema is not empty!");
-            }
+        let schema = schemas.remove(schema_id).unwrap();
 
-            let users_need_update =
-                Self::update_user_privileges(&mut users, &[Object::SchemaId(schema_id)]);
+        let users_need_update =
+            Self::update_user_privileges(&mut users, &[Object::SchemaId(schema_id)]);
 
-            commit_meta!(self, schemas, users)?;
+        commit_meta!(self, schemas, users)?;
 
-            for user in users_need_update {
-                self.notify_frontend(Operation::Update, Info::User(user))
-                    .await;
-            }
-            let version = self
-                .notify_frontend(Operation::Delete, Info::Schema(schema))
+        for user in users_need_update {
+            self.notify_frontend(Operation::Update, Info::User(user))
                 .await;
-
-            Ok(version)
-        } else {
-            bail!("schema doesn't exist");
         }
+        let version = self
+            .notify_frontend(Operation::Delete, Info::Schema(schema))
+            .await;
+
+        Ok(version)
     }
 
     pub async fn create_view(&self, view: &View) -> MetaResult<NotificationVersion> {
@@ -452,7 +422,7 @@ where
                 }
             }
         } else {
-            Err(MetaError::catalog_not_found("view", view_id.to_string()))
+            Err(MetaError::catalog_id_not_found("view", view_id))
         }
     }
 
@@ -585,8 +555,7 @@ where
         }
     }
 
-    /// return id of streaming jobs in the database which need to be dropped in
-    /// `StreamingJobBackgroundDeleter`.
+    /// return id of streaming jobs in the database which need to be dropped by stream manager.
     pub async fn drop_table(
         &self,
         table_id: TableId,
@@ -692,16 +661,11 @@ where
                 .notify_frontend(Operation::Delete, Info::Table(table))
                 .await;
 
-            let catalog_deleted_ids = {
-                let mut catalog_deleted_ids = Vec::with_capacity(index_table_ids.len() + 1);
-                catalog_deleted_ids.push(StreamingJobId::Table(table_id.into()));
-                catalog_deleted_ids.extend(
-                    index_table_ids
-                        .into_iter()
-                        .map(|id| StreamingJobId::Table(id.into())),
-                );
-                catalog_deleted_ids
-            };
+            let catalog_deleted_ids = index_table_ids
+                .into_iter()
+                .chain(std::iter::once(table_id))
+                .map(|id| id.into())
+                .collect_vec();
 
             Ok((version, catalog_deleted_ids))
         } else {
@@ -865,10 +829,7 @@ where
                 }
             }
         } else {
-            Err(MetaError::catalog_not_found(
-                "source",
-                source_id.to_string(),
-            ))
+            Err(MetaError::catalog_id_not_found("source", source_id))
         }
     }
 
@@ -967,8 +928,7 @@ where
         }
     }
 
-    /// return id of streaming jobs in the database which need to be dropped in
-    /// `StreamingJobBackgroundDeleter`.
+    /// return id of streaming jobs in the database which need to be dropped by stream manager.
     pub async fn drop_materialized_source(
         &self,
         source_id: SourceId,
@@ -1086,25 +1046,15 @@ where
                     .notify_frontend(Operation::Delete, Info::Source(source))
                     .await;
 
-                let catalog_deleted_ids = {
-                    let mut catalog_deleted_ids = Vec::with_capacity(index_table_ids.len() + 2);
-                    catalog_deleted_ids.push(StreamingJobId::Table(mview_id.into()));
-                    catalog_deleted_ids.push(StreamingJobId::Source(source_id));
-                    catalog_deleted_ids.extend(
-                        index_table_ids
-                            .into_iter()
-                            .map(|id| StreamingJobId::Table(id.into())),
-                    );
-                    catalog_deleted_ids
-                };
-
+                let catalog_deleted_ids = index_table_ids
+                    .into_iter()
+                    .chain(std::iter::once(mview_id))
+                    .map(|id| id.into())
+                    .collect_vec();
                 Ok((version, catalog_deleted_ids))
             }
 
-            _ => Err(MetaError::catalog_not_found(
-                "source",
-                source_id.to_string(),
-            )),
+            _ => Err(MetaError::catalog_id_not_found("source", source_id)),
         }
     }
 
@@ -1264,18 +1214,16 @@ where
 
             Ok(version)
         } else {
-            Err(MetaError::catalog_not_found("sink", sink_id.to_string()))
+            Err(MetaError::catalog_id_not_found("sink", sink_id))
         }
     }
 
-    pub async fn list_tables(&self, schema_id: SchemaId) -> MetaResult<Vec<TableId>> {
-        let _core = &self.core.lock().await.user;
-        let tables = Table::list(self.env.meta_store()).await?;
-        Ok(tables
-            .iter()
-            .filter(|t| t.schema_id == schema_id)
-            .map(|t| t.id)
-            .collect())
+    pub async fn list_tables(&self) -> Vec<Table> {
+        self.core.lock().await.database.list_tables()
+    }
+
+    pub async fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.core.lock().await.database.list_table_ids(schema_id)
     }
 
     pub async fn list_sources(&self) -> Vec<Source> {

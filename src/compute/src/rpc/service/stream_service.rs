@@ -47,7 +47,10 @@ impl StreamService for StreamServiceImpl {
         request: Request<UpdateActorsRequest>,
     ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
         let req = request.into_inner();
-        let res = self.mgr.update_actors(&req.actors, &req.hanging_channels);
+        let res = self
+            .mgr
+            .update_actors(&req.actors, &req.hanging_channels)
+            .await;
         match res {
             Err(e) => {
                 error!("failed to update stream actor {}", e);
@@ -65,7 +68,10 @@ impl StreamService for StreamServiceImpl {
         let req = request.into_inner();
 
         let actor_id = req.actor_id;
-        let res = self.mgr.build_actors(actor_id.as_slice(), self.env.clone());
+        let res = self
+            .mgr
+            .build_actors(actor_id.as_slice(), self.env.clone())
+            .await;
         match res {
             Err(e) => {
                 error!("failed to build actors {}", e);
@@ -85,7 +91,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
         let req = request.into_inner();
 
-        let res = self.mgr.update_actor_info(&req.info);
+        let res = self.mgr.update_actor_info(&req.info).await;
         match res {
             Err(e) => {
                 error!("failed to update actor info table actor {}", e);
@@ -104,7 +110,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<DropActorsResponse>, Status> {
         let req = request.into_inner();
         let actors = req.actor_ids;
-        self.mgr.drop_actor(&actors)?;
+        self.mgr.drop_actor(&actors).await?;
         Ok(Response::new(DropActorsResponse {
             request_id: req.request_id,
             status: None,

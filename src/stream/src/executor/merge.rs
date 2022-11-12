@@ -84,7 +84,7 @@ impl MergeExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(inputs: Vec<tokio::sync::mpsc::Receiver<Message>>) -> Self {
+    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
 
@@ -426,10 +426,11 @@ mod tests {
     use risingwave_rpc_client::ComputeClientPool;
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
-    use tonic::{Request, Response, Status};
+    use tonic::{Request, Response, Status, Streaming};
 
     use super::*;
     use crate::executor::exchange::input::RemoteInput;
+    use crate::executor::exchange::permit::channel;
     use crate::executor::{Barrier, Executor, Mutation};
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
@@ -445,7 +446,7 @@ mod tests {
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
         let mut rxs = Vec::with_capacity(CHANNEL_NUMBER);
         for _i in 0..CHANNEL_NUMBER {
-            let (tx, rx) = tokio::sync::mpsc::channel(16);
+            let (tx, rx) = channel();
             txs.push(tx);
             rxs.push(rx);
         }
@@ -465,7 +466,7 @@ mod tests {
                     } else {
                         tx.send(Message::Watermark(Watermark {
                             col_idx: (epoch as usize / 20 + tx_id) % CHANNEL_NUMBER,
-                            val: Some(ScalarImpl::Int64(epoch as i64)),
+                            val: ScalarImpl::Int64(epoch as i64),
                         }))
                         .await
                         .unwrap();
@@ -497,7 +498,7 @@ mod tests {
             } else if epoch as usize / 20 >= CHANNEL_NUMBER - 1 {
                 for _ in 0..CHANNEL_NUMBER {
                     assert_matches!(merger.next().await.unwrap().unwrap(), Message::Watermark(watermark) => {
-                        assert_eq!(watermark.val, Some(ScalarImpl::Int64((epoch - 20 * (CHANNEL_NUMBER as u64 - 1)) as i64)));
+                        assert_eq!(watermark.val, ScalarImpl::Int64((epoch - 20 * (CHANNEL_NUMBER as u64 - 1)) as i64));
                     });
                 }
             }
@@ -647,7 +648,7 @@ mod tests {
 
         async fn get_stream(
             &self,
-            _request: Request<GetStreamRequest>,
+            _request: Request<Streaming<GetStreamRequest>>,
         ) -> std::result::Result<Response<Self::GetStreamStream>, Status> {
             let (tx, rx) = tokio::sync::mpsc::channel(10);
             self.rpc_called.store(true, Ordering::SeqCst);
@@ -661,6 +662,7 @@ mod tests {
                         ),
                     ),
                 }),
+                permits: 1,
             }))
             .await
             .unwrap();
@@ -674,6 +676,7 @@ mod tests {
                         ),
                     ),
                 }),
+                permits: 0,
             }))
             .await
             .unwrap();

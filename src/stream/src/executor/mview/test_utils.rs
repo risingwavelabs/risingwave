@@ -38,7 +38,8 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
         column_descs.clone(),
         order_types,
         pk_indices,
-    );
+    )
+    .await;
     let table = StorageTable::for_test(
         state_store.clone(),
         TableId::from(0x42),

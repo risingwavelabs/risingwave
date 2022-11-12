@@ -17,6 +17,9 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
+};
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
@@ -26,9 +29,6 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{CompactionConfig, HummockVersion, KeyRange, SstableInfo};
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction_group::manager::{
-    CompactionGroupManager, CompactionGroupManagerRef,
-};
 use crate::hummock::compaction_group::TableOption;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{ClusterManager, ClusterManagerRef, MetaSrvEnv, META_NODE_ID};
@@ -53,7 +53,7 @@ where
     let table_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_tables(epoch, table_ids);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        hummock_manager,
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -97,7 +97,7 @@ where
     }
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        hummock_manager,
         &test_tables_2,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -119,7 +119,7 @@ where
     epoch += 1;
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        hummock_manager,
         &test_tables_3,
         StaticCompactionGroupId::StateDefault.into(),
     )
@@ -159,7 +159,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
 }
 
 pub async fn register_sstable_infos_to_compaction_group<S>(
-    compaction_group_manager_ref: CompactionGroupManagerRef<S>,
+    compaction_group_manager_ref: &HummockManager<S>,
     sstable_infos: &[SstableInfo],
     compaction_group_id: CompactionGroupId,
 ) where
@@ -181,13 +181,13 @@ pub async fn register_sstable_infos_to_compaction_group<S>(
 }
 
 pub async fn register_table_ids_to_compaction_group<S>(
-    compaction_group_manager_ref: CompactionGroupManagerRef<S>,
+    hummock_manager_ref: &HummockManager<S>,
     table_ids: &[u32],
     compaction_group_id: CompactionGroupId,
 ) where
     S: MetaStore,
 {
-    compaction_group_manager_ref
+    hummock_manager_ref
         .register_table_ids(
             &mut table_ids
                 .iter()
@@ -199,15 +199,29 @@ pub async fn register_table_ids_to_compaction_group<S>(
 }
 
 pub async fn unregister_table_ids_from_compaction_group<S>(
-    compaction_group_manager_ref: CompactionGroupManagerRef<S>,
+    hummock_manager_ref: &HummockManager<S>,
     table_ids: &[u32],
 ) where
     S: MetaStore,
 {
-    compaction_group_manager_ref
+    hummock_manager_ref
         .unregister_table_ids(table_ids)
         .await
         .unwrap();
+}
+
+pub fn update_filter_key_extractor_for_table_ids(
+    filter_key_extractor_manager_ref: FilterKeyExtractorManagerRef,
+    table_ids: &[u32],
+) {
+    for table_id in table_ids {
+        filter_key_extractor_manager_ref.update(
+            *table_id,
+            Arc::new(FilterKeyExtractorImpl::FullKey(
+                FullKeyFilterKeyExtractor::default(),
+            )),
+        )
+    }
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
@@ -261,21 +275,15 @@ pub async fn setup_compute_env_with_config(
             .unwrap(),
     );
 
-    let compaction_group_manager = Arc::new(
-        CompactionGroupManager::with_config(env.clone(), config.clone())
-            .await
-            .unwrap(),
-    );
-
     let compactor_manager = Arc::new(CompactorManager::for_test());
 
     let hummock_manager = Arc::new(
-        HummockManager::new(
+        HummockManager::with_config(
             env.clone(),
             cluster_manager.clone(),
             Arc::new(MetaMetrics::new()),
-            compaction_group_manager,
             compactor_manager,
+            config,
         )
         .await
         .unwrap(),
@@ -345,7 +353,7 @@ where
     let table_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_tables(epoch, table_ids);
     register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager(),
+        hummock_manager,
         &test_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )

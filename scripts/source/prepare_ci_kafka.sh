@@ -3,6 +3,13 @@
 # Exits as soon as any line fails.
 set -e
 
+KCAT_BIN="kcat"
+# kcat bin name on linux is "kafkacat"
+if [ "$(uname)" == "Linux" ]
+then
+    KCAT_BIN="kafkacat"
+fi
+
 SCRIPT_PATH="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
 cd "$SCRIPT_PATH/.." || exit 1
 
@@ -33,9 +40,9 @@ for filename in "$SCRIPT_PATH"/test_data/*; do
     echo "Fulfill kafka topic $topic with data from $base"
     # binary data, one message a file, filename/topic ends with "bin"
     if [[ "$topic" = *bin ]]; then
-        kafkacat -P -b 127.0.0.1:29092 -t "$topic" "$filename"
+        ${KCAT_BIN} -P -b 127.0.0.1:29092 -t "$topic" "$filename"
     else
-        cat "$filename" | kafkacat -P -b 127.0.0.1:29092 -t "$topic"
+        cat "$filename" | ${KCAT_BIN} -P -b 127.0.0.1:29092 -t "$topic"
     fi
     ) &
 done

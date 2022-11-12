@@ -34,7 +34,7 @@ use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::{check_valid_column_name, ColumnId};
-use crate::optimizer::plan_node::{LogicalSource, StreamSource};
+use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -230,8 +230,7 @@ pub(crate) fn gen_materialized_source_plan(
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
-        let source_node: PlanRef =
-            StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
+        let source_node: PlanRef = LogicalSource::new(Rc::new((&source).into()), context).into();
         let row_id_index = source.row_id_index.as_ref().map(|index| index.index as _);
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
         required_cols.toggle_range(..);

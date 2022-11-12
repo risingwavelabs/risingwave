@@ -27,6 +27,7 @@ use bloom::Bloom;
 pub mod builder;
 pub use builder::*;
 pub mod writer;
+use risingwave_common::catalog::TableId;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
@@ -35,6 +36,7 @@ use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
+use risingwave_hummock_sdk::key::UserKey;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -42,7 +44,9 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 mod delete_range_aggregator;
 mod sstable_id_manager;
 mod utils;
-pub use delete_range_aggregator::{DeleteRangeAggregator, DeleteRangeAggregatorIterator};
+pub use delete_range_aggregator::{
+    DeleteRangeAggregator, DeleteRangeAggregatorBuilder, RangeTombstonesCollector,
+};
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
@@ -57,16 +61,21 @@ const VERSION: u32 = 1;
 #[derive(Clone, PartialEq, Eq, Debug)]
 // delete keys located in [start_user_key, end_user_key)
 pub struct DeleteRangeTombstone {
-    start_user_key: Vec<u8>,
-    end_user_key: Vec<u8>,
-    sequence: HummockEpoch,
+    pub start_user_key: Vec<u8>,
+    pub end_user_key: Vec<u8>,
+    pub sequence: HummockEpoch,
 }
 
 impl DeleteRangeTombstone {
-    pub fn new(start_user_key: Vec<u8>, end_user_key: Vec<u8>, sequence: HummockEpoch) -> Self {
+    pub fn new(
+        table_id: TableId,
+        start_table_key: Vec<u8>,
+        end_table_key: Vec<u8>,
+        sequence: HummockEpoch,
+    ) -> Self {
         Self {
-            start_user_key,
-            end_user_key,
+            start_user_key: UserKey::for_test(table_id, start_table_key).encode(),
+            end_user_key: UserKey::for_test(table_id, end_table_key).encode(),
             sequence,
         }
     }

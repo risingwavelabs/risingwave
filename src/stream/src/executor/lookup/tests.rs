@@ -77,7 +77,7 @@ fn arrangement_col_arrange_rules_join_key() -> Vec<OrderPair> {
 /// | +  | 2337  | 8    | 3       |
 /// | -  | 2333  | 6    | 3       |
 /// | b  |       |      | 3 -> 4  |
-fn create_arrangement(
+async fn create_arrangement(
     table_id: TableId,
     memory_state_store: MemoryStateStore,
 ) -> Box<dyn Executor + Send> {
@@ -122,14 +122,17 @@ fn create_arrangement(
         ],
     );
 
-    Box::new(MaterializeExecutor::for_test(
-        Box::new(source),
-        memory_state_store,
-        table_id,
-        arrangement_col_arrange_rules(),
-        column_ids,
-        1,
-    ))
+    Box::new(
+        MaterializeExecutor::for_test(
+            Box::new(source),
+            memory_state_store,
+            table_id,
+            arrangement_col_arrange_rules(),
+            column_ids,
+            1,
+        )
+        .await,
+    )
 }
 
 /// Create a test source.
@@ -202,7 +205,7 @@ fn check_chunk_eq(chunk1: &StreamChunk, chunk2: &StreamChunk) {
     assert_eq!(format!("{:?}", chunk1), format!("{:?}", chunk2));
 }
 
-fn build_state_table_helper<S: StateStore>(
+async fn build_state_table_helper<S: StateStore>(
     s: S,
     table_id: TableId,
     columns: Vec<ColumnDesc>,
@@ -216,6 +219,7 @@ fn build_state_table_helper<S: StateStore>(
         order_types.iter().map(|pair| pair.order_type).collect_vec(),
         pk_indices,
     )
+    .await
 }
 #[tokio::test]
 async fn test_lookup_this_epoch() {
@@ -223,7 +227,7 @@ async fn test_lookup_this_epoch() {
     // fails because read epoch doesn't take effect in memory state store.
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
-    let arrangement = create_arrangement(table_id, store.clone());
+    let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         arrangement,
@@ -247,7 +251,8 @@ async fn test_lookup_this_epoch() {
             arrangement_col_descs(),
             arrangement_col_arrange_rules(),
             vec![1, 0],
-        ),
+        )
+        .await,
         lru_manager: None,
         cache_size: 1 << 16,
         chunk_size: 1024,
@@ -289,7 +294,7 @@ async fn test_lookup_this_epoch() {
 async fn test_lookup_last_epoch() {
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
-    let arrangement = create_arrangement(table_id, store.clone());
+    let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         arrangement,
@@ -313,7 +318,8 @@ async fn test_lookup_last_epoch() {
             arrangement_col_descs(),
             arrangement_col_arrange_rules(),
             vec![1, 0],
-        ),
+        )
+        .await,
         lru_manager: None,
         cache_size: 1 << 16,
         chunk_size: 1024,

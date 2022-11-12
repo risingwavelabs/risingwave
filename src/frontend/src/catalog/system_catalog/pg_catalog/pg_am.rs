@@ -14,18 +14,14 @@
 
 use risingwave_common::types::DataType;
 
-use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-/// The catalog `pg_user` provides access to information about database users.
-/// Ref: [`https://www.postgresql.org/docs/current/view-pg-user.html`]
-pub const PG_USER_TABLE_NAME: &str = "pg_user";
-pub const PG_USER_ID_INDEX: usize = 0;
-pub const PG_USER_NAME_INDEX: usize = 1;
-
-pub const PG_USER_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "usesysid"),
-    (DataType::Varchar, "name"),
-    (DataType::Boolean, "usecreatedb"),
-    (DataType::Boolean, "usesuper"),
-    (DataType::Varchar, "passwd"),
+/// Stores information about relation access methods.
+/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-am.html`]
+pub const PG_AM_TABLE_NAME: &str = "pg_am";
+pub const PG_AM_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
+    (DataType::Int32, "oid"),
+    (DataType::Varchar, "amname"),
+    (DataType::Int32, "amhandler"),
+    (DataType::Varchar, "amtype"),
 ];

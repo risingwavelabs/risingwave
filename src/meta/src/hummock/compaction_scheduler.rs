@@ -140,7 +140,7 @@ where
                 },
                 _ = min_trigger_interval.tick() => {
                     // Periodically trigger compaction for all compaction groups.
-                    for cg_id in self.hummock_manager.compaction_group_manager().compaction_group_ids().await {
+                    for cg_id in self.hummock_manager.compaction_group_ids().await {
                         if let Err(e) = sched_channel.try_sched_compaction(cg_id) {
                             tracing::warn!("Failed to schedule compaction for compaction group {}. {}", cg_id, e);
                         }

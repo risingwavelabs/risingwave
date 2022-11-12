@@ -14,15 +14,15 @@
 
 use risingwave_common::types::DataType;
 
-use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-/// The catalog `pg_namespace` stores namespaces. A namespace is the structure underlying SQL
-/// schemas: each namespace can have a separate collection of relations, types, etc. without name
-/// conflicts. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-namespace.html`]
-pub const PG_NAMESPACE_TABLE_NAME: &str = "pg_namespace";
-pub const PG_NAMESPACE_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
+/// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
+/// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
+pub const PG_CLASS_TABLE_NAME: &str = "pg_class";
+pub const PG_CLASS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
-    (DataType::Varchar, "nspname"),
-    (DataType::Int32, "nspowner"),
-    (DataType::Varchar, "nspacl"),
+    (DataType::Varchar, "relname"),
+    (DataType::Int32, "relnamespace"),
+    (DataType::Int32, "relowner"),
+    (DataType::Varchar, "relkind"),
 ];

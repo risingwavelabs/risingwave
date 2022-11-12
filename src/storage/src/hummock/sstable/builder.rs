@@ -20,7 +20,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
-use risingwave_hummock_sdk::key::{get_table_id, key_with_epoch, user_key};
+use risingwave_hummock_sdk::key::{key_with_epoch, user_key, FullKey};
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
@@ -100,6 +100,8 @@ pub struct SstableBuilder<W: SstableWriter> {
     /// Hashes of user keys.
     user_key_hashes: Vec<u32>,
     last_full_key: Vec<u8>,
+    /// Buffer for encoded key and value to avoid allocation.
+    raw_key: BytesMut,
     raw_value: BytesMut,
     last_table_id: u32,
     sstable_id: u64,
@@ -147,6 +149,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             table_ids: BTreeSet::new(),
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             last_table_id: 0,
+            raw_key: BytesMut::new(),
             raw_value: BytesMut::new(),
             last_full_key: vec![],
             range_tombstones: vec![],
@@ -168,7 +171,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
     /// Add kv pair to sstable.
     pub async fn add(
         &mut self,
-        full_key: &[u8],
+        full_key: &FullKey<impl AsRef<[u8]>>,
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
@@ -177,21 +180,22 @@ impl<W: SstableWriter> SstableBuilder<W> {
             self.block_metas.push(BlockMeta {
                 offset: self.writer.data_len() as u32,
                 len: 0,
-                smallest_key: full_key.to_vec(),
+                smallest_key: full_key.encode(),
                 uncompressed_size: 0,
             })
         }
 
         // TODO: refine me
+        full_key.encode_into(&mut self.raw_key);
         value.encode(&mut self.raw_value);
         if is_new_user_key {
-            let mut extract_key = user_key(full_key);
-            let table_id = get_table_id(full_key);
+            let table_id = full_key.user_key.table_id.table_id();
             if self.last_table_id != table_id {
                 self.table_ids.insert(table_id);
                 self.finalize_last_table_stats();
                 self.last_table_id = table_id;
             }
+            let mut extract_key = user_key(&self.raw_key);
             extract_key = self.filter_key_extractor.extract(extract_key);
 
             // add bloom_filter check
@@ -212,13 +216,17 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.total_key_count += 1;
         self.last_table_stats.total_key_count += 1;
 
-        self.block_builder.add(full_key, self.raw_value.as_ref());
-        self.last_table_stats.total_key_size += full_key.len();
+        self.block_builder
+            .add(self.raw_key.as_ref(), self.raw_value.as_ref());
+        self.last_table_stats.total_key_size += self.raw_key.len();
         self.last_table_stats.total_value_size += self.raw_value.len();
         self.raw_value.clear();
 
         self.last_full_key.clear();
-        self.last_full_key.extend_from_slice(full_key);
+        self.last_full_key.extend_from_slice(&self.raw_key);
+
+        self.raw_key.clear();
+        self.raw_value.clear();
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block().await?;
@@ -255,6 +263,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
             if largest_key.is_empty()
                 || user_key(&largest_key).lt(tombstone.end_user_key.as_slice())
             {
+                // use MAX as epoch because `end_user_key` of the range-tombstone is exclusive, so
+                // we can not include any version of this key.
                 largest_key = key_with_epoch(tombstone.end_user_key.clone(), HummockEpoch::MAX);
             }
             if smallest_key.is_empty()
@@ -380,7 +390,11 @@ impl<W: SstableWriter> SstableBuilder<W> {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::UserKey;
+
     use super::*;
+    use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_default_test_sstable, mock_sst_writer, test_key_of,
@@ -411,16 +425,24 @@ pub(super) mod tests {
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
         };
+        let table_id = TableId::default();
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
         b.add_delete_range(DeleteRangeTombstone::new(
+            table_id,
             b"abcd".to_vec(),
             b"eeee".to_vec(),
             0,
         ));
-        let s = b.finish().await.unwrap();
-        let key_range = s.sst_info.sst_info.key_range.unwrap();
-        assert_eq!(user_key(&key_range.left), b"abcd");
-        assert_eq!(user_key(&key_range.right), b"eeee");
+        let s = b.finish().await.unwrap().sst_info;
+        let key_range = s.sst_info.key_range.unwrap();
+        assert_eq!(
+            user_key(&key_range.left),
+            UserKey::for_test(TableId::default(), b"abcd").encode()
+        );
+        assert_eq!(
+            user_key(&key_range.right),
+            UserKey::for_test(TableId::default(), b"eeee").encode()
+        );
     }
 
     #[tokio::test]
@@ -437,9 +459,12 @@ pub(super) mod tests {
         let output = b.finish().await.unwrap();
         let info = output.sst_info.sst_info;
 
-        assert_eq!(test_key_of(0), info.key_range.as_ref().unwrap().left);
-        assert_eq!(
-            test_key_of(TEST_KEYS_COUNT - 1),
+        assert_bytes_eq!(
+            test_key_of(0).encode(),
+            info.key_range.as_ref().unwrap().left
+        );
+        assert_bytes_eq!(
+            test_key_of(TEST_KEYS_COUNT - 1).encode(),
             info.key_range.as_ref().unwrap().right
         );
         let (data, meta) = output.writer_output;
@@ -467,7 +492,7 @@ pub(super) mod tests {
         assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
             let full_key = test_key_of(i);
-            assert!(!table.surely_not_have_user_key(user_key(full_key.as_slice())));
+            assert!(!table.surely_not_have_user_key(full_key.user_key.encode().as_slice()));
         }
     }
 
