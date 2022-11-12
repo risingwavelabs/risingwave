@@ -121,7 +121,7 @@ async fn compact_shared_buffer(
         for data in data_list {
             let data_size = match data {
                 UncommittedData::Sst(LocalSstableInfo { sst_info, .. }) => {
-                    let table = sstable_store.sstable(&sst_info, &mut local_stats).await?;
+                    let table = sstable_store.sstable(sst_info, &mut local_stats).await?;
                     // TODO: use reference to avoid memory allocation.
                     let tombstones = table.value().meta.range_tombstone_list.clone();
                     builder.add_tombstone(tombstones);

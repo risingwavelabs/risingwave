@@ -420,7 +420,13 @@ mod tests {
             .await
             .unwrap();
         let mut sst_infos = builder.finish().await.unwrap();
-        let key_range = sst_infos.pop().unwrap().sst_info.key_range.unwrap();
+        let key_range = sst_infos
+            .pop()
+            .unwrap()
+            .sst_info
+            .sst_info
+            .key_range
+            .unwrap();
         assert_eq!(
             key_range.left,
             FullKey::for_test(table_id, b"aaa", 200).encode()
