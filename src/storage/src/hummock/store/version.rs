@@ -61,14 +61,13 @@ pub type CommittedVersion = PinnedVersion;
 /// - Uncommitted SST: data that has been uploaded to persistent storage but not committed to
 ///   hummock version.
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StagingSstableInfo {
     // newer data comes first
     sstable_infos: Vec<LocalSstableInfo>,
     /// Epochs whose data are included in the Sstable. The newer epoch comes first.
     /// The field must not be empty.
     epochs: Vec<HummockEpoch>,
-    #[allow(dead_code)]
     imm_ids: Vec<ImmId>,
     imm_size: usize,
 }
@@ -96,6 +95,14 @@ impl StagingSstableInfo {
 
     pub fn imm_size(&self) -> usize {
         self.imm_size
+    }
+
+    pub fn epochs(&self) -> &Vec<HummockEpoch> {
+        &self.epochs
+    }
+
+    pub fn imm_ids(&self) -> &Vec<ImmId> {
+        &self.imm_ids
     }
 }
 

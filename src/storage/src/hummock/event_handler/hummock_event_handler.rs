@@ -22,16 +22,15 @@ use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::pin_version_response::Payload;
-use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
 use crate::hummock::compactor::{compact, Context};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, TaskInfo, TaskPayload, UploaderEvent,
+    HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -102,10 +101,10 @@ pub struct HummockEventHandler {
 }
 
 async fn flush_imms(
-    payload: TaskPayload,
-    task_info: TaskInfo,
+    payload: UploadTaskPayload,
+    task_info: UploadTaskInfo,
     compactor_context: Arc<crate::hummock::compactor::Context>,
-) -> HummockResult<StagingSstableInfo> {
+) -> HummockResult<Vec<LocalSstableInfo>> {
     for epoch in &task_info.epochs {
         let _ = compactor_context
             .sstable_id_manager
@@ -115,7 +114,7 @@ async fn flush_imms(
                 error!("unable to set watermark sst id. epoch: {}, {:?}", epoch, e);
             });
     }
-    let sstable_infos = compact(
+    compact(
         compactor_context,
         payload
             .into_iter()
@@ -123,13 +122,7 @@ async fn flush_imms(
             .collect(),
         task_info.compaction_group_index,
     )
-    .await?;
-    Ok(StagingSstableInfo::new(
-        sstable_infos,
-        task_info.epochs,
-        task_info.imm_ids,
-        task_info.task_size,
-    ))
+    .await
 }
 
 impl HummockEventHandler {
@@ -148,9 +141,7 @@ impl HummockEventHandler {
         let write_conflict_detector = ConflictDetector::new_from_config(&compactor_context.options);
         let uploader = HummockUploader::new(
             pinned_version.clone(),
-            Arc::new(move |payload, task_info| {
-                spawn(flush_imms(payload, task_info, compactor_context.clone()))
-            }),
+            move |payload, task_info| flush_imms(payload, task_info, compactor_context.clone()),
             buffer_tracker,
         );
         Self {
