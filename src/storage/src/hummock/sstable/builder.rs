@@ -112,12 +112,9 @@ pub struct SstableBuilder<W: SstableWriter> {
     total_key_count: u64,
     /// Per table stats.
     table_stats: HashMap<u32, TableStats>,
-    /// last_table_ fields accumulate stats for `last_table_id` and finalize them in `table_stats`
-    /// by `collect_last_table_stats`
-    last_table_total_key_size: usize,
-    last_table_total_value_size: usize,
-    last_table_total_key_count: usize,
-    last_table_stale_key_count: usize,
+    /// `last_table_stats` accumulates stats for `last_table_id` and finalizes it in `table_stats`
+    /// by `finalize_last_table_stats`
+    last_table_stats: TableStats,
 }
 
 impl<W: SstableWriter> SstableBuilder<W> {
@@ -159,10 +156,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             stale_key_count: 0,
             total_key_count: 0,
             table_stats: Default::default(),
-            last_table_total_key_size: 0,
-            last_table_total_value_size: 0,
-            last_table_total_key_count: 0,
-            last_table_stale_key_count: 0,
+            last_table_stats: Default::default(),
         }
     }
 
@@ -195,7 +189,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             let table_id = get_table_id(full_key);
             if self.last_table_id != table_id {
                 self.table_ids.insert(table_id);
-                self.collect_last_table_stats();
+                self.finalize_last_table_stats();
                 self.last_table_id = table_id;
             }
             extract_key = self.filter_key_extractor.extract(extract_key);
@@ -213,14 +207,14 @@ impl<W: SstableWriter> SstableBuilder<W> {
             }
         } else {
             self.stale_key_count += 1;
-            self.last_table_stale_key_count += 1;
+            self.last_table_stats.stale_key_count += 1;
         }
         self.total_key_count += 1;
-        self.last_table_total_key_count += 1;
+        self.last_table_stats.total_key_count += 1;
 
         self.block_builder.add(full_key, self.raw_value.as_ref());
-        self.last_table_total_key_size += full_key.len();
-        self.last_table_total_value_size += self.raw_value.len();
+        self.last_table_stats.total_key_size += full_key.len();
+        self.last_table_stats.total_value_size += self.raw_value.len();
         self.raw_value.clear();
 
         self.last_full_key.clear();
@@ -252,7 +246,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             self.block_metas[0].smallest_key.clone()
         };
         let mut largest_key = self.last_full_key.clone();
-        self.collect_last_table_stats();
+        self.finalize_last_table_stats();
 
         self.build_block().await?;
         let meta_offset = self.writer.data_len() as u64;
@@ -373,19 +367,14 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.approximate_len() >= self.options.capacity
     }
 
-    fn collect_last_table_stats(&mut self) {
+    fn finalize_last_table_stats(&mut self) {
         if self.table_ids.is_empty() {
             return;
         }
-        let table_stats = self.table_stats.entry(self.last_table_id).or_default();
-        table_stats.total_key_count = self.last_table_total_key_count;
-        table_stats.stale_key_count = self.last_table_stale_key_count;
-        table_stats.total_key_size = self.last_table_total_key_size;
-        table_stats.total_value_size = self.last_table_total_value_size;
-        self.last_table_total_key_count = 0;
-        self.last_table_stale_key_count = 0;
-        self.last_table_total_key_size = 0;
-        self.last_table_total_value_size = 0;
+        self.table_stats.insert(
+            self.last_table_id,
+            std::mem::take(&mut self.last_table_stats),
+        );
     }
 }
 
