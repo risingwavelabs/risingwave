@@ -93,7 +93,6 @@ pub async fn compaction_test_main(
         opts.state_store.clone(),
         opts.config_path.clone(),
     );
-    tracing::info!("Started compactor thread");
 
     let original_meta_endpoint = "http://127.0.0.1:5690";
     let mut table_id: u32 = opts.table_id;
@@ -177,6 +176,7 @@ fn start_compactor_thread(
             .unwrap();
         runtime.block_on(async {
             tokio::spawn(async {
+                tracing::info!("Starting compactor node");
                 start_compactor_node(meta_endpoint, client_addr, state_store, config_path).await
             });
             rx.recv().unwrap();
@@ -211,6 +211,9 @@ async fn init_metadata_for_replay(
     ci_mode: bool,
     table_id: &mut u32,
 ) -> anyhow::Result<()> {
+    // Wait for compactor starts
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
     let meta_client: MetaClient;
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
