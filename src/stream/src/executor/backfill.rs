@@ -54,7 +54,7 @@ use crate::task::{ActorId, CreateMviewProgress};
 pub struct BackfillExecutor<S: StateStore> {
     // Upstream table
     table: StorageTable<S>,
-
+    // Upstream with the same schema with the upstream table
     upstream: BoxedExecutor,
 
     // The column indices need to be forwarded to the downstream
@@ -99,7 +99,6 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        assert_eq!(self.table.schema(), self.upstream.schema());
         // Table storage primary key.
         let table_pk_indices = self.table.pk_indices().to_vec();
         let upstream_indices = self.upstream_indices.to_vec();
@@ -154,9 +153,10 @@ where
                         .map(Either::Right),
                 );
 
-                println!(
-                    "Actor: {:?} snapshot read current_row = {:?}",
-                    &self.actor_id, &self.current_pos
+                tracing::debug!(
+                    actor = self.actor_id,
+                    "Snapshot read with current_row = {:?}",
+                    &self.current_pos
                 );
 
                 // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
@@ -176,16 +176,12 @@ where
                                     // upstream buffer chunk
                                     let checkpoint = barrier.checkpoint;
                                     if checkpoint {
-                                        println!(
-                                            "Actor: {:?} meet checkpoint barrier epoch = {}",
-                                            &self.actor_id, &barrier.epoch.prev
-                                        );
-
                                         // Consume upstream buffer chunk
                                         let mut buffer = vec![];
                                         mem::swap(&mut upstream_chunk_buffer, &mut buffer);
-
+                                        let mut row_cnt = 0;
                                         for chunk in buffer {
+                                            row_cnt += chunk.cardinality();
                                             yield Message::Chunk(Self::mapping_chunk(
                                                 Self::mark_chunk(
                                                     chunk,
@@ -195,6 +191,11 @@ where
                                                 &upstream_indices,
                                             ));
                                         }
+                                        tracing::debug!(
+                                            actor = self.actor_id,
+                                            "Upstream buffer chunks totaling {} rows are consumed.",
+                                            &row_cnt
+                                        );
                                     }
 
                                     // Update snapshot read epoch.
@@ -203,9 +204,10 @@ where
                                     yield Message::Barrier(barrier);
 
                                     if checkpoint {
-                                        println!(
-                                            "Actor: {:?} yield checkpoint barrier epoch = {}",
-                                            &self.actor_id, &snapshot_read_epoch
+                                        tracing::debug!(
+                                            actor = self.actor_id,
+                                            "Yield checkpoint barrier epoch = {}",
+                                            &snapshot_read_epoch
                                         );
                                         self.progress
                                             .update(snapshot_read_epoch, snapshot_read_epoch);
@@ -215,7 +217,7 @@ where
                                 }
                                 Message::Chunk(chunk) => {
                                     // Buffer the upstream chunk.
-                                    upstream_chunk_buffer.push(chunk);
+                                    upstream_chunk_buffer.push(chunk.compact());
                                 }
                                 Message::Watermark(_) => todo!(
                                     "https://github.com/risingwavelabs/risingwave/issues/6042"
@@ -226,22 +228,25 @@ where
                             match msg? {
                                 None => {
                                     // End of the snapshot read stream.
-                                    println!("Actor: {} the end of snapshot", &self.actor_id);
-
-                                    // Consume with the renaming stream buffer chunk
+                                    // We need to set current_pos to the maximum value or do not
+                                    // mark the chunk anymore, otherwise, we will ignore some rows
+                                    // in the buffer. Here we choose to never mark the chunk.
+                                    // Consume with the renaming stream buffer chunk without mark.
                                     let mut buffer = vec![];
                                     mem::swap(&mut upstream_chunk_buffer, &mut buffer);
-
+                                    let mut row_cnt = 0;
                                     for chunk in buffer {
+                                        row_cnt += chunk.cardinality();
                                         yield Message::Chunk(Self::mapping_chunk(
-                                            Self::mark_chunk(
-                                                chunk,
-                                                &self.current_pos,
-                                                &table_pk_indices,
-                                            ),
+                                            chunk,
                                             &upstream_indices,
                                         ));
                                     }
+                                    tracing::debug!(
+                                        actor = self.actor_id,
+                                        "Upstream buffer chunks totaling {} rows are consumed.",
+                                        &row_cnt
+                                    );
 
                                     // Finish backfill.
                                     break 'backfill_loop;
@@ -256,11 +261,6 @@ where
                                         .unwrap()
                                         .1
                                         .row_by_indices(&table_pk_indices);
-
-                                    println!(
-                                        "Actor: {} snapshot push current_pos = {:?}",
-                                        &self.actor_id, &self.current_pos
-                                    );
 
                                     yield Message::Chunk(Self::mapping_chunk(
                                         chunk,
@@ -278,6 +278,11 @@ where
                     self.progress.finish(barrier.epoch.curr);
                 }
             };
+
+            tracing::debug!(
+                actor = self.actor_id,
+                "Backfill has already finished and forward messages directly to the downstream"
+            );
 
             // Backfill has already finished.
             // Forward messages directly to the downstream.
@@ -322,7 +327,7 @@ where
 
         while let Some(data_chunk) = iter
             .collect_data_chunk(table.schema(), Some(1024))
-            .stack_trace("batch_query_executor_collect_chunk")
+            .stack_trace("backfill_snapshot_read")
             .await?
         {
             if data_chunk.cardinality() != 0 {
@@ -344,7 +349,6 @@ where
         table_pk_indices: &PkIndices,
     ) -> StreamChunk {
         let chunk = chunk.compact();
-        println!("apply chunk {}", chunk.to_pretty_string());
         let (data, ops) = chunk.into_parts();
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
         for v in data
