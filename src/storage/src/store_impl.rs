@@ -290,6 +290,7 @@ pub mod boxed_state_store {
 
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::FullKey;
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
@@ -307,18 +308,18 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreIter: StaticSendSync {
-        async fn next(&mut self) -> StorageResult<Option<(Bytes, Bytes)>>;
+        async fn next(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Bytes)>>;
     }
 
     #[async_trait::async_trait]
-    impl<I: StateStoreIter<Item = (Bytes, Bytes)>> DynamicDispatchedStateStoreIter for I {
-        async fn next(&mut self) -> StorageResult<Option<(Bytes, Bytes)>> {
+    impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> DynamicDispatchedStateStoreIter for I {
+        async fn next(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Bytes)>> {
             self.next().await
         }
     }
 
     impl StateStoreIter for Box<dyn DynamicDispatchedStateStoreIter> {
-        type Item = (Bytes, Bytes);
+        type Item = (FullKey<Vec<u8>>, Bytes);
 
         type NextFuture<'a> = impl NextFutureTrait<'a, Self::Item>;
 
