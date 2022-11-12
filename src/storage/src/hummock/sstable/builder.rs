@@ -220,7 +220,6 @@ impl<W: SstableWriter> SstableBuilder<W> {
             .add(self.raw_key.as_ref(), self.raw_value.as_ref());
         self.last_table_stats.total_key_size += self.raw_key.len();
         self.last_table_stats.total_value_size += self.raw_value.len();
-        self.raw_value.clear();
 
         self.last_full_key.clear();
         self.last_full_key.extend_from_slice(&self.raw_key);
