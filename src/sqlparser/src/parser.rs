@@ -2034,12 +2034,8 @@ impl Parser {
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
             Token::ScientificNumber { value, exponent } => {
-                Ok(Value::ScientificNumber {
-                    value: value.to_string(),
-                    exponent: exponent.to_string(),
-                })
+                Ok(Value::ScientificNumber { value, exponent })
             }
-
             Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
