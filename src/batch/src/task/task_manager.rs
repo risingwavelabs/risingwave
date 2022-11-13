@@ -17,6 +17,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use risingwave_common::config::BatchConfig;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::{
@@ -39,13 +40,16 @@ pub struct BatchManager {
 
     /// Runtime for the batch manager.
     runtime: &'static Runtime,
+
+    /// Batch configuration
+    config: BatchConfig,
 }
 
 impl BatchManager {
-    pub fn new(worker_threads_num: Option<usize>) -> Self {
+    pub fn new(config: BatchConfig) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
-            if let Some(worker_threads_num) = worker_threads_num {
+            if let Some(worker_threads_num) = config.worker_threads_num {
                 builder.worker_threads(worker_threads_num);
             }
             builder
@@ -60,6 +64,7 @@ impl BatchManager {
             // TODO: may manually shutdown the runtime after we implement graceful shutdown for
             // stream manager.
             runtime: Box::leak(Box::new(runtime)),
+            config,
         }
     }
 
@@ -192,16 +197,21 @@ impl BatchManager {
     pub fn runtime(&self) -> &'static Runtime {
         self.runtime
     }
+
+    pub fn config(&self) -> &BatchConfig {
+        &self.config
+    }
 }
 
 impl Default for BatchManager {
     fn default() -> Self {
-        BatchManager::new(None)
+        BatchManager::new(BatchConfig::default())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::config::BatchConfig;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::make_i32_literal;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
@@ -219,7 +229,7 @@ mod tests {
     #[test]
     fn test_task_not_found() {
         use tonic::Status;
-        let manager = BatchManager::new(None);
+        let manager = BatchManager::new(BatchConfig::default());
         let task_id = TaskId {
             task_id: 0,
             stage_id: 0,
@@ -247,7 +257,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_id_conflict() {
-        let manager = BatchManager::new(None);
+        let manager = BatchManager::new(BatchConfig::default());
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -283,7 +293,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_aborted() {
-        let manager = BatchManager::new(None);
+        let manager = BatchManager::new(BatchConfig::default());
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
