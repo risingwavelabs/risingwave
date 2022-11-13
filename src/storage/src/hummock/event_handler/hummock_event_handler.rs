@@ -53,6 +53,11 @@ impl BufferTracker {
     pub fn from_storage_config(config: &StorageConfig) -> Self {
         let capacity = config.shared_buffer_capacity_mb as usize * (1 << 20);
         let flush_threshold = capacity * 4 / 5;
+        Self::new(capacity, flush_threshold)
+    }
+
+    pub fn new(capacity: usize, flush_threshold: usize) -> Self {
+        assert!(capacity >= flush_threshold);
         Self {
             flush_threshold,
             global_buffer: Arc::new(MemoryLimiter::new(capacity as u64)),

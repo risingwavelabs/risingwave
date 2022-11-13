@@ -84,6 +84,7 @@ impl Debug for UploadingTask {
 
 impl UploadingTask {
     fn new(payload: UploadTaskPayload, context: &UploaderContext) -> Self {
+        assert!(!payload.is_empty());
         let mut epochs = payload
             .iter()
             .map(|imm| imm.epoch())
@@ -165,6 +166,11 @@ struct SpilledData {
 }
 
 impl SpilledData {
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.uploading_tasks.is_empty() && self.uploaded_data.is_empty()
+    }
+
     fn add_task(&mut self, task: UploadingTask) {
         self.uploading_tasks.push_front(task);
     }
@@ -201,8 +207,10 @@ struct UnsealedEpochData {
 impl UnsealedEpochData {
     fn flush(&mut self, context: &UploaderContext) {
         let imms = self.imms.drain(..).collect_vec();
-        self.spilled_data
-            .add_task(UploadingTask::new(imms, context));
+        if !imms.is_empty() {
+            self.spilled_data
+                .add_task(UploadingTask::new(imms, context));
+        }
     }
 }
 
@@ -670,67 +678,95 @@ impl<'a> Future for NextUploaderEvent<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::future::poll_fn;
+    use std::ops::Deref;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::Arc;
+    use std::task::Poll;
 
-    use bytes::{BufMut, BytesMut};
-    use itertools::Itertools;
+    use bytes::Bytes;
+    use futures::future::BoxFuture;
+    use futures::FutureExt;
     use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-    use risingwave_pb::hummock::{HummockVersion, SstableInfo};
+    use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
+    use spin::Mutex;
     use tokio::sync::mpsc::unbounded_channel;
+    use tokio::sync::oneshot;
+    use tokio::task::yield_now;
 
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
     use crate::hummock::event_handler::uploader::{
-        UploadFn, UploadOutputFuture, UploadTaskInfo, UploadTaskPayload, UploaderContext,
-        UploadingTask,
+        HummockUploader, UploadFn, UploadOutputFuture, UploadTaskInfo, UploadTaskPayload,
+        UploaderContext, UploaderEvent, UploadingTask,
     };
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-    use crate::hummock::store::memtable::ImmutableMemtable;
-    use crate::hummock::{HummockError, HummockResult};
+    use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
+    use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
     use crate::storage_value::StorageValue;
 
-    const INITIAL_EPOCH: HummockEpoch = 100;
+    const INITIAL_EPOCH: HummockEpoch = 5;
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
-    fn initial_pinned_version() -> PinnedVersion {
-        let initial_version = HummockVersion {
-            id: 0,
+
+    fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
+        HummockVersion {
+            id: epoch,
             levels: Default::default(),
-            max_committed_epoch: INITIAL_EPOCH,
+            max_committed_epoch: epoch,
             safe_epoch: 0,
-        };
-        PinnedVersion::new(initial_version, unbounded_channel().0)
+        }
     }
 
-    async fn gen_imm(epoch: HummockEpoch, test_batch_id: u8) -> ImmutableMemtable {
-        let mut key_builder = BytesMut::new();
-        key_builder.put_u32(TEST_TABLE_ID.table_id);
-        key_builder.put_u8(test_batch_id);
-        let key = key_builder.freeze();
+    fn initial_pinned_version() -> PinnedVersion {
+        PinnedVersion::new(test_hummock_version(INITIAL_EPOCH), unbounded_channel().0)
+    }
+
+    fn dummy_table_key() -> Vec<u8> {
+        vec![b't', b'e', b's', b't']
+    }
+
+    async fn gen_imm_with_limiter(
+        epoch: HummockEpoch,
+        limiter: Option<&MemoryLimiter>,
+    ) -> ImmutableMemtable {
         SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            vec![(key, StorageValue::new_delete())],
+            vec![(Bytes::from(dummy_table_key()), StorageValue::new_delete())],
             vec![],
             TEST_TABLE_ID,
-            None,
+            limiter,
         )
         .await
     }
 
-    fn gen_sstable_info(test_sst_id: u64) -> LocalSstableInfo {
-        LocalSstableInfo::for_test(SstableInfo {
-            id: test_sst_id,
-            key_range: None,
+    async fn gen_imm(epoch: HummockEpoch) -> ImmutableMemtable {
+        gen_imm_with_limiter(epoch, None).await
+    }
+
+    fn gen_sstable_info(
+        start_epoch: HummockEpoch,
+        end_epoch: HummockEpoch,
+    ) -> Vec<LocalSstableInfo> {
+        let start_full_key = FullKey::new(TEST_TABLE_ID, TableKey(dummy_table_key()), start_epoch);
+        let end_full_key = FullKey::new(TEST_TABLE_ID, TableKey(dummy_table_key()), end_epoch);
+        let gen_sst_id = (start_epoch << 8) + end_epoch;
+        vec![LocalSstableInfo::for_test(SstableInfo {
+            id: gen_sst_id,
+            key_range: Some(KeyRange {
+                left: start_full_key.encode(),
+                right: end_full_key.encode(),
+            }),
             file_size: 0,
             table_ids: vec![TEST_TABLE_ID.table_id],
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
             divide_version: 0,
-        })
+        })]
     }
 
     fn test_uploader_context<F, Fut>(upload_fn: F) -> UploaderContext
@@ -745,12 +781,20 @@ mod tests {
         )
     }
 
-    fn upload_output(test_sst_ids: Vec<u64>) -> Vec<LocalSstableInfo> {
-        test_sst_ids.into_iter().map(gen_sstable_info).collect_vec()
+    fn test_uploader<F, Fut>(upload_fn: F) -> HummockUploader
+    where
+        Fut: UploadOutputFuture,
+        F: UploadFn<Fut>,
+    {
+        HummockUploader::new(
+            initial_pinned_version(),
+            upload_fn,
+            BufferTracker::for_test(),
+        )
     }
 
     fn dummy_success_upload_output() -> Vec<LocalSstableInfo> {
-        upload_output(vec![1, 2])
+        gen_sstable_info(INITIAL_EPOCH, INITIAL_EPOCH)
     }
 
     #[allow(clippy::unused_async)]
@@ -772,33 +816,33 @@ mod tests {
     #[tokio::test]
     pub async fn test_uploading_task_future() {
         let uploader_context = test_uploader_context(dummy_success_upload_future);
-        let imm = gen_imm(INITIAL_EPOCH, 1).await;
+        let imm = gen_imm(INITIAL_EPOCH).await;
         let imm_size = imm.size();
         let imm_id = imm.batch_id();
         let task = UploadingTask::new(vec![imm], &uploader_context);
         assert_eq!(imm_size, task.task_info.task_size);
         assert_eq!(vec![imm_id], task.task_info.imm_ids);
-        assert_eq!(vec![INITIAL_EPOCH], task.task_info.epochs);
+        assert_eq!(vec![INITIAL_EPOCH as HummockEpoch], task.task_info.epochs);
         let output = task.await.unwrap();
         assert_eq!(output.sstable_infos(), &dummy_success_upload_output());
         assert_eq!(imm_size, output.imm_size());
         assert_eq!(&vec![imm_id], output.imm_ids());
-        assert_eq!(&vec![INITIAL_EPOCH], output.epochs());
+        assert_eq!(&vec![INITIAL_EPOCH as HummockEpoch], output.epochs());
 
         let uploader_context = test_uploader_context(dummy_fail_upload_future);
-        let task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH, 1).await], &uploader_context);
+        let task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH).await], &uploader_context);
         let _ = task.await.unwrap_err();
     }
 
     #[tokio::test]
     pub async fn test_uploading_task_poll_result() {
         let uploader_context = test_uploader_context(dummy_success_upload_future);
-        let mut task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH, 1).await], &uploader_context);
+        let mut task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH).await], &uploader_context);
         let output = poll_fn(|cx| task.poll_result(cx)).await.unwrap();
         assert_eq!(output.sstable_infos(), &dummy_success_upload_output());
 
         let uploader_context = test_uploader_context(dummy_fail_upload_future);
-        let mut task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH, 1).await], &uploader_context);
+        let mut task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH).await], &uploader_context);
         let _ = poll_fn(|cx| task.poll_result(cx)).await.unwrap_err();
     }
 
@@ -820,12 +864,387 @@ mod tests {
                 ret
             }
         });
-        let mut task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH, 1).await], &uploader_context);
+        let mut task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH).await], &uploader_context);
         let output = poll_fn(|cx| task.poll_ok_with_retry(cx)).await;
         assert_eq!(fail_num + 1, run_count_clone.load(SeqCst));
         assert_eq!(output.sstable_infos(), &dummy_success_upload_output());
     }
 
     #[tokio::test]
-    async fn test_uploader_basic() {}
+    async fn test_uploader_basic() {
+        let mut uploader = test_uploader(dummy_success_upload_future);
+        let epoch1 = INITIAL_EPOCH + 1;
+        let imm = gen_imm(epoch1).await;
+        uploader.add_imm(imm.clone());
+        assert_eq!(1, uploader.unsealed_data.len());
+        assert_eq!(
+            epoch1 as HummockEpoch,
+            *uploader.unsealed_data.first_key_value().unwrap().0
+        );
+        assert_eq!(
+            1,
+            uploader
+                .unsealed_data
+                .first_key_value()
+                .unwrap()
+                .1
+                .imms
+                .len()
+        );
+        uploader.seal_epoch(epoch1);
+        assert_eq!(epoch1, uploader.max_sealed_epoch);
+        assert!(uploader.unsealed_data.is_empty());
+        assert_eq!(1, uploader.sealed_data.imms.len());
+
+        uploader.start_sync_epoch(epoch1);
+        assert_eq!(epoch1 as HummockEpoch, uploader.max_syncing_epoch);
+        assert!(uploader.sealed_data.imms.is_empty());
+        assert!(uploader.sealed_data.spilled_data.is_empty());
+        assert_eq!(1, uploader.syncing_data.len());
+        let syncing_data = uploader.syncing_data.front().unwrap();
+        assert_eq!(epoch1 as HummockEpoch, syncing_data.sync_epoch);
+        assert!(syncing_data.uploaded.is_empty());
+        assert!(syncing_data.uploading_tasks.is_some());
+
+        match uploader.next_event().await {
+            UploaderEvent::SyncFinish(finished_epoch, ssts) => {
+                assert_eq!(epoch1, finished_epoch);
+                assert_eq!(1, ssts.len());
+                let staging_sst = ssts.first().unwrap();
+                assert_eq!(&vec![epoch1], staging_sst.epochs());
+                assert_eq!(&vec![imm.batch_id()], staging_sst.imm_ids());
+                assert_eq!(&dummy_success_upload_output(), staging_sst.sstable_infos());
+            }
+            _ => unreachable!(),
+        };
+        assert_eq!(epoch1, uploader.max_synced_epoch());
+        let synced_data = uploader.get_synced_data(epoch1).unwrap();
+        let ssts = synced_data.as_ref().unwrap();
+        assert_eq!(1, ssts.len());
+        let staging_sst = ssts.first().unwrap();
+        assert_eq!(&vec![epoch1], staging_sst.epochs());
+        assert_eq!(&vec![imm.batch_id()], staging_sst.imm_ids());
+        assert_eq!(&dummy_success_upload_output(), staging_sst.sstable_infos());
+
+        let new_pinned_version = uploader
+            .context
+            .pinned_version
+            .new_pin_version(test_hummock_version(epoch1));
+        uploader.update_pinned_version(new_pinned_version);
+        assert!(uploader.synced_data.is_empty());
+        assert_eq!(epoch1, uploader.max_committed_epoch());
+    }
+
+    #[tokio::test]
+    async fn test_uploader_empty_epoch() {
+        let mut uploader = test_uploader(dummy_success_upload_future);
+        let epoch1 = INITIAL_EPOCH + 1;
+        let epoch2 = INITIAL_EPOCH + 2;
+        let imm = gen_imm(epoch2).await;
+        // epoch1 is empty while epoch2 is not. Going to seal empty epoch1.
+        uploader.add_imm(imm);
+        uploader.seal_epoch(epoch1);
+        assert_eq!(epoch1, uploader.max_sealed_epoch);
+
+        uploader.start_sync_epoch(epoch1);
+        assert_eq!(epoch1, uploader.max_syncing_epoch);
+
+        match uploader.next_event().await {
+            UploaderEvent::SyncFinish(finished_epoch, ssts) => {
+                assert_eq!(epoch1, finished_epoch);
+                assert!(ssts.is_empty());
+            }
+            _ => unreachable!(),
+        };
+        assert_eq!(epoch1, uploader.max_synced_epoch());
+        let new_pinned_version = uploader
+            .context
+            .pinned_version
+            .new_pin_version(test_hummock_version(epoch1));
+        uploader.update_pinned_version(new_pinned_version);
+        assert!(uploader.synced_data.is_empty());
+        assert_eq!(epoch1, uploader.max_committed_epoch());
+    }
+
+    #[tokio::test]
+    async fn test_uploader_poll_empty() {
+        let mut uploader = test_uploader(dummy_success_upload_future);
+        assert!(poll_fn(|cx| uploader.poll_syncing_task(cx)).await.is_none());
+        assert!(poll_fn(|cx| uploader.poll_sealed_spill_task(cx))
+            .await
+            .is_none());
+        assert!(poll_fn(|cx| uploader.poll_unsealed_spill_task(cx))
+            .await
+            .is_none());
+    }
+
+    fn prepare_uploader_order_test() -> (
+        BufferTracker,
+        HummockUploader,
+        impl Fn(Vec<ImmId>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>),
+    ) {
+        // flush threshold is 0. Flush anyway
+        let buffer_tracker = BufferTracker::new(usize::MAX, 0);
+        // (the started task send the imm ids of payload, the started task wait for finish notify)
+        #[allow(clippy::type_complexity)]
+        let task_notifier_holder: Arc<
+            Mutex<VecDeque<(oneshot::Sender<UploadTaskInfo>, oneshot::Receiver<()>)>>,
+        > = Arc::new(Mutex::new(VecDeque::new()));
+
+        let new_task_notifier = {
+            let task_notifier_holder = task_notifier_holder.clone();
+            move |imm_ids: Vec<ImmId>| {
+                let (start_tx, start_rx) = oneshot::channel();
+                let (finish_tx, finish_rx) = oneshot::channel();
+                task_notifier_holder
+                    .lock()
+                    .push_front((start_tx, finish_rx));
+                let await_start_future = async move {
+                    let task_info = start_rx.await.unwrap();
+                    assert_eq!(imm_ids, task_info.imm_ids);
+                }
+                .boxed();
+                (await_start_future, finish_tx)
+            }
+        };
+        let uploader = HummockUploader::new(
+            initial_pinned_version(),
+            {
+                move |_: UploadTaskPayload, task_info: UploadTaskInfo| {
+                    let task_notifier_holder = task_notifier_holder.clone();
+                    async move {
+                        let (start_tx, finish_rx) = task_notifier_holder.lock().pop_back().unwrap();
+                        let start_epoch = *task_info.epochs.last().unwrap();
+                        let end_epoch = *task_info.epochs.first().unwrap();
+                        assert!(end_epoch >= start_epoch);
+                        let ret = gen_sstable_info(start_epoch, end_epoch);
+                        start_tx.send(task_info).unwrap();
+                        finish_rx.await.unwrap();
+                        Ok(ret)
+                    }
+                }
+            },
+            buffer_tracker.clone(),
+        );
+        (buffer_tracker, uploader, new_task_notifier)
+    }
+
+    async fn assert_uploader_pending(uploader: &mut HummockUploader) {
+        for _ in 0..10 {
+            yield_now().await;
+        }
+        assert!(
+            poll_fn(|cx| Poll::Ready(uploader.next_event().poll_unpin(cx)))
+                .await
+                .is_pending()
+        )
+    }
+
+    #[tokio::test]
+    async fn test_uploader_finish_in_order() {
+        let (buffer_tracker, mut uploader, new_task_notifier) = prepare_uploader_order_test();
+
+        let epoch1 = INITIAL_EPOCH + 1;
+        let epoch2 = INITIAL_EPOCH + 2;
+        let memory_limiter = buffer_tracker.get_memory_limiter().clone();
+        let memory_limiter = Some(memory_limiter.deref());
+
+        // imm2 contains data in newer epoch, but added first
+        let imm2 = gen_imm_with_limiter(epoch2, memory_limiter).await;
+        uploader.add_imm(imm2.clone());
+        let imm1_1 = gen_imm_with_limiter(epoch1, memory_limiter).await;
+        uploader.add_imm(imm1_1.clone());
+        let imm1_2 = gen_imm_with_limiter(epoch1, memory_limiter).await;
+        uploader.add_imm(imm1_2.clone());
+
+        // imm1 will be spilled first
+        let (await_start1, finish_tx1) =
+            new_task_notifier(vec![imm1_2.batch_id(), imm1_1.batch_id()]);
+        let (await_start2, finish_tx2) = new_task_notifier(vec![imm2.batch_id()]);
+        uploader.try_flush();
+        await_start1.await;
+        await_start2.await;
+
+        assert_uploader_pending(&mut uploader).await;
+
+        finish_tx2.send(()).unwrap();
+        assert_uploader_pending(&mut uploader).await;
+
+        finish_tx1.send(()).unwrap();
+        if let UploaderEvent::DataSpilled(sst) = uploader.next_event().await {
+            assert_eq!(&vec![imm1_2.batch_id(), imm1_1.batch_id()], sst.imm_ids());
+            assert_eq!(&vec![epoch1], sst.epochs());
+        } else {
+            unreachable!("")
+        }
+
+        if let UploaderEvent::DataSpilled(sst) = uploader.next_event().await {
+            assert_eq!(&vec![imm2.batch_id()], sst.imm_ids());
+            assert_eq!(&vec![epoch2], sst.epochs());
+        } else {
+            unreachable!("")
+        }
+
+        let imm1_3 = gen_imm_with_limiter(epoch1, memory_limiter).await;
+        uploader.add_imm(imm1_3.clone());
+        let (await_start1_3, finish_tx1_3) = new_task_notifier(vec![imm1_3.batch_id()]);
+        uploader.try_flush();
+        await_start1_3.await;
+        let imm1_4 = gen_imm_with_limiter(epoch1, memory_limiter).await;
+        uploader.add_imm(imm1_4.clone());
+        let (await_start1_4, finish_tx1_4) = new_task_notifier(vec![imm1_4.batch_id()]);
+        uploader.seal_epoch(epoch1);
+        uploader.start_sync_epoch(epoch1);
+        await_start1_4.await;
+
+        uploader.seal_epoch(epoch2);
+
+        // current uploader state:
+        // unsealed: empty
+        // sealed: epoch2: uploaded sst([imm2])
+        // syncing: epoch1: uploading: [imm1_4], [imm1_3], uploaded: sst([imm1_2, imm1_1])
+
+        let epoch3 = INITIAL_EPOCH + 3;
+        let imm3_1 = gen_imm_with_limiter(epoch3, memory_limiter).await;
+        uploader.add_imm(imm3_1.clone());
+        let (await_start3_1, finish_tx3_1) = new_task_notifier(vec![imm3_1.batch_id()]);
+        uploader.try_flush();
+        await_start3_1.await;
+        let imm3_2 = gen_imm_with_limiter(epoch3, memory_limiter).await;
+        uploader.add_imm(imm3_2.clone());
+        let (await_start3_2, finish_tx3_2) = new_task_notifier(vec![imm3_2.batch_id()]);
+        uploader.try_flush();
+        await_start3_2.await;
+        let imm3_3 = gen_imm_with_limiter(epoch3, memory_limiter).await;
+        uploader.add_imm(imm3_3.clone());
+
+        // current uploader state:
+        // unsealed: epoch3: imm: imm3_3, uploading: [imm3_2], [imm3_1]
+        // sealed: uploaded sst([imm2])
+        // syncing: epoch1: uploading: [imm1_4], [imm1_3], uploaded: sst([imm1_2, imm1_1])
+
+        let epoch4 = INITIAL_EPOCH + 4;
+        let imm4 = gen_imm_with_limiter(epoch4, memory_limiter).await;
+        uploader.add_imm(imm4.clone());
+        assert_uploader_pending(&mut uploader).await;
+
+        // current uploader state:
+        // unsealed: epoch3: imm: imm3_3, uploading: [imm3_2], [imm3_1]
+        //           epoch4: imm: imm4
+        // sealed: uploaded sst([imm2])
+        // syncing: epoch1: uploading: [imm1_4], [imm1_3], uploaded: sst([imm1_2, imm1_1])
+
+        finish_tx3_1.send(()).unwrap();
+        assert_uploader_pending(&mut uploader).await;
+        finish_tx1_4.send(()).unwrap();
+        assert_uploader_pending(&mut uploader).await;
+        finish_tx1_3.send(()).unwrap();
+
+        if let UploaderEvent::SyncFinish(epoch, newly_upload_sst) = uploader.next_event().await {
+            assert_eq!(epoch1, epoch);
+            assert_eq!(2, newly_upload_sst.len());
+            assert_eq!(&vec![imm1_4.batch_id()], newly_upload_sst[0].imm_ids());
+            assert_eq!(&vec![imm1_3.batch_id()], newly_upload_sst[1].imm_ids());
+        } else {
+            unreachable!("should be sync finish");
+        }
+        assert_eq!(epoch1, uploader.max_synced_epoch);
+        let synced_data1 = uploader.get_synced_data(epoch1).unwrap().as_ref().unwrap();
+        assert_eq!(3, synced_data1.len());
+        assert_eq!(&vec![imm1_4.batch_id()], synced_data1[0].imm_ids());
+        assert_eq!(&vec![imm1_3.batch_id()], synced_data1[1].imm_ids());
+        assert_eq!(
+            &vec![imm1_2.batch_id(), imm1_1.batch_id()],
+            synced_data1[2].imm_ids()
+        );
+
+        // current uploader state:
+        // unsealed: epoch3: imm: imm3_3, uploading: [imm3_2], [imm3_1]
+        //           epoch4: imm: imm4
+        // sealed: uploaded sst([imm2])
+        // syncing: empty
+        // synced: epoch1: sst([imm1_4]), sst([imm1_3]), sst([imm1_2, imm1_1])
+
+        uploader.start_sync_epoch(epoch2);
+        if let UploaderEvent::SyncFinish(epoch, newly_upload_sst) = uploader.next_event().await {
+            assert_eq!(epoch2, epoch);
+            assert!(newly_upload_sst.is_empty());
+        } else {
+            unreachable!("should be sync finish");
+        }
+        assert_eq!(epoch2, uploader.max_synced_epoch);
+        let synced_data2 = uploader.get_synced_data(epoch2).unwrap().as_ref().unwrap();
+        assert_eq!(1, synced_data2.len());
+        assert_eq!(&vec![imm2.batch_id()], synced_data2[0].imm_ids());
+
+        // current uploader state:
+        // unsealed: epoch3: imm: imm3_3, uploading: [imm3_2], [imm3_1]
+        //           epoch4: imm: imm4
+        // sealed: empty
+        // syncing: empty
+        // synced: epoch1: sst([imm1_4]), sst([imm1_3]), sst([imm1_2, imm1_1])
+        //         epoch2: sst([imm2])
+
+        uploader.seal_epoch(epoch3);
+        if let UploaderEvent::DataSpilled(sst) = uploader.next_event().await {
+            assert_eq!(&vec![imm3_1.batch_id()], sst.imm_ids());
+        } else {
+            unreachable!("should be data spilled");
+        }
+
+        // current uploader state:
+        // unsealed: epoch4: imm: imm4
+        // sealed: imm: imm3_3, uploading: [imm3_2], uploaded: sst([imm3_1])
+        // syncing: empty
+        // synced: epoch1: sst([imm1_4]), sst([imm1_3]), sst([imm1_2, imm1_1])
+        //         epoch2: sst([imm2])
+
+        uploader.seal_epoch(epoch4);
+        let (await_start4_with_3_3, finish_tx4_with_3_3) =
+            new_task_notifier(vec![imm4.batch_id(), imm3_3.batch_id()]);
+        uploader.start_sync_epoch(epoch4);
+        await_start4_with_3_3.await;
+
+        // current uploader state:
+        // unsealed: empty
+        // sealed: empty
+        // syncing: epoch4: uploading: [imm4, imm3_3], [imm3_2], uploaded: sst([imm3_1])
+        // synced: epoch1: sst([imm1_4]), sst([imm1_3]), sst([imm1_2, imm1_1])
+        //         epoch2: sst([imm2])
+
+        assert_uploader_pending(&mut uploader).await;
+        finish_tx3_2.send(()).unwrap();
+        assert_uploader_pending(&mut uploader).await;
+        finish_tx4_with_3_3.send(()).unwrap();
+
+        if let UploaderEvent::SyncFinish(epoch, newly_upload_sst) = uploader.next_event().await {
+            assert_eq!(epoch4, epoch);
+            assert_eq!(2, newly_upload_sst.len());
+            assert_eq!(
+                &vec![imm4.batch_id(), imm3_3.batch_id()],
+                newly_upload_sst[0].imm_ids()
+            );
+            assert_eq!(&vec![imm3_2.batch_id()], newly_upload_sst[1].imm_ids());
+        } else {
+            unreachable!("should be sync finish");
+        }
+        assert_eq!(epoch4, uploader.max_synced_epoch);
+        let synced_data4 = uploader.get_synced_data(epoch4).unwrap().as_ref().unwrap();
+        assert_eq!(3, synced_data4.len());
+        assert_eq!(&vec![epoch4, epoch3], synced_data4[0].epochs());
+        assert_eq!(
+            &vec![imm4.batch_id(), imm3_3.batch_id()],
+            synced_data4[0].imm_ids()
+        );
+        assert_eq!(&vec![imm3_2.batch_id()], synced_data4[1].imm_ids());
+        assert_eq!(&vec![imm3_1.batch_id()], synced_data4[2].imm_ids());
+
+        // current uploader state:
+        // unsealed: empty
+        // sealed: empty
+        // syncing: empty
+        // synced: epoch1: sst([imm1_4]), sst([imm1_3]), sst([imm1_2, imm1_1])
+        //         epoch2: sst([imm2])
+        //         epoch4: sst([imm4, imm3_3]), sst([imm3_2]), sst([imm3_1])
+    }
 }
