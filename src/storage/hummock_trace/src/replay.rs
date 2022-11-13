@@ -86,7 +86,6 @@ impl<R: TraceReader> HummockReplay<R> {
     pub async fn run(&mut self) -> Result<()> {
         let mut workers: HashMap<WorkerId, WorkerHandler> = HashMap::new();
         let mut total_ops: u64 = 0;
-        let mut worker_record_map = HashMap::new();
         while let Ok(r) = self.reader.read() {
             let local_id = r.local_id();
             let record_id = r.record_id();
@@ -103,6 +102,7 @@ impl<R: TraceReader> HummockReplay<R> {
                     if let Some(handler) = workers.get_mut(&worker_id) {
                         handler.wait_resp().await;
                         if let TraceLocalId::None = local_id {
+                            handler.finish();
                             workers.remove(&worker_id);
                         }
                     }
@@ -123,7 +123,6 @@ impl<R: TraceReader> HummockReplay<R> {
                     });
 
                     handler.send_replay_req(ReplayRequest::Task(vec![r]));
-                    worker_record_map.insert(record_id, worker_id);
                     total_ops += 1;
                     if total_ops % 10000 == 0 {
                         println!("replayed {} ops", total_ops);
@@ -133,7 +132,7 @@ impl<R: TraceReader> HummockReplay<R> {
         }
 
         for handler in workers.into_values() {
-            handler.send_replay_req(ReplayRequest::Fin);
+            handler.finish();
             handler.join().await;
         }
         println!("replay finished, totally {} operations", total_ops);
@@ -270,10 +269,10 @@ async fn handle_record(
             }
         }
         Operation::Sync(epoch_id) => {
-            let sync_result = replay.sync(epoch_id).await;
+            let sync_result = replay.sync(epoch_id).await.unwrap();
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Sync(expected) = res {
-                let actual = sync_result.ok();
+                let actual = Some(sync_result);
                 assert_eq!(actual, expected, "sync failed");
             }
         }
@@ -308,6 +307,10 @@ struct WorkerHandler {
 impl WorkerHandler {
     async fn join(self) {
         self.join.await.expect("failed to stop worker");
+    }
+
+    fn finish(&self) {
+        self.send_replay_req(ReplayRequest::Fin);
     }
 
     fn send_replay_req(&self, req: ReplayRequest) {

@@ -36,17 +36,17 @@ pub enum TraceError {
     #[error("try to close a non-existing record {0}")]
     FinRecord(RecordId),
 
-    #[error("failed to create a iter")]
+    #[error("failed to create a iter {0}")]
     IterFailed(String),
 
-    #[error("failed to get key")]
-    GetFailed,
+    #[error("failed to get key  {0}")]
+    GetFailed(String),
 
-    #[error("failed to ingest")]
-    IngestFailed,
+    #[error("failed to ingest  {0}")]
+    IngestFailed(String),
 
-    #[error("failed to sync")]
-    SyncFailed,
+    #[error("failed to sync  {0}")]
+    SyncFailed(String),
 }
 
 impl From<EncodeError> for TraceError {

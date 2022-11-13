@@ -62,7 +62,7 @@ impl Replayable for HummockInterface {
             .store
             .sync(id)
             .await
-            .map_err(|_| TraceError::SyncFailed)?;
+            .map_err(|e| TraceError::SyncFailed(format!("{e}")))?;
         Ok(result.sync_size)
     }
 
@@ -118,7 +118,7 @@ impl LocalReplay for LocalReplayInterface {
                 },
             )
             .await
-            .map_err(|_| TraceError::GetFailed)?;
+            .map_err(|e| TraceError::GetFailed(format!("{e}")))?;
 
         Ok(value.map(|b| b.to_vec()))
     }
@@ -153,7 +153,7 @@ impl LocalReplay for LocalReplayInterface {
             .0
             .ingest_batch(kv_pairs, delete_ranges, WriteOptions { epoch, table_id })
             .await
-            .map_err(|_| TraceError::IngestFailed)?;
+            .map_err(|e| TraceError::IngestFailed(format!("{e}")))?;
 
         Ok(size)
     }
