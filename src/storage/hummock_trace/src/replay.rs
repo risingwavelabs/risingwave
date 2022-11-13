@@ -30,32 +30,39 @@ use crate::{Operation, OperationResult, Record, RecordId};
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
 pub trait Replayable: Send + Sync {
+    async fn sync(&self, id: u64) -> Result<usize>;
+    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
+    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
+    async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay>;
+}
+
+#[async_trait::async_trait]
+pub trait LocalReplay: Send + Sync {
     async fn get(
         &self,
         key: Vec<u8>,
         check_bloom_filter: bool,
         epoch: u64,
+        prefix_hint: Option<Vec<u8>>,
         table_id: u32,
         retention_seconds: Option<u32>,
     ) -> Result<Option<Vec<u8>>>;
     async fn ingest(
         &self,
         kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+        delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
         epoch: u64,
         table_id: u32,
     ) -> Result<usize>;
     async fn iter(
         &self,
-        prefix_hint: Option<Vec<u8>>,
-        left_bound: Bound<Vec<u8>>,
-        right_bound: Bound<Vec<u8>>,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
-        table_id: u32,
+        prefix_hint: Option<Vec<u8>>,
+        check_bloom_filter: bool,
         retention_seconds: Option<u32>,
+        table_id: u32,
     ) -> Result<Box<dyn ReplayIter>>;
-    async fn sync(&self, id: u64) -> Result<usize>;
-    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
-    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
 }
 
 #[async_trait::async_trait]
@@ -156,12 +163,20 @@ async fn replay_worker(
     replay: Arc<Box<dyn Replayable>>,
 ) {
     let mut iters_map = HashMap::new();
+    let mut local_storages = HashMap::new();
     loop {
         if let Some(msg) = rx.recv().await {
             match msg {
                 ReplayRequest::Task(record_group) => {
                     for record in record_group {
-                        handle_record(record, &replay, &mut res_rx, &mut iters_map).await;
+                        handle_record(
+                            record,
+                            &replay,
+                            &mut res_rx,
+                            &mut iters_map,
+                            &mut local_storages,
+                        )
+                        .await;
                     }
                     tx.send(()).expect("failed to done task");
                 }
@@ -176,41 +191,73 @@ async fn handle_record(
     replay: &Arc<Box<dyn Replayable>>,
     res_rx: &mut UnboundedReceiver<OperationResult>,
     iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
+    local_storages: &mut HashMap<u32, Box<dyn LocalReplay>>,
 ) {
-    let Record(_, record_id, op) = record;
+    let Record(_, _, record_id, op) = record;
     match op {
-        Operation::Get(key, check_bloom_filter, epoch, table_id, retention_seconds) => {
-            let actual = replay
-                .get(key, check_bloom_filter, epoch, table_id, retention_seconds)
+        Operation::Get {
+            key,
+            check_bloom_filter,
+            epoch,
+            table_id,
+            retention_seconds,
+            prefix_hint,
+        } => {
+            let local_storage = local_storages
+                .entry(table_id)
+                .or_insert(replay.new_local(table_id).await);
+
+            let actual = local_storage
+                .get(
+                    key,
+                    check_bloom_filter,
+                    epoch,
+                    prefix_hint,
+                    table_id,
+                    retention_seconds,
+                )
                 .await;
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Get(expected) = res {
                 assert_eq!(actual.ok(), expected, "get result wrong");
             }
         }
-        Operation::Ingest(kv_pairs, epoch, table_id) => {
-            let actual = replay.ingest(kv_pairs, epoch, table_id).await;
+        Operation::Ingest {
+            kv_pairs,
+            epoch,
+            table_id,
+            delete_ranges,
+        } => {
+            let local_storage = local_storages
+                .entry(table_id)
+                .or_insert(replay.new_local(table_id).await);
+            let actual = local_storage
+                .ingest(kv_pairs, delete_ranges, epoch, table_id)
+                .await;
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Ingest(expected) = res {
                 assert_eq!(actual.ok(), expected, "ingest result wrong");
             }
         }
-        Operation::Iter(
+        Operation::Iter {
             prefix_hint,
-            left_bound,
-            right_bound,
+            key_range,
             epoch,
             table_id,
             retention_seconds,
-        ) => {
-            let iter = replay
+            check_bloom_filter,
+        } => {
+            let local_storage = local_storages
+                .entry(table_id)
+                .or_insert(replay.new_local(table_id).await);
+            let iter = local_storage
                 .iter(
-                    prefix_hint,
-                    left_bound,
-                    right_bound,
+                    key_range,
                     epoch,
-                    table_id,
+                    prefix_hint,
+                    check_bloom_filter,
                     retention_seconds,
+                    table_id,
                 )
                 .await;
             let res = res_rx.recv().await.expect("recv result failed");
@@ -312,15 +359,15 @@ mod tests {
         let mut records: VecDeque<Result<Record>> = VecDeque::from(vec![
             Ok(Record::new_local_none(
                 0,
-                Operation::Get(vec![0], true, 0, 0, None),
+                Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), 123),
             )),
             Ok(Record::new_local_none(
                 1,
-                Operation::Get(vec![1], true, 0, 0, None),
+                Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), 123),
             )),
             Ok(Record::new_local_none(
                 2,
-                Operation::Get(vec![0], true, 0, 0, None),
+                Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), 123),
             )),
             Ok(Record::new_local_none(
                 0,
@@ -339,7 +386,7 @@ mod tests {
             Ok(Record::new_local_none(0, Operation::Finish)),
             Ok(Record::new_local_none(
                 3,
-                Operation::Ingest(vec![(vec![1], Some(vec![1]))], 0, 0),
+                Operation::ingest(vec![(vec![123], Some(vec![123]))], vec![], 4, 5),
             )),
             Ok(Record::new_local_none(
                 0,
@@ -363,15 +410,15 @@ mod tests {
 
         let mut mock_replay = MockReplayable::new();
 
-        mock_replay
-            .expect_get()
-            .times(3)
-            .returning(move |_, _, _, _, _| Ok(Some(get_result.clone())));
+        // mock_replay
+        //     .expect_get()
+        //     .times(3)
+        //     .returning(move |_, _, _, _, _, _| Ok(Some(get_result.clone())));
 
-        mock_replay
-            .expect_ingest()
-            .times(1)
-            .returning(move |_, _, _| Ok(ingest_result));
+        // mock_replay
+        //     .expect_ingest()
+        //     .times(1)
+        //     .returning(move |_, _, _, _| Ok(ingest_result));
 
         mock_replay
             .expect_sync()

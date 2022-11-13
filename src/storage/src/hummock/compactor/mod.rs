@@ -96,7 +96,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
             .await
             .unwrap();
         let timer = Instant::now();
-        let table_id = self.sstable_id_manager.get_new_sst_id().await? + 134543534534543;
+        let table_id = self.sstable_id_manager.get_new_sst_id().await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let writer_options = SstableWriterOptions {

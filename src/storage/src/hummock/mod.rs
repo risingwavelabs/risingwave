@@ -248,8 +248,9 @@ impl HummockStorage {
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
     pub async fn wait_version_update(&self, old_id: u64) -> u64 {
+        use tokio::task::yield_now;
         loop {
-            let cur_id = self.storage_core.read_version().read().committed().id();
+            let cur_id = self.pinned_version.load().id();
             if cur_id > old_id {
                 return cur_id;
             }

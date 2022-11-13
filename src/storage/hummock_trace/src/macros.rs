@@ -14,60 +14,70 @@
 
 #[macro_export]
 macro_rules! trace {
-    (GET, $key:ident, $bloom_filter:ident, $opt:ident) => {
+    (GET, $key:ident, $epoch:ident, $opt:ident, $storage_type:expr) => {
         $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::Get(
+            $crate::record::Operation::get(
                 $key.to_vec(),
-                $bloom_filter,
-                $opt.epoch,
-                $opt.table_id.table_id,
+                $epoch,
+                $opt.prefix_hint.clone(),
+                $opt.check_bloom_filter,
                 $opt.retention_seconds,
+                $opt.table_id.table_id,
             ),
             risingwave_common::hm_trace::task_local_get(),
+            $storage_type,
         );
     };
-    (INGEST, $kvs:ident, $opt:ident) => {
+    (INGEST, $kvs:ident, $delete_range:ident, $opt:ident, $storage_type:expr) => {
         $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::Ingest(
+            $crate::record::Operation::ingest(
                 $kvs.iter()
-                    .map(|(k, v)| (k.to_vec(), v.user_value.clone().map(|v| v.to_vec())))
+                    .map(|(k, v)| (k.to_vec(), v.user_value.clone().map(|b| b.to_vec())))
+                    .collect(),
+                $delete_range
+                    .iter()
+                    .map(|(k, v)| (k.to_vec(), v.to_vec()))
                     .collect(),
                 $opt.epoch,
                 $opt.table_id.table_id,
             ),
             risingwave_common::hm_trace::task_local_get(),
+            $storage_type,
         );
     };
-    (ITER, $prefix:ident, $range:ident, $opt:ident) => {
-        // do not assign iter span to a variable
+    (ITER, $range:ident, $epoch:ident, $opt:ident, $storage_type:expr) => {
         $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::Iter(
-                $prefix.clone(),
-                $range.0.clone(),
-                $range.1.clone(),
-                $opt.epoch,
-                $opt.table_id.table_id,
-                $opt.retention_seconds,
-            ),
+            $crate::record::Operation::Iter {
+                prefix_hint: $opt.prefix_hint.clone(),
+                key_range: $range.clone(),
+                epoch: $epoch,
+                table_id: $opt.table_id.table_id,
+                retention_seconds: $opt.retention_seconds,
+                check_bloom_filter: $opt.check_bloom_filter,
+            },
             risingwave_common::hm_trace::task_local_get(),
+            $storage_type,
         );
     };
     (ITER_NEXT, $id:expr) => {
         $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::IterNext($id),
             risingwave_common::hm_trace::task_local_get(),
+            $crate::collector::StorageType::Local,
         );
     };
-    (SYNC, $epoch:ident) => {
+    (SYNC, $epoch:ident, $storage_type:expr) => {
         $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Sync($epoch),
             risingwave_common::hm_trace::TraceLocalId::None,
+            $storage_type,
         );
     };
-    (SEAL, $epoch:ident, $check_point:ident) => {
+    (SEAL, $epoch:ident, $check_point:ident, $storage_type:expr) => {
         let _span = $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Seal($epoch, $check_point),
             risingwave_common::hm_trace::TraceLocalId::None,
+            $storage_type,
         );
     };
     (VERSION) => {
@@ -82,6 +92,7 @@ macro_rules! trace {
                 $resp.clone(),
             ))),
             risingwave_common::hm_trace::TraceLocalId::None,
+            $crate::collector::StorageType::Global,
         );
     };
 }
@@ -91,13 +102,12 @@ macro_rules! trace_result {
     (GET, $span:ident, $result:ident) => {
         let res: Option<Option<Vec<u8>>> = $result
             .as_ref()
-            .map(Clone::clone)
-            .ok()
-            .map(|b| b.map(|c| c.to_vec()));
+            .map(|o| o.as_ref().map(|b| b.to_vec()))
+            .ok();
         $span.send($crate::record::Operation::Result(OperationResult::Get(res)));
     };
     (INGEST, $span:ident, $result:ident) => {
-        let res = $result.as_ref().map(Clone::clone).ok();
+        let res = $result.as_ref().map(|b| *b).ok();
         $span.send($crate::record::Operation::Result(OperationResult::Ingest(
             res,
         )));
@@ -109,7 +119,7 @@ macro_rules! trace_result {
         )));
     };
     (ITER_NEXT, $span:ident, $pair:ident) => {
-        let res = $pair.clone().map(|(k, v)| (k.to_vec(), v.to_vec()));
+        let res = $pair.as_ref().map(|(k, v)| (k.to_vec(), v.to_vec()));
         $span.send($crate::record::Operation::Result(
             OperationResult::IterNext(res),
         ));

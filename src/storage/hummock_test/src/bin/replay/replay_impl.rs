@@ -16,13 +16,16 @@ use std::ops::Bound;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_trace::{ReplayIter, Replayable, Result, TraceError};
+use risingwave_hummock_trace::{LocalReplay, ReplayIter, Replayable, Result, TraceError};
 use risingwave_meta::manager::NotificationManagerRef;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
+use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, SyncResult, WriteOptions};
+use risingwave_storage::store::{
+    ReadOptions, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
+};
 use risingwave_storage::{StateStore, StateStoreIter};
 
 pub(crate) struct HummockReplayIter<I: StateStoreIter<Item = (Bytes, Bytes)>>(I);
@@ -54,89 +57,6 @@ impl HummockInterface {
 
 #[async_trait::async_trait]
 impl Replayable for HummockInterface {
-    async fn get(
-        &self,
-        key: Vec<u8>,
-        check_bloom_filter: bool,
-        epoch: u64,
-        table_id: u32,
-        retention_seconds: Option<u32>,
-    ) -> Result<Option<Vec<u8>>> {
-        let value = self
-            .store
-            .get(
-                &key,
-                check_bloom_filter,
-                ReadOptions {
-                    epoch,
-                    table_id: TableId { table_id },
-                    retention_seconds,
-                },
-            )
-            .await
-            .map_err(|_| TraceError::GetFailed)?;
-
-        Ok(value.map(|b| b.to_vec()))
-    }
-
-    async fn ingest(
-        &self,
-        mut kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-        epoch: u64,
-        table_id: u32,
-    ) -> Result<usize> {
-        let kv_pairs = kv_pairs
-            .drain(..)
-            .map(|(key, value)| {
-                (
-                    Bytes::from(key),
-                    StorageValue {
-                        user_value: value.map(Bytes::from),
-                    },
-                )
-            })
-            .collect();
-        let size = self
-            .store
-            .ingest_batch(
-                kv_pairs,
-                WriteOptions {
-                    epoch,
-                    table_id: TableId { table_id },
-                },
-            )
-            .await
-            .map_err(|_| TraceError::IngestFailed)?;
-        Ok(size)
-    }
-
-    async fn iter(
-        &self,
-        prefix_hint: Option<Vec<u8>>,
-        left_bound: Bound<Vec<u8>>,
-        right_bound: Bound<Vec<u8>>,
-        epoch: u64,
-        table_id: u32,
-        retention_seconds: Option<u32>,
-    ) -> Result<Box<dyn ReplayIter>> {
-        let iter = self
-            .store
-            .iter(
-                prefix_hint,
-                (left_bound.clone(), right_bound.clone()),
-                ReadOptions {
-                    epoch,
-                    table_id: TableId { table_id },
-                    retention_seconds,
-                },
-            )
-            .await
-            .map_err(|e| TraceError::IterFailed(format!("{e}")))?;
-
-        let iter = HummockReplayIter::new(iter);
-        Ok(Box::new(iter))
-    }
-
     async fn sync(&self, id: u64) -> Result<usize> {
         let result: SyncResult = self
             .store
@@ -163,5 +83,107 @@ impl Replayable for HummockInterface {
             self.store.wait_version_update(prev_version_id).await;
         }
         Ok(version)
+    }
+
+    async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay> {
+        let table_id = TableId { table_id };
+        let local_storage = self.store.new_local(table_id).await;
+        Box::new(LocalReplayInterface(local_storage))
+    }
+}
+
+pub(crate) struct LocalReplayInterface(LocalHummockStorage);
+
+#[async_trait::async_trait]
+impl LocalReplay for LocalReplayInterface {
+    async fn get(
+        &self,
+        key: Vec<u8>,
+        check_bloom_filter: bool,
+        epoch: u64,
+        prefix_hint: Option<Vec<u8>>,
+        table_id: u32,
+        retention_seconds: Option<u32>,
+    ) -> Result<Option<Vec<u8>>> {
+        let value = self
+            .0
+            .get(
+                &key,
+                epoch,
+                ReadOptions {
+                    check_bloom_filter,
+                    table_id: TableId { table_id },
+                    retention_seconds,
+                    prefix_hint: prefix_hint,
+                },
+            )
+            .await
+            .map_err(|_| TraceError::GetFailed)?;
+
+        Ok(value.map(|b| b.to_vec()))
+    }
+
+    async fn ingest(
+        &self,
+        mut kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+        mut delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
+        epoch: u64,
+        table_id: u32,
+    ) -> Result<usize> {
+        let kv_pairs = kv_pairs
+            .drain(..)
+            .map(|(key, value)| {
+                (
+                    Bytes::from(key),
+                    StorageValue {
+                        user_value: value.map(Bytes::from),
+                    },
+                )
+            })
+            .collect();
+
+        let delete_ranges = delete_ranges
+            .drain(..)
+            .map(|(left, right)| (Bytes::from(left), Bytes::from(right)))
+            .collect();
+
+        let table_id = TableId { table_id };
+
+        let size = self
+            .0
+            .ingest_batch(kv_pairs, delete_ranges, WriteOptions { epoch, table_id })
+            .await
+            .map_err(|_| TraceError::IngestFailed)?;
+
+        Ok(size)
+    }
+
+    async fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        epoch: u64,
+        prefix_hint: Option<Vec<u8>>,
+        check_bloom_filter: bool,
+        retention_seconds: Option<u32>,
+        table_id: u32,
+    ) -> Result<Box<dyn ReplayIter>> {
+        let table_id = TableId { table_id };
+        let iter = self
+            .0
+            .iter(
+                key_range,
+                epoch,
+                ReadOptions {
+                    prefix_hint,
+                    table_id,
+                    retention_seconds,
+                    check_bloom_filter,
+                },
+            )
+            .await
+            .map_err(|e| TraceError::IterFailed(format!("{e}")))?;
+
+        let iter = HummockReplayIter::new(iter);
+        Ok(Box::new(iter))
     }
 }

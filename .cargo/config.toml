@@ -18,6 +18,8 @@ rustflags = [
 rustflags = [
     "--cfg",
     "tokio_unstable",
+    "--cfg",
+    "hm_trace",
     # lints
     # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
     "-Funused_must_use",
@@ -37,3 +39,6 @@ rustflags = [
     "-Wnonstandard_style",
     "-Wrust_2018_idioms",
 ]
+
+[build]
+rustc-wrapper = "/home/odysa/.cargo/bin/sccache"

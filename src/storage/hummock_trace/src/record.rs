@@ -18,6 +18,8 @@ use bincode::{BorrowDecode, Decode, Encode};
 use risingwave_common::hm_trace::TraceLocalId;
 use risingwave_pb::meta::SubscribeResponse;
 
+use crate::StorageType;
+
 pub type RecordId = u64;
 
 pub(crate) struct RecordIdGenerator {
@@ -38,58 +40,82 @@ impl RecordIdGenerator {
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub struct Record(
+    pub StorageType,
     #[bincode(with_serde)] pub TraceLocalId,
     pub RecordId,
     pub Operation,
 );
 
 impl Record {
-    pub(crate) fn new(local_id: TraceLocalId, record_id: RecordId, op: Operation) -> Self {
-        Self(local_id, record_id, op)
+    pub(crate) fn new(
+        storage_type: StorageType,
+        local_id: TraceLocalId,
+        record_id: RecordId,
+        op: Operation,
+    ) -> Self {
+        Self(storage_type, local_id, record_id, op)
     }
 
-    pub(crate) fn local_id(&self) -> TraceLocalId {
+    pub fn storage_type(&self) -> StorageType {
         self.0
     }
 
-    pub(crate) fn record_id(&self) -> RecordId {
+    pub fn local_id(&self) -> TraceLocalId {
         self.1
     }
 
-    pub(crate) fn op(&self) -> &Operation {
-        &self.2
+    pub fn record_id(&self) -> RecordId {
+        self.2
+    }
+
+    pub fn op(&self) -> &Operation {
+        &self.3
     }
 
     #[cfg(test)]
     pub(crate) fn new_local_none(record_id: RecordId, op: Operation) -> Self {
-        Self::new(TraceLocalId::None, record_id, op)
+        Self::new(StorageType::Global, TraceLocalId::None, record_id, op)
     }
 }
 
 type TraceKey = Vec<u8>;
 type TraceValue = Vec<u8>;
-
+type TableId = u32;
 /// Operations represents Hummock operations
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub enum Operation {
     /// Get operation of Hummock.
     /// (key, check_bloom_filter, epoch, table_id, retention_seconds)
-    Get(TraceKey, bool, u64, u32, Option<u32>),
+    // Get(TraceKey, bool, u64, u32, Option<u32>),
+    Get {
+        key: TraceKey,
+        epoch: u64,
+        prefix_hint: Option<TraceKey>,
+        check_bloom_filter: bool,
+        retention_seconds: Option<u32>,
+        table_id: TableId,
+    },
 
     /// Ingest operation of Hummock.
     /// (kv_pairs, epoch, table_id)
-    Ingest(Vec<(TraceKey, Option<TraceValue>)>, u64, u32),
+    // Ingest(Vec<(TraceKey, Option<TraceValue>)>, u64, u32),
+    Ingest {
+        kv_pairs: Vec<(TraceKey, Option<TraceValue>)>,
+        delete_ranges: Vec<(TraceKey, TraceKey)>,
+        epoch: u64,
+        table_id: TableId,
+    },
 
     /// Iter operation of Hummock
     /// (prefix_hint, left_bound, right_bound, epoch, table_id, retention_seconds)
-    Iter(
-        Option<TraceKey>,
-        Bound<TraceKey>,
-        Bound<TraceKey>,
-        u64,
-        u32,
-        Option<u32>,
-    ),
+    Iter {
+        key_range: (Bound<TraceKey>, Bound<TraceValue>),
+        epoch: u64,
+        prefix_hint: Option<TraceKey>,
+        check_bloom_filter: bool,
+        retention_seconds: Option<u32>,
+        table_id: TableId,
+    },
 
     /// Iter.next operation
     /// (record_id, kv_pair)
@@ -109,10 +135,43 @@ pub enum Operation {
     /// The end of an operation
     Finish,
 
-    /// SubscribeResponse implements Serde's Serialize and Deserialize, so use serde
     MetaMessage(Box<TraceSubResp>),
 
     Result(OperationResult),
+}
+
+impl Operation {
+    pub fn get(
+        key: TraceKey,
+        epoch: u64,
+        prefix_hint: Option<TraceKey>,
+        check_bloom_filter: bool,
+        retention_seconds: Option<u32>,
+        table_id: TableId,
+    ) -> Operation {
+        Operation::Get {
+            key,
+            epoch,
+            prefix_hint,
+            check_bloom_filter,
+            retention_seconds,
+            table_id,
+        }
+    }
+
+    pub fn ingest(
+        kv_pairs: Vec<(TraceKey, Option<TraceValue>)>,
+        delete_ranges: Vec<(TraceKey, TraceKey)>,
+        epoch: u64,
+        table_id: TableId,
+    ) -> Operation {
+        Operation::Ingest {
+            kv_pairs,
+            delete_ranges,
+            epoch,
+            table_id,
+        }
+    }
 }
 
 /// `TraceResult` discards Error and only marks whether succeeded or not.

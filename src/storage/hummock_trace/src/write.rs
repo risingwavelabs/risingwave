@@ -118,7 +118,7 @@ mod test {
 
     #[test]
     fn test_bincode_serialize() {
-        let op = Operation::Get(vec![0, 1, 2, 3], true, 1, 1, Some(12));
+        let op = Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), 123);
         let expected = Record::new_local_none(0, op);
         let serializer = BincodeSerializer::new();
         let mut buf = Vec::new();
@@ -134,7 +134,7 @@ mod test {
     #[test]
     fn test_writer_impl_write() {
         let mut mock_writer = MockWrite::new();
-        let op = crate::Operation::Ingest(vec![(vec![0], Some(vec![0]))], 0, 0);
+        let op = Operation::ingest(vec![(vec![1], Some(vec![5]))], vec![], 0, 0);
         let record = Record::new_local_none(0, op);
         let r_bytes = encode_to_vec(record.clone(), config::standard()).unwrap();
         let r_len = r_bytes.len();

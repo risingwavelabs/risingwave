@@ -145,7 +145,7 @@ mod test {
     #[test]
     fn test_bincode_deserialize() {
         let deserializer = BincodeDeserializer::new();
-        let op = Operation::Get(vec![100, 45, 32, 56], true, 123, 45, Some(543));
+        let op = Operation::get(vec![5, 5, 15, 6], 7564, None, true, Some(5433), 123);
         let expected = Record::new_local_none(54433, op);
 
         let mut buf = MemTraceStore::default();
@@ -190,7 +190,7 @@ mod test {
         for i in 0..count {
             let key = format!("key{}", i).as_bytes().to_vec();
             let value = format!("value{}", i).as_bytes().to_vec();
-            let op = Operation::Ingest(vec![(key, Some(value))], 0, 0);
+            let op = Operation::ingest(vec![(key, Some(value))], vec![], 0, 0);
             let record = Record::new_local_none(i, op);
             records.push(record.clone());
             let record_bytes = encode_to_vec(record.clone(), config::standard()).unwrap();
