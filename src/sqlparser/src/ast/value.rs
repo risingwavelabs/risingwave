@@ -23,6 +23,11 @@ use serde::{Deserialize, Serialize};
 pub enum Value {
     /// Numeric literal
     Number(String),
+    /// Scientific numeric literal
+    ScientificNumber {
+        value: String,
+        exponent: String
+    },
     /// 'string value'
     SingleQuotedString(String),
     /// N'string value'
@@ -60,6 +65,7 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Number(v) => write!(f, "{}", v),
+            Value::ScientificNumber {value, exponent } => write!(f, "{}e{}", value, exponent),
             Value::DoubleQuotedString(v) => write!(f, "\"{}\"", v),
             Value::SingleQuotedString(v) => write!(f, "'{}'", escape_single_quote_string(v)),
             Value::NationalStringLiteral(v) => write!(f, "N'{}'", v),

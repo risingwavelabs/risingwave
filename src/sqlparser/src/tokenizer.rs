@@ -43,6 +43,11 @@ pub enum Token {
     Word(Word),
     /// An unsigned numeric literal
     Number(String),
+    /// An unsigned scientific  numeric literal
+    ScientificNumber {
+       value: String,
+       exponent: String
+    },
     /// A character that could not be tokenized
     Char(char),
     /// Single quoted string: i.e: 'string'
@@ -146,6 +151,7 @@ impl fmt::Display for Token {
             Token::EOF => f.write_str("EOF"),
             Token::Word(ref w) => write!(f, "{}", w),
             Token::Number(ref n) => write!(f, "{}", n),
+            Token::ScientificNumber {value, exponent} => write!(f, "{}e{}",value, exponent),
             Token::Char(ref c) => write!(f, "{}", c),
             Token::SingleQuotedString(ref s) => write!(f, "'{}'", s),
             Token::NationalStringLiteral(ref s) => write!(f, "N'{}'", s),
@@ -454,15 +460,15 @@ impl<'a> Tokenizer<'a> {
                     match chars.peek() {
                         // Number is a scientific number (1e6)
                         Some('e') | Some('E') => {
-                            s.push('e');
                             chars.next();
 
-                            // exponent of scientific number is negative (1e-6)
+                            let mut exponent = String::new();
                             if let Some('-') = chars.peek() {
-                                s.push('-');
+                                exponent.push('-');
                                 chars.next();
                             }
-                            s += &peeking_take_while(chars, |ch| matches!(ch, '0'..='9'))
+                            exponent += &peeking_take_while(chars, |ch| matches!(ch, '0'..='9'));
+                            return Ok(Some(Token::ScientificNumber {value: s, exponent}));
                         }
                         // Not a scientific number
                         _ => {}
