@@ -117,23 +117,19 @@ impl Binder {
         };
 
         let mut target_table_col_idxs: Vec<ColumnIdx> = vec![];
-        for query_column in &columns {
+        'outer: for query_column in &columns {
             let column_name = &query_column.value; // value or real_value() ?
-            let mut col_exists = false;
             for (col_idx, table_column) in table_source.columns.iter().enumerate() {
                 if *column_name.to_lowercase() == table_column.name.to_lowercase() {
                     target_table_col_idxs.push(ColumnIdx::from(col_idx));
-                    col_exists = true;
-                    break;
+                    continue 'outer;
                 }
             }
             // Invalid column name found
-            if !col_exists {
-                return Err(RwError::from(ErrorCode::BindError(format!(
-                    "Column {} not found in table {}",
-                    column_name, table_source.name
-                ))));
-            }
+            return Err(RwError::from(ErrorCode::BindError(format!(
+                "Column {} not found in table {}",
+                column_name, table_source.name
+            ))));
         }
 
         // validate that query has a value for each target column, if target columns are used
