@@ -361,12 +361,12 @@ mod tests {
             Event::Person(Person {
                 id: 1000,
                 name: "vicky noris".into(),
-                email_address: "vzbhp@wxv.com".into(),
-                credit_card: "4355 0142 3460 9324".into(),
-                city: "boise".into(),
-                state: "ca".into(),
+                email_address: "yplkvgz@qbxfg.com".into(),
+                credit_card: "7878 5821 1864 2539".into(),
+                city: "cheyenne".into(),
+                state: "az".into(),
                 date_time: 1436918400000,
-                extra: "cllnesmssnthtljklifqbqcyhcjwiuoaudxxwcnnwgmsmwgqelplzyckqzuoaitfpxubgpkjtqjhktelmbskvjkxrhziyowxibbgnqneuaiazqduhkynvgeisbxtknbxmqmzbgnptlrcyigjginataks".into(),
+                extra: "lwaiyhjhrkaruidlsjilvqccyedttedeynpqmackqbwvklwuyypztnkengzgtwtjivjgrxurskpcldfohdzuwnefqymyncrksxyfaecwsbswjumzxudgoznyhakxrudomnxtmqtgshecfjgspxzpludz".into(),
             })
         );
     }
