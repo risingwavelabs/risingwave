@@ -380,12 +380,12 @@ pub async fn get_from_order_sorted_uncommitted_data(
                     }
                 }
 
-                UncommittedData::Sst((_, sstable_info)) => {
+                UncommittedData::Sst(LocalSstableInfo { sst_info, .. }) => {
                     table_counts += 1;
 
                     if let Some(data) = get_from_sstable_info(
                         sstable_store_ref.clone(),
-                        &sstable_info,
+                        &sst_info,
                         full_key,
                         check_bloom_filter,
                         local_stats,

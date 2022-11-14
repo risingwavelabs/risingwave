@@ -22,7 +22,9 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
+use risingwave_hummock_sdk::{
+    HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
+};
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::pin_version_response::Payload;
@@ -784,7 +786,7 @@ async fn test_invalid_sst_id() {
     // reject due to invalid context id
     let sst_to_worker = ssts
         .iter()
-        .map(|(_, sst)| (sst.id, WorkerId::MAX))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, WorkerId::MAX))
         .collect();
     let error = hummock_manager
         .commit_epoch(epoch, ssts.clone(), sst_to_worker)
@@ -792,7 +794,10 @@ async fn test_invalid_sst_id() {
         .unwrap_err();
     assert!(matches!(error, Error::InvalidSst(1)));
 
-    let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
+    let sst_to_worker = ssts
+        .iter()
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, context_id))
+        .collect();
     hummock_manager
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await

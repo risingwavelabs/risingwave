@@ -206,7 +206,10 @@ pub async fn gen_test_sstable_inner(
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
     let table = sstable_store
-        .sstable(&output.sst_info, &mut StoreLocalStatistic::default())
+        .sstable(
+            &output.sst_info.sst_info,
+            &mut StoreLocalStatistic::default(),
+        )
         .await
         .unwrap();
     table.value().as_ref().clone()

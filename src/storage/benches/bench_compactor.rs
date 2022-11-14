@@ -109,7 +109,7 @@ async fn build_table(
     }
     let output = builder.finish().await.unwrap();
     let handle = output.writer_output;
-    let sst = output.sst_info;
+    let sst = output.sst_info.sst_info;
     handle.await.unwrap().unwrap();
     sst
 }

@@ -18,8 +18,7 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{get_user_key, FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compactor::task_progress::TaskProgress;
@@ -41,7 +40,7 @@ pub trait TableBuilderFactory {
 }
 
 pub struct SplitTableOutput {
-    pub sst_info: SstableInfo,
+    pub sst_info: LocalSstableInfo,
     pub upload_join_handle: UploadJoinHandle,
 }
 
@@ -194,10 +193,10 @@ where
                         .observe(builder_output.bloom_filter_size as _);
                 }
 
-                if builder_output.sst_info.file_size != 0 {
+                if builder_output.sst_info.file_size() != 0 {
                     self.stats
                         .sstable_file_size
-                        .observe(builder_output.sst_info.file_size as _);
+                        .observe(builder_output.sst_info.file_size() as _);
                 }
 
                 if builder_output.avg_key_size != 0 {
@@ -421,7 +420,13 @@ mod tests {
             .await
             .unwrap();
         let mut sst_infos = builder.finish().await.unwrap();
-        let key_range = sst_infos.pop().unwrap().sst_info.key_range.unwrap();
+        let key_range = sst_infos
+            .pop()
+            .unwrap()
+            .sst_info
+            .sst_info
+            .key_range
+            .unwrap();
         assert_eq!(
             key_range.left,
             FullKey::for_test(table_id, b"aaa", 200).encode()

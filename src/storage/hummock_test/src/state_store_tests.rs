@@ -20,7 +20,7 @@ use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, HummockSstableId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, HummockSstableId, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
     update_filter_key_extractor_for_table_ids,
@@ -1257,7 +1257,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         sync_result
             .uncommitted_ssts
             .iter()
-            .map(|(_, sst)| sst.id)
+            .map(|LocalSstableInfo { sst_info, .. }| sst_info.id)
             .min()
             .unwrap()
     };
