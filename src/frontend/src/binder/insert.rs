@@ -27,6 +27,10 @@ pub struct BoundInsert {
     /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
 
+    /// User defined columns in which to insert
+    /// Is equal to [0, 2, 1] for insert statement
+    /// create table t1 (v1 int, v2 int, v3 int); insert into t1 (v1, v3, v2) values (5, 6, 7);
+    /// Empty if user does not define insert columns
     pub column_idxs: Vec<ColumnIdx>,
 
     pub source: BoundQuery,
