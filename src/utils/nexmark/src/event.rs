@@ -128,10 +128,13 @@ impl Person {
             cfg.last_names.choose(rng).unwrap(),
         );
         let email_address = format!("{}@{}.com", rng.gen_string(7), rng.gen_string(5));
-        let credit_card = (0..4)
-            .map(|_| format!("{:04}", rng.gen_range(0..10000)))
-            .collect::<Vec<String>>()
-            .join(" ");
+        let credit_card = format!(
+            "{:04} {:04} {:04} {:04}",
+            rng.gen_range(0..10000),
+            rng.gen_range(0..10000),
+            rng.gen_range(0..10000),
+            rng.gen_range(0..10000)
+        );
         let city = cfg.us_cities.choose(rng).unwrap().clone();
         let state = cfg.us_states.choose(rng).unwrap().clone();
 
