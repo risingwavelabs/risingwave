@@ -50,8 +50,8 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         // its schema.
         let schema = snapshot.schema().clone();
 
-        let executor = if node.chain_type == ChainType::Chain as i32 {
-            ChainExecutor::new(
+        let executor = match node.chain_type() {
+            ChainType::Chain => ChainExecutor::new(
                 snapshot,
                 mview,
                 upstream_indices,
@@ -59,9 +59,8 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 schema,
                 params.pk_indices,
             )
-            .boxed()
-        } else if node.chain_type == ChainType::Rearrange as i32 {
-            RearrangedChainExecutor::new(
+            .boxed(),
+            ChainType::Rearrange => RearrangedChainExecutor::new(
                 snapshot,
                 mview,
                 upstream_indices,
@@ -69,79 +68,79 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 schema,
                 params.pk_indices,
             )
-            .boxed()
-        } else if node.chain_type == ChainType::Backfill as i32 {
-            let table_desc: &StorageTableDesc = node.get_table_desc()?;
-            let table_id = TableId {
-                table_id: table_desc.table_id,
-            };
+            .boxed(),
+            ChainType::Backfill => {
+                let table_desc: &StorageTableDesc = node.get_table_desc()?;
+                let table_id = TableId {
+                    table_id: table_desc.table_id,
+                };
 
-            let order_types = table_desc
-                .pk
-                .iter()
-                .map(|desc| {
-                    OrderType::from_prost(&ProstOrderType::from_i32(desc.order_type).unwrap())
-                })
-                .collect_vec();
+                let order_types = table_desc
+                    .pk
+                    .iter()
+                    .map(|desc| {
+                        OrderType::from_prost(&ProstOrderType::from_i32(desc.order_type).unwrap())
+                    })
+                    .collect_vec();
 
-            let column_descs = table_desc
-                .columns
-                .iter()
-                .map(ColumnDesc::from)
-                .collect_vec();
-            let column_ids = column_descs.iter().map(|x| x.column_id).collect_vec();
+                let column_descs = table_desc
+                    .columns
+                    .iter()
+                    .map(ColumnDesc::from)
+                    .collect_vec();
+                let column_ids = column_descs.iter().map(|x| x.column_id).collect_vec();
 
-            // Use indices based on full table instead of streaming executor output.
-            let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+                // Use indices based on full table instead of streaming executor output.
+                let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
 
-            let dist_key_indices = table_desc
-                .dist_key_indices
-                .iter()
-                .map(|&k| k as usize)
-                .collect_vec();
-            let distribution = match params.vnode_bitmap {
-                Some(vnodes) => Distribution {
-                    dist_key_indices,
-                    vnodes: vnodes.into(),
-                },
-                None => Distribution::fallback(),
-            };
+                let dist_key_indices = table_desc
+                    .dist_key_indices
+                    .iter()
+                    .map(|&k| k as usize)
+                    .collect_vec();
+                let distribution = match params.vnode_bitmap {
+                    Some(vnodes) => Distribution {
+                        dist_key_indices,
+                        vnodes: vnodes.into(),
+                    },
+                    None => Distribution::fallback(),
+                };
 
-            let table_option = TableOption {
-                retention_seconds: if table_desc.retention_seconds > 0 {
-                    Some(table_desc.retention_seconds)
-                } else {
-                    None
-                },
-            };
-            let value_indices = table_desc
-                .get_value_indices()
-                .iter()
-                .map(|&k| k as usize)
-                .collect_vec();
-            let table = StorageTable::new_partial(
-                state_store,
-                table_id,
-                column_descs,
-                column_ids,
-                order_types,
-                pk_indices,
-                distribution,
-                table_option,
-                value_indices,
-            );
+                let table_option = TableOption {
+                    retention_seconds: if table_desc.retention_seconds > 0 {
+                        Some(table_desc.retention_seconds)
+                    } else {
+                        None
+                    },
+                };
+                let value_indices = table_desc
+                    .get_value_indices()
+                    .iter()
+                    .map(|&k| k as usize)
+                    .collect_vec();
+                let table = StorageTable::new_partial(
+                    state_store,
+                    table_id,
+                    column_descs,
+                    column_ids,
+                    order_types,
+                    pk_indices,
+                    distribution,
+                    table_option,
+                    value_indices,
+                );
 
-            BackfillExecutor::new(
-                table,
-                mview,
-                upstream_indices,
-                progress,
-                schema,
-                params.pk_indices,
-            )
-            .boxed()
-        } else {
-            unreachable!();
+                BackfillExecutor::new(
+                    table,
+                    mview,
+                    upstream_indices,
+                    progress,
+                    schema,
+                    params.pk_indices,
+                )
+                .boxed()
+            }
+            ChainType::ChainUnspecified => unreachable!(),
         };
         Ok(executor)
     }

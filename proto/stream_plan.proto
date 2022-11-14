@@ -301,14 +301,16 @@ message ExchangeNode {
 }
 
 enum ChainType {
+  CHAIN_UNSPECIFIED = 0;
+
   // CHAIN is corresponding to the chain executor.
-  CHAIN = 0;
+  CHAIN = 1;
 
   // REARRANGE is corresponding to the rearranged chain executor.
-  REARRANGE = 1;
+  REARRANGE = 2;
 
   // BACKFILL is corresponding to the backfill executor.
-  BACKFILL = 2;
+  BACKFILL = 3;
 }
 // ChainNode is used for mv on mv.
 // ChainNode is like a "UNION" on mv snapshot and streaming. So it takes two inputs with fixed order:
