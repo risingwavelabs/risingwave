@@ -24,8 +24,6 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
-#[cfg(all(not(madsim), hm_trace))]
-use risingwave_common::hm_trace::actor_local_scope;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
@@ -622,19 +620,12 @@ impl LocalStreamManagerCore {
                 .map(|(m, _)| m.register(actor_id));
 
             let handle = {
-                #[cfg(any(madsim, not(hm_trace)))]
                 let actor = async move {
-                    // unwrap the actor result to panic on error
-                    actor.run().await.expect("actor failed");
+                    let _ = actor.run().await.inspect_err(|err| {
+                        // TODO: check error type and panic if it's unexpected.
+                        tracing::error!(actor=%actor_id, error=%err, "actor exit");
+                    });
                 };
-
-                // use local_scope for actor_id only when tracing enabled
-                #[cfg(all(not(madsim), hm_trace))]
-                let actor = actor_local_scope(async move {
-                    // unwrap the actor result to panic on error
-                    actor.run().await.expect("actor failed");
-                });
-
                 #[auto_enums::auto_enum(Future)]
                 let traced = match trace_reporter {
                     Some(trace_reporter) => trace_reporter.trace(

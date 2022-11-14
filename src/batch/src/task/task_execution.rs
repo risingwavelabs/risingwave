@@ -21,8 +21,6 @@ use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-#[cfg(all(not(madsim), hm_trace))]
-use risingwave_common::hm_trace::executor_local_scope;
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
@@ -300,8 +298,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         // Clone `self` to make compiler happy because of the move block.
         let t_1 = self.clone();
         let t_2 = self.clone();
-
-        let f = async move {
+        // Spawn task for real execution.
+        self.runtime.spawn(async move {
             trace!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
             let mut state_tx = state_tx;
@@ -337,13 +335,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
             if let Some(task_metrics) = task_metrics {
                 let monitor = TaskMonitor::new();
-                let f = monitor.instrument(task(task_id.clone()));
-
-                // only when tracing enable
-                #[cfg(all(not(madsim), hm_trace))]
-                let f = executor_local_scope(f);
-
-                let join_handle = t_2.runtime.spawn(f);
+                let join_handle = t_2.runtime.spawn(monitor.instrument(task(task_id.clone())));
                 if let Err(join_error) = join_handle.await && join_error.is_panic() {
                     error!("Batch task {:?} panic!", task_id);
                 }
@@ -375,24 +367,12 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
             } else {
-                let f = task(task_id.clone());
-                // only when tracing enable
-                #[cfg(all(not(madsim), hm_trace))]
-                let f = executor_local_scope(f);
-
-                let join_handle = t_2.runtime.spawn(f);
+                let join_handle = t_2.runtime.spawn(task(task_id.clone()));
                 if let Err(join_error) = join_handle.await && join_error.is_panic() {
                     error!("Batch task {:?} panic!", task_id);
                 }
             }
-        };
-
-        // only when tracing enable
-        #[cfg(all(not(madsim), hm_trace))]
-        let f = executor_local_scope(f);
-
-        // Spawn task for real execution.
-        self.runtime.spawn(f);
+        });
         Ok(())
     }
 

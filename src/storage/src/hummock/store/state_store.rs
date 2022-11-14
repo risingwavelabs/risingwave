@@ -202,6 +202,7 @@ impl StateStoreWrite for LocalHummockStorage {
                 .event_sender
                 .send(HummockEvent::ImmToUploader(imm))
                 .unwrap();
+
             Ok(imm_size)
         }
     }

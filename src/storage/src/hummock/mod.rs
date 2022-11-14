@@ -162,10 +162,12 @@ impl HummockStorage {
             .start()
             .await
             .expect("should be able to start the observer manager");
+
         let hummock_version = match event_rx.recv().await {
             Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
             _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
         };
+
         let (pin_version_tx, pin_version_rx) = unbounded_channel();
         let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
         tokio::spawn(start_pinned_version_worker(
@@ -320,6 +322,7 @@ pub async fn get_from_sstable_info(
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
+
     let ukey = user_key(internal_key);
     if check_bloom_filter && !hit_sstable_bloom_filter(sstable.value(), ukey, local_stats) {
         return Ok(None);
