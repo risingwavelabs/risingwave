@@ -21,7 +21,7 @@ use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 
 use self::managed_state::ManagedBarrierState;
-use crate::error::StreamResult;
+use crate::error::{StreamError, StreamResult};
 use crate::executor::*;
 use crate::task::ActorId;
 
@@ -218,13 +218,13 @@ impl LocalBarrierManager {
 
     /// When a actor exit unexpectedly, it should report this event using this function, so meta
     /// will notice actor's exit while collecting.
-    pub fn notify_exit(&mut self, actor_id: ActorId) {
+    pub fn notify_failure(&mut self, actor_id: ActorId, err: &StreamError) {
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}
 
             BarrierState::Managed(managed_state) => {
-                managed_state.notify_exit(actor_id);
+                managed_state.notify_failure(actor_id, err);
             }
         }
     }
