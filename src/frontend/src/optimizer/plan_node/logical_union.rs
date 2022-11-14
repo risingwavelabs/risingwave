@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 
 use super::{ColPrunable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::optimizer::plan_node::{BatchHashAgg, BatchUnion, LogicalAgg, PlanTreeNode};
@@ -123,11 +123,11 @@ impl ToBatch for LogicalUnion {
 
 impl ToStream for LogicalUnion {
     fn to_stream(&self) -> Result<PlanRef> {
-        todo!()
+        Err(ErrorCode::NotImplemented(format!("Union for streaming query"), 2911.into()).into())
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        todo!()
+        Err(ErrorCode::NotImplemented(format!("Union for streaming query"), 2911.into()).into())
     }
 }
 
