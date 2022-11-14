@@ -26,8 +26,8 @@ use risingwave_pb::expr::AggCall as ProstAggCall;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
-use super::stream;
 use super::utils::{IndicesDisplay, TableCatalogBuilder};
+use super::{stream, NodeExplain, NodeExplainBuilder};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, InputRef, InputRefDisplay};
@@ -117,7 +117,36 @@ pub struct HopWindow<PlanRef> {
     pub(super) window_size: IntervalUnit,
     pub(super) output_indices: Vec<usize>,
 }
-
+impl<PlanRef: GenericPlanRef> NodeExplain for HopWindow<PlanRef> {
+    fn explain(&self, builder: &mut super::NodeExplainBuilder) {
+        builder.display_field(
+            "time_col",
+            &InputRefDisplay {
+                input_ref: &self.time_col,
+                input_schema: self.input.schema(),
+            },
+        );
+        builder.display_field("slide", &self.window_slide);
+        builder.display_field("size", &self.window_size);
+        if self
+            .output_indices
+            .iter()
+            .copied()
+            // Behavior is the same as `LogicalHopWindow::internal_column_num`
+            .eq(0..(self.input.schema().len() + 2))
+        {
+            builder.field("output", "all");
+        } else {
+            builder.display_field(
+                "output",
+                &IndicesDisplay {
+                    indices: &self.output_indices,
+                    input_schema: &self.original_schema(),
+                },
+            );
+        };
+    }
+}
 impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
     pub fn into_parts(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit, Vec<usize>) {
         (
@@ -129,50 +158,24 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
         )
     }
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+    pub fn original_schema(&self) -> Schema {
         let output_type = DataType::window_of(&self.time_col.data_type).unwrap();
-        write!(
-            f,
-            "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
-            name,
-            format_args!(
-                "{}",
-                InputRefDisplay {
-                    input_ref: &self.time_col,
-                    input_schema: self.input.schema()
-                }
-            ),
-            self.window_slide,
-            self.window_size,
-            if self
-                .output_indices
-                .iter()
-                .copied()
-                // Behavior is the same as `LogicalHopWindow::internal_column_num`
-                .eq(0..(self.input.schema().len() + 2))
-            {
-                "all".to_string()
-            } else {
-                let original_schema: Schema = self
-                    .input
-                    .schema()
-                    .clone()
-                    .into_fields()
-                    .into_iter()
-                    .chain([
-                        Field::with_name(output_type.clone(), "window_start"),
-                        Field::with_name(output_type, "window_end"),
-                    ])
-                    .collect();
-                format!(
-                    "{:?}",
-                    &IndicesDisplay {
-                        indices: &self.output_indices,
-                        input_schema: &original_schema,
-                    }
-                )
-            },
-        )
+        self.input
+            .schema()
+            .clone()
+            .into_fields()
+            .into_iter()
+            .chain([
+                Field::with_name(output_type.clone(), "window_start"),
+                Field::with_name(output_type, "window_end"),
+            ])
+            .collect()
+    }
+
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let mut builder = NodeExplainBuilder::new(name.to_string());
+        self.explain(&mut builder);
+        builder.write_in_one_row(f)
     }
 }
 
