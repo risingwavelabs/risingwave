@@ -165,7 +165,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 Message::Chunk(chunk) => {
                     match self.handle_pk_conflict {
                         true => {
-                            println!("do check");
                             // create MaterializeBuffer from chunk
                             let buffer = MaterializeBuffer::fill_buffer_from_chunk(
                                 chunk,
@@ -211,10 +210,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                 self.materialize_cache.get(&key).unwrap()
                                             {
                                                 // double insert
-                                                println!(
-                                                    "这里1, cache_row = {:?}, new_row = {:?}",
-                                                    cache_row, row
-                                                );
                                                 output.insert(
                                                     key.clone(),
                                                     RowOp::Update((
@@ -232,7 +227,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                             {
                                                 if cache_row != &old_row {
                                                     // delete a nonexistent value
-                                                    println!("这里2, cache_row = {:?}", cache_row);
                                                     output.insert(
                                                         key.clone(),
                                                         RowOp::Delete(cache_row.to_vec()),
@@ -242,7 +236,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                 self.materialize_cache.insert(key, None);
                                             } else {
                                                 // delete a nonexistent pk
-                                                println!("这里3");
                                                 output.remove(&key);
                                             }
                                         }
@@ -252,7 +245,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                             {
                                                 if cache_row != &old_row {
                                                     // update a nonexistent old value
-                                                    println!("这里4");
                                                     output.insert(
                                                         key.clone(),
                                                         RowOp::Update((
@@ -264,7 +256,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                 self.materialize_cache.insert(key, Some(new_row));
                                             } else {
                                                 // update a nonexistent pk
-                                                println!("这里5");
                                                 output.insert(
                                                     key.clone(),
                                                     RowOp::Insert(new_row.clone()),
