@@ -96,11 +96,21 @@ impl UserManager {
         }
     }
 
+    #[inline(always)]
+    pub fn increase_ref(&mut self, user_id: UserId) {
+        self.increase_ref_count(user_id, 1)
+    }
+
     pub fn increase_ref_count(&mut self, user_id: UserId, count: usize) {
         self.catalog_create_ref_count
             .entry(user_id)
             .and_modify(|c| *c += count)
             .or_insert(count);
+    }
+
+    #[inline(always)]
+    pub fn decrease_ref(&mut self, user_id: UserId) {
+        self.decrease_ref_count(user_id, 1)
     }
 
     pub fn decrease_ref_count(&mut self, user_id: UserId, count: usize) {
