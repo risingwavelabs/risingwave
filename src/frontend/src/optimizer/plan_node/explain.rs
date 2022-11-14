@@ -24,14 +24,14 @@ impl NodeExplainBuilder {
         self.field(name, &format!("{:?}", value));
     }
 
-    pub fn display_field(&mut self, name: &str, value: &dyn fmt::Debug) {
-        self.field(name, &format!("{:?}", value));
+    pub fn display_field(&mut self, name: &str, value: &dyn fmt::Display) {
+        self.field(name, &format!("{}", value));
     }
 
     pub fn write_in_one_row<'a, 'b>(self, f: &'a mut fmt::Formatter<'b>) -> fmt::Result {
         write!(
             f,
-            "{} {{ {}}}",
+            "{} {{ {} }}",
             self.node_name,
             self.fields
                 .into_iter()
