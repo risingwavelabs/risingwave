@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::RangeBounds;
+use std::ops::{Bound, RangeBounds};
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{prefixed_range, table_prefix};
+use risingwave_hummock_sdk::key::FullKey;
 
 use crate::error::StorageResult;
 use crate::store::{ReadOptions, StateStoreRead, StateStoreReadExt, StateStoreWrite, WriteOptions};
@@ -44,18 +44,13 @@ impl<S> Keyspace<S> {
     /// here.
 
     /// Creates a root [`Keyspace`] for a table.
-    pub fn table_root(store: S, id: &TableId) -> Self {
-        let prefix = table_prefix(id.table_id);
+    pub fn table_root(store: S, id: TableId) -> Self {
+        let prefix = id.table_id().to_be_bytes().to_vec();
         Self {
             store,
             prefix,
-            table_id: *id,
+            table_id: id,
         }
-    }
-
-    /// Treats the keyspace as a single key, and returns the key.
-    pub fn prefix(&self) -> &[u8] {
-        &self.prefix
     }
 
     /// Concatenates this keyspace and the given key to produce a prefixed key.
@@ -82,9 +77,7 @@ impl<S: StateStoreRead> Keyspace<S> {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
-        self.store
-            .get(&self.prefixed_key(key), epoch, read_options)
-            .await
+        self.store.get(key.as_ref(), epoch, read_options).await
     }
 
     /// Scans `limit` keys from the keyspace and get their values.
@@ -95,7 +88,7 @@ impl<S: StateStoreRead> Keyspace<S> {
         epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> StorageResult<Vec<(Bytes, Bytes)>> {
+    ) -> StorageResult<Vec<(Vec<u8>, Bytes)>> {
         self.scan_with_range::<_, &[u8]>(.., epoch, limit, read_options)
             .await
     }
@@ -111,16 +104,17 @@ impl<S: StateStoreRead> Keyspace<S> {
         epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> StorageResult<Vec<(Bytes, Bytes)>>
+    ) -> StorageResult<Vec<(Vec<u8>, Bytes)>>
     where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
     {
-        let range = prefixed_range(range, &self.prefix);
-        let mut pairs = self.store.scan(range, epoch, limit, read_options).await?;
-        pairs
-            .iter_mut()
-            .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
+        let range = to_owned_range(range);
+        let pairs = self.store.scan(range, epoch, limit, read_options).await?;
+        let pairs = pairs
+            .into_iter()
+            .map(|(k, v)| (k.user_key.table_key.0, v))
+            .collect();
         Ok(pairs)
     }
 
@@ -130,7 +124,7 @@ impl<S: StateStoreRead> Keyspace<S> {
         &self,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<StripPrefixIterator<S::Iter>> {
+    ) -> StorageResult<ExtractTableKeyIterator<S::Iter>> {
         self.iter_with_range::<_, &[u8]>(.., epoch, read_options)
             .await
     }
@@ -143,41 +137,46 @@ impl<S: StateStoreRead> Keyspace<S> {
         &self,
         range: R,
         epoch: u64,
-        mut read_options: ReadOptions,
-    ) -> StorageResult<StripPrefixIterator<S::Iter>>
+        read_options: ReadOptions,
+    ) -> StorageResult<ExtractTableKeyIterator<S::Iter>>
     where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
     {
-        let range = prefixed_range(range, &self.prefix);
-        read_options.prefix_hint = read_options
-            .prefix_hint
-            .map(|prefix_hint| [self.prefix.to_vec(), prefix_hint].concat());
-
+        let range = to_owned_range(range);
         let iter = self.store.iter(range, epoch, read_options).await?;
-        let strip_prefix_iterator = StripPrefixIterator {
-            iter,
-            prefix_len: self.prefix.len(),
-        };
+        let extract_table_key_iter = ExtractTableKeyIterator { iter };
 
-        Ok(strip_prefix_iterator)
+        Ok(extract_table_key_iter)
     }
 }
 
 impl<S: StateStoreWrite> Keyspace<S> {
     pub fn start_write_batch(&self, option: WriteOptions) -> KeySpaceWriteBatch<'_, S> {
         let write_batch = self.store.start_write_batch(option);
-        write_batch.prefixify(self)
+        write_batch.prefixify()
     }
 }
 
-pub struct StripPrefixIterator<I: StateStoreIter<Item = (Bytes, Bytes)> + 'static> {
-    iter: I,
-    prefix_len: usize,
+fn to_owned_range<R, B>(range: R) -> (Bound<Vec<u8>>, Bound<Vec<u8>>)
+where
+    R: RangeBounds<B>,
+    B: AsRef<[u8]>,
+{
+    (
+        range.start_bound().map(|b| b.as_ref().to_vec()),
+        range.end_bound().map(|b| b.as_ref().to_vec()),
+    )
 }
 
-impl<I: StateStoreIter<Item = (Bytes, Bytes)>> StateStoreIter for StripPrefixIterator<I> {
-    type Item = (Bytes, Bytes);
+pub struct ExtractTableKeyIterator<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + 'static> {
+    iter: I,
+}
+
+impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> StateStoreIter
+    for ExtractTableKeyIterator<I>
+{
+    type Item = (Vec<u8>, Bytes);
 
     type NextFuture<'a> =
         impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
@@ -188,7 +187,7 @@ impl<I: StateStoreIter<Item = (Bytes, Bytes)>> StateStoreIter for StripPrefixIte
                 .iter
                 .next()
                 .await?
-                .map(|(key, value)| (key.slice(self.prefix_len..), value)))
+                .map(|(key, value)| (key.user_key.table_key.0, value)))
         }
     }
 }

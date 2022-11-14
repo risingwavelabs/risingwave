@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::bail;
-use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{DataType, ScalarImpl, VIRTUAL_NODE_COUNT};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use risingwave_expr::Result as ExprResult;
@@ -120,7 +120,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let mut current_watermark =
             Self::get_global_max_watermark(&table, watermark_type.clone()).await?;
 
-        let mut last_checkpoint_watermark = None;
+        let mut last_checkpoint_watermark = watermark_type.min();
 
         yield Message::Watermark(Watermark::new(
             event_time_col_idx,
@@ -153,8 +153,12 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
                     // NULL watermark should not be considered.
                     let max_watermark = watermark_array.iter().flatten().max();
-                    // Assign a new watermark.
-                    current_watermark = cmp::max(current_watermark, max_watermark.to_owned_datum());
+
+                    if let Some(max_watermark) = max_watermark {
+                        // Assign a new watermark.
+                        current_watermark =
+                            cmp::max(current_watermark, max_watermark.into_scalar_impl());
+                    }
 
                     let pred_output = watermark_filter_expr
                         .eval_infallible(chunk.data_chunk(), |err| {
@@ -204,7 +208,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         let vnodes = table.get_vnodes();
                         for vnode in vnodes.ones() {
                             let pk = Some(ScalarImpl::Int16(vnode as _));
-                            let row = Row::new(vec![pk, current_watermark.clone()]);
+                            let row = Row::new(vec![pk, Some(current_watermark.clone())]);
                             // FIXME(yuhao): use upsert.
                             table.insert(row);
                         }
@@ -222,20 +226,20 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
     fn build_watermark_filter_expr(
         watermark_type: DataType,
         event_time_col_idx: usize,
-        watermark: Datum,
+        watermark: ScalarImpl,
     ) -> ExprResult<BoxedExpression> {
         new_binary_expr(
             Type::GreaterThanOrEqual,
             DataType::Boolean,
             InputRefExpression::new(watermark_type.clone(), event_time_col_idx).boxed(),
-            LiteralExpression::new(watermark_type, watermark).boxed(),
+            LiteralExpression::new(watermark_type, Some(watermark)).boxed(),
         )
     }
 
     async fn get_global_max_watermark(
         table: &StateTable<S>,
         watermark_type: DataType,
-    ) -> StreamExecutorResult<Datum> {
+    ) -> StreamExecutorResult<ScalarImpl> {
         let watermark_iter_futures = (0..VIRTUAL_NODE_COUNT).map(|vnode| async move {
             let pk = Row::new(vec![Some(ScalarImpl::Int16(vnode as _))]);
             let watermark_row = table.get_row(&pk).await?;
@@ -268,7 +272,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             .max()
             .unwrap_or_else(|| watermark_type.min());
 
-        Ok(Some(watermark))
+        Ok(watermark)
     }
 }
 
@@ -397,7 +401,7 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            Watermark::new(1, Some(WATERMARK_TYPE.min()))
+            Watermark::new(1, WATERMARK_TYPE.min())
         );
 
         // push the 1st chunk
@@ -417,9 +421,9 @@ mod tests {
             watermark.into_watermark().unwrap(),
             Watermark::new(
                 1,
-                Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
                     NaiveDate::from_ymd(2022, 11, 7).and_hms(0, 0, 0)
-                )))
+                ))
             )
         );
 
@@ -443,9 +447,9 @@ mod tests {
             watermark.into_watermark().unwrap(),
             Watermark::new(
                 1,
-                Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
                     NaiveDate::from_ymd(2022, 11, 9).and_hms(0, 0, 0)
-                )))
+                ))
             )
         );
 
@@ -470,9 +474,9 @@ mod tests {
             watermark.into_watermark().unwrap(),
             Watermark::new(
                 1,
-                Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
                     NaiveDate::from_ymd(2022, 11, 9).and_hms(0, 0, 0)
-                )))
+                ))
             )
         );
 
@@ -492,9 +496,9 @@ mod tests {
             watermark.into_watermark().unwrap(),
             Watermark::new(
                 1,
-                Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
                     NaiveDate::from_ymd(2022, 11, 13).and_hms(0, 0, 0)
-                )))
+                ))
             )
         );
     }

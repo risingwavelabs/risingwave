@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
 use super::RwPgResponse;
@@ -54,7 +55,8 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
         vec![row].into(),
         vec![PgFieldDescriptor::new(
             name.to_ascii_lowercase(),
-            TypeOid::Varchar,
+            DataType::VARCHAR.to_oid(),
+            DataType::VARCHAR.type_len(),
         )],
     ))
 }
@@ -80,9 +82,21 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<RwPgResponse
         Some(all_variables.len() as i32),
         rows.into(),
         vec![
-            PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
-            PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
-            PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new(
+                "Name".to_string(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Setting".to_string(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Description".to_string(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
         ],
     ))
 }
