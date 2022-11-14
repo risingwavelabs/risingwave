@@ -114,6 +114,7 @@ export interface Table {
    */
   valueIndices: number[];
   definition: string;
+  handlePkConflict: boolean;
 }
 
 export interface Table_PropertiesEntry {
@@ -529,6 +530,7 @@ function createBaseTable(): Table {
     vnodeColIdx: undefined,
     valueIndices: [],
     definition: "",
+    handlePkConflict: false,
   };
 }
 
@@ -568,6 +570,7 @@ export const Table = {
         ? object.valueIndices.map((e: any) => Number(e))
         : [],
       definition: isSet(object.definition) ? String(object.definition) : "",
+      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
     };
   },
 
@@ -622,6 +625,7 @@ export const Table = {
       obj.valueIndices = [];
     }
     message.definition !== undefined && (obj.definition = message.definition);
+    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     return obj;
   },
 
@@ -664,6 +668,7 @@ export const Table = {
       : undefined;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
+    message.handlePkConflict = object.handlePkConflict ?? false;
     return message;
   },
 };
