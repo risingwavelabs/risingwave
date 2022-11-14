@@ -244,15 +244,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_exists(&mut self, ret: DataTypeName, inside_agg: bool) -> Expr {
-        // TODO: Streaming nested loop join is not implemented yet. 
+        // TODO: Streaming nested loop join is not implemented yet.
         // Tracked by: <https://github.com/singularity-data/risingwave/issues/2655>.
+
+        // Generation of subquery inside aggregation is now workaround.
+        // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/3896>.
         if self.is_mview || ret != DataTypeName::Boolean || inside_agg {
             return self.gen_simple_scalar(ret);
         };
-        // Workround Due to Correlated subquery in HAVING or SELECT with agg is not implemented
-        // yet.  Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
-        // let (sibquery, _) = self.gen_correlated_query()
-        let (subquery, _) = self._gen_corellated_query();
+
+        let (subquery, _) = self.gen_correlated_query();
         Expr::Exists(Box::new(subquery))
     }
 
