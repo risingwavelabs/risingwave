@@ -959,8 +959,30 @@ where
                         FragmentDistributionType::Unspecified => unreachable!(),
                     }
                 } else {
-                    let upstream_fragment_id =
-                        fragment.upstream_fragment_ids.iter().exactly_one().unwrap();
+
+                    // let test: &FragmentId =
+                    //     fragment.upstream_fragment_ids.iter().filter(|fragment_id| {
+                    //         !ctx.no_shuffle_source_fragment_ids.contains(*fragment_id)
+                    //     }).exactly_one().unwrap();
+                    //
+                    // let frag = ctx.fragment_map.get(test).cloned().unwrap();
+                    //
+                    // let x = frag.actors.iter().exactly_one().cloned().unwrap();
+                    //
+                    // println!("actor {} broad dispa {:#?}", x.actor_id, x.dispatcher);
+
+                    for fragment_id in &fragment.upstream_fragment_ids {
+                        let frag = ctx.fragment_map.get(fragment_id).cloned().unwrap();
+                        let x = frag.actors.first().unwrap();
+                        println!("actor {} broad dispa {:#?}", x.actor_id, x.dispatcher);
+                    }
+
+
+                    let upstream_fragment_id: &FragmentId =
+                        fragment.upstream_fragment_ids.iter().filter(|fragment_id| {
+                            ctx.no_shuffle_source_fragment_ids.contains(*fragment_id)
+                        }).exactly_one().unwrap();
+
                     let upstream_fragment = ctx.fragment_map.get(upstream_fragment_id).unwrap();
 
                     let upstream_fragment_dispatcher_types = upstream_fragment
