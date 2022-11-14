@@ -284,18 +284,16 @@ impl TestCase {
 
         let expected_output_path = self.file_manager.expected_output_of(&self.test_name)?;
 
-        let input_lines = input_file_content
-            .lines()
-            .filter(|s| !is_empty_or_comment(s));
+        let input_lines = input_file_content.lines().filter(|s| !s.is_empty());
         let mut expected_lines = std::io::BufReader::new(File::open(expected_output_path)?)
             .lines()
             .map(|s| s.unwrap())
-            .filter(|s| !is_empty_or_comment(s));
+            .filter(|s| !s.is_empty());
         let mut actual_lines = std::io::BufReader::new(File::open(actual_output_path)?)
             .lines()
             .skip(extra_lines_added_to_input.len())
             .map(|s| s.unwrap())
-            .filter(|s| !is_empty_or_comment(s));
+            .filter(|s| !s.is_empty());
 
         // We split the output lines (either expected or actual) based on matching lines from input.
         // For example:
@@ -319,10 +317,16 @@ impl TestCase {
         // * query 9..=9 and output 10..=12
         let mut is_diff = false;
         let mut pending_input = vec![];
+        // Test queries commented out with `--@ ` are ignored for comparison.
+        // Unlike normal comment `--`, this does not require modification to expected output file.
+        // We can simplify toggle the case on/off by just updating the input sql file.
+        const PREFIX_IGNORE: &str = "--@ ";
         for input_line in input_lines {
+            let original_input_line = input_line.strip_prefix(PREFIX_IGNORE).unwrap_or(input_line);
+
             // Find the matching output line, and collect lines before the next matching line.
             let mut expected_output = vec![];
-            while let Some(line) = expected_lines.next() && line != input_line {
+            while let Some(line) = expected_lines.next() && line != original_input_line {
                 expected_output.push(line);
             }
 
@@ -340,6 +344,9 @@ impl TestCase {
 
             let query_input = std::mem::replace(&mut pending_input, vec![input_line]);
 
+            if let Some(l) = query_input.last() && l.starts_with(PREFIX_IGNORE) {
+                continue;
+            }
             is_diff = !compare_output(&query_input, &expected_output, &actual_output) || is_diff;
         }
         // There may be more lines after the final matching lines.
@@ -349,21 +356,6 @@ impl TestCase {
 
         Ok(if is_diff { Different } else { Same })
     }
-}
-
-/// Checks whether a line (without '\n') needs to be skipped during comparison.
-///
-/// This may not be general enough, but regress input/output files are relatively standard and may
-/// not contain the following edge cases:
-/// * " \t " (not empty but only contains whitespaces)
-/// * " --" or "A--" (comment not starting at position 0)
-/// * "---" or "--A" (comment not followed by space)
-///
-/// Feel free to handle these cases when needed.
-fn is_empty_or_comment(line: &str) -> bool {
-    // We assume that the line indicating the result set of a select query must have more than two
-    // `-`.
-    line.is_empty() || line.starts_with("-- ") || line == "--"
 }
 
 fn compare_output(query: &[&str], expected: &[String], actual: &[String]) -> bool {
