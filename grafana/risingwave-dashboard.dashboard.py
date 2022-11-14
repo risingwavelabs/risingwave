@@ -1408,7 +1408,9 @@ def frontend(outer_panels):
 
 def section_hummock(panels):
     mete_miss_filter = "type='meta_miss'"
+    meta_total_filter = "type='meta_total'"
     data_miss_filter = "type='data_miss'"
+    data_total_filter = "type='data_total'"
     file_cache_get_filter = "op='get'"
     return [
         panels.row("Hummock"),
@@ -1610,11 +1612,11 @@ def section_hummock(panels):
                     "bloom filter miss rate - {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"(sum(rate({metric('state_store_sst_store_block_request_counts', mete_miss_filter)}[$__rate_interval])) by (job,instance))",
+                    f"(sum(rate({metric('state_store_sst_store_block_request_counts', mete_miss_filter)}[$__rate_interval])) by (job,instance)) / (sum(rate({metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance))",
                     "meta cache miss rate - {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"(sum(rate({metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by (job,instance))",
+                    f"(sum(rate({metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by (job,instance)) / (sum(rate({metric('state_store_sst_store_block_request_counts', data_total_filter)}[$__rate_interval])) by (job,instance))",
                     "block cache miss rate - {{job}} @ {{instance}}",
                 ),
                 panels.target(
@@ -1950,9 +1952,12 @@ def section_grpc_meta_catalog_service(outer_panels):
         outer_panels.row_collapsed(
             "gRPC Meta: Catalog Service",
             [
-                grpc_metrics_target(panels, "Create", "path='/meta.CatalogService/Create'"),
-                grpc_metrics_target(panels, "Drop", "path='/meta.CatalogService/Drop'"),
-                grpc_metrics_target(panels, "GetCatalog", "path='/meta.CatalogService/GetCatalog'"),
+                grpc_metrics_target(
+                    panels, "Create", "path='/meta.CatalogService/Create'"),
+                grpc_metrics_target(
+                    panels, "Drop", "path='/meta.CatalogService/Drop'"),
+                grpc_metrics_target(panels, "GetCatalog",
+                                    "path='/meta.CatalogService/GetCatalog'"),
             ],
         )
     ]
@@ -1964,8 +1969,10 @@ def section_grpc_meta_cluster_service(outer_panels):
         outer_panels.row_collapsed(
             "gRPC Meta: Cluster Service",
             [
-                grpc_metrics_target(panels, "AddWorkerNode", "path='/meta.ClusterService/AddWorkerNode'"),
-                grpc_metrics_target(panels, "ListAllNodes", "path='/meta.ClusterService/ListAllNodes'"),
+                grpc_metrics_target(panels, "AddWorkerNode",
+                                    "path='/meta.ClusterService/AddWorkerNode'"),
+                grpc_metrics_target(panels, "ListAllNodes",
+                                    "path='/meta.ClusterService/ListAllNodes'"),
             ],
         ),
     ]
@@ -1977,9 +1984,12 @@ def section_grpc_meta_stream_manager(outer_panels):
         outer_panels.row_collapsed(
             "gRPC Meta: Stream Manager",
             [
-                grpc_metrics_target(panels, "CreateMaterializedView", "path='/meta.StreamManagerService/CreateMaterializedView'"),
-                grpc_metrics_target(panels, "DropMaterializedView", "path='/meta.StreamManagerService/DropMaterializedView'"),
-                grpc_metrics_target(panels, "Flush", "path='/meta.StreamManagerService/Flush'"),
+                grpc_metrics_target(panels, "CreateMaterializedView",
+                                    "path='/meta.StreamManagerService/CreateMaterializedView'"),
+                grpc_metrics_target(panels, "DropMaterializedView",
+                                    "path='/meta.StreamManagerService/DropMaterializedView'"),
+                grpc_metrics_target(
+                    panels, "Flush", "path='/meta.StreamManagerService/Flush'"),
             ],
         ),
     ]
@@ -1991,10 +2001,14 @@ def section_grpc_meta_hummock_manager(outer_panels):
         outer_panels.row_collapsed(
             "gRPC Meta: Hummock Manager",
             [
-                grpc_metrics_target(panels, "UnpinVersionBefore", "path='/meta.HummockManagerService/UnpinVersionBefore'"),
-                grpc_metrics_target(panels, "UnpinSnapshotBefore", "path='/meta.HummockManagerService/UnpinSnapshotBefore'"),
-                grpc_metrics_target(panels, "ReportCompactionTasks", "path='/meta.HummockManagerService/ReportCompactionTasks'"),
-                grpc_metrics_target(panels, "GetNewSstIds", "path='/meta.HummockManagerService/GetNewSstIds'"),
+                grpc_metrics_target(
+                    panels, "UnpinVersionBefore", "path='/meta.HummockManagerService/UnpinVersionBefore'"),
+                grpc_metrics_target(panels, "UnpinSnapshotBefore",
+                                    "path='/meta.HummockManagerService/UnpinSnapshotBefore'"),
+                grpc_metrics_target(panels, "ReportCompactionTasks",
+                                    "path='/meta.HummockManagerService/ReportCompactionTasks'"),
+                grpc_metrics_target(
+                    panels, "GetNewSstIds", "path='/meta.HummockManagerService/GetNewSstIds'"),
             ],
         ),
     ]

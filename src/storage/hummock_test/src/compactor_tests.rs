@@ -48,7 +48,8 @@ mod tests {
     };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::{
-        CompactorSstableStore, HummockStorage, MemoryLimiter, SstableIdManager,
+        CompactorSstableStore, HummockStorage as GlobalHummockStorage, MemoryLimiter,
+        SstableIdManager,
     };
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use risingwave_storage::storage_value::StorageValue;
@@ -57,7 +58,10 @@ mod tests {
     };
     use risingwave_storage::Keyspace;
 
-    use crate::test_utils::{get_test_notification_client, prefixed_key};
+    use crate::test_utils::{
+        get_test_notification_client, prefixed_key, HummockV2MixedStateStore,
+        HummockV2MixedStateStore as HummockStorage,
+    };
 
     async fn get_hummock_storage(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -74,14 +78,16 @@ mod tests {
         });
         let sstable_store = mock_sstable_store();
 
-        HummockStorage::for_test(
+        let hummock = GlobalHummockStorage::for_test(
             options,
             sstable_store,
             hummock_meta_client.clone(),
             notification_client,
         )
         .await
-        .unwrap()
+        .unwrap();
+
+        HummockV2MixedStateStore::new(hummock).await
     }
 
     async fn prepare_test_put_data(
@@ -128,7 +134,7 @@ mod tests {
     }
 
     fn get_compactor_context_with_filter_key_extractor_manager(
-        storage: &HummockStorage,
+        storage: &HummockV2MixedStateStore,
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
@@ -147,13 +153,13 @@ mod tests {
             )),
             task_progress_manager: Default::default(),
         });
-        CompactorContext {
-            sstable_store: Arc::new(CompactorSstableStore::new(
+        CompactorContext::new(
+            context.clone(),
+            Arc::new(CompactorSstableStore::new(
                 context.sstable_store.clone(),
                 context.read_memory_limiter.clone(),
             )),
-            context,
-        }
+        )
     }
 
     #[tokio::test]
@@ -451,7 +457,7 @@ mod tests {
         }
     }
 
-    pub async fn prepare_compactor_and_filter(
+    pub(crate) async fn prepare_compactor_and_filter(
         storage: &HummockStorage,
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         hummock_manager_ref: HummockManagerRef<MemStore>,

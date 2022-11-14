@@ -32,6 +32,7 @@ mod stream_chunk_iter;
 pub mod struct_array;
 mod utf8_array;
 mod value_reader;
+mod vis;
 
 use std::convert::From;
 use std::hash::{Hash, Hasher};
@@ -43,7 +44,7 @@ pub use chrono_array::{
     NaiveTimeArray, NaiveTimeArrayBuilder,
 };
 pub use column_proto_readers::*;
-pub use data_chunk::{DataChunk, DataChunkTestExt, Vis};
+pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
@@ -55,6 +56,7 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
+pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
 use crate::buffer::Bitmap;
@@ -323,12 +325,6 @@ impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
 impl From<BoolArray> for ArrayImpl {
     fn from(arr: BoolArray) -> Self {
         Self::Bool(arr)
-    }
-}
-
-impl From<DecimalArray> for ArrayImpl {
-    fn from(arr: DecimalArray) -> Self {
-        Self::Decimal(arr)
     }
 }
 
@@ -623,7 +619,7 @@ impl ArrayImpl {
                 read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?
             }
             ProstArrayType::Decimal => {
-                read_string_array::<DecimalArrayBuilder, DecimalValueReader>(array, cardinality)?
+                read_numeric_array::<Decimal, DecimalValueReader>(array, cardinality)?
             }
             ProstArrayType::Date => read_naive_date_array(array, cardinality)?,
             ProstArrayType::Time => read_naive_time_array(array, cardinality)?,
