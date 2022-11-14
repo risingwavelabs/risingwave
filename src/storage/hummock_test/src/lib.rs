@@ -29,6 +29,7 @@ mod snapshot_tests;
 #[cfg(test)]
 mod state_store_tests;
 
+#[cfg(test)]
 pub mod test_utils;
 
 #[cfg(test)]

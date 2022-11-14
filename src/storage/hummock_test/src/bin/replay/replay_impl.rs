@@ -16,10 +16,17 @@ use std::ops::Bound;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_trace::{LocalReplay, ReplayIter, Replayable, Result, TraceError};
-use risingwave_meta::manager::NotificationManagerRef;
-use risingwave_meta::storage::MemStore;
+use risingwave_common::error::Result as RwResult;
+use risingwave_common::util::addr::HostAddr;
+use risingwave_common_service::observer_manager::{Channel, NotificationClient};
+use risingwave_hummock_trace::{
+    LocalReplay, ReplayIter, Replayable, Result, TraceError, TraceSubResp,
+};
+use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
+use risingwave_meta::storage::{MemStore, MetaStore};
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
+use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
@@ -27,6 +34,7 @@ use risingwave_storage::store::{
     ReadOptions, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
 };
 use risingwave_storage::{StateStore, StateStoreIter};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 pub(crate) struct HummockReplayIter<I: StateStoreIter<Item = (Bytes, Bytes)>>(I);
 
@@ -114,7 +122,7 @@ impl LocalReplay for LocalReplayInterface {
                     check_bloom_filter,
                     table_id: TableId { table_id },
                     retention_seconds,
-                    prefix_hint: prefix_hint,
+                    prefix_hint,
                 },
             )
             .await
@@ -175,9 +183,9 @@ impl LocalReplay for LocalReplayInterface {
                 epoch,
                 ReadOptions {
                     prefix_hint,
-                    table_id,
-                    retention_seconds,
                     check_bloom_filter,
+                    retention_seconds,
+                    table_id,
                 },
             )
             .await
@@ -185,5 +193,74 @@ impl LocalReplay for LocalReplayInterface {
 
         let iter = HummockReplayIter::new(iter);
         Ok(Box::new(iter))
+    }
+}
+
+pub struct ReplayNotificationClient<S: MetaStore> {
+    addr: HostAddr,
+    notification_manager: NotificationManagerRef<S>,
+    first_resp: Box<TraceSubResp>,
+}
+
+impl<S: MetaStore> ReplayNotificationClient<S> {
+    pub fn new(
+        addr: HostAddr,
+        notification_manager: NotificationManagerRef<S>,
+        first_resp: Box<TraceSubResp>,
+    ) -> Self {
+        Self {
+            addr,
+            notification_manager,
+            first_resp,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<S: MetaStore> NotificationClient for ReplayNotificationClient<S> {
+    type Channel = ReplayChannel<SubscribeResponse>;
+
+    async fn subscribe(&self, subscribe_type: SubscribeType) -> RwResult<Self::Channel> {
+        let (tx, rx) = unbounded_channel();
+
+        self.notification_manager
+            .insert_sender(subscribe_type, WorkerKey(self.addr.to_protobuf()), tx)
+            .await;
+
+        // send the first snapshot message
+        let op = self.first_resp.0.operation();
+        let info = self.first_resp.0.info.clone();
+
+        self.notification_manager
+            .notify_hummock(op, info.unwrap())
+            .await;
+
+        Ok(ReplayChannel(rx))
+    }
+}
+
+pub fn get_replay_notification_client(
+    env: MetaSrvEnv<MemStore>,
+    worker_node: WorkerNode,
+    first_resp: Box<TraceSubResp>,
+) -> ReplayNotificationClient<MemStore> {
+    ReplayNotificationClient::new(
+        worker_node.get_host().unwrap().into(),
+        env.notification_manager_ref(),
+        first_resp,
+    )
+}
+
+pub struct ReplayChannel<T>(UnboundedReceiver<std::result::Result<T, MessageStatus>>);
+
+#[async_trait::async_trait]
+impl<T: Send + 'static> Channel for ReplayChannel<T> {
+    type Item = T;
+
+    async fn message(&mut self) -> std::result::Result<Option<T>, MessageStatus> {
+        match self.0.recv().await {
+            None => Ok(None),
+            Some(result) => result.map(|r| Some(r)),
+        }
     }
 }

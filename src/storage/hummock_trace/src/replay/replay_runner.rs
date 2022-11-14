@@ -13,63 +13,16 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::ops::Bound;
 use std::sync::Arc;
 
-#[cfg(test)]
-use mockall::automock;
 use risingwave_common::hm_trace::TraceLocalId;
-use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
+use super::{ReplayRequest, WorkerId, WorkerResponse};
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::{Operation, OperationResult, Record, RecordId};
-
-#[cfg_attr(test, automock)]
-#[async_trait::async_trait]
-pub trait Replayable: Send + Sync {
-    async fn sync(&self, id: u64) -> Result<usize>;
-    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
-    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
-    async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay>;
-}
-
-#[cfg_attr(test, automock)]
-#[async_trait::async_trait]
-pub trait LocalReplay: Send + Sync {
-    async fn get(
-        &self,
-        key: Vec<u8>,
-        check_bloom_filter: bool,
-        epoch: u64,
-        prefix_hint: Option<Vec<u8>>,
-        table_id: u32,
-        retention_seconds: Option<u32>,
-    ) -> Result<Option<Vec<u8>>>;
-    async fn ingest(
-        &self,
-        kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-        delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
-        epoch: u64,
-        table_id: u32,
-    ) -> Result<usize>;
-    async fn iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-        prefix_hint: Option<Vec<u8>>,
-        check_bloom_filter: bool,
-        retention_seconds: Option<u32>,
-        table_id: u32,
-    ) -> Result<Box<dyn ReplayIter>>;
-}
-
-#[async_trait::async_trait]
-pub trait ReplayIter: Send + Sync {
-    async fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)>;
-}
+use crate::{replay_worker, Operation, OperationResult, RecordId, Replayable};
 
 pub struct HummockReplay<R: TraceReader> {
     reader: R,
@@ -149,169 +102,6 @@ impl<R: TraceReader> HummockReplay<R> {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone)]
-enum WorkerId {
-    Actor(u64),
-    Executor(u64),
-    None(u64),
-}
-
-async fn replay_worker(
-    mut rx: UnboundedReceiver<ReplayRequest>,
-    mut res_rx: UnboundedReceiver<OperationResult>,
-    tx: UnboundedSender<WorkerResponse>,
-    replay: Arc<Box<dyn Replayable>>,
-) {
-    let mut iters_map = HashMap::new();
-    let mut local_storages = HashMap::new();
-    loop {
-        if let Some(msg) = rx.recv().await {
-            match msg {
-                ReplayRequest::Task(record_group) => {
-                    for record in record_group {
-                        handle_record(
-                            record,
-                            &replay,
-                            &mut res_rx,
-                            &mut iters_map,
-                            &mut local_storages,
-                        )
-                        .await;
-                    }
-                    tx.send(()).expect("failed to done task");
-                }
-                ReplayRequest::Fin => return,
-            }
-        }
-    }
-}
-
-async fn handle_record(
-    record: Record,
-    replay: &Arc<Box<dyn Replayable>>,
-    res_rx: &mut UnboundedReceiver<OperationResult>,
-    iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
-    local_storages: &mut HashMap<u32, Box<dyn LocalReplay>>,
-) {
-    let Record(_, _, record_id, op) = record;
-    match op {
-        Operation::Get {
-            key,
-            check_bloom_filter,
-            epoch,
-            table_id,
-            retention_seconds,
-            prefix_hint,
-        } => {
-            let local_storage = {
-                // cannot use or_insert here because rust evaluates arguments even though
-                // or_insert is never called
-                if !local_storages.contains_key(&table_id) {
-                    local_storages.insert(table_id, replay.new_local(table_id).await);
-                }
-                local_storages.get(&table_id).unwrap()
-            };
-
-            let actual = local_storage
-                .get(
-                    key,
-                    check_bloom_filter,
-                    epoch,
-                    prefix_hint,
-                    table_id,
-                    retention_seconds,
-                )
-                .await;
-            let res = res_rx.recv().await.expect("recv result failed");
-            if let OperationResult::Get(expected) = res {
-                assert_eq!(actual.ok(), expected, "get result wrong");
-            }
-        }
-        Operation::Ingest {
-            kv_pairs,
-            epoch,
-            table_id,
-            delete_ranges,
-        } => {
-            let local_storage = {
-                if !local_storages.contains_key(&table_id) {
-                    local_storages.insert(table_id, replay.new_local(table_id).await);
-                }
-                local_storages.get(&table_id).unwrap()
-            };
-
-            let actual = local_storage
-                .ingest(kv_pairs, delete_ranges, epoch, table_id)
-                .await;
-
-            let res = res_rx.recv().await.expect("recv result failed");
-            if let OperationResult::Ingest(expected) = res {
-                assert_eq!(actual.ok(), expected, "ingest result wrong");
-            }
-        }
-        Operation::Iter {
-            prefix_hint,
-            key_range,
-            epoch,
-            table_id,
-            retention_seconds,
-            check_bloom_filter,
-        } => {
-            let local_storage = {
-                if !local_storages.contains_key(&table_id) {
-                    local_storages.insert(table_id, replay.new_local(table_id).await);
-                }
-                local_storages.get(&table_id).unwrap()
-            };
-
-            let iter = local_storage
-                .iter(
-                    key_range,
-                    epoch,
-                    prefix_hint,
-                    check_bloom_filter,
-                    retention_seconds,
-                    table_id,
-                )
-                .await;
-            let res = res_rx.recv().await.expect("recv result failed");
-            if let OperationResult::Iter(expected) = res {
-                if expected.is_some() {
-                    iters_map.insert(record_id, iter.unwrap());
-                } else {
-                    assert!(iter.is_err());
-                }
-            }
-        }
-        Operation::Sync(epoch_id) => {
-            let sync_result = replay.sync(epoch_id).await.unwrap();
-            let res = res_rx.recv().await.expect("recv result failed");
-            if let OperationResult::Sync(expected) = res {
-                let actual = Some(sync_result);
-                assert_eq!(actual, expected, "sync failed");
-            }
-        }
-        Operation::Seal(epoch_id, is_checkpoint) => {
-            replay.seal_epoch(epoch_id, is_checkpoint).await;
-        }
-        Operation::IterNext(id) => {
-            let iter = iters_map.get_mut(&id).expect("iter not in worker");
-            let actual = iter.next().await;
-            let res = res_rx.recv().await.expect("recv result failed");
-            if let OperationResult::IterNext(expected) = res {
-                assert_eq!(actual, expected, "iter_next result wrong");
-            }
-        }
-        Operation::MetaMessage(resp) => {
-            let op = resp.0.operation();
-            if let Some(info) = resp.0.info {
-                replay.notify_hummock(info, op).await.unwrap();
-            }
-        }
-        _ => unreachable!(),
-    }
-}
-
 struct WorkerHandler {
     req_tx: UnboundedSender<ReplayRequest>,
     res_tx: UnboundedSender<OperationResult>,
@@ -346,16 +136,6 @@ impl WorkerHandler {
     }
 }
 
-type ReplayGroup = Vec<Record>;
-
-type WorkerResponse = ();
-
-#[derive(Debug)]
-enum ReplayRequest {
-    Task(ReplayGroup),
-    Fin,
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -364,7 +144,9 @@ mod tests {
     use mockall::predicate;
 
     use super::*;
-    use crate::{MockTraceReader, StorageType, TraceError};
+    use crate::{
+        MockLocalReplay, MockReplayable, MockTraceReader, Record, StorageType, TraceError,
+    };
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_replay() {
@@ -382,7 +164,7 @@ mod tests {
         let table_id1 = 1;
         let table_id2 = 2;
         let table_id3 = 3;
-        let actor_1: Vec<Result<Record>> = vec![
+        let actor_1 = vec![
             (
                 0,
                 Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), table_id1),
@@ -403,10 +185,9 @@ mod tests {
             (3, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id1, record_id, op)))
-        .collect();
+        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id1, record_id, op)));
 
-        let actor_2: Vec<Result<Record>> = vec![
+        let actor_2 = vec![
             (
                 1,
                 Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), table_id2),
@@ -427,10 +208,9 @@ mod tests {
             (2, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id2, record_id, op)))
-        .collect();
+        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id2, record_id, op)));
 
-        let actor_3: Vec<Result<Record>> = vec![
+        let actor_3 = vec![
             (
                 4,
                 Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), table_id3),
@@ -451,8 +231,7 @@ mod tests {
             (5, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id3, record_id, op)))
-        .collect();
+        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id3, record_id, op)));
 
         let mut non_local: Vec<Result<Record>> = vec![
             (6, Operation::Seal(seal_id, seal_checkpoint)),

@@ -6,16 +6,16 @@ risedev:
   # The default configuration will start 1 compute node, 1 meta node and 1 frontend.
   default:
     # If you want to use the local s3 storage, enable the following line
-    - use: minio
+    # - use: minio
 
    # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
     # - use: aws-s3
-      
+
       # bucket: test-bucket
-      
+
       # If you want to use other s3 compatible object store, open this flag:
       # s3-compatible: false
-      
+
 
     # if you want to enable etcd backend, uncomment the following lines.
     # - use: etcd
@@ -27,7 +27,7 @@ risedev:
     - use: frontend
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-    - use: compactor
+    # - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
     # - use: prometheus
@@ -599,10 +599,10 @@ template:
     unsafe-disable-recovery: false
 
     # Interval of GC stale metadata and SST
-    vacuum-interval-sec: 604800
+    vacuum-interval-sec: 30
 
     # Interval of periodical compaction
-    periodic-compaction-interval-sec: 604800
+    periodic-compaction-interval-sec: 60
 
     # Whether run in compaction deterministic test mode
     enable-compaction-deterministic: false
@@ -752,7 +752,7 @@ template:
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
 
-    # used to support other s3 compatible object store. 
+    # used to support other s3 compatible object store.
     s3-compatible: false
 
   # Apache Kafka service

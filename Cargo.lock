@@ -5503,7 +5503,6 @@ dependencies = [
  "madsim-tokio",
  "mockall",
  "parking_lot 0.12.1",
- "rand 0.8.5",
  "risingwave_common",
  "risingwave_pb",
  "ron",
