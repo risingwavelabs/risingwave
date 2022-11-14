@@ -308,7 +308,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             match msg? {
                 AlignedMessage::Left(chunk) => {
                     // Reuse the logic from `FilterExecutor`
-                    let chunk = chunk.compact(); // Is this unnecessary work?
+                    let chunk = chunk.compact(); // This is not unnecessary work, but we can refactor.
                     let (data_chunk, ops) = chunk.into_parts();
 
                     let right_val = prev_epoch_value.clone().flatten();

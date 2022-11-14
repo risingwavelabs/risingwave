@@ -77,6 +77,7 @@ mod sink;
 mod sort;
 pub mod source;
 pub mod subtask;
+mod temporal_filter;
 mod top_n;
 mod union;
 mod watermark_filter;
