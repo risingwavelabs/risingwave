@@ -265,11 +265,11 @@ impl SealedData {
         unseal_epoch_data
             .spilled_data
             .uploading_tasks
-            .extend(self.spilled_data.uploading_tasks.drain(..));
+            .append(&mut self.spilled_data.uploading_tasks);
         unseal_epoch_data
             .spilled_data
             .uploaded_data
-            .extend(self.spilled_data.uploaded_data.drain(..));
+            .append(&mut self.spilled_data.uploaded_data);
         self.spilled_data.uploading_tasks = unseal_epoch_data.spilled_data.uploading_tasks;
         self.spilled_data.uploaded_data = unseal_epoch_data.spilled_data.uploaded_data;
     }
@@ -312,6 +312,7 @@ type SyncedDataState = HummockResult<Vec<StagingSstableInfo>>;
 
 struct UploaderContext {
     pinned_version: PinnedVersion,
+    /// When called, it will spawn a task to flush the imm into sst and return the join handle.
     spawn_upload_task: SpawnUploadTask,
     buffer_tracker: BufferTracker,
 }
