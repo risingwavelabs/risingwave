@@ -211,7 +211,10 @@ async fn init_metadata_for_replay(
     ci_mode: bool,
     table_id: &mut u32,
 ) -> anyhow::Result<()> {
-    // Wait for compactor starts
+    // The compactor needs to receive catalog notification from the new Meta node,
+    // and we should wait the compactor finishes setup the subscription channel
+    // before registering the table catalog to the new Meta node. Otherwise the
+    // filter key manager will fail to acquire a key extractor.
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     let meta_client: MetaClient;
