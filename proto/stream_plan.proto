@@ -300,7 +300,6 @@ message ExchangeNode {
   DispatchStrategy strategy = 1;
 }
 
-
 enum ChainType {
   // CHAIN is corresponding to the chain executor.
   CHAIN = 0;
