@@ -75,7 +75,7 @@ impl ToBatchProst for BatchInsert {
             .logical
             .column_idxs()
             .iter()
-            .map(|&i| u32::from(i))
+            .map(|&i| i as u32)
             .collect();
         NodeBody::Insert(InsertNode {
             table_source_id: self.logical.source_id().table_id(),

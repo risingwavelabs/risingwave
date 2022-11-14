@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::ColumnIdx;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
@@ -31,7 +30,7 @@ pub struct BoundInsert {
     /// Is equal to [0, 2, 1] for insert statement
     /// create table t1 (v1 int, v2 int, v3 int); insert into t1 (v1, v3, v2) values (5, 6, 7);
     /// Empty if user does not define insert columns
-    pub column_idxs: Vec<ColumnIdx>,
+    pub column_idxs: Vec<usize>,
 
     pub source: BoundQuery,
 
@@ -120,12 +119,12 @@ impl Binder {
             }
         };
 
-        let mut target_table_col_idxs: Vec<ColumnIdx> = vec![];
+        let mut target_table_col_idxs: Vec<usize> = vec![];
         'outer: for query_column in &columns {
             let column_name = &query_column.value; // value or real_value() ?
             for (col_idx, table_column) in table_source.columns.iter().enumerate() {
                 if column_name.eq_ignore_ascii_case(table_column.name.as_str()) {
-                    target_table_col_idxs.push(ColumnIdx::from(col_idx));
+                    target_table_col_idxs.push(col_idx);
                     continue 'outer;
                 }
             }
