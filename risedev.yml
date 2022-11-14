@@ -10,9 +10,12 @@ risedev:
 
    # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
     # - use: aws-s3
+
       # bucket: test-bucket
+
       # If you want to use other s3 compatible object store, open this flag:
       # s3-compatible: false
+
 
     # if you want to enable etcd backend, uncomment the following lines.
     # - use: etcd
