@@ -29,7 +29,7 @@ pub trait NexmarkRng {
 
 impl NexmarkRng for SmallRng {
     fn gen_string(&mut self, max: usize) -> String {
-        self.gen_string_with_delimiter(max, ' ')
+        self.gen_exact_string(max)
     }
 
     fn gen_string_with_delimiter(&mut self, max: usize, delimiter: char) -> String {

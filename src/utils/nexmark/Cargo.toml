@@ -8,3 +8,10 @@ description = "Nexmark data stream generator."
 [dependencies]
 rand = { version = "0.8", features = ["small_rng"] }
 serde = { version = "1", features = ["derive"], optional = true }
+
+[dev-dependencies]
+criterion = "0.4"
+
+[[bench]]
+name = "gen"
+harness = false
