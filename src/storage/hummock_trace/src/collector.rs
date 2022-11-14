@@ -264,11 +264,11 @@ mod tests {
         let op1 = Operation::Sync(0);
         let op2 = Operation::Seal(0, false);
 
-        let record1 = Record::new_local_none(0, op1.clone());
-        let record2 = Record::new_local_none(1, op2.clone());
+        let record1 = Record::new(StorageType::Global, TraceLocalId::None, 0, op1.clone());
+        let record2 = Record::new(StorageType::Global, TraceLocalId::None, 1, op2.clone());
 
-        let _span1 = TraceSpan::new_to_global(op1, TraceLocalId::None, StorageType::Local);
-        let _span2 = TraceSpan::new_to_global(op2, TraceLocalId::None, StorageType::Local);
+        let _span1 = TraceSpan::new_to_global(op1, TraceLocalId::None, StorageType::Global);
+        let _span2 = TraceSpan::new_to_global(op2, TraceLocalId::None, StorageType::Global);
 
         let msg1 = rx.recv().unwrap();
         let msg2 = rx.recv().unwrap();
@@ -308,7 +308,7 @@ mod tests {
             let handle = tokio::spawn(async move {
                 let op = Operation::get(vec![i as u8], 123, None, true, Some(12), 123);
                 let _span =
-                    TraceSpan::new_op(collector.tx(), generator.next(), op, StorageType::Local);
+                    TraceSpan::new_op(collector.tx(), generator.next(), op, StorageType::Global);
             });
             handles.push(handle);
         }

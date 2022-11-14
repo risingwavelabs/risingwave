@@ -36,6 +36,7 @@ pub trait Replayable: Send + Sync {
     async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay>;
 }
 
+#[cfg_attr(test, automock)]
 #[async_trait::async_trait]
 pub trait LocalReplay: Send + Sync {
     async fn get(
@@ -202,9 +203,14 @@ async fn handle_record(
             retention_seconds,
             prefix_hint,
         } => {
-            let local_storage = local_storages
-                .entry(table_id)
-                .or_insert(replay.new_local(table_id).await);
+            let local_storage = {
+                // cannot use or_insert here because rust evaluates arguments even though
+                // or_insert is never called
+                if !local_storages.contains_key(&table_id) {
+                    local_storages.insert(table_id, replay.new_local(table_id).await);
+                }
+                local_storages.get(&table_id).unwrap()
+            };
 
             let actual = local_storage
                 .get(
@@ -227,12 +233,17 @@ async fn handle_record(
             table_id,
             delete_ranges,
         } => {
-            let local_storage = local_storages
-                .entry(table_id)
-                .or_insert(replay.new_local(table_id).await);
+            let local_storage = {
+                if !local_storages.contains_key(&table_id) {
+                    local_storages.insert(table_id, replay.new_local(table_id).await);
+                }
+                local_storages.get(&table_id).unwrap()
+            };
+
             let actual = local_storage
                 .ingest(kv_pairs, delete_ranges, epoch, table_id)
                 .await;
+
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Ingest(expected) = res {
                 assert_eq!(actual.ok(), expected, "ingest result wrong");
@@ -246,9 +257,13 @@ async fn handle_record(
             retention_seconds,
             check_bloom_filter,
         } => {
-            let local_storage = local_storages
-                .entry(table_id)
-                .or_insert(replay.new_local(table_id).await);
+            let local_storage = {
+                if !local_storages.contains_key(&table_id) {
+                    local_storages.insert(table_id, replay.new_local(table_id).await);
+                }
+                local_storages.get(&table_id).unwrap()
+            };
+
             let iter = local_storage
                 .iter(
                     key_range,
@@ -345,66 +360,122 @@ enum ReplayRequest {
 mod tests {
     use std::collections::VecDeque;
 
+    use itertools::Itertools;
     use mockall::predicate;
 
     use super::*;
-    use crate::MockTraceReader;
+    use crate::{MockTraceReader, StorageType, TraceError};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_replay() {
         let mut mock_reader = MockTraceReader::new();
         let get_result = vec![54, 32, 198, 236, 24];
         let ingest_result = 536248723;
-
+        let seal_checkpoint = true;
         let sync_id = 4561245432;
         let seal_id = 5734875243;
-        let seal_checkpoint = true;
-        let mut records: VecDeque<Result<Record>> = VecDeque::from(vec![
-            Ok(Record::new_local_none(
+
+        let storage_type = StorageType::Local;
+        let local_id1 = TraceLocalId::Actor(1);
+        let local_id2 = TraceLocalId::Actor(2);
+        let local_id3 = TraceLocalId::Executor(1);
+        let table_id1 = 1;
+        let table_id2 = 2;
+        let table_id3 = 3;
+        let actor_1: Vec<Result<Record>> = vec![
+            (
                 0,
-                Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), 123),
-            )),
-            Ok(Record::new_local_none(
-                1,
-                Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), 123),
-            )),
-            Ok(Record::new_local_none(
-                2,
-                Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), 123),
-            )),
-            Ok(Record::new_local_none(
-                0,
-                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
-            )),
-            Ok(Record::new_local_none(
+                Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), table_id1),
+            ),
+            (
                 0,
                 Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
-            )),
-            Ok(Record::new_local_none(
-                0,
-                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
-            )),
-            Ok(Record::new_local_none(2, Operation::Finish)),
-            Ok(Record::new_local_none(1, Operation::Finish)),
-            Ok(Record::new_local_none(0, Operation::Finish)),
-            Ok(Record::new_local_none(
+            ),
+            (0, Operation::Finish),
+            (
                 3,
-                Operation::ingest(vec![(vec![123], Some(vec![123]))], vec![], 4, 5),
-            )),
-            Ok(Record::new_local_none(
-                0,
+                Operation::ingest(vec![(vec![123], Some(vec![123]))], vec![], 4, table_id1),
+            ),
+            (
+                3,
                 Operation::Result(OperationResult::Ingest(Some(ingest_result))),
-            )),
-            Ok(Record::new_local_none(4, Operation::Sync(sync_id))),
-            Ok(Record::new_local_none(
+            ),
+            (3, Operation::Finish),
+        ]
+        .into_iter()
+        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id1, record_id, op)))
+        .collect();
+
+        let actor_2: Vec<Result<Record>> = vec![
+            (
+                1,
+                Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), table_id2),
+            ),
+            (
+                1,
+                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
+            ),
+            (1, Operation::Finish),
+            (
+                2,
+                Operation::ingest(vec![(vec![123], Some(vec![123]))], vec![], 4, table_id2),
+            ),
+            (
+                2,
+                Operation::Result(OperationResult::Ingest(Some(ingest_result))),
+            ),
+            (2, Operation::Finish),
+        ]
+        .into_iter()
+        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id2, record_id, op)))
+        .collect();
+
+        let actor_3: Vec<Result<Record>> = vec![
+            (
+                4,
+                Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), table_id3),
+            ),
+            (
+                4,
+                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
+            ),
+            (4, Operation::Finish),
+            (
                 5,
-                Operation::Seal(seal_id, seal_checkpoint),
-            )),
-            Ok(Record::new_local_none(3, Operation::Finish)),
-            Ok(Record::new_local_none(4, Operation::Finish)),
-            Ok(Record::new_local_none(5, Operation::Finish)),
-            Err(crate::TraceError::FinRecord(5)), // intentional error
-        ]);
+                Operation::ingest(vec![(vec![123], Some(vec![123]))], vec![], 4, table_id3),
+            ),
+            (
+                5,
+                Operation::Result(OperationResult::Ingest(Some(ingest_result))),
+            ),
+            (5, Operation::Finish),
+        ]
+        .into_iter()
+        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id3, record_id, op)))
+        .collect();
+
+        let mut non_local: Vec<Result<Record>> = vec![
+            (6, Operation::Seal(seal_id, seal_checkpoint)),
+            (6, Operation::Finish),
+            (7, Operation::Sync(sync_id)),
+            (7, Operation::Result(OperationResult::Sync(Some(0)))),
+            (7, Operation::Finish),
+        ]
+        .into_iter()
+        .map(|(record_id, op)| Ok(Record::new(storage_type, TraceLocalId::None, record_id, op)))
+        .collect();
+
+        // interleave vectors to simulate concurrency
+        let mut actors = actor_1
+            .into_iter()
+            .interleave(actor_2.into_iter().interleave(actor_3.into_iter()))
+            .collect::<Vec<_>>();
+
+        actors.append(&mut non_local);
+
+        actors.push(Err(TraceError::FinRecord(8))); // intentional error to stop loop
+
+        let mut records: VecDeque<Result<Record>> = VecDeque::from(actors);
 
         let records_len = records.len();
         let f = move || records.pop_front().unwrap();
@@ -413,15 +484,21 @@ mod tests {
 
         let mut mock_replay = MockReplayable::new();
 
-        // mock_replay
-        //     .expect_get()
-        //     .times(3)
-        //     .returning(move |_, _, _, _, _, _| Ok(Some(get_result.clone())));
+        mock_replay.expect_new_local().times(3).returning(move |_| {
+            let mut mock_local = MockLocalReplay::new();
 
-        // mock_replay
-        //     .expect_ingest()
-        //     .times(1)
-        //     .returning(move |_, _, _, _| Ok(ingest_result));
+            mock_local
+                .expect_get()
+                .times(1)
+                .returning(move |_, _, _, _, _, _| Ok(Some(vec![54, 32, 198, 236, 24])));
+
+            mock_local
+                .expect_ingest()
+                .times(1)
+                .returning(move |_, _, _, _| Ok(ingest_result));
+
+            Box::new(mock_local)
+        });
 
         mock_replay
             .expect_sync()
