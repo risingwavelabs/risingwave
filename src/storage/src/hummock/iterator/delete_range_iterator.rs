@@ -15,6 +15,7 @@
 use std::collections::binary_heap::PeekMut;
 use std::collections::BinaryHeap;
 
+use risingwave_hummock_sdk::key::UserKey;
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferDeleteRangeIterator;
@@ -37,7 +38,7 @@ pub trait DeleteRangeIterator {
     ///
     /// # Panics
     /// This function will panic if the iterator is invalid.
-    fn start_user_key(&self) -> &[u8];
+    fn start_user_key(&self) -> UserKey<&[u8]>;
 
     /// Retrieves the right-endpoint of the current range-tombstone.
     ///
@@ -47,7 +48,7 @@ pub trait DeleteRangeIterator {
     ///
     /// # Panics
     /// This function will panic if the iterator is invalid.
-    fn end_user_key(&self) -> &[u8];
+    fn end_user_key(&self) -> UserKey<&[u8]>;
 
     /// Retrieves the epoch of the current range-tombstone.
     ///
@@ -88,7 +89,7 @@ pub trait DeleteRangeIterator {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    fn seek(&mut self, target_user_key: &[u8]);
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>);
 
     /// Indicates whether the iterator can be used.
     ///
@@ -105,14 +106,14 @@ pub enum RangeIteratorTyped {
 }
 
 impl DeleteRangeIterator for RangeIteratorTyped {
-    fn start_user_key(&self) -> &[u8] {
+    fn start_user_key(&self) -> UserKey<&[u8]> {
         match self {
             RangeIteratorTyped::Sst(sst) => sst.start_user_key(),
             RangeIteratorTyped::Batch(batch) => batch.start_user_key(),
         }
     }
 
-    fn end_user_key(&self) -> &[u8] {
+    fn end_user_key(&self) -> UserKey<&[u8]> {
         match self {
             RangeIteratorTyped::Sst(sst) => sst.end_user_key(),
             RangeIteratorTyped::Batch(batch) => batch.end_user_key(),
@@ -148,7 +149,7 @@ impl DeleteRangeIterator for RangeIteratorTyped {
         }
     }
 
-    fn seek(&mut self, target_user_key: &[u8]) {
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
         match self {
             RangeIteratorTyped::Sst(sst) => sst.seek(target_user_key),
             RangeIteratorTyped::Batch(batch) => batch.seek(target_user_key),
@@ -165,14 +166,13 @@ impl DeleteRangeIterator for RangeIteratorTyped {
 
 impl PartialEq<Self> for RangeIteratorTyped {
     fn eq(&self, other: &Self) -> bool {
-        self.start_user_key().eq(other.start_user_key())
+        self.start_user_key().eq(&other.start_user_key())
     }
 }
 
 impl PartialOrd for RangeIteratorTyped {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        let ret = other.start_user_key().cmp(self.start_user_key());
-        Some(ret)
+        Some(self.cmp(other))
     }
 }
 
@@ -180,7 +180,10 @@ impl Eq for RangeIteratorTyped {}
 
 impl Ord for RangeIteratorTyped {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other.start_user_key().cmp(self.start_user_key())
+        other
+            .start_user_key()
+            .cmp(&self.start_user_key())
+            .then_with(|| other.end_user_key().cmp(&self.end_user_key()))
     }
 }
 
@@ -201,11 +204,11 @@ impl ForwardMergeRangeIterator {
 }
 
 impl DeleteRangeIterator for ForwardMergeRangeIterator {
-    fn start_user_key(&self) -> &[u8] {
+    fn start_user_key(&self) -> UserKey<&[u8]> {
         self.heap.peek().unwrap().start_user_key()
     }
 
-    fn end_user_key(&self) -> &[u8] {
+    fn end_user_key(&self) -> UserKey<&[u8]> {
         self.heap.peek().unwrap().end_user_key()
     }
 
@@ -236,7 +239,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
         }
     }
 
-    fn seek(&mut self, target_user_key: &[u8]) {
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
         self.unused_iters.extend(self.heap.drain());
         for mut node in self.unused_iters.drain(..) {
             node.seek(target_user_key);

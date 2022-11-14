@@ -112,20 +112,19 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                             self.last_val.clear();
                             self.last_val.extend_from_slice(val);
 
-                        // handle range scan
-                        match &self.key_range.1 {
-                            Included(end_key) => {
-                                self.out_of_range = key > &end_key.as_ref();
-                            }
-                            Excluded(end_key) => {
-                                self.out_of_range = key >= &end_key.as_ref();
-                            }
-                            Unbounded => {}
-                        };
+                            // handle range scan
+                            match &self.key_range.1 {
+                                Included(end_key) => {
+                                    self.out_of_range = key > &end_key.as_ref();
+                                }
+                                Excluded(end_key) => {
+                                    self.out_of_range = key >= &end_key.as_ref();
+                                }
+                                Unbounded => {}
+                            };
                             self.stats.processed_key_count += 1;
                             return Ok(());
                         }
-
                     }
                     // It means that the key is deleted from the storage.
                     // Deleted kv and the previous versions (if any) of the key should not be
@@ -170,9 +169,12 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         // Handle range scan
         match &self.key_range.0 {
             Included(begin_key) => {
-                let full_key = &key_with_epoch(begin_key.clone(), self.read_epoch);
-                self.iterator.seek(full_key).await?;
-                self.delete_range_aggregator.seek(begin_key);
+                let full_key = FullKey {
+                    user_key: begin_key.clone(),
+                    epoch: self.read_epoch,
+                };
+                self.iterator.seek(full_key.to_ref()).await?;
+                self.delete_range_aggregator.seek(begin_key.as_ref());
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => {
@@ -208,7 +210,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             epoch: self.read_epoch,
         };
         self.iterator.seek(full_key).await?;
-        self.delete_range_aggregator.seek(full_key);
+        self.delete_range_aggregator.seek(full_key.user_key);
 
         // Handle multi-version
         self.last_key = FullKey::default();
@@ -296,7 +298,8 @@ mod tests {
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
         gen_iterator_test_sstable_with_range_tombstones, iterator_test_key_of,
-        iterator_test_key_of_epoch, iterator_test_user_key_of, iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+        iterator_test_key_of_epoch, iterator_test_user_key_of, iterator_test_value_of,
+        mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::HummockIteratorUnion;
     use crate::hummock::sstable::{
@@ -900,17 +903,17 @@ mod tests {
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
         assert!(ui.is_valid());
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(0).as_slice()));
+        assert_eq!(ui.key().user_key, iterator_test_user_key_of(0));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(8).as_slice()));
+        assert_eq!(ui.key().user_key, iterator_test_user_key_of(8));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- before-begin-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(1).as_slice()))
+        ui.seek(iterator_test_user_key_of(1).as_ref())
             .await
             .unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(8).as_slice()));
+        assert_eq!(ui.key().user_key, iterator_test_user_key_of(8));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -929,9 +932,9 @@ mod tests {
             UserIterator::new(mi, (Unbounded, Unbounded), 300, 0, None, del_agg);
         ui.rewind().await.unwrap();
         assert!(ui.is_valid());
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key().user_key, iterator_test_user_key_of(2));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(8).as_slice()));
+        assert_eq!(ui.key().user_key, iterator_test_user_key_of(8));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
     }

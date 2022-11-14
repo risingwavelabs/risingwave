@@ -73,7 +73,6 @@ use risingwave_common_service::observer_manager::{NotificationClient, ObserverMa
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
 };
-use risingwave_hummock_sdk::key::get_epoch;
 pub use validator::*;
 use value::*;
 
@@ -313,11 +312,10 @@ pub async fn get_from_sstable_info(
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
-    let ukey = &full_key.user_key;
     let mut iter = SstableDeleteRangeIterator::new(sstable.clone());
-    iter.seek(ukey);
-    let read_snapshot = get_epoch(internal_key);
-    let mut agg = DeleteRangeAggregator::new(iter, read_snapshot);
+    iter.seek(full_key.user_key);
+    let ukey = &full_key.user_key;
+    let mut agg = DeleteRangeAggregator::new(iter, full_key.epoch);
     if check_bloom_filter
         && !hit_sstable_bloom_filter(sstable.value(), ukey.encode().as_slice(), local_stats)
     {
@@ -346,7 +344,7 @@ pub async fn get_from_sstable_info(
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
     let value = if iter.key().user_key == *ukey {
-        if agg.should_delete(ukey, get_epoch(iter.key())) {
+        if agg.should_delete(ukey, iter.key().epoch) {
             Some(HummockValue::Delete)
         } else {
             Some(iter.value().to_bytes())

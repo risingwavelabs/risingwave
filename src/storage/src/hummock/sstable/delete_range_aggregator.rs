@@ -17,7 +17,7 @@ use std::collections::{BTreeSet, BinaryHeap};
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::UserKey;
-use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
+use risingwave_hummock_sdk::HummockEpoch;
 
 use super::DeleteRangeTombstone;
 use crate::hummock::iterator::DeleteRangeIterator;
@@ -25,7 +25,7 @@ use crate::hummock::sstable_store::TableHolder;
 
 pub struct SortedBoundary {
     sequence: HummockEpoch,
-    user_key: Vec<u8>,
+    user_key: UserKey<Vec<u8>>,
 }
 
 impl PartialEq<Self> for SortedBoundary {
@@ -106,19 +106,19 @@ impl RangeTombstonesCollector {
     // split ranges to make sure they locate in [smallest_user_key, largest_user_key)
     pub fn get_tombstone_between(
         &self,
-        smallest_user_key: &[u8],
-        largest_user_key: &[u8],
+        smallest_user_key: &UserKey<&[u8]>,
+        largest_user_key: &UserKey<&[u8]>,
     ) -> Vec<DeleteRangeTombstone> {
         let mut delete_ranges = vec![];
         for tombstone in &self.range_tombstone_list {
             if !largest_user_key.is_empty()
-                && tombstone.start_user_key.as_slice().ge(largest_user_key)
+                && tombstone.start_user_key.as_ref().ge(largest_user_key)
             {
                 continue;
             }
 
             if !smallest_user_key.is_empty()
-                && tombstone.end_user_key.as_slice().le(smallest_user_key)
+                && tombstone.end_user_key.as_ref().le(smallest_user_key)
             {
                 continue;
             }
@@ -128,11 +128,10 @@ impl RangeTombstonesCollector {
             }
 
             let mut ret = tombstone.clone();
-            if !smallest_user_key.is_empty() && smallest_user_key.gt(ret.start_user_key.as_slice())
-            {
+            if !smallest_user_key.is_empty() && smallest_user_key.gt(&ret.start_user_key.as_ref()) {
                 ret.start_user_key = smallest_user_key.to_vec();
             }
-            if !largest_user_key.is_empty() && largest_user_key.lt(ret.end_user_key.as_slice()) {
+            if !largest_user_key.is_empty() && largest_user_key.lt(&ret.end_user_key.as_ref()) {
                 ret.end_user_key = largest_user_key.to_vec();
             }
             delete_ranges.push(ret);
@@ -147,12 +146,16 @@ pub struct SingleDeleteRangeIterator {
 }
 
 impl DeleteRangeIterator for SingleDeleteRangeIterator {
-    fn start_user_key(&self) -> &[u8] {
-        &self.agg.range_tombstone_list[self.seek_idx].start_user_key
+    fn start_user_key(&self) -> UserKey<&[u8]> {
+        self.agg.range_tombstone_list[self.seek_idx]
+            .start_user_key
+            .as_ref()
     }
 
-    fn end_user_key(&self) -> &[u8] {
-        &self.agg.range_tombstone_list[self.seek_idx].end_user_key
+    fn end_user_key(&self) -> UserKey<&[u8]> {
+        self.agg.range_tombstone_list[self.seek_idx]
+            .end_user_key
+            .as_ref()
     }
 
     fn current_epoch(&self) -> HummockEpoch {
@@ -171,11 +174,11 @@ impl DeleteRangeIterator for SingleDeleteRangeIterator {
         self.seek_idx < self.agg.range_tombstone_list.len()
     }
 
-    fn seek(&mut self, target_user_key: &[u8]) {
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
         self.seek_idx = self
             .agg
             .range_tombstone_list
-            .partition_point(|tombstone| tombstone.end_user_key.as_slice().le(target_user_key));
+            .partition_point(|tombstone| tombstone.end_user_key.as_ref().le(&target_user_key));
     }
 }
 
@@ -196,10 +199,10 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
         }
     }
 
-    fn add_all_overlap_range(&mut self, include_key: &[u8]) {
-        while self.inner.is_valid() && self.inner.start_user_key().le(include_key) {
+    fn add_all_overlap_range(&mut self, target_key: &UserKey<&[u8]>) {
+        while self.inner.is_valid() && self.inner.start_user_key().le(target_key) {
             let sequence = self.inner.current_epoch();
-            if sequence > self.watermark || self.inner.end_user_key().le(include_key) {
+            if sequence > self.watermark || self.inner.end_user_key().le(target_key) {
                 self.inner.next();
                 continue;
             }
@@ -214,11 +217,7 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
 
     /// Check whether the target-key is deleted by some range-tombstone. Target-key must be given
     /// in order.
-    pub fn should_delete(
-        &mut self,
-        target_key: UserKey<impl AsRef<[u8]>>,
-        epoch: HummockEpoch,
-    ) -> bool {
+    pub fn should_delete(&mut self, target_key: &UserKey<&[u8]>, epoch: HummockEpoch) -> bool {
         if epoch >= self.watermark {
             return false;
         }
@@ -227,10 +226,7 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
         //  from covered epoch index.
         while !self.end_user_key_index.is_empty() {
             let item = self.end_user_key_index.peek().unwrap();
-            if Ordering::is_gt(KeyComparator::compare_user_key_cross_format(
-                item.user_key.as_slice(),
-                &target_key,
-            )) {
+            if item.user_key.as_ref().gt(target_key) {
                 break;
             }
 
@@ -254,11 +250,11 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
         self.end_user_key_index.clear();
     }
 
-    pub fn seek(&mut self, target_user_key: &[u8]) {
+    pub fn seek(&mut self, target_user_key: UserKey<&[u8]>) {
         self.inner.seek(target_user_key);
         self.epoch_index.clear();
         self.end_user_key_index.clear();
-        self.add_all_overlap_range(target_user_key);
+        self.add_all_overlap_range(&target_user_key);
     }
 }
 
@@ -277,12 +273,16 @@ impl SstableDeleteRangeIterator {
 }
 
 impl DeleteRangeIterator for SstableDeleteRangeIterator {
-    fn start_user_key(&self) -> &[u8] {
-        &self.table.value().meta.range_tombstone_list[self.current_idx].start_user_key
+    fn start_user_key(&self) -> UserKey<&[u8]> {
+        self.table.value().meta.range_tombstone_list[self.current_idx]
+            .start_user_key
+            .as_ref()
     }
 
-    fn end_user_key(&self) -> &[u8] {
-        &self.table.value().meta.range_tombstone_list[self.current_idx].end_user_key
+    fn end_user_key(&self) -> UserKey<&[u8]> {
+        self.table.value().meta.range_tombstone_list[self.current_idx]
+            .end_user_key
+            .as_ref()
     }
 
     fn current_epoch(&self) -> HummockEpoch {
@@ -297,13 +297,13 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
         self.current_idx = 0;
     }
 
-    fn seek(&mut self, target_user_key: &[u8]) {
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
         self.current_idx = self
             .table
             .value()
             .meta
             .range_tombstone_list
-            .partition_point(|tombstone| tombstone.end_user_key.as_slice().le(target_user_key));
+            .partition_point(|tombstone| tombstone.end_user_key.as_ref().le(&target_user_key));
     }
 
     fn is_valid(&self) -> bool {
@@ -334,47 +334,32 @@ mod tests {
         let iter = agg.iter();
         let mut iter = DeleteRangeAggregator::new(iter, 10);
         // can not be removed by tombstone with smaller epoch.
-        assert!(!iter.should_delete(test_user_key(b"bbb"), 13));
+        assert!(!iter.should_delete(&test_user_key(b"bbb").as_ref(), 13));
         // can not be removed by tombstone because its sequence is larger than epoch.
-        assert!(!iter.should_delete(test_user_key(b"bbb"), 11));
-        assert!(iter.should_delete(test_user_key(b"bbb"), 8));
+        assert!(!iter.should_delete(&test_user_key(b"bbb").as_ref(), 11));
+        assert!(iter.should_delete(&test_user_key(b"bbb").as_ref(), 8));
 
-        assert!(iter.should_delete(test_user_key(b"bbbaaa"), 8));
+        assert!(iter.should_delete(&test_user_key(b"bbbaaa").as_ref(), 8));
 
-        assert!(iter.should_delete(test_user_key(b"bbbccd"), 8));
+        assert!(iter.should_delete(&test_user_key(b"bbbccd").as_ref(), 8));
         // can not be removed by tombstone because it equals the end of delete-ranges.
-        assert!(!iter.should_delete(test_user_key(b"bbbddd"), 8));
-        assert!(iter.should_delete(test_user_key(b"bbbeee"), 8));
-        assert!(!iter.should_delete(test_user_key(b"bbbeef"), 10));
-        assert!(iter.should_delete(test_user_key(b"eeeeee"), 9));
-        assert!(iter.should_delete(test_user_key(b"gggggg"), 8));
-        assert!(!iter.should_delete(test_user_key(b"hhhhhh"), 8));
+        assert!(!iter.should_delete(&test_user_key(b"bbbddd").as_ref(), 8));
+        assert!(iter.should_delete(&test_user_key(b"bbbeee").as_ref(), 8));
+        assert!(!iter.should_delete(&test_user_key(b"bbbeef").as_ref(), 10));
+        assert!(iter.should_delete(&test_user_key(b"eeeeee").as_ref(), 9));
+        assert!(iter.should_delete(&test_user_key(b"gggggg").as_ref(), 8));
+        assert!(!iter.should_delete(&test_user_key(b"hhhhhh").as_ref(), 8));
 
         let split_ranges = agg.get_tombstone_between(
-            &test_user_key(b"bbb").encode(),
-            &test_user_key(b"eeeeee").encode(),
+            &test_user_key(b"bbb").as_ref(),
+            &test_user_key(b"eeeeee").as_ref(),
         );
         assert_eq!(5, split_ranges.len());
-        assert_eq!(
-            test_user_key(b"bbb").encode(),
-            split_ranges[0].start_user_key.as_slice()
-        );
-        assert_eq!(
-            test_user_key(b"bbb").encode(),
-            split_ranges[1].start_user_key.as_slice()
-        );
-        assert_eq!(
-            test_user_key(b"bbbaab").encode(),
-            split_ranges[2].start_user_key.as_slice()
-        );
-        assert_eq!(
-            test_user_key(b"eeeeee").encode(),
-            split_ranges[3].end_user_key.as_slice()
-        );
-        assert_eq!(
-            test_user_key(b"eeeeee").encode(),
-            split_ranges[4].end_user_key.as_slice()
-        );
+        assert_eq!(test_user_key(b"bbb"), split_ranges[0].start_user_key);
+        assert_eq!(test_user_key(b"bbb"), split_ranges[1].start_user_key,);
+        assert_eq!(test_user_key(b"bbbaab"), split_ranges[2].start_user_key);
+        assert_eq!(test_user_key(b"eeeeee"), split_ranges[3].end_user_key);
+        assert_eq!(test_user_key(b"eeeeee"), split_ranges[4].end_user_key);
     }
 
     #[test]
@@ -390,25 +375,13 @@ mod tests {
         ]);
         let agg = builder.build(10, true);
         let split_ranges = agg.get_tombstone_between(
-            &test_user_key(b"bbbb").encode(),
-            &test_user_key(b"eeeeee").encode(),
+            &test_user_key(b"bbbb").as_ref(),
+            &test_user_key(b"eeeeee").as_ref(),
         );
         assert_eq!(3, split_ranges.len());
-        assert_eq!(
-            test_user_key(b"bbbb").encode(),
-            split_ranges[0].start_user_key.as_slice()
-        );
-        assert_eq!(
-            test_user_key(b"cccc").encode(),
-            split_ranges[0].end_user_key.as_slice()
-        );
-        assert_eq!(
-            test_user_key(b"cccc").encode(),
-            split_ranges[1].start_user_key.as_slice()
-        );
-        assert_eq!(
-            test_user_key(b"eeee").encode(),
-            split_ranges[1].end_user_key.as_slice()
-        );
+        assert_eq!(test_user_key(b"bbbb"), split_ranges[0].start_user_key);
+        assert_eq!(test_user_key(b"cccc"), split_ranges[0].end_user_key);
+        assert_eq!(test_user_key(b"cccc"), split_ranges[1].start_user_key);
+        assert_eq!(test_user_key(b"eeee"), split_ranges[1].end_user_key);
     }
 }

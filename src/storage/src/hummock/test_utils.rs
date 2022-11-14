@@ -241,7 +241,7 @@ pub async fn gen_test_sstable(
 pub async fn gen_test_sstable_with_range_tombstone(
     opts: SstableBuilderOptions,
     sst_id: HummockSstableId,
-    kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+    kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
     range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {

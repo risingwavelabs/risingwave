@@ -15,9 +15,7 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
-use bytes::BufMut;
 use itertools::Itertools;
-use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
@@ -153,7 +151,12 @@ pub async fn gen_iterator_test_sstable_with_range_tombstones(
     let range_tombstones = delete_ranges
         .into_iter()
         .map(|(start, end, epoch)| {
-            DeleteRangeTombstone::new(test_user_key_of(start), test_user_key_of(end), epoch)
+            DeleteRangeTombstone::new(
+                TableId::default(),
+                iterator_test_table_key_of(start),
+                iterator_test_table_key_of(end),
+                epoch,
+            )
         })
         .collect_vec();
     gen_test_sstable_with_range_tombstone(

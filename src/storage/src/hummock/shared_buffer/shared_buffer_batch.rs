@@ -23,7 +23,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{table_key, FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
 use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
@@ -59,10 +59,9 @@ impl SharedBufferBatchInner {
             // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary of
             // `SharedBufferBatch` because it just expands an useless query and does not affect
             // correctness.
-            let end_table_key = table_key(&tombstone.end_user_key);
-            if largest_table_key.as_slice().lt(end_table_key) {
+            if largest_table_key.lt(&tombstone.end_user_key.table_key.0) {
                 largest_table_key.clear();
-                largest_table_key.extend_from_slice(end_table_key);
+                largest_table_key.extend_from_slice(&tombstone.end_user_key.table_key.0);
             }
         }
         if let Some(item) = payload.last() {
@@ -173,19 +172,20 @@ impl SharedBufferBatch {
         }
     }
 
-    pub fn check_delete_by_range(&self, user_key: &[u8]) -> bool {
+    pub fn check_delete_by_range(&self, table_key: TableKey<&[u8]>) -> bool {
         if self.inner.range_tombstone_list.is_empty() {
             return false;
         }
         let idx = self
             .inner
             .range_tombstone_list
-            .partition_point(|item| item.end_user_key.as_slice().le(user_key));
+            .partition_point(|item| item.end_user_key.table_key.as_ref().le(table_key.as_ref()));
         idx < self.inner.range_tombstone_list.len()
             && self.inner.range_tombstone_list[idx]
                 .start_user_key
-                .as_slice()
-                .le(user_key)
+                .table_key
+                .as_ref()
+                .le(table_key.as_ref())
     }
 
     pub fn into_directed_iter<D: HummockIteratorDirection>(self) -> SharedBufferBatchIterator<D> {
@@ -221,24 +221,23 @@ impl SharedBufferBatch {
     pub fn start_user_key(&self) -> UserKey<&[u8]> {
         if self.has_range_tombstone()
             && (self.inner.is_empty()
-                || table_key(
-                    self.inner
-                        .range_tombstone_list
-                        .first()
-                        .unwrap()
-                        .start_user_key
-                        .as_slice(),
-                )
-                .le(&self.inner.first().unwrap().0))
-        {
-            UserKey::decode(
-                self.inner
+                || self
+                    .inner
                     .range_tombstone_list
                     .first()
                     .unwrap()
                     .start_user_key
-                    .as_slice(),
-            )
+                    .table_key
+                    .0
+                    .as_slice()
+                    .le(&self.inner.first().unwrap().0))
+        {
+            self.inner
+                .range_tombstone_list
+                .first()
+                .unwrap()
+                .start_user_key
+                .as_ref()
         } else {
             UserKey::new(self.table_id, self.start_table_key())
         }
@@ -322,13 +321,11 @@ impl SharedBufferBatch {
     fn check_tombstone_prefix(table_id: TableId, tombstones: &[DeleteRangeTombstone]) {
         for tombstone in tombstones {
             assert_eq!(
-                UserKey::decode(&tombstone.start_user_key).table_id,
-                table_id,
+                tombstone.start_user_key.table_id, table_id,
                 "delete range tombstone in a shared buffer batch must begin with the same table id"
             );
             assert_eq!(
-                UserKey::decode(&tombstone.end_user_key).table_id,
-                table_id,
+                tombstone.end_user_key.table_id, table_id,
                 "delete range tombstone in a shared buffer batch must begin with the same table id"
             );
         }
@@ -463,12 +460,16 @@ impl SharedBufferDeleteRangeIterator {
 }
 
 impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
-    fn start_user_key(&self) -> &[u8] {
-        &self.inner.range_tombstone_list[self.current_idx].start_user_key
+    fn start_user_key(&self) -> UserKey<&[u8]> {
+        self.inner.range_tombstone_list[self.current_idx]
+            .start_user_key
+            .as_ref()
     }
 
-    fn end_user_key(&self) -> &[u8] {
-        &self.inner.range_tombstone_list[self.current_idx].end_user_key
+    fn end_user_key(&self) -> UserKey<&[u8]> {
+        self.inner.range_tombstone_list[self.current_idx]
+            .end_user_key
+            .as_ref()
     }
 
     fn current_epoch(&self) -> HummockEpoch {
@@ -483,11 +484,11 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
         self.current_idx = 0;
     }
 
-    fn seek(&mut self, target_user_key: &[u8]) {
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
         self.current_idx = self
             .inner
             .range_tombstone_list
-            .partition_point(|tombstone| tombstone.end_user_key.as_slice().le(target_user_key));
+            .partition_point(|tombstone| tombstone.end_user_key.as_ref().le(&target_user_key));
     }
 
     fn is_valid(&self) -> bool {
@@ -746,12 +747,12 @@ mod tests {
             None,
         )
         .await;
-        assert!(shared_buffer_batch.check_delete_by_range(b"aaa"));
-        assert!(!shared_buffer_batch.check_delete_by_range(b"bbb"));
-        assert!(shared_buffer_batch.check_delete_by_range(b"ddd"));
-        assert!(!shared_buffer_batch.check_delete_by_range(b"eee"));
+        assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"aaa")));
+        assert!(!shared_buffer_batch.check_delete_by_range(TableKey(b"bbb")));
+        assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"ddd")));
+        assert!(!shared_buffer_batch.check_delete_by_range(TableKey(b"eee")));
     }
-    
+
     #[should_panic]
     async fn test_invalid_table_id() {
         let epoch = 1;
