@@ -81,6 +81,14 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
 }
 
 #[inline]
+pub fn i64_to_timestamp(ms: i64) -> Result<NaiveDateTimeWrapper> {
+    Ok(NaiveDateTimeWrapper::new(NaiveDateTime::from_timestamp(
+        ms / 1000,
+        (ms % 1000) as u32 * 1_000_000,
+    )))
+}
+
+#[inline]
 fn parse_naive_date(s: &str) -> Result<NaiveDate> {
     let res = SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE))?;
     Ok(NaiveDate::from_ymd(
@@ -106,6 +114,11 @@ pub fn str_to_timestampz(elem: &str) -> Result<i64> {
     elem.parse::<DateTime<Utc>>()
         .map(|ret| ret.timestamp_nanos() / 1000)
         .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))
+}
+
+#[inline]
+pub fn i64_to_timestampz(ms: i64) -> Result<i64> {
+    Ok(ms * 1000)
 }
 
 #[inline(always)]
