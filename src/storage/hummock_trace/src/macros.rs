@@ -119,7 +119,9 @@ macro_rules! trace_result {
         )));
     };
     (ITER_NEXT, $span:ident, $pair:ident) => {
-        let res = $pair.as_ref().map(|(k, v)| (k.to_vec(), v.to_vec()));
+        let res = $pair
+            .as_ref()
+            .map(|(k, v)| (k.user_key.table_key.to_vec(), v.to_vec()));
         $span.send($crate::record::Operation::Result(
             OperationResult::IterNext(res),
         ));

@@ -19,6 +19,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient};
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_trace::{
     LocalReplay, ReplayIter, Replayable, Result, TraceError, TraceSubResp,
 };
@@ -36,19 +37,21 @@ use risingwave_storage::store::{
 use risingwave_storage::{StateStore, StateStoreIter};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-pub(crate) struct HummockReplayIter<I: StateStoreIter<Item = (Bytes, Bytes)>>(I);
+pub(crate) struct HummockReplayIter<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>>(I);
 
-impl<I: StateStoreIter<Item = (Bytes, Bytes)> + Send + Sync> HummockReplayIter<I> {
+impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + Send + Sync> HummockReplayIter<I> {
     fn new(iter: I) -> Self {
         Self(iter)
     }
 }
 
 #[async_trait::async_trait]
-impl<I: StateStoreIter<Item = (Bytes, Bytes)> + Send + Sync> ReplayIter for HummockReplayIter<I> {
+impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + Send + Sync> ReplayIter
+    for HummockReplayIter<I>
+{
     async fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
-        let key_value: Option<(Bytes, Bytes)> = self.0.next().await.unwrap();
-        key_value.map(|(key, value)| (key.to_vec(), value.to_vec()))
+        let key_value: Option<(FullKey<Vec<u8>>, Bytes)> = self.0.next().await.unwrap();
+        key_value.map(|(key, value)| (key.user_key.table_key.to_vec(), value.to_vec()))
     }
 }
 

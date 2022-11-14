@@ -17,6 +17,7 @@ use std::ops::Bound;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     init_collector, trace, trace_result, OperationResult, RecordId, StorageType, TraceSpan,
@@ -42,14 +43,14 @@ impl<S> TracedStateStore<S> {
     pub fn new(inner: S, storage_type: StorageType) -> Self {
         init_collector();
         Self {
-            inner: inner,
+            inner,
             storage_type,
         }
     }
 
     pub fn new_local(inner: S) -> Self {
         Self {
-            inner: inner,
+            inner,
             storage_type: StorageType::Local,
         }
     }
@@ -193,16 +194,16 @@ pub struct TracedStateStoreIter<I> {
 
 impl<I> StateStoreIter for TracedStateStoreIter<I>
 where
-    I: StateStoreIter<Item = (Bytes, Bytes)>,
+    I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>,
 {
-    type Item = (Bytes, Bytes);
+    type Item = (FullKey<Vec<u8>>, Bytes);
 
     type NextFuture<'a> = impl NextFutureTrait<'a, Self::Item>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
             let span = trace!(ITER_NEXT, self.record_id);
-            let kv_pair = self.inner.next().await?;
+            let kv_pair: _ = self.inner.next().await?;
             trace_result!(ITER_NEXT, span, kv_pair);
             Ok(kv_pair)
         }
