@@ -28,28 +28,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Nexmark events.
+
 use std::cmp::{max, min};
 
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::source::nexmark::config::{NexmarkConfig, CHANNEL_NUMBER};
-use crate::source::nexmark::utils::{milli_ts_to_timestamp_string, NexmarkRng};
+use crate::config::{GeneratorConfig, CHANNEL_NUMBER};
+use crate::utils::{milli_ts_to_timestamp_string, NexmarkRng};
 
 type Id = usize;
 
+/// The type of a Nexmark event.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EventType {
     Person,
     Auction,
     Bid,
 }
 
-/// The `Nexmark` Event, including `Person`, `Auction`, and `Bid`.
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
+/// The Nexmark Event, including [`Person`], [`Auction`], and [`Bid`].
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Event {
     /// The Person event.
     Person(Person),
@@ -61,32 +66,24 @@ pub enum Event {
 
 impl Event {
     /// Creates a new event randomly.
-    pub fn new(
+    pub(crate) fn new(
         events_so_far: usize,
-        nex: &NexmarkConfig,
-        wall_clock_base_time: usize,
-    ) -> (Event, usize) {
-        let rem = nex.next_adjusted_event(events_so_far) % nex.proportion_denominator;
-        let timestamp = nex.event_timestamp(nex.next_adjusted_event(events_so_far));
-        let new_wall_clock_base_time = timestamp - nex.base_time + wall_clock_base_time;
-        let id = nex.first_event_id + nex.next_adjusted_event(events_so_far);
+        cfg: &GeneratorConfig,
+        wall_clock_base_time: u64,
+    ) -> (Event, u64) {
+        let rem = cfg.next_adjusted_event(events_so_far) % cfg.proportion_denominator;
+        let timestamp = cfg.event_timestamp(cfg.next_adjusted_event(events_so_far));
+        let new_wall_clock_base_time = timestamp - cfg.base_time + wall_clock_base_time;
+        let id = cfg.first_event_id + cfg.next_adjusted_event(events_so_far);
         let mut rng = SmallRng::seed_from_u64(id as u64);
-        let event = if rem < nex.person_proportion {
-            Event::Person(Person::new(id, timestamp, &mut rng, nex))
-        } else if rem < nex.person_proportion + nex.auction_proportion {
-            Event::Auction(Auction::new(events_so_far, id, timestamp, &mut rng, nex))
+        let event = if rem < cfg.person_proportion {
+            Event::Person(Person::new(id, timestamp, &mut rng, cfg))
+        } else if rem < cfg.person_proportion + cfg.auction_proportion {
+            Event::Auction(Auction::new(events_so_far, id, timestamp, &mut rng, cfg))
         } else {
-            Event::Bid(Bid::new(id, timestamp, &mut rng, nex))
+            Event::Bid(Bid::new(id, timestamp, &mut rng, cfg))
         };
         (event, new_wall_clock_base_time)
-    }
-
-    pub fn to_json(&self) -> String {
-        match self {
-            Event::Person(p) => serde_json::to_string(p).unwrap(),
-            Event::Auction(a) => serde_json::to_string(a).unwrap(),
-            Event::Bid(b) => serde_json::to_string(b).unwrap(),
-        }
     }
 
     pub fn event_type(&self) -> EventType {
@@ -100,7 +97,8 @@ impl Event {
 
 /// Person represents a person submitting an item for auction and/or making a
 /// bid on an auction.
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Person {
     /// A person-unique integer ID.
     pub id: Id,
@@ -122,24 +120,24 @@ pub struct Person {
 
 impl Person {
     /// Creates a new `Person` event.
-    fn new(id: usize, time: usize, rng: &mut SmallRng, nex: &NexmarkConfig) -> Self {
-        let id = Self::last_id(id, nex) + nex.first_person_id;
+    fn new(id: usize, time: u64, rng: &mut SmallRng, cfg: &GeneratorConfig) -> Self {
+        let id = Self::last_id(id, cfg) + cfg.first_person_id;
         let name = format!(
             "{} {}",
-            nex.first_names.choose(rng).unwrap(),
-            nex.last_names.choose(rng).unwrap(),
+            cfg.first_names.choose(rng).unwrap(),
+            cfg.last_names.choose(rng).unwrap(),
         );
         let email_address = format!("{}@{}.com", rng.gen_string(7), rng.gen_string(5));
         let credit_card = (0..4)
             .map(|_| format!("{:04}", rng.gen_range(0..10000)))
             .collect::<Vec<String>>()
             .join(" ");
-        let city = nex.us_cities.choose(rng).unwrap().clone();
-        let state = nex.us_states.choose(rng).unwrap().clone();
+        let city = cfg.us_cities.choose(rng).unwrap().clone();
+        let state = cfg.us_states.choose(rng).unwrap().clone();
 
         let current_size =
             8 + name.len() + email_address.len() + credit_card.len() + city.len() + state.len();
-        let extra = rng.gen_next_extra(current_size, nex.avg_person_byte_size);
+        let extra = rng.gen_next_extra(current_size, cfg.avg_person_byte_size);
 
         Self {
             id,
@@ -153,13 +151,13 @@ impl Person {
         }
     }
 
-    fn next_id(id: usize, rng: &mut SmallRng, nex: &NexmarkConfig) -> Id {
+    fn next_id(id: usize, rng: &mut SmallRng, nex: &GeneratorConfig) -> Id {
         let people = Self::last_id(id, nex) + 1;
         let active = min(people, nex.active_people);
         people - active + rng.gen_range(0..active + nex.person_id_lead)
     }
 
-    fn last_id(id: usize, nex: &NexmarkConfig) -> Id {
+    fn last_id(id: usize, nex: &GeneratorConfig) -> Id {
         let epoch = id / nex.proportion_denominator;
         let mut offset = id % nex.proportion_denominator;
         if nex.person_proportion <= offset {
@@ -170,7 +168,8 @@ impl Person {
 }
 
 /// Auction represents an item under auction.
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Auction {
     /// An auction-unique integer ID.
     pub id: Id,
@@ -198,11 +197,11 @@ impl Auction {
     fn new(
         events_so_far: usize,
         id: usize,
-        time: usize,
+        time: u64,
         rng: &mut SmallRng,
-        nex: &NexmarkConfig,
+        cfg: &GeneratorConfig,
     ) -> Self {
-        let id = Self::last_id(id, nex) + nex.first_auction_id;
+        let id = Self::last_id(id, cfg) + cfg.first_auction_id;
         let item_name = rng.gen_string(20);
         let description = rng.gen_string(100);
         let initial_bid = rng.gen_price();
@@ -210,17 +209,17 @@ impl Auction {
         let reserve = initial_bid + rng.gen_price();
         let date_time = milli_ts_to_timestamp_string(time);
         let expires =
-            milli_ts_to_timestamp_string(time + Self::next_length(events_so_far, rng, time, nex));
-        let mut seller = if rng.gen_range(0..nex.hot_seller_ratio) > 0 {
-            (Person::last_id(id, nex) / nex.hot_seller_ratio_2) * nex.hot_seller_ratio_2
+            milli_ts_to_timestamp_string(time + Self::next_length(events_so_far, rng, time, cfg));
+        let mut seller = if rng.gen_range(0..cfg.hot_seller_ratio) > 0 {
+            (Person::last_id(id, cfg) / cfg.hot_seller_ratio_2) * cfg.hot_seller_ratio_2
         } else {
-            Person::next_id(id, rng, nex)
+            Person::next_id(id, rng, cfg)
         };
-        seller += nex.first_person_id;
-        let category = nex.first_category_id + rng.gen_range(0..nex.num_categories);
+        seller += cfg.first_person_id;
+        let category = cfg.first_category_id + rng.gen_range(0..cfg.num_categories);
 
         let current_size = 8 + item_name.len() + description.len() + 8 + 8 + 8 + 8 + 8;
-        let extra = rng.gen_next_extra(current_size, nex.avg_auction_byte_size);
+        let extra = rng.gen_next_extra(current_size, cfg.avg_auction_byte_size);
 
         Auction {
             id,
@@ -236,7 +235,7 @@ impl Auction {
         }
     }
 
-    fn next_id(id: usize, rng: &mut SmallRng, nex: &NexmarkConfig) -> Id {
+    fn next_id(id: usize, rng: &mut SmallRng, nex: &GeneratorConfig) -> Id {
         let max_auction = Self::last_id(id, nex);
         let min_auction = if max_auction < nex.in_flight_auctions {
             0
@@ -246,7 +245,7 @@ impl Auction {
         min_auction + rng.gen_range(0..max_auction - min_auction + 1 + nex.auction_id_lead)
     }
 
-    fn last_id(id: usize, nex: &NexmarkConfig) -> Id {
+    fn last_id(id: usize, nex: &GeneratorConfig) -> Id {
         let mut epoch = id / nex.proportion_denominator;
         let mut offset = id % nex.proportion_denominator;
         if offset < nex.person_proportion {
@@ -263,13 +262,13 @@ impl Auction {
     fn next_length(
         events_so_far: usize,
         rng: &mut SmallRng,
-        time: usize,
-        nex: &NexmarkConfig,
-    ) -> usize {
-        let current_event = nex.next_adjusted_event(events_so_far);
+        time: u64,
+        cfg: &GeneratorConfig,
+    ) -> u64 {
+        let current_event = cfg.next_adjusted_event(events_so_far);
         let events_for_auctions =
-            (nex.in_flight_auctions * nex.proportion_denominator) / nex.auction_proportion;
-        let future_auction = nex.event_timestamp(current_event + events_for_auctions);
+            (cfg.in_flight_auctions * cfg.proportion_denominator) / cfg.auction_proportion;
+        let future_auction = cfg.event_timestamp(current_event + events_for_auctions);
 
         let horizon = future_auction - time;
         1 + rng.gen_range(0..max(horizon * 2, 1))
@@ -277,7 +276,8 @@ impl Auction {
 }
 
 /// Bid represents a bid for an item under auction.
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Bid {
     /// The ID of the auction this bid is for.
     pub auction: Id,
@@ -296,7 +296,7 @@ pub struct Bid {
 }
 
 impl Bid {
-    fn new(id: usize, time: usize, rng: &mut SmallRng, nex: &NexmarkConfig) -> Self {
+    fn new(id: usize, time: u64, rng: &mut SmallRng, nex: &GeneratorConfig) -> Self {
         let auction = if 0 < rng.gen_range(0..nex.hot_auction_ratio) {
             (Auction::last_id(id, nex) / nex.hot_auction_ratio_2) * nex.hot_auction_ratio_2
         } else {
@@ -337,30 +337,36 @@ impl Bid {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Result;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
-    use crate::source::nexmark::{NexmarkProperties, NEXMARK_BASE_TIME};
+    use crate::config::{NexmarkConfig, NEXMARK_BASE_TIME};
 
     #[test]
-    fn test_event() -> Result<()> {
-        let properties = NexmarkProperties::default();
-        let res = NexmarkConfig::from(properties);
-        assert!(res.is_ok());
-        let config = res.unwrap();
+    fn test_event() {
+        let config = GeneratorConfig::from(NexmarkConfig::default());
 
         let wall_clock_base_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_millis() as usize;
+            .as_millis() as u64;
 
         let (event_1, _) = Event::new(0, &config, wall_clock_base_time);
         let (event_2, _) = Event::new(0, &config, NEXMARK_BASE_TIME);
         assert_eq!(event_1, event_2);
 
-        let event_1_payload = r#"{"id":1000,"name":"vicky noris","email_address":"vzbhp@wxv.com","credit_card":"4355 0142 3460 9324","city":"boise","state":"ca","date_time":"2015-07-15 00:00:00","extra":"cllnesmssnthtljklifqbqcyhcjwiuoaudxxwcnnwgmsmwgqelplzyckqzuoaitfpxubgpkjtqjhktelmbskvjkxrhziyowxibbgnqneuaiazqduhkynvgeisbxtknbxmqmzbgnptlrcyigjginataks"}"#.to_string();
-        assert_eq!(event_1.to_json(), event_1_payload);
-        Ok(())
+        assert_eq!(
+            event_1,
+            Event::Person(Person {
+                id: 1000,
+                name: "vicky noris".into(),
+                email_address: "vzbhp@wxv.com".into(),
+                credit_card: "4355 0142 3460 9324".into(),
+                city: "boise".into(),
+                state: "ca".into(),
+                date_time: "2015-07-15 00:00:00".into(),
+                extra: "cllnesmssnthtljklifqbqcyhcjwiuoaudxxwcnnwgmsmwgqelplzyckqzuoaitfpxubgpkjtqjhktelmbskvjkxrhziyowxibbgnqneuaiazqduhkynvgeisbxtknbxmqmzbgnptlrcyigjginataks".into(),
+            })
+        );
     }
 }
