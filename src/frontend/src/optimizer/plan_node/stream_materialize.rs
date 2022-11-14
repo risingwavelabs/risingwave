@@ -167,7 +167,6 @@ impl StreamMaterialize {
 
         let ctx = input.ctx();
         let properties = ctx.inner().with_options.internal_table_subset();
-
         let table = TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -185,6 +184,7 @@ impl StreamMaterialize {
             vnode_col_idx: None,
             value_indices,
             definition,
+            handle_pk_conflict: false,
         };
 
         Ok(Self { base, input, table })
@@ -265,7 +265,7 @@ impl StreamNode for StreamMaterialize {
                 .map(FieldOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
-            handle_pk_conflict: false,
+            handle_pk_conflict: self.table.handle_pk_conflict(),
         })
     }
 }

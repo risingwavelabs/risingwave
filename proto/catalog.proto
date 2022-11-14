@@ -92,6 +92,7 @@ message Table {
   // Currently is not supported yet and expected to be `[0..columns.len()]`.
   repeated int32 value_indices = 19;
   string definition = 20;
+  bool handle_pk_conflict = 21;
 }
 
 message View {
