@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 
-use chrono::NaiveDateTime;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
@@ -90,12 +89,6 @@ impl NexmarkRng for SmallRng {
     }
 }
 
-pub fn milli_ts_to_timestamp_string(milli_ts: u64) -> String {
-    NaiveDateTime::from_timestamp(milli_ts as i64 / 1000, (milli_ts % 1000) as u32 * 1000000)
-        .format("%Y-%m-%d %H:%M:%S%.f")
-        .to_string()
-}
-
 pub fn get_base_url(seed: u64) -> String {
     let mut rng = SmallRng::seed_from_u64(seed);
     let id0 = rng.gen_string_with_delimiter(5, "_");
@@ -125,20 +118,7 @@ pub fn build_channel_url_map(channel_number: usize) -> HashMap<usize, (String, S
 
 #[cfg(test)]
 mod tests {
-    use std::io::Result;
-
     use super::*;
-
-    #[test]
-    fn test_milli_ts_to_timestamp_string() -> Result<()> {
-        let mut init_ts = milli_ts_to_timestamp_string(0);
-        assert_eq!(init_ts, "1970-01-01 00:00:00");
-        init_ts = milli_ts_to_timestamp_string(1);
-        assert_eq!(init_ts, "1970-01-01 00:00:00.001");
-        init_ts = milli_ts_to_timestamp_string(1000);
-        assert_eq!(init_ts, "1970-01-01 00:00:01");
-        Ok(())
-    }
 
     #[test]
     fn test_deterministic() {
