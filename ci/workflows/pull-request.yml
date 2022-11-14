@@ -201,8 +201,6 @@ steps:
   - label: "recovery test (deterministic simulation)"
     command: "timeout 14m ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
-    env:
-      KILL_RATE: 0.5
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       # - seek-oss/aws-sm#v2.3.1:

@@ -140,8 +140,6 @@ steps:
   - label: "recovery test (deterministic simulation)"
     command: "timeout 14m ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
-    env:
-      KILL_RATE: 1.0
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
