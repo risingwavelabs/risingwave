@@ -97,7 +97,7 @@ impl HummockStorageV1 {
                 uncommitted_data,
                 full_key,
                 &mut local_stats,
-                read_options.check_bloom_filter,
+                &read_options,
             )
             .await?;
             if let Some(v) = value {
@@ -112,7 +112,7 @@ impl HummockStorageV1 {
                 sync_uncommitted_data,
                 full_key,
                 &mut local_stats,
-                read_options.check_bloom_filter,
+                &read_options,
             )
             .await?;
             if let Some(v) = value {
@@ -142,7 +142,7 @@ impl HummockStorageV1 {
                             self.sstable_store.clone(),
                             sstable_info,
                             full_key,
-                            read_options.check_bloom_filter,
+                            &read_options,
                             &mut local_stats,
                         )
                         .await?
@@ -180,7 +180,7 @@ impl HummockStorageV1 {
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
                         full_key,
-                        read_options.check_bloom_filter,
+                        &read_options,
                         &mut local_stats,
                     )
                     .await?

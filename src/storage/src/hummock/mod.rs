@@ -84,8 +84,8 @@ use crate::hummock::compactor::Context;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::iterator::{
-    Backward, BackwardUserIteratorType, DeleteRangeIterator, DirectedUserIteratorBuilder,
-    DirectionEnum, Forward, ForwardUserIteratorType, HummockIteratorDirection,
+    Backward, BackwardUserIteratorType, DirectedUserIteratorBuilder, DirectionEnum, Forward,
+    ForwardUserIteratorType, HummockIteratorDirection,
 };
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
@@ -95,6 +95,7 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::{HummockReadVersion, HummockVersionReader};
 use crate::monitor::StoreLocalStatistic;
+use crate::store::ReadOptions;
 
 struct HummockStorageShutdownGuard {
     shutdown_sender: UnboundedSender<HummockEvent>,
@@ -307,24 +308,26 @@ pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
     sstable_info: &SstableInfo,
     full_key: FullKey<&[u8]>,
-    check_bloom_filter: bool,
+    read_options: &ReadOptions,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
-    let mut iter = SstableDeleteRangeIterator::new(sstable.clone());
-    iter.seek(full_key.user_key);
     let ukey = &full_key.user_key;
-    let mut agg = DeleteRangeAggregator::new(iter, full_key.epoch);
-    if check_bloom_filter
+    if read_options.check_bloom_filter
         && !hit_sstable_bloom_filter(sstable.value(), ukey.encode().as_slice(), local_stats)
     {
-        if agg.should_delete(ukey, 0) {
+        if get_delete_range_epoch_from_sstable(&sstable, &full_key).is_some() {
             return Ok(Some(HummockValue::Delete));
         }
         return Ok(None);
     }
 
+    let delete_epoch = if read_options.ignore_range_tombstone {
+        None
+    } else {
+        get_delete_range_epoch_from_sstable(&sstable, &full_key)
+    };
     // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
     // use default before refinement.
     let mut iter = SstableIterator::create(
@@ -335,7 +338,7 @@ pub async fn get_from_sstable_info(
     iter.seek(full_key).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
-        if agg.should_delete(ukey, 0) {
+        if delete_epoch.is_some() {
             return Ok(Some(HummockValue::Delete));
         }
         return Ok(None);
@@ -344,12 +347,15 @@ pub async fn get_from_sstable_info(
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
     let value = if iter.key().user_key == *ukey {
-        if agg.should_delete(ukey, iter.key().epoch) {
+        if delete_epoch
+            .map(|epoch| epoch >= iter.key().epoch)
+            .unwrap_or(false)
+        {
             Some(HummockValue::Delete)
         } else {
             Some(iter.value().to_bytes())
         }
-    } else if agg.should_delete(ukey, 0) {
+    } else if delete_epoch.is_some() {
         Some(HummockValue::Delete)
     } else {
         None
@@ -380,7 +386,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
     order_sorted_uncommitted_data: OrderSortedUncommittedData,
     full_key: FullKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
-    check_bloom_filter: bool,
+    read_options: &ReadOptions,
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
     let epoch = full_key.epoch;
@@ -403,7 +409,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
                         sstable_store_ref.clone(),
                         &sst_info,
                         full_key,
-                        check_bloom_filter,
+                        read_options,
                         local_stats,
                     )
                     .await?

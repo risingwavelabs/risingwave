@@ -389,7 +389,7 @@ impl HummockVersionReader {
                 self.sstable_store.clone(),
                 local_sst,
                 full_key,
-                read_options.check_bloom_filter,
+                &read_options,
                 &mut local_stats,
             )
             .await?
@@ -420,7 +420,7 @@ impl HummockVersionReader {
                             self.sstable_store.clone(),
                             sstable_info,
                             full_key,
-                            read_options.check_bloom_filter,
+                            &read_options,
                             &mut local_stats,
                         )
                         .await?
@@ -459,7 +459,7 @@ impl HummockVersionReader {
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
                         full_key,
-                        read_options.check_bloom_filter,
+                        &read_options,
                         &mut local_stats,
                     )
                     .await?
@@ -497,7 +497,7 @@ impl HummockVersionReader {
             .with_label_values(&["staging-imm-iter"])
             .observe(imms.len() as f64);
         for imm in imms {
-            if imm.has_range_tombstone() {
+            if imm.has_range_tombstone() && !read_options.ignore_range_tombstone {
                 delete_range_iter.add_batch_iter(imm.delete_range_iter());
             }
             staging_iters.push(HummockIteratorUnion::First(imm.into_forward_iter()));
@@ -519,7 +519,9 @@ impl HummockVersionReader {
                 ) {
                     continue;
                 }
-                if !table_holder.value().meta.range_tombstone_list.is_empty() {
+                if !table_holder.value().meta.range_tombstone_list.is_empty()
+                    && !read_options.ignore_range_tombstone
+                {
                     delete_range_iter
                         .add_sst_iter(SstableDeleteRangeIterator::new(table_holder.clone()));
                 }
@@ -589,7 +591,9 @@ impl HummockVersionReader {
                             continue;
                         }
                     }
-                    if !sstable.value().meta.range_tombstone_list.is_empty() {
+                    if !sstable.value().meta.range_tombstone_list.is_empty()
+                        && !read_options.ignore_range_tombstone
+                    {
                         delete_range_iter
                             .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
                     }
@@ -621,7 +625,9 @@ impl HummockVersionReader {
                             continue;
                         }
                     }
-                    if !sstable.value().meta.range_tombstone_list.is_empty() {
+                    if !sstable.value().meta.range_tombstone_list.is_empty()
+                        && !read_options.ignore_range_tombstone
+                    {
                         delete_range_iter
                             .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
                     }

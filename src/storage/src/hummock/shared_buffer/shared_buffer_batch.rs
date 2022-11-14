@@ -753,6 +753,7 @@ mod tests {
         assert!(!shared_buffer_batch.check_delete_by_range(TableKey(b"eee")));
     }
 
+    #[tokio::test]
     #[should_panic]
     async fn test_invalid_table_id() {
         let epoch = 1;

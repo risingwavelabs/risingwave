@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap};
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::UserKey;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
 use super::DeleteRangeTombstone;
@@ -218,7 +218,7 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
     /// Check whether the target-key is deleted by some range-tombstone. Target-key must be given
     /// in order.
     pub fn should_delete(&mut self, target_key: &UserKey<&[u8]>, epoch: HummockEpoch) -> bool {
-        if epoch >= self.watermark {
+        if epoch > self.watermark {
             return false;
         }
 
@@ -309,6 +309,45 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
     fn is_valid(&self) -> bool {
         self.current_idx < self.table.value().meta.range_tombstone_list.len()
     }
+}
+
+pub fn get_delete_range_epoch_from_sstable(
+    table: &TableHolder,
+    full_key: &FullKey<&[u8]>,
+) -> Option<HummockEpoch> {
+    if table.value().meta.range_tombstone_list.is_empty() {
+        return None;
+    }
+    let watermark = full_key.epoch;
+    let mut idx = table
+        .value()
+        .meta
+        .range_tombstone_list
+        .partition_point(|tombstone| tombstone.end_user_key.as_ref().le(&full_key.user_key));
+    if idx >= table.value().meta.range_tombstone_list.len() {
+        return None;
+    }
+    let mut epoch = None;
+    while table.value().meta.range_tombstone_list[idx]
+        .start_user_key
+        .as_ref()
+        .le(&full_key.user_key)
+    {
+        let sequence = table.value().meta.range_tombstone_list[idx].sequence;
+        if sequence > watermark {
+            idx += 1;
+            continue;
+        }
+        if epoch
+            .as_ref()
+            .map(|epoch| *epoch < sequence)
+            .unwrap_or(true)
+        {
+            epoch = Some(sequence);
+        }
+        idx += 1;
+    }
+    epoch
 }
 
 #[cfg(test)]

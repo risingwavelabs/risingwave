@@ -45,8 +45,8 @@ mod delete_range_aggregator;
 mod sstable_id_manager;
 mod utils;
 pub use delete_range_aggregator::{
-    DeleteRangeAggregator, DeleteRangeAggregatorBuilder, RangeTombstonesCollector,
-    SstableDeleteRangeIterator,
+    get_delete_range_epoch_from_sstable, DeleteRangeAggregator, DeleteRangeAggregatorBuilder,
+    RangeTombstonesCollector, SstableDeleteRangeIterator,
 };
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
