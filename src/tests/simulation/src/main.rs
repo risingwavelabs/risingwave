@@ -169,7 +169,7 @@ async fn main() {
         })
         .build();
     // wait for the service to be ready
-    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
 
     // frontend node
     let mut frontend_ip = vec![];
@@ -326,7 +326,7 @@ async fn main() {
         });
 
     // wait for the service to be ready
-    tokio::time::sleep(Duration::from_secs(30)).await;
+    tokio::time::sleep(Duration::from_secs(15)).await;
     // client
     let client_node = handle
         .create_node()
