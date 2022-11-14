@@ -302,8 +302,8 @@ message ExchangeNode {
 
 
 enum ChainType {
-  // Chain is corresponding to the chain executor.
-  Chain = 0;
+  // CHAIN is corresponding to the chain executor.
+  CHAIN = 0;
 
   // REARRANGE is corresponding to the rearranged chain executor.
   REARRANGE = 1;

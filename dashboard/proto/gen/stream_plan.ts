@@ -18,8 +18,8 @@ import { ConnectorSplits } from "./source";
 export const protobufPackage = "stream_plan";
 
 export const ChainType = {
-  /** Chain - Chain is corresponding to the chain executor. */
-  Chain: "Chain",
+  /** CHAIN - CHAIN is corresponding to the chain executor. */
+  CHAIN: "CHAIN",
   /** REARRANGE - REARRANGE is corresponding to the rearranged chain executor. */
   REARRANGE: "REARRANGE",
   /** BACKFILL - BACKFILL is corresponding to the backfill executor. */
@@ -32,8 +32,8 @@ export type ChainType = typeof ChainType[keyof typeof ChainType];
 export function chainTypeFromJSON(object: any): ChainType {
   switch (object) {
     case 0:
-    case "Chain":
-      return ChainType.Chain;
+    case "CHAIN":
+      return ChainType.CHAIN;
     case 1:
     case "REARRANGE":
       return ChainType.REARRANGE;
@@ -49,8 +49,8 @@ export function chainTypeFromJSON(object: any): ChainType {
 
 export function chainTypeToJSON(object: ChainType): string {
   switch (object) {
-    case ChainType.Chain:
-      return "Chain";
+    case ChainType.CHAIN:
+      return "CHAIN";
     case ChainType.REARRANGE:
       return "REARRANGE";
     case ChainType.BACKFILL:
@@ -2544,7 +2544,7 @@ function createBaseChainNode(): ChainNode {
     tableId: 0,
     upstreamFields: [],
     upstreamColumnIndices: [],
-    chainType: ChainType.Chain,
+    chainType: ChainType.CHAIN,
     sameWorkerNode: false,
     isSingleton: false,
     tableDesc: undefined,
@@ -2561,7 +2561,7 @@ export const ChainNode = {
       upstreamColumnIndices: Array.isArray(object?.upstreamColumnIndices)
         ? object.upstreamColumnIndices.map((e: any) => Number(e))
         : [],
-      chainType: isSet(object.chainType) ? chainTypeFromJSON(object.chainType) : ChainType.Chain,
+      chainType: isSet(object.chainType) ? chainTypeFromJSON(object.chainType) : ChainType.CHAIN,
       sameWorkerNode: isSet(object.sameWorkerNode) ? Boolean(object.sameWorkerNode) : false,
       isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
       tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
@@ -2594,7 +2594,7 @@ export const ChainNode = {
     message.tableId = object.tableId ?? 0;
     message.upstreamFields = object.upstreamFields?.map((e) => Field.fromPartial(e)) || [];
     message.upstreamColumnIndices = object.upstreamColumnIndices?.map((e) => e) || [];
-    message.chainType = object.chainType ?? ChainType.Chain;
+    message.chainType = object.chainType ?? ChainType.CHAIN;
     message.sameWorkerNode = object.sameWorkerNode ?? false;
     message.isSingleton = object.isSingleton ?? false;
     message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
