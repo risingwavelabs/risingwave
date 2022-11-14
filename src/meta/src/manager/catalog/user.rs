@@ -58,9 +58,7 @@ impl UserManager {
             .chain(database.indexes.values().map(|index| index.owner))
             .chain(database.tables.values().map(|table| table.owner))
             .chain(database.views.values().map(|view| view.owner))
-            .for_each(|owner_id| {
-                user_manager.increase_ref_count(owner_id, 1);
-            });
+            .for_each(|owner_id| user_manager.increase_ref(owner_id));
 
         Ok(user_manager)
     }
