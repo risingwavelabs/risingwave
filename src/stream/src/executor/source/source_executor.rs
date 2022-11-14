@@ -351,6 +351,9 @@ impl<S: StateStore> SourceExecutor<S> {
                                 self.apply_split_change(&source_desc, &mut stream, actor_splits)
                                     .await?;
                             }
+                            Mutation::Stop(_) => {
+                                // todo: stop cdc engine on connector node if any
+                            }
                             _ => {}
                         }
                     }

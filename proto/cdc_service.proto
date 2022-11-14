@@ -50,8 +50,9 @@ message GetEventStreamResponse {
   repeated CdcMessage events = 2;
 }
 
-message DropSourceRequest {}
-
+message DropSourceRequest {
+  uint64 source_id = 1;
+}
 
 message DropSourceResponse {
   Status status = 1;
@@ -60,4 +61,5 @@ message DropSourceResponse {
 service CdcService {
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
+  rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
 }

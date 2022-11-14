@@ -69,6 +69,16 @@ impl CdcClient {
             })?
             .into_inner())
     }
+
+    pub async fn drop_source(&self, source_id: u64) -> Result<DropSourceResponse> {
+        Ok(self
+            .0
+            .to_owned()
+            .drop_source(DropSourceRequest { source_id })
+            .await
+            .inspect_err(|_| tracing::error!("failed to drop source for CDC source {}", source_id))?
+            .into_inner())
+    }
 }
 
 #[async_trait]
