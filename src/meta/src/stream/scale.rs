@@ -516,6 +516,16 @@ where
                     );
                 }
             }
+
+            match fragment.distribution_type() {
+                FragmentDistributionType::Hash => {}
+                FragmentDistributionType::Single => {
+                    if added_parallel_units.len() != removed_parallel_units.len() {
+                        bail!("single distribution fragment only support migration");
+                    }
+                }
+                FragmentDistributionType::Unspecified => unreachable!(),
+            }
         }
 
         if !no_shuffle_reschedule.is_empty() {
@@ -768,26 +778,26 @@ where
                 let worker = ctx.parallel_unit_id_to_worker(new_parallel_unit_id)?;
 
                 // for chain (no shuffle) downstreams, we don't need to create hanging channels
-                if !ctx.no_shuffle_target_fragment_ids.contains(fragment_id) {
-                    for upstream_actor_id in &new_actor.upstream_actor_id {
-                        let upstream_worker_id = ctx
-                            .actor_id_to_parallel_unit(upstream_actor_id)?
-                            .worker_node_id;
-                        worker_hanging_channels
-                            .entry(upstream_worker_id)
-                            .or_default()
-                            .push(HangingChannel {
-                                upstream: Some(ActorInfo {
-                                    actor_id: *upstream_actor_id,
-                                    host: None,
-                                }),
-                                downstream: Some(ActorInfo {
-                                    actor_id: *new_actor_id,
-                                    host: worker.host.clone(),
-                                }),
-                            });
-                    }
+                //                if !ctx.no_shuffle_target_fragment_ids.contains(fragment_id) {
+                for upstream_actor_id in &new_actor.upstream_actor_id {
+                    let upstream_worker_id = ctx
+                        .actor_id_to_parallel_unit(upstream_actor_id)?
+                        .worker_node_id;
+                    worker_hanging_channels
+                        .entry(upstream_worker_id)
+                        .or_default()
+                        .push(HangingChannel {
+                            upstream: Some(ActorInfo {
+                                actor_id: *upstream_actor_id,
+                                host: None,
+                            }),
+                            downstream: Some(ActorInfo {
+                                actor_id: *new_actor_id,
+                                host: worker.host.clone(),
+                            }),
+                        });
                 }
+                //              }
 
                 // This should be assigned before the `modify_actor_upstream_and_downstream` call,
                 // because we need to use the new actor id to find the upstream and
@@ -797,6 +807,7 @@ where
                 Self::modify_actor_upstream_and_downstream(
                     &ctx.fragment_map,
                     &ctx.actor_map,
+                    &ctx.fragment_dispatcher_map,
                     &fragment_actors_to_remove,
                     &fragment_actors_to_create,
                     &fragment_actor_bitmap,
@@ -885,6 +896,13 @@ where
                         host: worker.host.clone(),
                     },
                 );
+            }
+        }
+
+        for (a, b) in &worker_hanging_channels {
+            println!("for worker {}", a);
+            for hc in b {
+                println!("\thc {:?} -> {:?}", hc.upstream, hc.downstream);
             }
         }
 
@@ -1298,6 +1316,7 @@ where
     fn modify_actor_upstream_and_downstream(
         fragment_map: &HashMap<FragmentId, Fragment>,
         actor_map: &HashMap<ActorId, StreamActor>,
+        fragment_relation_map: &HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
         fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
@@ -1305,91 +1324,76 @@ where
         no_shuffle_downstream_actors_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         new_actor: &mut StreamActor,
     ) -> MetaResult<()> {
-        if let Some(no_shuffle_actor_id) = no_shuffle_upstream_actor_map.get(&new_actor.actor_id) {
-            assert_eq!(new_actor.upstream_actor_id.len(), 1);
-            new_actor.upstream_actor_id = vec![*no_shuffle_actor_id as ActorId];
-        } else {
-            let upstream_fragment_ids: HashSet<_> = new_actor
-                .upstream_actor_id
-                .iter()
-                .filter_map(|actor_id| actor_map.get(actor_id).map(|actor| actor.fragment_id))
-                .collect();
+        let fragment = fragment_map.get(&new_actor.fragment_id).unwrap();
 
-            for upstream_fragment_id in &upstream_fragment_ids {
-                let upstream_fragment = fragment_map.get(upstream_fragment_id).unwrap();
+        let mut applied_upstream_fragment_actor_ids = HashMap::new();
+        for upstream_fragment_id in &fragment.upstream_fragment_ids {
+            let upstream_dispatch_type = fragment_relation_map
+                .get(upstream_fragment_id)
+                .and_then(|map| map.get(&fragment.fragment_id))
+                .unwrap();
 
-                match upstream_fragment.distribution_type() {
-                    FragmentDistributionType::Hash => {}
-                    FragmentDistributionType::Single => {
-                        let upstream_actors_to_create =
-                            fragment_actors_to_create.get(upstream_fragment_id);
-                        let upstream_actors_to_remove =
-                            fragment_actors_to_remove.get(upstream_fragment_id);
+            match upstream_dispatch_type {
+                DispatcherType::Unspecified => unreachable!(),
+                DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
+                    let upstream_fragment = fragment_map.get(upstream_fragment_id).unwrap();
+                    let mut upstream_actor_ids = upstream_fragment
+                        .actors
+                        .iter()
+                        .map(|actor| actor.actor_id as ActorId)
+                        .collect_vec();
 
-                        match (upstream_actors_to_create, upstream_actors_to_remove) {
-                            (Some(create), Some(remove)) if create.len() == remove.len() => {}
-                            (None, None) => {}
-                            _ => bail!("single distribution only support migration"),
-                        }
+                    if let Some(upstream_actors_to_remove) =
+                        fragment_actors_to_remove.get(upstream_fragment_id)
+                    {
+                        upstream_actor_ids.drain_filter(|actor_id| {
+                            upstream_actors_to_remove.contains_key(actor_id)
+                        });
                     }
-                    FragmentDistributionType::Unspecified => unreachable!(),
+
+                    if let Some(upstream_actors_to_create) =
+                        fragment_actors_to_create.get(upstream_fragment_id)
+                    {
+                        upstream_actor_ids.extend(upstream_actors_to_create.keys().cloned());
+                    }
+
+                    applied_upstream_fragment_actor_ids.insert(
+                        *upstream_fragment_id as FragmentId,
+                        upstream_actor_ids.clone(),
+                    );
                 }
-            }
+                DispatcherType::NoShuffle => {
+                    let no_shuffle_upstream_actor_id = no_shuffle_upstream_actor_map
+                        .get(&new_actor.actor_id)
+                        .cloned()
+                        .unwrap();
 
-            let mut upstream_actors_to_remove = HashSet::new();
-            for upstream_fragment_id in &upstream_fragment_ids {
-                if let Some(actors_to_remove) = fragment_actors_to_remove.get(upstream_fragment_id)
-                {
-                    upstream_actors_to_remove.extend(actors_to_remove.keys().cloned());
-                }
-            }
-
-            // update upstream actor ids
-            new_actor
-                .upstream_actor_id
-                .drain_filter(|actor_id| upstream_actors_to_remove.contains(actor_id));
-
-            for upstream_fragment_id in &upstream_fragment_ids {
-                if let Some(upstream_actors_to_create) =
-                    fragment_actors_to_create.get(upstream_fragment_id)
-                {
-                    new_actor
-                        .upstream_actor_id
-                        .extend(upstream_actors_to_create.keys().cloned())
+                    applied_upstream_fragment_actor_ids.insert(
+                        *upstream_fragment_id as FragmentId,
+                        vec![no_shuffle_upstream_actor_id as ActorId],
+                    );
                 }
             }
         }
+
+        new_actor.upstream_actor_id = applied_upstream_fragment_actor_ids
+            .values()
+            .cloned()
+            .flatten()
+            .collect_vec();
 
         fn replace_merge_node_upstream(
             stream_node: &mut StreamNode,
             fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
             fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
             no_shuffle_upstream_actor_id: Option<&ActorId>,
+            applied_upstream_fragment_actor_ids: &HashMap<FragmentId, Vec<ActorId>>,
         ) {
             if let Some(NodeBody::Merge(s)) = stream_node.node_body.as_mut() {
-                if let Some(upstream_actor_id) = no_shuffle_upstream_actor_id {
-                    assert_eq!(s.upstream_actor_id.len(), 1);
-                    assert!(matches!(
-                        s.upstream_dispatcher_type(),
-                        DispatcherType::NoShuffle
-                    ));
-                    s.upstream_actor_id = vec![*upstream_actor_id as ActorId];
-                } else {
-                    if let Some(upstream_actors_to_remove) =
-                        fragment_actors_to_remove.get(&s.upstream_fragment_id)
-                    {
-                        s.upstream_actor_id.drain_filter(|actor_id| {
-                            upstream_actors_to_remove.contains_key(actor_id)
-                        });
-                    }
-
-                    if let Some(upstream_actors_to_create) =
-                        fragment_actors_to_create.get(&s.upstream_fragment_id)
-                    {
-                        s.upstream_actor_id
-                            .extend(upstream_actors_to_create.keys().cloned());
-                    }
-                }
+                s.upstream_actor_id = applied_upstream_fragment_actor_ids
+                    .get(&s.upstream_fragment_id)
+                    .cloned()
+                    .unwrap();
             }
 
             for child in &mut stream_node.input {
@@ -1398,6 +1402,7 @@ where
                     fragment_actors_to_remove,
                     fragment_actors_to_create,
                     no_shuffle_upstream_actor_id,
+                    applied_upstream_fragment_actor_ids,
                 );
             }
         }
@@ -1408,6 +1413,7 @@ where
                 fragment_actors_to_remove,
                 fragment_actors_to_create,
                 no_shuffle_upstream_actor_map.get(&new_actor.actor_id),
+                &applied_upstream_fragment_actor_ids,
             );
         }
 
