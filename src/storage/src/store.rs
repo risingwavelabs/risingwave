@@ -19,6 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::StorageResult;
@@ -73,10 +74,10 @@ macro_rules! define_state_store_read_associated_type {
 }
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
-pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>> =
+pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> =
     Future<Output = StorageResult<I>> + Send + 'a;
 pub trait StateStoreRead: StaticSendSync {
-    type Iter: StateStoreIter<Item = (Bytes, Bytes)> + 'static;
+    type Iter: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + 'static;
 
     type GetFuture<'a>: GetFutureTrait<'a>;
     type IterFuture<'a>: IterFutureTrait<'a, Self::Iter>;
@@ -103,7 +104,8 @@ pub trait StateStoreRead: StaticSendSync {
     ) -> Self::IterFuture<'_>;
 }
 
-pub trait ScanFutureTrait<'a> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send + 'a;
+pub trait ScanFutureTrait<'a> =
+    Future<Output = StorageResult<Vec<(FullKey<Vec<u8>>, Bytes)>>> + Send + 'a;
 
 pub trait StateStoreReadExt: StaticSendSync {
     type ScanFuture<'a>: ScanFutureTrait<'a>;
@@ -154,6 +156,11 @@ pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + S
 pub trait StateStoreWrite: StaticSendSync {
     type IngestBatchFuture<'a>: IngestBatchFutureTrait<'a>;
 
+    /// Writes a batch to storage. The batch should be:
+    /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
+    /// * Locally unique. There should not be two or more operations on the same key in one write
+    ///   batch.
+    ///
     /// Ingests a batch of data into the state store. One write batch should never contain operation
     /// on the same key. e.g. Put(233, x) then Delete(233).
     /// An epoch should be provided to ingest a write batch. It is served as:
@@ -198,7 +205,7 @@ macro_rules! define_state_store_associated_type {
     };
 }
 
-pub trait StateStore: StateStoreRead + StateStoreWrite + StaticSendSync + Clone {
+pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
     type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;

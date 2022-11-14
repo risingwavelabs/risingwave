@@ -33,7 +33,7 @@ mod tests {
         FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
         FixedLengthFilterKeyExtractor, FullKeyFilterKeyExtractor,
     };
-    use risingwave_hummock_sdk::key::{get_table_id, next_key, table_prefix, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::key::{get_table_id, next_key, TABLE_PREFIX_LEN};
     use risingwave_meta::hummock::compaction::ManualCompactionOption;
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env,
@@ -48,7 +48,8 @@ mod tests {
     };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::{
-        CompactorSstableStore, HummockStorage, MemoryLimiter, SstableIdManager,
+        CompactorSstableStore, HummockStorage as GlobalHummockStorage, MemoryLimiter,
+        SstableIdManager,
     };
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use risingwave_storage::storage_value::StorageValue;
@@ -57,7 +58,10 @@ mod tests {
     };
     use risingwave_storage::Keyspace;
 
-    use crate::test_utils::{get_test_notification_client, prefixed_key};
+    use crate::test_utils::{
+        get_test_notification_client, HummockV2MixedStateStore,
+        HummockV2MixedStateStore as HummockStorage,
+    };
 
     async fn get_hummock_storage(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -74,14 +78,16 @@ mod tests {
         });
         let sstable_store = mock_sstable_store();
 
-        HummockStorage::for_test(
+        let hummock = GlobalHummockStorage::for_test(
             options,
             sstable_store,
             hummock_meta_client.clone(),
             notification_client,
         )
         .await
-        .unwrap()
+        .unwrap();
+
+        HummockV2MixedStateStore::new(hummock).await
     }
 
     async fn prepare_test_put_data(
@@ -128,7 +134,7 @@ mod tests {
     }
 
     fn get_compactor_context_with_filter_key_extractor_manager(
-        storage: &HummockStorage,
+        storage: &HummockV2MixedStateStore,
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
@@ -147,13 +153,13 @@ mod tests {
             )),
             task_progress_manager: Default::default(),
         });
-        CompactorContext {
-            sstable_store: Arc::new(CompactorSstableStore::new(
+        CompactorContext::new(
+            context.clone(),
+            Arc::new(CompactorSstableStore::new(
                 context.sstable_store.clone(),
                 context.read_memory_limiter.clone(),
             )),
-            context,
-        }
+        )
     }
 
     #[tokio::test]
@@ -309,7 +315,7 @@ mod tests {
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         // 1. add sstables with 1MB value
-        let key = prefixed_key(Bytes::from(&b"same_key"[..]));
+        let key = Bytes::from(&b"same_key"[..]);
         let mut val = b"0"[..].repeat(1 << 20);
         val.extend_from_slice(&128u64.to_be_bytes());
         prepare_test_put_data(
@@ -451,7 +457,7 @@ mod tests {
         }
     }
 
-    pub async fn prepare_compactor_and_filter(
+    pub(crate) async fn prepare_compactor_and_filter(
         storage: &HummockStorage,
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         hummock_manager_ref: HummockManagerRef<MemStore>,
@@ -505,7 +511,7 @@ mod tests {
             existing_table_id,
         )
         .await;
-        let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
+        let keyspace = Keyspace::table_root(storage.clone(), TableId::new(existing_table_id));
 
         prepare_data(
             hummock_meta_client.clone(),
@@ -618,7 +624,7 @@ mod tests {
             } else {
                 existing_table_ids
             };
-            let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(table_id));
+            let keyspace = Keyspace::table_root(storage.clone(), TableId::new(table_id));
             register_table_ids_to_compaction_group(
                 &hummock_manager_ref,
                 &[table_id],
@@ -728,7 +734,7 @@ mod tests {
                 ReadOptions {
                     check_bloom_filter: false,
                     prefix_hint: None,
-                    table_id: Default::default(),
+                    table_id: TableId::from(existing_table_ids),
                     retention_seconds: None,
                 },
             )
@@ -736,7 +742,7 @@ mod tests {
             .unwrap();
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = get_table_id(&k);
+            let table_id = k.user_key.table_id.table_id();
             assert_eq!(table_id, existing_table_ids);
             scan_count += 1;
         }
@@ -779,7 +785,7 @@ mod tests {
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
-        let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
+        let keyspace = Keyspace::table_root(storage.clone(), TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
             &hummock_manager_ref,
             &[existing_table_id],
@@ -898,7 +904,7 @@ mod tests {
                 ReadOptions {
                     check_bloom_filter: false,
                     prefix_hint: None,
-                    table_id: Default::default(),
+                    table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                 },
             )
@@ -906,7 +912,7 @@ mod tests {
             .unwrap();
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = get_table_id(&k);
+            let table_id = k.user_key.table_id.table_id();
             assert_eq!(table_id, existing_table_id);
             scan_count += 1;
         }
@@ -952,7 +958,7 @@ mod tests {
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
-        let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
+        let keyspace = Keyspace::table_root(storage.clone(), TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
             &hummock_manager_ref,
             &[keyspace.table_id().table_id],
@@ -1057,9 +1063,8 @@ mod tests {
         storage.wait_version(version).await;
 
         // 6. scan kv to check key table_id
-        let table_prefix = table_prefix(existing_table_id);
-        let bloom_filter_key = [table_prefix.clone(), key_prefix.to_vec()].concat();
-        let start_bound_key = [table_prefix, key_prefix.to_vec()].concat();
+        let bloom_filter_key = key_prefix.to_vec();
+        let start_bound_key = key_prefix.to_vec();
         let end_bound_key = next_key(start_bound_key.as_slice());
         let scan_result = storage
             .scan(
@@ -1081,7 +1086,7 @@ mod tests {
 
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = get_table_id(&k);
+            let table_id = k.user_key.table_id.table_id();
             assert_eq!(table_id, existing_table_id);
             scan_count += 1;
         }
@@ -1110,7 +1115,7 @@ mod tests {
         )
         .await;
 
-        let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
+        let keyspace = Keyspace::table_root(storage.clone(), TableId::new(existing_table_id));
         prepare_data(
             hummock_meta_client.clone(),
             &keyspace,

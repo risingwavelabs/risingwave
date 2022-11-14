@@ -79,7 +79,7 @@ pub mod predicate {
     }
 
     /// There does not exist any operator whose identity contains `s` in the fragment.
-    pub fn identity_not_contains(s: impl Into<String>) -> BoxedPredicate {
+    pub fn no_identity_contains(s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
         let p = move |f: &ProstFragment| {
             all(root(f), &|n| {
@@ -97,18 +97,9 @@ pub mod predicate {
 
     /// The fragment is able to be rescheduled. Used for locating random fragment.
     pub fn can_reschedule() -> BoxedPredicate {
-        let p = |f: &ProstFragment| {
-            // FIXME: we should already support reschedule source fragment, but there might be a bug
-            // of nexmark generator recovery.
-            let has_source = identity_contains("StreamSource")(f);
-
-            // TODO: remove below after we support scaling them.
-            let has_downstream_mv = identity_contains("StreamMaterialize")(f)
-                && !f.actors.first().unwrap().dispatcher.is_empty();
-            let has_chain = identity_contains("StreamTableScan")(f);
-            !(has_source || has_downstream_mv || has_chain)
-        };
-        Box::new(p)
+        // The rescheduling of `Chain` must be derived from the upstream `Materialize`, not
+        // specified by the user.
+        no_identity_contains("StreamTableScan")
     }
 
     /// The fragment with the given id.

@@ -23,12 +23,13 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::*;
+use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreIter, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
 
 use crate::test_utils::{
-    get_test_notification_client, prefixed_key, with_hummock_storage_v1, with_hummock_storage_v2,
+    get_test_notification_client, with_hummock_storage_v1, with_hummock_storage_v2,
     HummockStateStoreTestTrait,
 };
 
@@ -105,14 +106,8 @@ async fn test_snapshot_inner(
     hummock_storage
         .ingest_batch(
             vec![
-                (
-                    prefixed_key(Bytes::from("1")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    prefixed_key(Bytes::from("2")),
-                    StorageValue::new_put("test"),
-                ),
+                (Bytes::from("1"), StorageValue::new_put("test")),
+                (Bytes::from("2"), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -145,15 +140,9 @@ async fn test_snapshot_inner(
     hummock_storage
         .ingest_batch(
             vec![
-                (prefixed_key(Bytes::from("1")), StorageValue::new_delete()),
-                (
-                    prefixed_key(Bytes::from("3")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    prefixed_key(Bytes::from("4")),
-                    StorageValue::new_put("test"),
-                ),
+                (Bytes::from("1"), StorageValue::new_delete()),
+                (Bytes::from("3"), StorageValue::new_put("test")),
+                (Bytes::from("4"), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -187,9 +176,9 @@ async fn test_snapshot_inner(
     hummock_storage
         .ingest_batch(
             vec![
-                (prefixed_key(Bytes::from("2")), StorageValue::new_delete()),
-                (prefixed_key(Bytes::from("3")), StorageValue::new_delete()),
-                (prefixed_key(Bytes::from("4")), StorageValue::new_delete()),
+                (Bytes::from("2"), StorageValue::new_delete()),
+                (Bytes::from("3"), StorageValue::new_delete()),
+                (Bytes::from("4"), StorageValue::new_delete()),
             ],
             vec![],
             WriteOptions {
@@ -232,22 +221,10 @@ async fn test_snapshot_range_scan_inner(
     hummock_storage
         .ingest_batch(
             vec![
-                (
-                    prefixed_key(Bytes::from("1")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    prefixed_key(Bytes::from("2")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    prefixed_key(Bytes::from("3")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    prefixed_key(Bytes::from("4")),
-                    StorageValue::new_put("test"),
-                ),
+                (Bytes::from("1"), StorageValue::new_put("test")),
+                (Bytes::from("2"), StorageValue::new_put("test")),
+                (Bytes::from("3"), StorageValue::new_put("test")),
+                (Bytes::from("4"), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -276,7 +253,7 @@ async fn test_snapshot_range_scan_inner(
     }
     macro_rules! key {
         ($idx:expr) => {
-            prefixed_key(Bytes::from(stringify!($idx)))
+            Bytes::from(stringify!($idx))
         };
     }
 
@@ -299,11 +276,13 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         worker_node.id,
     ));
 
-    let hummock_storage = HummockStorage::for_test(
+    // TODO: may also test for v2 when the unit test is enabled.
+    let hummock_storage = HummockStorageV1::new(
         hummock_options,
         sstable_store,
         mock_hummock_meta_client.clone(),
         get_test_notification_client(env, hummock_manager_ref, worker_node),
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();

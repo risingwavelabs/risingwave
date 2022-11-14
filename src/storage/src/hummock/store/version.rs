@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::collections::{HashSet, VecDeque};
 use std::iter::once;
 use std::ops::Bound::{Excluded, Included};
-use std::ops::{Bound, Deref, RangeBounds};
+use std::ops::{Deref, RangeBounds};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -25,7 +25,9 @@ use minitrace::future::FutureExt;
 use minitrace::Span;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
+use risingwave_hummock_sdk::key::{
+    bound_table_key_range, user_key, FullKey, TableKey, TableKeyRange, UserKey,
+};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 
@@ -116,20 +118,23 @@ pub struct StagingVersion {
 }
 
 impl StagingVersion {
+    /// Get the overlapping `imm`s and `sst`s that overlap respectively with `table_key_range` and
+    /// the user key range derived from `table_id`, `epoch` and `table_key_range`.
     pub fn prune_overlap<'a>(
         &'a self,
         min_epoch_exclusive: HummockEpoch,
         max_epoch_inclusive: HummockEpoch,
         table_id: TableId,
-        key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        table_key_range: &'a TableKeyRange,
     ) -> (
         impl Iterator<Item = &ImmutableMemtable> + 'a,
         impl Iterator<Item = &SstableInfo> + 'a,
     ) {
         let overlapped_imms = self.imm.iter().filter(move |imm| {
             imm.epoch() <= max_epoch_inclusive
+                && imm.table_id == table_id
                 && imm.epoch() > min_epoch_exclusive
-                && range_overlap(key_range, imm.start_user_key(), imm.end_user_key())
+                && range_overlap(table_key_range, imm.start_table_key(), imm.end_table_key())
         });
 
         // TODO: Remove duplicate sst based on sst id
@@ -150,7 +155,7 @@ impl StagingVersion {
                 staging_sst
                     .sstable_infos
                     .iter()
-                    .filter(move |sstable| filter_single_sst(sstable, table_id, key_range))
+                    .filter(move |sstable| filter_single_sst(sstable, table_id, table_key_range))
             });
         (overlapped_imms, overlapped_ssts)
     }
@@ -275,7 +280,7 @@ impl HummockReadVersion {
 pub fn read_filter_for_batch(
     epoch: HummockEpoch, // for check
     table_id: TableId,
-    key_range: &(Bound<Vec<u8>>, Bound<Vec<u8>>),
+    key_range: &TableKeyRange,
     read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
 ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
     assert!(!read_version_vec.is_empty());
@@ -321,13 +326,14 @@ pub fn read_filter_for_batch(
 pub fn read_filter_for_local(
     epoch: HummockEpoch,
     table_id: TableId,
-    key_range: &(Bound<Vec<u8>>, Bound<Vec<u8>>),
+    table_key_range: &TableKeyRange,
     read_version: Arc<RwLock<HummockReadVersion>>,
 ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
     let read_version_guard = read_version.read();
-    let (imm_iter, sst_iter) = read_version_guard
-        .staging()
-        .prune_overlap(0, epoch, table_id, key_range);
+    let (imm_iter, sst_iter) =
+        read_version_guard
+            .staging()
+            .prune_overlap(0, epoch, table_id, table_key_range);
 
     Ok((
         imm_iter.cloned().collect_vec(),
@@ -358,31 +364,31 @@ impl HummockVersionReader {
 impl HummockVersionReader {
     pub async fn get<'a>(
         &'a self,
-        key: &'a [u8],
+        table_key: TableKey<&'a [u8]>,
         epoch: u64,
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
     ) -> StorageResult<Option<Bytes>> {
         let mut table_counts = 0;
-        let internal_key = key_with_epoch(key.to_vec(), epoch);
         let mut local_stats = StoreLocalStatistic::default();
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
 
         // 1. read staging data
-        // 2. order guarantee: imm -> sst
         for imm in &imms {
-            if let Some(data) = get_from_batch(imm, key, &mut local_stats) {
+            if let Some(data) = get_from_batch(imm, table_key, &mut local_stats) {
                 return Ok(data.into_user_value());
             }
         }
 
+        // 2. order guarantee: imm -> sst
+        let full_key = FullKey::new(read_options.table_id, table_key, epoch);
         for local_sst in &uncommitted_ssts {
             table_counts += 1;
 
             if let Some(data) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 local_sst,
-                &internal_key,
+                full_key,
                 read_options.check_bloom_filter,
                 &mut local_stats,
             )
@@ -392,7 +398,10 @@ impl HummockVersionReader {
             }
         }
 
-        // 2. read from committed_version sst file
+        // 3. read from committed_version sst file
+        // Because SST meta records encoded key range,
+        // the filter key needs to be encoded as well.
+        let encoded_user_key = full_key.user_key.encode();
         assert!(committed_version.is_valid());
         for level in committed_version.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
@@ -403,14 +412,14 @@ impl HummockVersionReader {
                     let sstable_infos = prune_ssts(
                         level.table_infos.iter(),
                         read_options.table_id,
-                        &(key..=key),
+                        &(table_key..=table_key),
                     );
                     for sstable_info in sstable_infos {
                         table_counts += 1;
                         if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
-                            &internal_key,
+                            full_key,
                             read_options.check_bloom_filter,
                             &mut local_stats,
                         )
@@ -424,8 +433,8 @@ impl HummockVersionReader {
                 }
                 LevelType::Nonoverlapping => {
                     let mut table_info_idx = level.table_infos.partition_point(|table| {
-                        let ord =
-                            user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
+                        let ord = user_key(&table.key_range.as_ref().unwrap().left)
+                            .cmp(encoded_user_key.as_ref());
                         ord == Ordering::Less || ord == Ordering::Equal
                     });
                     if table_info_idx == 0 {
@@ -439,7 +448,7 @@ impl HummockVersionReader {
                             .unwrap()
                             .right,
                     )
-                    .cmp(key.as_ref());
+                    .cmp(encoded_user_key.as_ref());
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
                         continue;
@@ -449,7 +458,7 @@ impl HummockVersionReader {
                     if let Some(v) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
-                        &internal_key,
+                        full_key,
                         read_options.check_bloom_filter,
                         &mut local_stats,
                     )
@@ -473,7 +482,7 @@ impl HummockVersionReader {
 
     pub async fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
@@ -501,7 +510,13 @@ impl HummockVersionReader {
                 .in_span(Span::enter_with_local_parent("get_sstable"))
                 .await?;
             if let Some(prefix) = read_options.prefix_hint.as_ref() {
-                if !hit_sstable_bloom_filter(table_holder.value(), prefix, &mut local_stats) {
+                if !hit_sstable_bloom_filter(
+                    table_holder.value(),
+                    UserKey::for_test(read_options.table_id, prefix)
+                        .encode()
+                        .as_slice(),
+                    &mut local_stats,
+                ) {
                     continue;
                 }
                 if !table_holder.value().meta.range_tombstone_list.is_empty() {
@@ -523,23 +538,33 @@ impl HummockVersionReader {
         let staging_iter: StagingDataIterator = OrderedMergeIteratorInner::new(staging_iters);
 
         // 2. build iterator from committed
+        // Because SST meta records encoded key range,
+        // the filter key range needs to be encoded as well.
+        let user_key_range = bound_table_key_range(read_options.table_id, &table_key_range);
+        let encoded_user_key_range = (
+            user_key_range.0.as_ref().map(UserKey::encode),
+            user_key_range.1.as_ref().map(UserKey::encode),
+        );
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
         for level in committed.levels(read_options.table_id) {
-            let table_infos =
-                prune_ssts(level.table_infos.iter(), read_options.table_id, &key_range);
+            let table_infos = prune_ssts(
+                level.table_infos.iter(),
+                read_options.table_id,
+                &table_key_range,
+            );
             if table_infos.is_empty() {
                 continue;
             }
 
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&table_infos));
-                let start_table_idx = match key_range.start_bound() {
+                let start_table_idx = match encoded_user_key_range.start_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
                     _ => 0,
                 };
-                let end_table_idx = match key_range.end_bound() {
+                let end_table_idx = match encoded_user_key_range.end_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
                     _ => table_infos.len().saturating_sub(1),
                 };
@@ -556,7 +581,9 @@ impl HummockVersionReader {
                     if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
                         if !hit_sstable_bloom_filter(
                             sstable.value(),
-                            bloom_filter_key,
+                            UserKey::for_test(read_options.table_id, bloom_filter_key)
+                                .encode()
+                                .as_slice(),
                             &mut local_stats,
                         ) {
                             continue;
@@ -586,7 +613,9 @@ impl HummockVersionReader {
                     if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
                         if !hit_sstable_bloom_filter(
                             sstable.value(),
-                            bloom_filter_key,
+                            UserKey::for_test(read_options.table_id, bloom_filter_key)
+                                .encode()
+                                .as_slice(),
                             &mut local_stats,
                         ) {
                             continue;
@@ -632,10 +661,9 @@ impl HummockVersionReader {
 
         // the epoch_range left bound for iterator read
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
-
         let mut user_iter = UserIterator::new(
             merge_iter,
-            key_range,
+            user_key_range,
             epoch,
             min_epoch,
             Some(committed),
