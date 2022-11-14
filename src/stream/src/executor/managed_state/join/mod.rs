@@ -243,8 +243,6 @@ impl JoinHashMapMetrics {
 
 pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Store the join states.
-    // SAFETY: This is a self-referential data structure and the allocator is owned by the struct
-    // itself. Use the field is safe iff the struct is constructed with [`moveit`](https://crates.io/crates/moveit)'s way.
     inner: JoinHashMapInner<K>,
     /// Data types of the join key columns
     join_key_data_types: Vec<DataType>,
