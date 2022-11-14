@@ -141,8 +141,8 @@ impl SyncUncommittedData {
                                     batch.epoch() <= epoch
                                         && batch.filter(table_id, table_key_range)
                                 }
-                                UncommittedData::Sst((_, info)) => {
-                                    filter_single_sst(info, table_id, table_key_range)
+                                UncommittedData::Sst(LocalSstableInfo { sst_info, .. }) => {
+                                    filter_single_sst(sst_info, table_id, table_key_range)
                                 }
                             })
                             .cloned()
@@ -152,7 +152,9 @@ impl SyncUncommittedData {
             }
             SyncUncommittedDataStage::Synced(ssts, _) => vec![ssts
                 .iter()
-                .filter(|(_, info)| filter_single_sst(info, table_id, table_key_range))
+                .filter(|LocalSstableInfo { sst_info, .. }| {
+                    filter_single_sst(sst_info, table_id, table_key_range)
+                })
                 .map(|info| UncommittedData::Sst(info.clone()))
                 .collect()],
         }
@@ -496,7 +498,12 @@ impl LocalVersion {
                     .collect_vec();
                 let mut compaction_group_ssts: HashMap<_, Vec<_>> = HashMap::new();
                 let mut sst_ids = HashSet::new();
-                for (compaction_group_id, sst) in synced_ssts {
+                for LocalSstableInfo {
+                    compaction_group_id,
+                    sst_info: sst,
+                    ..
+                } in synced_ssts
+                {
                     sst_ids.insert(sst.get_id());
                     compaction_group_ssts
                         .entry(compaction_group_id)

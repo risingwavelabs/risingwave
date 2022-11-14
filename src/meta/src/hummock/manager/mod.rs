@@ -1471,7 +1471,10 @@ where
                     }
                     Some(compactor) => compactor,
                 };
-                let sst_infos = sstables.iter().map(|(_, sst)| sst.clone()).collect_vec();
+                let sst_infos = sstables
+                    .iter()
+                    .map(|LocalSstableInfo { sst_info, .. }| sst_info.clone())
+                    .collect_vec();
                 if compactor
                     .send_task(Task::ValidationTask(ValidationTask {
                         sst_infos,
@@ -1488,7 +1491,12 @@ where
         }
 
         let mut branch_sstables = vec![];
-        sstables.retain_mut(|(compaction_group_id, sst)| {
+        sstables.retain_mut(|local_sst_info| {
+            let LocalSstableInfo {
+                compaction_group_id,
+                sst_info: sst,
+                ..
+            } = local_sst_info;
             let is_sst_belong_to_group_declared = match compaction_groups.get(compaction_group_id) {
                 Some(compaction_group) => sst
                     .table_ids
@@ -1525,7 +1533,7 @@ where
                 for (group_id, match_ids) in group_table_ids {
                     let mut branch_sst = sst.clone();
                     branch_sst.table_ids = match_ids;
-                    branch_sstables.push((group_id, branch_sst));
+                    branch_sstables.push(LocalSstableInfo::new(group_id, branch_sst));
                     branch_groups.insert(group_id, sst.get_divide_version());
                 }
                 if !branch_groups.is_empty() && !is_trivial_adjust {
@@ -1563,11 +1571,24 @@ where
             .into_iter()
             // the sort is stable sort, and will not change the order within compaction group.
             // Do a sort so that sst in the same compaction group can be consecutive
-            .sorted_by_key(|(cg_id, _)| *cg_id)
-            .group_by(|(cg_id, _)| *cg_id)
+            .sorted_by_key(
+                |LocalSstableInfo {
+                     compaction_group_id,
+                     ..
+                 }| *compaction_group_id,
+            )
+            .group_by(
+                |LocalSstableInfo {
+                     compaction_group_id,
+                     ..
+                 }| *compaction_group_id,
+            )
         {
             modified_compaction_groups.push(compaction_group_id);
-            let group_sstables = sstables.into_iter().map(|(_, sst)| sst).collect_vec();
+            let group_sstables = sstables
+                .into_iter()
+                .map(|LocalSstableInfo { sst_info, .. }| sst_info)
+                .collect_vec();
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)

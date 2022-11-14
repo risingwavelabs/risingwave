@@ -12,5 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod message;
-pub mod reader;
+#[derive(Default, Debug, Clone)]
+pub struct TableStats {
+    pub total_key_size: usize,
+    pub total_value_size: usize,
+    pub total_key_count: usize,
+    pub stale_key_count: usize,
+}

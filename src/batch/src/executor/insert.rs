@@ -288,6 +288,7 @@ mod tests {
                 ReadOptions {
                     prefix_hint: None,
                     check_bloom_filter: false,
+                    ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },

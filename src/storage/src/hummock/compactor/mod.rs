@@ -42,11 +42,11 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
+use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, KeyRange as KeyRange_vec, LevelType, SstableInfo,
+    CompactTask, CompactTaskProgress, KeyRange as KeyRange_vec, LevelType,
     SubscribeCompactTasksResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
@@ -134,7 +134,7 @@ pub struct Compactor {
     get_id_time: Arc<AtomicU64>,
 }
 
-pub type CompactOutput = (usize, Vec<SstableInfo>);
+pub type CompactOutput = (usize, Vec<LocalSstableInfo>);
 
 impl Compactor {
     /// Handles a compaction task and reports its status to hummock manager.
@@ -339,8 +339,8 @@ impl Compactor {
         let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
             for sst_info in ssts {
-                compaction_write_bytes += sst_info.file_size;
-                compact_task.sorted_output_ssts.push(sst_info);
+                compaction_write_bytes += sst_info.file_size();
+                compact_task.sorted_output_ssts.push(sst_info.sst_info);
             }
         }
 
@@ -537,11 +537,16 @@ impl Compactor {
     where
         F: TableBuilderFactory,
     {
+        let del_iter = sst_builder.del_agg.iter();
+        let mut del_agg = DeleteRangeAggregator::new(del_iter, task_config.watermark);
+
         if !task_config.key_range.left.is_empty() {
-            iter.seek(FullKey::decode(&task_config.key_range.left))
-                .await?;
+            let full_key = FullKey::decode(&task_config.key_range.left);
+            iter.seek(full_key).await?;
+            del_agg.seek(full_key.user_key);
         } else {
             iter.rewind().await?;
+            del_agg.rewind();
         }
 
         let max_key = if task_config.key_range.right.is_empty() {
@@ -554,8 +559,6 @@ impl Compactor {
         let mut last_key = FullKey::default();
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
-        let del_iter = sst_builder.del_agg.iter();
-        let mut del_agg = DeleteRangeAggregator::new(del_iter, task_config.watermark);
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -588,7 +591,7 @@ impl Compactor {
             if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
                 || (epoch < task_config.watermark
                     && (watermark_can_see_last_key
-                        || del_agg.should_delete(iter_key.user_key, epoch)))
+                        || del_agg.should_delete(&iter_key.user_key, epoch)))
             {
                 drop = true;
             }
@@ -653,7 +656,7 @@ impl Compactor {
         del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
-    ) -> HummockResult<Vec<SstableInfo>> {
+    ) -> HummockResult<Vec<LocalSstableInfo>> {
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
             self.context.stats.write_build_l0_sst_duration.start_timer()
@@ -695,7 +698,7 @@ impl Compactor {
             upload_join_handle,
         } in split_table_outputs
         {
-            let sst_size = sst_info.file_size;
+            let sst_size = sst_info.file_size();
             ssts.push(sst_info);
 
             let tracker_cloned = task_progress.clone();
@@ -730,7 +733,7 @@ impl Compactor {
 
         debug_assert!(ssts
             .iter()
-            .all(|table_info| table_info.get_table_ids().is_sorted()));
+            .all(|table_info| table_info.sst_info.get_table_ids().is_sorted()));
         Ok(ssts)
     }
 

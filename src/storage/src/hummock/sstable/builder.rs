@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -20,8 +20,9 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
-use risingwave_hummock_sdk::key::{key_with_epoch, user_key, FullKey};
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::key::{user_key, FullKey};
+use risingwave_hummock_sdk::table_stats::TableStats;
+use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
 
 use super::bloom::Bloom;
@@ -75,7 +76,7 @@ impl Default for SstableBuilderOptions {
 }
 
 pub struct SstableBuilderOutput<WO> {
-    pub sst_info: SstableInfo,
+    pub sst_info: LocalSstableInfo,
     pub bloom_filter_size: usize,
     pub writer_output: WO,
     pub avg_key_size: usize,
@@ -107,10 +108,15 @@ pub struct SstableBuilder<W: SstableWriter> {
 
     last_bloom_filter_key_length: usize,
 
-    total_key_size: usize,
-    total_value_size: usize,
+    /// `stale_key_count` counts range_tombstones as well.
     stale_key_count: u64,
+    /// `total_key_count` counts range_tombstones as well.
     total_key_count: u64,
+    /// Per table stats.
+    table_stats: HashMap<u32, TableStats>,
+    /// `last_table_stats` accumulates stats for `last_table_id` and finalizes it in `table_stats`
+    /// by `finalize_last_table_stats`
+    last_table_stats: TableStats,
 }
 
 impl<W: SstableWriter> SstableBuilder<W> {
@@ -150,10 +156,10 @@ impl<W: SstableWriter> SstableBuilder<W> {
             sstable_id,
             filter_key_extractor,
             last_bloom_filter_key_length: 0,
-            total_key_size: 0,
-            total_value_size: 0,
             stale_key_count: 0,
             total_key_count: 0,
+            table_stats: Default::default(),
+            last_table_stats: Default::default(),
         }
     }
 
@@ -183,12 +189,13 @@ impl<W: SstableWriter> SstableBuilder<W> {
         full_key.encode_into(&mut self.raw_key);
         value.encode(&mut self.raw_value);
         if is_new_user_key {
-            let mut extract_key = user_key(&self.raw_key);
             let table_id = full_key.user_key.table_id.table_id();
             if self.last_table_id != table_id {
                 self.table_ids.insert(table_id);
+                self.finalize_last_table_stats();
                 self.last_table_id = table_id;
             }
+            let mut extract_key = user_key(&self.raw_key);
             extract_key = self.filter_key_extractor.extract(extract_key);
 
             // add bloom_filter check
@@ -204,13 +211,15 @@ impl<W: SstableWriter> SstableBuilder<W> {
             }
         } else {
             self.stale_key_count += 1;
+            self.last_table_stats.stale_key_count += 1;
         }
         self.total_key_count += 1;
+        self.last_table_stats.total_key_count += 1;
 
         self.block_builder
             .add(self.raw_key.as_ref(), self.raw_value.as_ref());
-        self.total_key_size += self.raw_key.len();
-        self.total_value_size += self.raw_value.len();
+        self.last_table_stats.total_key_size += self.raw_key.len();
+        self.last_table_stats.total_value_size += self.raw_value.len();
 
         self.last_full_key.clear();
         self.last_full_key.extend_from_slice(&self.raw_key);
@@ -244,22 +253,33 @@ impl<W: SstableWriter> SstableBuilder<W> {
             self.block_metas[0].smallest_key.clone()
         };
         let mut largest_key = self.last_full_key.clone();
+        self.finalize_last_table_stats();
 
         self.build_block().await?;
         let meta_offset = self.writer.data_len() as u64;
         for tombstone in &self.range_tombstones {
             assert!(!tombstone.end_user_key.is_empty());
             if largest_key.is_empty()
-                || user_key(&largest_key).lt(tombstone.end_user_key.as_slice())
+                || KeyComparator::encoded_less_than_unencoded(
+                    user_key(&largest_key),
+                    &tombstone.end_user_key,
+                )
             {
                 // use MAX as epoch because `end_user_key` of the range-tombstone is exclusive, so
                 // we can not include any version of this key.
-                largest_key = key_with_epoch(tombstone.end_user_key.clone(), HummockEpoch::MAX);
+                largest_key =
+                    FullKey::from_user_key(tombstone.end_user_key.clone(), HummockEpoch::MAX)
+                        .encode();
             }
             if smallest_key.is_empty()
-                || user_key(&smallest_key).gt(tombstone.start_user_key.as_slice())
+                || KeyComparator::encoded_greater_than_unencoded(
+                    user_key(&smallest_key),
+                    &tombstone.start_user_key,
+                )
             {
-                smallest_key = key_with_epoch(tombstone.start_user_key.clone(), tombstone.sequence);
+                smallest_key =
+                    FullKey::from_user_key(tombstone.start_user_key.clone(), tombstone.sequence)
+                        .encode();
             }
         }
         self.total_key_count += self.range_tombstones.len() as u64;
@@ -305,12 +325,26 @@ impl<W: SstableWriter> SstableBuilder<W> {
             self.total_key_count,
         );
         let bloom_filter_size = meta.bloom_filter.len();
-        let avg_key_size = self.total_key_size / (self.total_key_count as usize);
-        let avg_value_size = self.total_value_size / (self.total_key_count as usize);
-
+        let (avg_key_size, avg_value_size) = if self.table_stats.is_empty() {
+            (0, 0)
+        } else {
+            let avg_key_size = self
+                .table_stats
+                .values()
+                .map(|s| s.total_key_size)
+                .sum::<usize>()
+                / self.table_stats.len();
+            let avg_value_size = self
+                .table_stats
+                .values()
+                .map(|s| s.total_value_size)
+                .sum::<usize>()
+                / self.table_stats.len();
+            (avg_key_size, avg_value_size)
+        };
         let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {
-            sst_info,
+            sst_info: LocalSstableInfo::with_stats(sst_info, self.table_stats),
             bloom_filter_size,
             writer_output,
             avg_key_size,
@@ -351,6 +385,16 @@ impl<W: SstableWriter> SstableBuilder<W> {
     pub fn reach_capacity(&self) -> bool {
         self.approximate_len() >= self.options.capacity
     }
+
+    fn finalize_last_table_stats(&mut self) {
+        if self.table_ids.is_empty() {
+            return;
+        }
+        self.table_stats.insert(
+            self.last_table_id,
+            std::mem::take(&mut self.last_table_stats),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -367,7 +411,6 @@ pub(super) mod tests {
     };
 
     #[tokio::test]
-    #[should_panic]
     async fn test_empty() {
         let opt = SstableBuilderOptions {
             capacity: 0,
@@ -399,7 +442,7 @@ pub(super) mod tests {
             b"eeee".to_vec(),
             0,
         ));
-        let s = b.finish().await.unwrap();
+        let s = b.finish().await.unwrap().sst_info;
         let key_range = s.sst_info.key_range.unwrap();
         assert_eq!(
             user_key(&key_range.left),
@@ -423,7 +466,7 @@ pub(super) mod tests {
         }
 
         let output = b.finish().await.unwrap();
-        let info = output.sst_info;
+        let info = output.sst_info.sst_info;
 
         assert_bytes_eq!(
             test_key_of(0).encode(),

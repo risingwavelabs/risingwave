@@ -122,8 +122,8 @@ pub async fn compute_node_serve(
     .unwrap();
 
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
-    if let StateStoreImpl::HummockStateStore(storage) = &state_store {
-        extra_info_sources.push(storage.sstable_id_manager());
+    if let Some(storage) = state_store.as_hummock() {
+        extra_info_sources.push(storage.sstable_id_manager().clone());
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.
         if opts.state_store == "hummock+memory"
@@ -144,12 +144,9 @@ pub async fn compute_node_serve(
                 stats: state_store_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-                filter_key_extractor_manager: storage
-                    .inner()
-                    .filter_key_extractor_manager()
-                    .clone(),
+                filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 read_memory_limiter,
-                sstable_id_manager: storage.sstable_id_manager(),
+                sstable_id_manager: storage.sstable_id_manager().clone(),
                 task_progress_manager: Default::default(),
             });
             // TODO: use normal sstable store for single-process mode.
@@ -169,7 +166,7 @@ pub async fn compute_node_serve(
                 Compactor::start_compactor(compactor_context, hummock_meta_client);
             sub_tasks.push((handle, shutdown_sender));
         }
-        let memory_limiter = storage.inner().get_memory_limiter();
+        let memory_limiter = storage.get_memory_limiter();
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),
             memory_limiter,

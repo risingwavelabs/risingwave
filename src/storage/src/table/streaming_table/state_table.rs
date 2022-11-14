@@ -422,6 +422,7 @@ impl<S: StateStore> StateTable<S> {
                     check_bloom_filter: self.dist_key_indices == key_indices,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.keyspace.table_id(),
+                    ignore_range_tombstone: false,
                 };
                 if let Some(storage_row_bytes) = self
                     .keyspace
@@ -659,6 +660,7 @@ impl<S: StateStore> StateTable<S> {
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.keyspace.table_id(),
+            ignore_range_tombstone: false,
         };
         let stored_value = self.keyspace.get(key, epoch, read_options).await?;
 
@@ -690,6 +692,7 @@ impl<S: StateStore> StateTable<S> {
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.keyspace.table_id(),
+            ignore_range_tombstone: false,
         };
         let stored_value = self.keyspace.get(key, epoch, read_options).await?;
 
@@ -720,6 +723,7 @@ impl<S: StateStore> StateTable<S> {
     ) -> StorageResult<()> {
         let read_options = ReadOptions {
             prefix_hint: None,
+            ignore_range_tombstone: false,
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.keyspace.table_id(),
@@ -915,6 +919,7 @@ impl<S: StateStore> StateTable<S> {
         let read_options = ReadOptions {
             prefix_hint,
             check_bloom_filter,
+            ignore_range_tombstone: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.keyspace.table_id(),
         };

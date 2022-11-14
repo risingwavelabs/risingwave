@@ -28,17 +28,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Nexmark configurations.
+
 use std::collections::HashMap;
 use std::f64::consts::PI;
+use std::ops::Deref;
 
-use crate::source::nexmark::utils::{build_channel_url_map, get_base_url};
-use crate::source::nexmark::{NexmarkProperties, NEXMARK_BASE_TIME};
+use crate::utils::{build_channel_url_map, get_base_url};
 
 pub const CHANNEL_NUMBER: usize = 10_000;
+pub const NEXMARK_BASE_TIME: u64 = 1_436_918_400_000;
 
-#[derive(PartialEq)]
-enum RateShape {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum RateShape {
+    #[cfg_attr(feature = "serde", serde(rename = "square"))]
     Square,
+    #[cfg_attr(feature = "serde", serde(rename = "sine"))]
     Sine,
 }
 
@@ -78,20 +84,8 @@ pub struct NexmarkConfig {
     /// the event number is used to determine the event timestamp.
     pub first_event_number: usize,
     /// Time for first event (ms since epoch).
-    pub base_time: usize,
-    /// Delay before changing the current inter-event delay.
-    pub step_length: usize,
-    /// Number of events per epoch.
-    /// Derived from above. (Ie number of events to run through cycle for all
-    /// interEventDelayUs entries).
-    pub events_per_epoch: usize,
-    /// True period of epoch in milliseconds. Derived from above. (Ie time to
-    /// run through cycle for all interEventDelayUs entries).
-    pub epoch_period: f32,
-    /// Delay between events, in microseconds.
-    /// If the array has more than one entry then the rate is changed every
-    /// step_length, and wraps around.
-    pub inter_event_delays: Vec<f32>,
+    pub base_time: u64,
+
     // Originally constants
     /// Auction categories.
     pub num_categories: usize,
@@ -141,81 +135,111 @@ pub struct NexmarkConfig {
     /// Number of event generators to use. Each generates events in its own
     /// timeline.
     pub num_event_generators: usize,
+    pub rate_shape: RateShape,
+    pub rate_period: usize,
+    pub first_rate: usize,
+    pub next_rate: usize,
+    pub us_per_unit: usize,
 }
 
-impl NexmarkConfig {
-    pub fn from(properties: NexmarkProperties) -> anyhow::Result<Self> {
-        let active_people = properties.active_people.unwrap_or(1000);
-        let in_flight_auctions = properties.in_flight_auctions.unwrap_or(100);
-        let out_of_order_group_size = properties.out_of_order_group_size.unwrap_or(1);
-        let avg_person_byte_size = properties.avg_person_byte_size.unwrap_or(200);
-        let avg_auction_byte_size = properties.avg_auction_byte_size.unwrap_or(500);
-        let avg_bid_byte_size = properties.avg_bid_byte_size.unwrap_or(100);
-        let hot_seller_ratio = properties.hot_seller_ratio.unwrap_or(4);
-        let hot_auction_ratio = properties.hot_auction_ratio.unwrap_or(2);
-        let hot_bidder_ratio = properties.hot_bidder_ratio.unwrap_or(4);
-        let hot_channel_ratio = properties.hot_channel_ratio.unwrap_or(2);
-        let first_event_id = properties.hot_first_event_id.unwrap_or(0);
-        let first_event_number = properties.first_event_number.unwrap_or(0);
-        let num_categories = properties.num_categories.unwrap_or(5);
-        let auction_id_lead = properties.auction_id_lead.unwrap_or(10);
-        let hot_seller_ratio_2 = properties.hot_seller_ratio_2.unwrap_or(100);
-        let hot_auction_ratio_2 = properties.hot_auction_ratio_2.unwrap_or(100);
-        let hot_bidder_ratio_2 = properties.hot_bidder_ratio_2.unwrap_or(100);
-        let person_proportion = properties.person_proportion.unwrap_or(1);
-        let auction_proportion = properties.auction_proportion.unwrap_or(3);
-        let bid_proportion = properties.bid_proportion.unwrap_or(46);
-        let proportion_denominator = person_proportion + auction_proportion + bid_proportion;
-        let first_auction_id = properties.first_auction_id.unwrap_or(1000);
-        let first_person_id = properties.first_person_id.unwrap_or(1000);
-        let first_category_id = properties.first_category_id.unwrap_or(10);
-        let person_id_lead = properties.person_id_lead.unwrap_or(10);
-        let sine_approx_steps = properties.sine_approx_steps.unwrap_or(10);
-        let base_time = properties.base_time.unwrap_or(NEXMARK_BASE_TIME);
-        let us_states = split_string_arg(
-            properties
-                .us_states
-                .unwrap_or_else(|| "az,ca,id,or,wa,wy".to_string()),
-        );
-        let us_cities = split_string_arg(properties.us_cities.unwrap_or_else(|| {
-            "phoenix,los angeles,san francisco,boise,portland,bend,redmond,seattle,kent,cheyenne"
-                .to_string()
-        }));
-        let first_names = split_string_arg(properties.first_names.unwrap_or_else(|| {
-            "peter,paul,luke,john,saul,vicky,kate,julie,sarah,deiter,walter".to_string()
-        }));
-        let last_names = split_string_arg(properties.last_names.unwrap_or_else(|| {
-            "shultz,abrams,spencer,white,bartels,walton,smith,jones,noris".to_string()
-        }));
-        let hot_channels = split_string_arg("Google,Facebook,Baidu,Apple".to_string());
-        let hot_urls = (0..4).map(get_base_url).collect();
-        let rate_shape = if properties.rate_shape.unwrap_or_else(|| "sine".to_string()) == "sine" {
-            RateShape::Sine
-        } else {
-            RateShape::Square
-        };
-        let rate_period = properties.rate_period.unwrap_or(600);
-        let first_rate = properties.first_event_rate.unwrap_or(10_000);
-        let next_rate = properties.next_event_rate.unwrap_or(first_rate);
-        let us_per_unit = properties.us_per_unit.unwrap_or(1_000_000); // Rate is in μs
-        let generators = properties.threads.unwrap_or(1) as f32;
+/// Default configuration.
+impl Default for NexmarkConfig {
+    fn default() -> Self {
+        let person_proportion = 1;
+        let auction_proportion = 3;
+        let bid_proportion = 46;
+        Self {
+            active_people: 1000,
+            in_flight_auctions: 100,
+            out_of_order_group_size: 1,
+            avg_person_byte_size: 200,
+            avg_auction_byte_size: 500,
+            avg_bid_byte_size: 100,
+            hot_seller_ratio: 4,
+            hot_auction_ratio: 2,
+            hot_bidder_ratio: 4,
+            hot_channel_ratio: 2,
+            first_event_id: 0,
+            first_event_number: 0,
+            num_categories: 5,
+            auction_id_lead: 10,
+            hot_seller_ratio_2: 100,
+            hot_auction_ratio_2: 100,
+            hot_bidder_ratio_2: 100,
+            person_proportion,
+            auction_proportion,
+            bid_proportion,
+            proportion_denominator: person_proportion + auction_proportion + bid_proportion,
+            first_auction_id: 1000,
+            first_person_id: 1000,
+            first_category_id: 10,
+            person_id_lead: 10,
+            sine_approx_steps: 10,
+            base_time: NEXMARK_BASE_TIME,
+            us_states: split_str("az,ca,id,or,wa,wy"),
+            us_cities: split_str("phoenix,los angeles,san francisco,boise,portland,bend,redmond,seattle,kent,cheyenne"),
+            hot_channels: split_str("Google,Facebook,Baidu,Apple"),
+            hot_urls: (0..4).map(get_base_url).collect(),
+            first_names: split_str("peter,paul,luke,john,saul,vicky,kate,julie,sarah,deiter,walter"),
+            last_names: split_str("shultz,abrams,spencer,white,bartels,walton,smith,jones,noris"),
+            channel_url_map: build_channel_url_map(CHANNEL_NUMBER),
+            num_event_generators: 1,
+            rate_shape: RateShape::Sine,
+            rate_period: 600,
+            first_rate: 10_000,
+            next_rate: 10_000,
+            us_per_unit: 1_000_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GeneratorConfig {
+    pub config: NexmarkConfig,
+
+    /// Delay before changing the current inter-event delay.
+    pub step_length: usize,
+    /// Number of events per epoch.
+    /// Derived from above. (Ie number of events to run through cycle for all
+    /// interEventDelayUs entries).
+    pub events_per_epoch: usize,
+    /// True period of epoch in milliseconds. Derived from above. (Ie time to
+    /// run through cycle for all interEventDelayUs entries).
+    pub epoch_period: f32,
+    /// Delay between events, in microseconds.
+    /// If the array has more than one entry then the rate is changed every
+    /// step_length, and wraps around.
+    pub inter_event_delays: Vec<f32>,
+}
+
+impl Deref for GeneratorConfig {
+    type Target = NexmarkConfig;
+
+    fn deref(&self) -> &Self::Target {
+        &self.config
+    }
+}
+
+impl From<NexmarkConfig> for GeneratorConfig {
+    fn from(cfg: NexmarkConfig) -> Self {
+        let generators = cfg.num_event_generators as f32;
 
         // Calculate inter event delays array.
         let mut inter_event_delays = Vec::new();
-        let rate_to_period = |r| (us_per_unit) as f32 / r as f32;
-        if first_rate == next_rate {
-            inter_event_delays.push(rate_to_period(first_rate) * generators);
+        let rate_to_period = |r| cfg.us_per_unit as f32 / r as f32;
+        if cfg.first_rate == cfg.next_rate {
+            inter_event_delays.push(rate_to_period(cfg.first_rate) * generators);
         } else {
-            match rate_shape {
+            match cfg.rate_shape {
                 RateShape::Square => {
-                    inter_event_delays.push(rate_to_period(first_rate) * generators);
-                    inter_event_delays.push(rate_to_period(next_rate) * generators);
+                    inter_event_delays.push(rate_to_period(cfg.first_rate) * generators);
+                    inter_event_delays.push(rate_to_period(cfg.next_rate) * generators);
                 }
                 RateShape::Sine => {
-                    let mid = (first_rate + next_rate) as f64 / 2.0;
-                    let amp = (first_rate - next_rate) as f64 / 2.0;
-                    for i in 0..sine_approx_steps {
-                        let r = (2.0 * PI * i as f64) / sine_approx_steps as f64;
+                    let mid = (cfg.first_rate + cfg.next_rate) as f64 / 2.0;
+                    let amp = (cfg.first_rate - cfg.next_rate) as f64 / 2.0;
+                    for i in 0..cfg.sine_approx_steps {
+                        let r = (2.0 * PI * i as f64) / cfg.sine_approx_steps as f64;
                         let rate = mid + amp * r.cos();
                         inter_event_delays.push(rate_to_period(rate.round() as usize) * generators);
                     }
@@ -223,12 +247,12 @@ impl NexmarkConfig {
             }
         }
         // Calculate events per epoch and epoch period.
-        let n = if rate_shape == RateShape::Square {
+        let n = if cfg.rate_shape == RateShape::Square {
             2
         } else {
-            sine_approx_steps
+            cfg.sine_approx_steps
         };
-        let step_length = (rate_period + n - 1) / n;
+        let step_length = (cfg.rate_period + n - 1) / n;
         let mut events_per_epoch = 0;
         let mut epoch_period = 0.0;
         if inter_event_delays.len() > 1 {
@@ -240,57 +264,22 @@ impl NexmarkConfig {
             }
         }
 
-        let channel_url_map = build_channel_url_map(CHANNEL_NUMBER);
-
-        Ok(NexmarkConfig {
-            active_people,
-            in_flight_auctions,
-            out_of_order_group_size,
-            avg_person_byte_size,
-            avg_auction_byte_size,
-            avg_bid_byte_size,
-            hot_seller_ratio,
-            hot_auction_ratio,
-            hot_bidder_ratio,
-            hot_channel_ratio,
-            first_event_id,
-            first_event_number,
-            base_time,
+        Self {
+            config: cfg,
             step_length,
             events_per_epoch,
             epoch_period,
             inter_event_delays,
-            // Originally constants
-            num_categories,
-            auction_id_lead,
-            hot_seller_ratio_2,
-            hot_auction_ratio_2,
-            hot_bidder_ratio_2,
-            person_proportion,
-            auction_proportion,
-            bid_proportion,
-            proportion_denominator,
-            first_auction_id,
-            first_person_id,
-            first_category_id,
-            person_id_lead,
-            sine_approx_steps,
-            us_states,
-            us_cities,
-            hot_channels,
-            hot_urls,
-            first_names,
-            last_names,
-            channel_url_map,
-            num_event_generators: generators as usize,
-        })
+        }
     }
+}
 
+impl GeneratorConfig {
     /// Returns a new event timestamp.
-    pub fn event_timestamp(&self, event_number: usize) -> usize {
+    pub fn event_timestamp(&self, event_number: usize) -> u64 {
         if self.inter_event_delays.len() == 1 {
             return self.base_time
-                + ((event_number as f32 * self.inter_event_delays[0]) / 1000.0).round() as usize;
+                + ((event_number as f32 * self.inter_event_delays[0]) / 1000.0).round() as u64;
         }
 
         let epoch = event_number / self.events_per_epoch;
@@ -305,7 +294,7 @@ impl NexmarkConfig {
                     + (epoch as f32 * self.epoch_period
                         + offset_in_epoch
                         + offset_in_cycle / 1000.0)
-                        .round() as usize;
+                        .round() as u64;
             }
             event_i -= num_events_for_this_cycle.round() as usize;
             offset_in_epoch += (num_events_for_this_cycle * inter_event_delay) / 1000.0;
@@ -321,25 +310,6 @@ impl NexmarkConfig {
     }
 }
 
-fn split_string_arg(string: String) -> Vec<String> {
-    string.split(',').map(String::from).collect::<Vec<String>>()
-}
-
-#[cfg(test)]
-mod tests {
-    use std::io::Result;
-
-    use super::*;
-
-    #[test]
-    fn test_config() -> Result<()> {
-        let properties = NexmarkProperties::default();
-        let res = NexmarkConfig::from(properties);
-        assert!(res.is_ok());
-        let config = res.unwrap();
-        println!("config {:?}", config);
-
-        assert_eq!(config.active_people, 1000);
-        Ok(())
-    }
+fn split_str(string: &str) -> Vec<String> {
+    string.split(',').map(String::from).collect()
 }
