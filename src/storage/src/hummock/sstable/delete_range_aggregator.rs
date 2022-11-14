@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::HummockEpoch;
 use super::DeleteRangeTombstone;
 use crate::hummock::iterator::DeleteRangeIterator;
 use crate::hummock::sstable_store::TableHolder;
+use crate::hummock::Sstable;
 
 pub struct SortedBoundary {
     sequence: HummockEpoch,
@@ -312,28 +313,28 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
 }
 
 pub fn get_delete_range_epoch_from_sstable(
-    table: &TableHolder,
+    table: &Sstable,
     full_key: &FullKey<&[u8]>,
 ) -> Option<HummockEpoch> {
-    if table.value().meta.range_tombstone_list.is_empty() {
+    if table.meta.range_tombstone_list.is_empty() {
         return None;
     }
     let watermark = full_key.epoch;
     let mut idx = table
-        .value()
         .meta
         .range_tombstone_list
         .partition_point(|tombstone| tombstone.end_user_key.as_ref().le(&full_key.user_key));
-    if idx >= table.value().meta.range_tombstone_list.len() {
+    if idx >= table.meta.range_tombstone_list.len() {
         return None;
     }
     let mut epoch = None;
-    while table.value().meta.range_tombstone_list[idx]
-        .start_user_key
-        .as_ref()
-        .le(&full_key.user_key)
+    while idx < table.meta.range_tombstone_list.len()
+        && table.meta.range_tombstone_list[idx]
+            .start_user_key
+            .as_ref()
+            .le(&full_key.user_key)
     {
-        let sequence = table.value().meta.range_tombstone_list[idx].sequence;
+        let sequence = table.meta.range_tombstone_list[idx].sequence;
         if sequence > watermark {
             idx += 1;
             continue;
@@ -355,6 +356,10 @@ mod tests {
     use risingwave_common::catalog::TableId;
 
     use super::*;
+    use crate::hummock::iterator::test_utils::{
+        gen_iterator_test_sstable_with_range_tombstones, iterator_test_key_of_epoch,
+        mock_sstable_store,
+    };
     use crate::hummock::test_utils::test_user_key;
 
     #[test]
@@ -422,5 +427,58 @@ mod tests {
         assert_eq!(test_user_key(b"cccc"), split_ranges[0].end_user_key);
         assert_eq!(test_user_key(b"cccc"), split_ranges[1].start_user_key);
         assert_eq!(test_user_key(b"eeee"), split_ranges[1].end_user_key);
+    }
+
+    #[tokio::test]
+    async fn test_delete_range_get() {
+        let sstable_store = mock_sstable_store();
+        // key=[idx, epoch], value
+        let sstable = gen_iterator_test_sstable_with_range_tombstones(
+            0,
+            vec![],
+            vec![(0, 2, 300), (1, 4, 150), (3, 6, 50), (5, 8, 150)],
+            sstable_store,
+        )
+        .await;
+        let ret = get_delete_range_epoch_from_sstable(
+            &sstable,
+            &iterator_test_key_of_epoch(0, 200).to_ref(),
+        );
+        assert!(ret.is_none());
+        let ret = get_delete_range_epoch_from_sstable(
+            &sstable,
+            &iterator_test_key_of_epoch(1, 100).to_ref(),
+        );
+        assert!(ret.is_none());
+        let ret = get_delete_range_epoch_from_sstable(
+            &sstable,
+            &iterator_test_key_of_epoch(1, 200).to_ref(),
+        );
+        assert_eq!(ret, Some(150));
+        let ret = get_delete_range_epoch_from_sstable(
+            &sstable,
+            &iterator_test_key_of_epoch(1, 300).to_ref(),
+        );
+        assert_eq!(ret, Some(300));
+        let ret = get_delete_range_epoch_from_sstable(
+            &sstable,
+            &iterator_test_key_of_epoch(3, 100).to_ref(),
+        );
+        assert_eq!(ret, Some(50));
+        let ret = get_delete_range_epoch_from_sstable(
+            &sstable,
+            &iterator_test_key_of_epoch(6, 100).to_ref(),
+        );
+        assert!(ret.is_none());
+        let ret = get_delete_range_epoch_from_sstable(
+            &sstable,
+            &iterator_test_key_of_epoch(6, 200).to_ref(),
+        );
+        assert_eq!(ret, Some(150));
+        let ret = get_delete_range_epoch_from_sstable(
+            &sstable,
+            &iterator_test_key_of_epoch(8, 200).to_ref(),
+        );
+        assert!(ret.is_none());
     }
 }

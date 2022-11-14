@@ -314,20 +314,20 @@ pub async fn get_from_sstable_info(
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
     let ukey = &full_key.user_key;
+    let delete_epoch = if read_options.ignore_range_tombstone {
+        None
+    } else {
+        get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
+    };
     if read_options.check_bloom_filter
         && !hit_sstable_bloom_filter(sstable.value(), ukey.encode().as_slice(), local_stats)
     {
-        if get_delete_range_epoch_from_sstable(&sstable, &full_key).is_some() {
+        if delete_epoch.is_some() {
             return Ok(Some(HummockValue::Delete));
         }
         return Ok(None);
     }
 
-    let delete_epoch = if read_options.ignore_range_tombstone {
-        None
-    } else {
-        get_delete_range_epoch_from_sstable(&sstable, &full_key)
-    };
     // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
     // use default before refinement.
     let mut iter = SstableIterator::create(
