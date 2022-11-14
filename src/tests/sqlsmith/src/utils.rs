@@ -39,7 +39,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     pub(crate) fn clone_local_context(&mut self) -> Context {
         let current_bound_relations = self.bound_relations.clone();
-        let current_bound_columns = self.bound_coloumns.clone();
+        let current_bound_columns = self.bound_columns.clone();
         (current_bound_columns, current_bound_relations)
     }
 }
