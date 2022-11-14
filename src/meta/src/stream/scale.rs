@@ -1032,6 +1032,13 @@ where
                 }
             }
 
+            println!(
+                "frag {} ups ids {:?}, mapping {}",
+                fragment_id,
+                upstream_fragment_dispatcher_set,
+                upstream_dispatcher_mapping.is_some()
+            );
+
             let downstream_fragment_id = if let Some(downstream_fragment_ids) =
                 ctx.downstream_fragment_id_map.get(&fragment_id)
             {
@@ -1091,6 +1098,13 @@ where
                     actor_splits,
                 },
             );
+        }
+
+        for (a, b) in &reschedule_fragment {
+            println!("for fragment {}", a);
+            println!("\tadded   {:?}", b.added_actors);
+            println!("\tremoved {:?}", b.removed_actors);
+            println!("\tupstream ids {:?}", b.upstream_fragment_dispatcher_ids);
         }
 
         let mut fragment_created_actors = HashMap::new();
