@@ -394,7 +394,7 @@ where
             ActorId,
             Vec<(FragmentId, DispatcherId, DispatcherType)>,
         > = HashMap::new();
-        for (_, stream_actor) in &actor_map {
+        for stream_actor in actor_map.values() {
             for dispatcher in &stream_actor.dispatcher {
                 for downstream_actor_id in &dispatcher.downstream_actor_id {
                     upstream_dispatchers
@@ -777,8 +777,12 @@ where
 
                 let worker = ctx.parallel_unit_id_to_worker(new_parallel_unit_id)?;
 
-                // for chain (no shuffle) downstreams, we don't need to create hanging channels
-                //                if !ctx.no_shuffle_target_fragment_ids.contains(fragment_id) {
+                // Because of the transferability of no shuffle, the upstream and downstream actors
+                // of no shuffle are always created at the same time, so the upstream and downstream
+                // scaling process of 1-1 no shuffle does not need to create a hanging channel,
+                // but for the downstream of no shuffle with multiple upstreams (e.g. dynamic filter
+                // actor), the hanging channel from the remaining upstreams to the new actor needs
+                // to be created
                 for upstream_actor_id in &new_actor.upstream_actor_id {
                     let upstream_worker_id = ctx
                         .actor_id_to_parallel_unit(upstream_actor_id)?
@@ -797,7 +801,6 @@ where
                             }),
                         });
                 }
-                //              }
 
                 // This should be assigned before the `modify_actor_upstream_and_downstream` call,
                 // because we need to use the new actor id to find the upstream and
@@ -1378,15 +1381,12 @@ where
 
         new_actor.upstream_actor_id = applied_upstream_fragment_actor_ids
             .values()
-            .cloned()
             .flatten()
+            .cloned()
             .collect_vec();
 
         fn replace_merge_node_upstream(
             stream_node: &mut StreamNode,
-            fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
-            fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
-            no_shuffle_upstream_actor_id: Option<&ActorId>,
             applied_upstream_fragment_actor_ids: &HashMap<FragmentId, Vec<ActorId>>,
         ) {
             if let Some(NodeBody::Merge(s)) = stream_node.node_body.as_mut() {
@@ -1397,24 +1397,12 @@ where
             }
 
             for child in &mut stream_node.input {
-                replace_merge_node_upstream(
-                    child,
-                    fragment_actors_to_remove,
-                    fragment_actors_to_create,
-                    no_shuffle_upstream_actor_id,
-                    applied_upstream_fragment_actor_ids,
-                );
+                replace_merge_node_upstream(child, applied_upstream_fragment_actor_ids);
             }
         }
 
         if let Some(node) = new_actor.nodes.as_mut() {
-            replace_merge_node_upstream(
-                node,
-                fragment_actors_to_remove,
-                fragment_actors_to_create,
-                no_shuffle_upstream_actor_map.get(&new_actor.actor_id),
-                &applied_upstream_fragment_actor_ids,
-            );
+            replace_merge_node_upstream(node, &applied_upstream_fragment_actor_ids);
         }
 
         // Update downstream actor ids

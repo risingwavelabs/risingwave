@@ -723,12 +723,8 @@ where
 
                         for dispatcher in &mut upstream_actor.dispatcher {
                             if dispatcher.dispatcher_id == dispatcher_id {
-                                match dispatcher.r#type() {
-                                    DispatcherType::Hash => {
-                                        dispatcher.hash_mapping =
-                                            upstream_dispatcher_mapping.clone();
-                                    }
-                                    _ => {}
+                                if let DispatcherType::Hash = dispatcher.r#type() {
+                                    dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
                                 }
 
                                 update_actors(
