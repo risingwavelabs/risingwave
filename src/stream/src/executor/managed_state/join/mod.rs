@@ -39,9 +39,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use self::iter_utils::zip_by_order_key;
-use crate::cache::{
-    cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef, ManagedLruCache,
-};
+use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;
@@ -172,13 +170,40 @@ impl EstimateSize for EncodedJoinRow {
 type PkType = Vec<u8>;
 
 pub type StateValueType = EncodedJoinRow;
-pub type HashValueType = JoinEntryState;
+pub type HashValueType = Box<JoinEntryState>;
+
+/// The wrapper for [`JoinEntryState`] which should be `Some` most of the time in the hash table.
+///
+/// When the executor is operating on the specific entry of the map, it can hold the ownership of
+/// the entry by taking the value out of the `Option`, instead of holding a mutable reference to the
+/// map, which can make the compiler happy.
+struct HashValueWrapper(Option<HashValueType>);
+
+impl HashValueWrapper {
+    const MESSAGE: &str = "the state should always be `Some`";
+
+    /// Take the value out of the wrapper. Panic if the value is `None`.
+    pub fn take(&mut self) -> HashValueType {
+        self.0.take().expect(Self::MESSAGE)
+    }
+}
+
+impl Deref for HashValueWrapper {
+    type Target = HashValueType;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref().expect(Self::MESSAGE)
+    }
+}
+
+impl DerefMut for HashValueWrapper {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0.as_mut().expect(Self::MESSAGE)
+    }
+}
 
 type JoinHashMapInner<K> =
-    ExecutorCache<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
-
-pub type JoinManagedCache<K> =
-    ManagedLruCache<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+    ExecutorCache<K, HashValueWrapper, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
@@ -349,57 +374,23 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
     }
 
-    /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
-    /// up in remote storage and return. If not exist in remote storage, a
-    /// `JoinEntryState` with empty cache will be returned.
-    #[expect(dead_code)]
-    #[cfg(any())]
-    pub async fn get<'a>(&'a mut self, key: &K) -> Option<&'a HashValueType> {
-        // TODO: add metrics for get
-        let state = self.inner.get(key);
-        // TODO: we should probably implement a entry function for `LruCache`
-        match state {
-            Some(_) => self.inner.get(key),
-            None => {
-                let remote_state = self.fetch_cached_state(key).await.unwrap();
-                self.inner.put(key.clone(), remote_state);
-                self.inner.get(key)
-            }
-        }
-    }
-
-    /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
-    /// up in remote storage and return. If not exist in remote storage, a
-    /// `JoinEntryState` with empty cache will be returned.
-    #[expect(dead_code)]
-    #[cfg(any())]
-    pub async fn get_mut<'a>(&'a mut self, key: &'a K) -> Option<&'a mut HashValueType> {
-        // TODO: add metrics for get_mut
-        let state = self.inner.get(key);
-        // TODO: we should probably implement a entry function for `LruCache`
-        match state {
-            Some(_) => self.inner.get_mut(key),
-            None => {
-                let remote_state = self.fetch_cached_state(key).await.unwrap();
-                self.inner.put(key.clone(), remote_state);
-                self.inner.get_mut(key)
-            }
-        }
-    }
-
-    /// Remove the key in the memory, returning the value at the key if the
-    /// key was previously in the map. If does not exist, look
-    /// up in remote storage and return. If not exist in remote storage, a
-    /// `JoinEntryState` with empty cache will be returned.
-    /// WARNING: This will NOT remove anything from remote storage.
-    pub async fn remove_state<'a>(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
-        let state = self.inner.pop(key);
+    /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
+    /// `update_state` after some operations to put the state back.
+    ///
+    /// If the state does not exist in the cache, fetch the remote storage and return. If it still
+    /// does not exist in the remote storage, a [`JoinEntryState`] with empty cache will be
+    /// returned.
+    ///
+    /// Note: This will NOT remove anything from remote storage.
+    pub async fn take_state<'a>(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
+        // Do not update the LRU statistics here with `peek_mut` since we will put the state back.
+        let state = self.inner.peek_mut(key);
         self.metrics.total_lookup_count += 1;
         Ok(match state {
-            Some(state) => state,
+            Some(state) => state.take(),
             None => {
                 self.metrics.lookup_miss_count += 1;
-                self.fetch_cached_state(key).await?
+                self.fetch_cached_state(key).await?.into()
             }
         })
     }
@@ -538,9 +529,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.state.table.delete(value);
     }
 
-    /// Insert a [`JoinEntryState`]
-    pub fn insert_state(&mut self, key: &K, state: JoinEntryState) {
-        self.inner.put(key.clone(), state);
+    /// Update a [`JoinEntryState`] into the hash table.
+    pub fn update_state(&mut self, key: &K, state: HashValueType) {
+        self.inner.put(key.clone(), HashValueWrapper(Some(state)));
     }
 
     pub fn inc_degree(&mut self, join_row: &mut StateValueType) -> StreamExecutorResult<()> {
@@ -565,40 +556,32 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(())
     }
 
+    /// Evict the cache.
+    pub fn evict(&mut self) {
+        self.inner.evict();
+    }
+
     /// Cached rows for this hash table.
     #[expect(dead_code)]
     pub fn cached_rows(&self) -> usize {
-        self.values().map(|e| e.len()).sum()
+        self.inner.values().map(|e| e.len()).sum()
     }
 
     /// Cached entry count for this hash table.
     pub fn entry_count(&self) -> usize {
-        self.len()
+        self.inner.len()
     }
 
     /// Estimated memory usage for this hash table.
     #[expect(dead_code)]
     pub fn estimated_size(&self) -> usize {
-        self.iter()
+        self.inner
+            .iter()
             .map(|(k, v)| k.estimated_size() + v.estimated_size())
             .sum()
     }
 
     pub fn null_matched(&self) -> &FixedBitSet {
         &self.null_matched
-    }
-}
-
-impl<K: HashKey, S: StateStore> Deref for JoinHashMap<K, S> {
-    type Target = JoinHashMapInner<K>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<K: HashKey, S: StateStore> DerefMut for JoinHashMap<K, S> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
     }
 }
