@@ -366,6 +366,8 @@ where
         // Index the downstream fragment
         let mut downstream_fragment_id_map = HashMap::new();
         for actor in actor_map.values() {
+            // Question(peng): will a fragment use multiple different dispatchers to connect to the
+            // same downstream fragment?
             for dispatcher in &actor.dispatcher {
                 for downstream_actor_id in &dispatcher.downstream_actor_id {
                     if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
@@ -902,13 +904,6 @@ where
             }
         }
 
-        for (a, b) in &worker_hanging_channels {
-            println!("for worker {}", a);
-            for hc in b {
-                println!("\thc {:?} -> {:?}", hc.upstream, hc.downstream);
-            }
-        }
-
         self.create_actors_on_compute_node(
             &ctx,
             worker_hanging_channels,
@@ -941,7 +936,6 @@ where
             HashMap::with_capacity(reschedules.len());
 
         for (fragment_id, _) in reschedules {
-            println!("handling {}", fragment_id);
             let actors_to_create = fragment_actors_to_create
                 .get(&fragment_id)
                 .cloned()
@@ -1037,11 +1031,6 @@ where
                     }
                 }
             }
-            println!(
-                "ids {:#?} mapping {}",
-                upstream_fragment_dispatcher_set,
-                upstream_dispatcher_mapping.is_some()
-            );
 
             let downstream_fragment_id = if let Some(downstream_fragment_ids) =
                 ctx.downstream_fragment_id_map.get(&fragment_id)
@@ -1102,20 +1091,6 @@ where
                     actor_splits,
                 },
             );
-        }
-
-        for (fragment_id, reschedule) in &reschedule_fragment {
-            println!("for fragment {}", fragment_id);
-            println!(
-                "\tupstream mapping {}",
-                reschedule.upstream_dispatcher_mapping.is_some()
-            );
-            println!(
-                "\tupstream ids {:?}",
-                reschedule.upstream_fragment_dispatcher_ids
-            );
-            println!("\tremoved {:?}", reschedule.removed_actors);
-            println!("\tadded {:?}", reschedule.added_actors);
         }
 
         let mut fragment_created_actors = HashMap::new();
@@ -1328,8 +1303,8 @@ where
         new_actor: &mut StreamActor,
     ) -> MetaResult<()> {
         let fragment = fragment_map.get(&new_actor.fragment_id).unwrap();
-
         let mut applied_upstream_fragment_actor_ids = HashMap::new();
+
         for upstream_fragment_id in &fragment.upstream_fragment_ids {
             let upstream_dispatch_type = fragment_relation_map
                 .get(upstream_fragment_id)
