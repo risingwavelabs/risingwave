@@ -21,7 +21,7 @@ use anyhow::Result;
 use crate::cluster::{Cluster, Configuration};
 
 /// The target number of events of the three sources per second totally.
-pub const THROUGHPUT: usize = 10_000;
+pub const THROUGHPUT: usize = 5_000;
 
 /// Cluster for nexmark tests.
 pub struct NexmarkCluster {
@@ -62,6 +62,7 @@ impl NexmarkCluster {
             if let Some(event_num) = event_num {
                 write!(output, ", nexmark.event.num = '{event_num}'")?;
             }
+            write!(output, ", nexmark.max.chunk.size = 256")?;
             output
         };
 

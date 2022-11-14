@@ -389,7 +389,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
 
     hummock_manager
-        .purge_stale_members(
+        .purge_stale(
             &fragment_manager
                 .list_table_fragments()
                 .await

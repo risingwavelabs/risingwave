@@ -20,7 +20,7 @@ use anyhow::Result;
 use itertools::Itertools;
 use madsim::time::sleep;
 use risingwave_simulation_scale::cluster::{Cluster, Configuration};
-use risingwave_simulation_scale::ctl_ext::predicate::{identity_contains, identity_not_contains};
+use risingwave_simulation_scale::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation_scale::utils::AssertResult;
 
 const ROOT_TABLE_CREATE: &str = "create table t1 (v1 int);";
@@ -40,8 +40,8 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment(vec![
             identity_contains("materialize"),
-            identity_not_contains("chain"),
-            identity_not_contains("hashjoin"),
+            no_identity_contains("chain"),
+            no_identity_contains("hashjoin"),
         ])
         .await?;
 
@@ -128,8 +128,8 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment(vec![
             identity_contains("materialize"),
-            identity_not_contains("chain"),
-            identity_not_contains("hashjoin"),
+            no_identity_contains("chain"),
+            no_identity_contains("hashjoin"),
         ])
         .await?;
 
