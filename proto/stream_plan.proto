@@ -302,11 +302,13 @@ message ExchangeNode {
 
 
 enum ChainType {
-  // Corresponding to `ChainExecutor`
+  // Chain is corresponding to the chain executor.
   Chain = 0;
-  // Corresponding to `RearrangedChainExecutor`
+
+  // REARRANGE is corresponding to the rearranged chain executor.
   REARRANGE = 1;
-  // Corresponding to `BackfillExecutor`
+
+  // BACKFILL is corresponding to the backfill executor.
   BACKFILL = 2;
 }
 // ChainNode is used for mv on mv.
