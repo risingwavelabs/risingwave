@@ -90,13 +90,10 @@ impl NexmarkRng for SmallRng {
     }
 }
 
-pub fn milli_ts_to_timestamp_string(milli_ts: usize) -> String {
-    NaiveDateTime::from_timestamp(
-        milli_ts as i64 / 1000,
-        (milli_ts % (1000_usize)) as u32 * 1000000,
-    )
-    .format("%Y-%m-%d %H:%M:%S%.f")
-    .to_string()
+pub fn milli_ts_to_timestamp_string(milli_ts: u64) -> String {
+    NaiveDateTime::from_timestamp(milli_ts as i64 / 1000, (milli_ts % 1000) as u32 * 1000000)
+        .format("%Y-%m-%d %H:%M:%S%.f")
+        .to_string()
 }
 
 pub fn get_base_url(seed: u64) -> String {

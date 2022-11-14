@@ -12,5 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod message;
-pub mod reader;
+//! Nexmark benchmark data generator.
+
+pub mod config;
+pub mod event;
+mod generator;
+mod utils;
+
+pub use self::generator::EventGenerator;

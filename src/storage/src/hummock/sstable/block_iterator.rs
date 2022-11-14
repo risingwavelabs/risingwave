@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 use bytes::BytesMut;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::KeyComparator;
 
 use super::KeyPrefix;
 use crate::hummock::BlockHolder;
@@ -154,7 +154,7 @@ impl BlockIterator {
     /// Moves forward until reaching the first that equals or larger than the given `key`.
     fn next_until_key(&mut self, key: &[u8]) {
         while self.is_valid()
-            && VersionedComparator::compare_key(&self.key[..], key) == Ordering::Less
+            && KeyComparator::compare_encoded_full_key(&self.key[..], key) == Ordering::Less
         {
             self.next_inner();
         }
@@ -163,7 +163,7 @@ impl BlockIterator {
     /// Moves backward until reaching the first key that equals or smaller than the given `key`.
     fn prev_until_key(&mut self, key: &[u8]) {
         while self.is_valid()
-            && VersionedComparator::compare_key(&self.key[..], key) == Ordering::Greater
+            && KeyComparator::compare_encoded_full_key(&self.key[..], key) == Ordering::Greater
         {
             self.prev_inner();
         }
@@ -216,7 +216,7 @@ impl BlockIterator {
             .search_restart_partition_point(|&probe| {
                 let prefix = self.decode_prefix_at(probe as usize);
                 let probe_key = &self.block.data()[prefix.diff_key_range()];
-                match VersionedComparator::compare_key(probe_key, key) {
+                match KeyComparator::compare_encoded_full_key(probe_key, key) {
                     Ordering::Less | Ordering::Equal => true,
                     Ordering::Greater => false,
                 }
