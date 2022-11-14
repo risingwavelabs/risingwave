@@ -15,8 +15,6 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use hyper::http::uri::InvalidUri;
-use hyper_tls::HttpsConnector;
 use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
@@ -182,22 +180,24 @@ async fn load_bytes_from_s3(
 }
 
 async fn load_bytes_from_https(location: &Url) -> Result<Vec<u8>> {
-    let client = hyper::Client::builder().build::<_, hyper::Body>(HttpsConnector::new());
-    let res = client
-        .get(
-            location
-                .to_string()
-                .parse()
-                .map_err(|e: InvalidUri| InvalidParameterValue(e.to_string()))?,
-        )
-        .await
-        .map_err(|e| {
-            InvalidParameterValue(format!("failed to read from URL {}: {}", location, e))
-        })?;
-    let buf = hyper::body::to_bytes(res)
+    let res = reqwest::get(location.clone()).await.map_err(|e| {
+        InvalidParameterValue(format!(
+            "failed to make request to URL: {}, err: {}",
+            location, e
+        ))
+    })?;
+    if !res.status().is_success() {
+        return Err(RwError::from(InvalidParameterValue(format!(
+            "Http request err, URL: {}, status code: {}",
+            location,
+            res.status()
+        ))));
+    }
+    let body = res
+        .bytes()
         .await
         .map_err(|e| InvalidParameterValue(format!("failed to read HTTP body: {}", e)))?;
-    Ok(buf.to_vec())
+    Ok(body.to_vec())
 }
 
 fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
