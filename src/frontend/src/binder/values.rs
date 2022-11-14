@@ -92,14 +92,6 @@ impl Binder {
         // Calculate column types.
         let types = match expected_types {
             Some(types) => {
-                if types.len() > num_columns {
-                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6128
-                    return Err(ErrorCode::BindError(
-                        "VALUES list must define a value for each column in table".into(),
-                    )
-                    .into());
-                }
-
                 bound = bound
                     .into_iter()
                     .map(|vec| Self::cast_on_insert(&types.clone(), vec))
