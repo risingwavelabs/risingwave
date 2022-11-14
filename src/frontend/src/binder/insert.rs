@@ -121,7 +121,7 @@ impl Binder {
 
         let mut target_table_col_idxs: Vec<usize> = vec![];
         'outer: for query_column in &columns {
-            let column_name = &query_column.value; // value or real_value() ?
+            let column_name = &query_column.value;
             for (col_idx, table_column) in table_source.columns.iter().enumerate() {
                 if column_name.eq_ignore_ascii_case(table_column.name.as_str()) {
                     target_table_col_idxs.push(col_idx);
@@ -158,8 +158,6 @@ impl Binder {
                 "Column specified more than once".to_string(),
             )));
         }
-
-        // TODO: add test
 
         let insert = BoundInsert {
             table_source,
