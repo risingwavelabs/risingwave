@@ -77,6 +77,3 @@ impl RpcClient for CdcClient {
         Self::new(host_addr).await
     }
 }
-
-// pub type CdcSourceClientPool = RpcClientPool<CdcSourceClient>;
-// pub type CdcSourceClientPoolRef = Arc<CdcSourceClientPool>;
