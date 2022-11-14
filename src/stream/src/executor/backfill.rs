@@ -154,12 +154,6 @@ where
                         .map(Either::Right),
                 );
 
-                tracing::debug!(
-                    actor = self.actor_id,
-                    "Snapshot read with current_row = {:?}",
-                    &self.current_pos
-                );
-
                 // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
                 // comes.
                 let backfill_stream =
@@ -180,9 +174,7 @@ where
                                         // Consume upstream buffer chunk
                                         let mut buffer = vec![];
                                         mem::swap(&mut upstream_chunk_buffer, &mut buffer);
-                                        let mut row_cnt = 0;
                                         for chunk in buffer {
-                                            row_cnt += chunk.cardinality();
                                             if self.current_pos.is_some() {
                                                 yield Message::Chunk(Self::mapping_chunk(
                                                     Self::mark_chunk(
@@ -194,11 +186,6 @@ where
                                                 ));
                                             }
                                         }
-                                        tracing::debug!(
-                                            actor = self.actor_id,
-                                            "Upstream buffer chunks totaling {} rows are consumed.",
-                                            &row_cnt
-                                        );
                                     }
 
                                     // Update snapshot read epoch.
@@ -207,11 +194,6 @@ where
                                     yield Message::Barrier(barrier);
 
                                     if checkpoint {
-                                        tracing::debug!(
-                                            actor = self.actor_id,
-                                            "Yield checkpoint barrier epoch = {}",
-                                            &snapshot_read_epoch
-                                        );
                                         self.progress
                                             .update(snapshot_read_epoch, snapshot_read_epoch);
                                         // Break the for loop and start a new snapshot read stream.
@@ -237,19 +219,12 @@ where
                                     // Consume with the renaming stream buffer chunk without mark.
                                     let mut buffer = vec![];
                                     mem::swap(&mut upstream_chunk_buffer, &mut buffer);
-                                    let mut row_cnt = 0;
                                     for chunk in buffer {
-                                        row_cnt += chunk.cardinality();
                                         yield Message::Chunk(Self::mapping_chunk(
                                             chunk,
                                             &upstream_indices,
                                         ));
                                     }
-                                    tracing::debug!(
-                                        actor = self.actor_id,
-                                        "Upstream buffer chunks totaling {} rows are consumed.",
-                                        &row_cnt
-                                    );
 
                                     // Finish backfill.
                                     break 'backfill_loop;
