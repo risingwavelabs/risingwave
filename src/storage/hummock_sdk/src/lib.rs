@@ -32,7 +32,6 @@ pub use key_cmp::*;
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
-use crate::key::user_key;
 use crate::table_stats::TableStats;
 
 pub mod compact;
@@ -153,9 +152,10 @@ impl SstIdRange {
 pub fn can_concat(ssts: &[impl Deref<Target = SstableInfo>]) -> bool {
     let len = ssts.len();
     for i in 0..len - 1 {
-        if user_key(&ssts[i].get_key_range().as_ref().unwrap().right).cmp(user_key(
-            &ssts[i + 1].get_key_range().as_ref().unwrap().left,
-        )) != Ordering::Less
+        if KeyComparator::compare_encoded_full_key(
+            &ssts[i].key_range.as_ref().unwrap().right,
+            &ssts[i + 1].key_range.as_ref().unwrap().left,
+        ) != Ordering::Less
         {
             return false;
         }

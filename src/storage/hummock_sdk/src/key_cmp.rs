@@ -126,4 +126,15 @@ mod tests {
             Ordering::Less
         );
     }
+
+    #[test]
+    fn test_cmp_encode_key() {
+        let a_left = vec![0, 0, 3, 237, 0, 0, 11, 234, 98, 142, 90, 0, 0];
+        let a_right = vec![0, 0, 3, 237, 0, 0, 11, 234, 98, 133, 107, 0, 0];
+        let b_left = vec![0, 0, 3, 237, 0, 0, 11, 234, 98, 131, 241, 0, 0];
+        let b_right = vec![0, 0, 3, 237, 0, 0, 11, 234, 98, 126, 38, 0, 0];
+        assert!(KeyComparator::compare_encoded_full_key(&a_left, &a_right) == Ordering::Less);
+        assert!(KeyComparator::compare_encoded_full_key(&a_right, &b_left) == Ordering::Less);
+        assert!(KeyComparator::compare_encoded_full_key(&b_left, &b_right) == Ordering::Less);
+    }
 }
