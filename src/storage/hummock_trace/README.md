@@ -31,7 +31,7 @@ For example, to start a traced playground
 RUSTFLAGS="--cfg hm_trace --cfg tokio_unstable" cargo run --bin risingwave playground
 ```
 
-### Develop
+### Development
 It's recommended to add `--cfg hm_trace` flag to `.cargo/config.toml` for development.
 Example:
 ```toml
