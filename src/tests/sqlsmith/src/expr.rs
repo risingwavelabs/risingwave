@@ -409,7 +409,7 @@ fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool) -> Function {
         name: ObjectName(vec![Ident::new(func_name)]),
         args,
         over: None,
-        distinct: distinct,
+        distinct,
         order_by: vec![],
         filter: None,
     }
