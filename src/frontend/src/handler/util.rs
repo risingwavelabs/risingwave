@@ -18,7 +18,7 @@ use std::task::{Context, Poll};
 use bytes::Bytes;
 use futures::Stream;
 use itertools::Itertools;
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::RowSetResult;
 use pgwire::pg_server::BoxedError;
 use pgwire::types::Row;
@@ -134,27 +134,11 @@ pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
 
 /// Convert from [`Field`] to [`PgFieldDescriptor`].
 pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
-    PgFieldDescriptor::new(f.name.clone(), data_type_to_type_oid(f.data_type()))
-}
-
-pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
-    match data_type {
-        DataType::Int16 => TypeOid::SmallInt,
-        DataType::Int32 => TypeOid::Int,
-        DataType::Int64 => TypeOid::BigInt,
-        DataType::Float32 => TypeOid::Float4,
-        DataType::Float64 => TypeOid::Float8,
-        DataType::Boolean => TypeOid::Boolean,
-        DataType::Varchar => TypeOid::Varchar,
-        DataType::Date => TypeOid::Date,
-        DataType::Time => TypeOid::Time,
-        DataType::Timestamp => TypeOid::Timestamp,
-        DataType::Timestampz => TypeOid::Timestamptz,
-        DataType::Decimal => TypeOid::Decimal,
-        DataType::Interval => TypeOid::Interval,
-        DataType::Struct { .. } => TypeOid::Varchar,
-        DataType::List { .. } => TypeOid::Varchar,
-    }
+    PgFieldDescriptor::new(
+        f.name.clone(),
+        f.data_type().to_oid(),
+        f.data_type().type_len(),
+    )
 }
 
 #[cfg(test)]
@@ -168,10 +152,7 @@ mod tests {
         let field = Field::with_name(DataType::Int32, "v1");
         let pg_field = to_pg_field(&field);
         assert_eq!(pg_field.get_name(), "v1");
-        assert_eq!(
-            pg_field.get_type_oid().as_number(),
-            TypeOid::Int.as_number()
-        );
+        assert_eq!(pg_field.get_type_oid(), DataType::INT32.to_oid());
     }
 
     #[test]
