@@ -30,6 +30,11 @@ impl Planner {
             BoundSetOperation::UNION => {
                 let left = self.plan_set_expr(left, vec![])?;
                 let right = self.plan_set_expr(right, vec![])?;
+                if left.schema().fields.len() != right.schema().fields.len() {
+                    return Err(ErrorCode::InvalidInputSyntax("each UNION query must have the same number of columns".to_string()).into());
+                } else if left.schema() != right.schema() {
+                    return Err(ErrorCode::InvalidInputSyntax("each UNION query must have the same type of columns".to_string()).into());
+                }
                 Ok(LogicalUnion::create(all, vec![left, right]))
             }
             BoundSetOperation::Except | BoundSetOperation::Intersect => {
