@@ -252,6 +252,8 @@ mod convert;
 pub use convert::*;
 mod eq_join_predicate;
 pub use eq_join_predicate::*;
+mod explain;
+pub use explain::*;
 mod to_prost;
 pub use to_prost::*;
 mod predicate_pushdown;
