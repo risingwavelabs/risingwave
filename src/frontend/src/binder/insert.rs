@@ -146,14 +146,17 @@ impl Binder {
         }
 
         // Check if column was used multiple times in query e.g.
-        // insert into t (v1, v1) values (1, 5);
+        // insert into t1 (v1, v1) values (1, 5);
         let mut uniq_cols = target_table_col_idxs.clone();
+        uniq_cols.sort_unstable();
         uniq_cols.dedup();
         if target_table_col_idxs.len() != uniq_cols.len() {
             return Err(RwError::from(ErrorCode::BindError(
                 "Column specified more than once".to_string(),
             )));
         }
+
+        // TODO: add test
 
         let insert = BoundInsert {
             table_source,
