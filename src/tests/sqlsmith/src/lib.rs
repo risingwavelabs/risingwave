@@ -210,7 +210,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates a query with local context.
-    /// Used by `WITH`
+    /// Used by `WITH`, `Table Subquery` in Relation
     fn gen_local_query(&mut self) -> (Query, Vec<Column>) {
         let old_ctxt = self.new_local_context();
         let t = self.gen_query();
@@ -219,9 +219,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates a query with correlated context to ensure proper recursion.
-    /// Used by `Subquery`
-    fn gen_corellated_query(&mut self) -> (Query, Vec<Column>) {
-        let old_ctxt = self.clone_local_context();
+    /// Used by Exists `Subquery`
+    /// This function is workaround because certain feature regarding to correlated subquery is
+    /// workaround Tracking issues: https://github.com/risingwavelabs/risingwave/issues/3896
+    fn _gen_corellated_query(&mut self) -> (Query, Vec<Column>) {
+        let old_ctxt = self._clone_local_context();
         let t = self.gen_query();
         self.restore_context(old_ctxt);
         t

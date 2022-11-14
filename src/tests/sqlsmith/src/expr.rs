@@ -85,7 +85,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         match self.rng.gen_range(0..=range) {
             0..=70 => self.gen_func(typ, can_agg, inside_agg),
-            71..=80 => self.gen_exists(typ),
+            71..=80 => self.gen_exists(typ, inside_agg),
             81..=90 => self.gen_cast(typ, can_agg, inside_agg),
             91..=99 => self.gen_agg(typ),
             // TODO: There are more that are not in the functions table, e.g. CAST.
@@ -243,13 +243,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
-    fn gen_exists(&mut self, ret: DataTypeName) -> Expr {
-        // TODO: Streaming nested loop join is not implemented yet.
+    fn gen_exists(&mut self, ret: DataTypeName, inside_agg: bool) -> Expr {
+        // TODO: Streaming nested loop join is not implemented yet. 
         // Tracked by: <https://github.com/singularity-data/risingwave/issues/2655>.
-        if self.is_mview || ret != DataTypeName::Boolean {
+        if self.is_mview || ret != DataTypeName::Boolean || inside_agg {
             return self.gen_simple_scalar(ret);
         };
-        let (subquery, _) = self.gen_local_query();
+        // Workround Due to Correlated subquery in HAVING or SELECT with agg is not implemented
+        // yet.  Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
+        // let (sibquery, _) = self.gen_correlated_query()
+        let (subquery, _) = self._gen_corellated_query();
         Expr::Exists(Box::new(subquery))
     }
 
