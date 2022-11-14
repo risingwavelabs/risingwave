@@ -17,13 +17,14 @@ use crate::executor::LookupUnionExecutor;
 
 pub struct LookupUnionExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for LookupUnionExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let lookup_union = try_match_expand!(node.get_node_body().unwrap(), NodeBody::LookupUnion)?;
         Ok(
             LookupUnionExecutor::new(params.pk_indices, params.input, lookup_union.order.clone())

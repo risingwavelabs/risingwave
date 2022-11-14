@@ -14,11 +14,14 @@
 
 use std::fmt;
 
+use itertools::Itertools;
+use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
-use super::{LogicalSource, PlanBase, ToStreamProst};
+use super::{LogicalSource, PlanBase, StreamNode};
 use crate::optimizer::property::Distribution;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone)]
@@ -32,7 +35,8 @@ impl StreamSource {
         let base = PlanBase::new_stream(
             logical.ctx(),
             logical.schema().clone(),
-            logical.pk_indices().to_vec(),
+            logical.logical_pk().to_vec(),
+            logical.functional_dependency().clone(),
             Distribution::SomeShard,
             logical.source_catalog().append_only,
         );
@@ -51,10 +55,10 @@ impl StreamSource {
 impl_plan_tree_node_for_leaf! { StreamSource }
 
 impl fmt::Display for StreamSource {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamSource");
         builder
-            .field("source", &self.logical.source_catalog.name)
+            .field("source", &self.logical.source_catalog().name)
             .field(
                 "columns",
                 &format_args!("[{}]", &self.column_names().join(", ")),
@@ -63,18 +67,32 @@ impl fmt::Display for StreamSource {
     }
 }
 
-impl ToStreamProst for StreamSource {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamSource {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+        let source_catalog = self.logical.source_catalog();
         ProstStreamNode::Source(SourceNode {
-            table_id: self.logical.source_catalog.id,
-            column_ids: self
-                .logical
-                .source_catalog
+            source_id: source_catalog.id,
+            state_table: Some(
+                self.logical
+                    .infer_internal_table_catalog()
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            ),
+            info: Some(source_catalog.info.clone()),
+            row_id_index: source_catalog
+                .row_id_index
+                .map(|index| ColumnIndex { index: index as _ }),
+            columns: source_catalog
                 .columns
                 .iter()
-                .map(|c| c.column_id().into())
-                .collect(),
-            source_type: self.logical.source_catalog.source_type as i32,
+                .map(|c| c.to_protobuf())
+                .collect_vec(),
+            pk_column_ids: source_catalog
+                .pk_col_ids
+                .iter()
+                .map(Into::into)
+                .collect_vec(),
+            properties: source_catalog.properties.clone(),
         })
     }
 }

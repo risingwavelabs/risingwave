@@ -30,7 +30,6 @@ mod test {
     };
     use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
     use crate::hummock::value::HummockValue;
-    use crate::monitor::StateStoreMetrics;
 
     #[tokio::test]
     async fn test_merge_basic() {
@@ -40,7 +39,6 @@ mod test {
             OrderedMergeIteratorInner<SstableIterator>,
         > = HummockIteratorUnion::First(UnorderedMergeIteratorInner::new(
             gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3).await,
-            Arc::new(StateStoreMetrics::unused()),
         ));
         let mut ordered_iter: HummockIteratorUnion<
             Forward,
@@ -48,7 +46,6 @@ mod test {
             OrderedMergeIteratorInner<SstableIterator>,
         > = HummockIteratorUnion::Second(OrderedMergeIteratorInner::new(
             gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3).await,
-            Arc::new(StateStoreMetrics::unused()),
         ));
 
         // Test both ordered and unordered iterators
@@ -59,7 +56,7 @@ mod test {
             while iter.is_valid() {
                 let key = iter.key();
                 let val = iter.value();
-                assert_eq!(key, iterator_test_key_of(i).as_slice());
+                assert_eq!(key, iterator_test_key_of(i).to_ref());
                 assert_eq!(
                     val.into_user_value().unwrap(),
                     iterator_test_value_of(i).as_slice()
@@ -83,7 +80,6 @@ mod test {
             OrderedMergeIteratorInner<SstableIterator>,
         > = HummockIteratorUnion::First(UnorderedMergeIteratorInner::new(
             gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3).await,
-            Arc::new(StateStoreMetrics::unused()),
         ));
         let mut ordered_iter: HummockIteratorUnion<
             Forward,
@@ -91,7 +87,6 @@ mod test {
             OrderedMergeIteratorInner<SstableIterator>,
         > = HummockIteratorUnion::Second(OrderedMergeIteratorInner::new(
             gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3).await,
-            Arc::new(StateStoreMetrics::unused()),
         ));
 
         // Test both ordered and unordered iterators
@@ -99,13 +94,13 @@ mod test {
 
         for iter in test_iters {
             // right edge case
-            iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 3).as_slice())
+            iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 3).to_ref())
                 .await
                 .unwrap();
             assert!(!iter.is_valid());
 
             // normal case
-            iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).as_slice())
+            iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).to_ref())
                 .await
                 .unwrap();
             let k = iter.key();
@@ -114,28 +109,26 @@ mod test {
                 v.into_user_value().unwrap(),
                 iterator_test_value_of(TEST_KEYS_COUNT * 2 + 5).as_slice()
             );
-            assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).as_slice());
+            assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).to_ref());
 
-            iter.seek(iterator_test_key_of(17).as_slice())
-                .await
-                .unwrap();
+            iter.seek(iterator_test_key_of(17).to_ref()).await.unwrap();
             let k = iter.key();
             let v = iter.value();
             assert_eq!(
                 v.into_user_value().unwrap(),
                 iterator_test_value_of(TEST_KEYS_COUNT + 7).as_slice()
             );
-            assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT + 7).as_slice());
+            assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT + 7).to_ref());
 
             // left edge case
-            iter.seek(iterator_test_key_of(0).as_slice()).await.unwrap();
+            iter.seek(iterator_test_key_of(0).to_ref()).await.unwrap();
             let k = iter.key();
             let v = iter.value();
             assert_eq!(
                 v.into_user_value().unwrap(),
                 iterator_test_value_of(0).as_slice()
             );
-            assert_eq!(k, iterator_test_key_of(0).as_slice());
+            assert_eq!(k, iterator_test_key_of(0).to_ref());
         }
     }
 
@@ -170,40 +163,34 @@ mod test {
             Forward,
             UnorderedMergeIteratorInner<SstableIterator>,
             OrderedMergeIteratorInner<SstableIterator>,
-        > = HummockIteratorUnion::First(UnorderedMergeIteratorInner::new(
-            vec![
-                SstableIterator::create(
-                    cache.insert(table0.id, table0.id, 1, table0),
-                    sstable_store.clone(),
-                    read_options.clone(),
-                ),
-                SstableIterator::create(
-                    cache.insert(table1.id, table1.id, 1, table1),
-                    sstable_store.clone(),
-                    read_options.clone(),
-                ),
-            ],
-            Arc::new(StateStoreMetrics::unused()),
-        ));
+        > = HummockIteratorUnion::First(UnorderedMergeIteratorInner::new(vec![
+            SstableIterator::create(
+                cache.insert(table0.id, table0.id, 1, table0),
+                sstable_store.clone(),
+                read_options.clone(),
+            ),
+            SstableIterator::create(
+                cache.insert(table1.id, table1.id, 1, table1),
+                sstable_store.clone(),
+                read_options.clone(),
+            ),
+        ]));
         let mut ordered_iter: HummockIteratorUnion<
             Forward,
             UnorderedMergeIteratorInner<SstableIterator>,
             OrderedMergeIteratorInner<SstableIterator>,
-        > = HummockIteratorUnion::Second(OrderedMergeIteratorInner::new(
-            vec![
-                SstableIterator::create(
-                    cache.lookup(0, &0).unwrap(),
-                    sstable_store.clone(),
-                    read_options.clone(),
-                ),
-                SstableIterator::create(
-                    cache.lookup(1, &1).unwrap(),
-                    sstable_store.clone(),
-                    read_options.clone(),
-                ),
-            ],
-            Arc::new(StateStoreMetrics::unused()),
-        ));
+        > = HummockIteratorUnion::Second(OrderedMergeIteratorInner::new(vec![
+            SstableIterator::create(
+                cache.lookup(0, &0).unwrap(),
+                sstable_store.clone(),
+                read_options.clone(),
+            ),
+            SstableIterator::create(
+                cache.lookup(1, &1).unwrap(),
+                sstable_store.clone(),
+                read_options.clone(),
+            ),
+        ]));
 
         // Test both ordered and unordered iterators
         let test_iters = vec![&mut unordered_iter, &mut ordered_iter];
@@ -278,48 +265,45 @@ mod test {
         );
         let cache = create_small_table_cache();
 
-        let mut iter = OrderedMergeIteratorInner::new(
-            vec![
-                SstableIterator::create(
-                    cache.insert(
-                        non_overlapped_sstable.id,
-                        non_overlapped_sstable.id,
-                        1,
-                        non_overlapped_sstable,
-                    ),
-                    sstable_store.clone(),
-                    read_options.clone(),
+        let mut iter = OrderedMergeIteratorInner::new(vec![
+            SstableIterator::create(
+                cache.insert(
+                    non_overlapped_sstable.id,
+                    non_overlapped_sstable.id,
+                    1,
+                    non_overlapped_sstable,
                 ),
-                SstableIterator::create(
-                    cache.insert(
-                        overlapped_new_sstable.id,
-                        overlapped_new_sstable.id,
-                        1,
-                        overlapped_new_sstable,
-                    ),
-                    sstable_store.clone(),
-                    read_options.clone(),
+                sstable_store.clone(),
+                read_options.clone(),
+            ),
+            SstableIterator::create(
+                cache.insert(
+                    overlapped_new_sstable.id,
+                    overlapped_new_sstable.id,
+                    1,
+                    overlapped_new_sstable,
                 ),
-                SstableIterator::create(
-                    cache.insert(
-                        overlapped_old_sstable.id,
-                        overlapped_old_sstable.id,
-                        1,
-                        overlapped_old_sstable,
-                    ),
-                    sstable_store.clone(),
-                    read_options.clone(),
+                sstable_store.clone(),
+                read_options.clone(),
+            ),
+            SstableIterator::create(
+                cache.insert(
+                    overlapped_old_sstable.id,
+                    overlapped_old_sstable.id,
+                    1,
+                    overlapped_old_sstable,
                 ),
-            ],
-            Arc::new(StateStoreMetrics::unused()),
-        );
+                sstable_store.clone(),
+                read_options.clone(),
+            ),
+        ]);
 
         iter.rewind().await.unwrap();
 
         let mut count = 0;
 
         while iter.is_valid() {
-            assert_eq!(iter.key(), iterator_test_key_of(count));
+            assert_eq!(iter.key(), iterator_test_key_of(count).to_ref());
             let expected_value = match count % 3 {
                 0 => format!("non_overlapped_{}", count).as_bytes().to_vec(),
                 1 => format!("overlapped_new_{}", count).as_bytes().to_vec(),

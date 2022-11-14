@@ -19,13 +19,18 @@ use crate::optimizer::plan_node::*;
 
 /// Define `PlanVisitor` trait.
 macro_rules! def_visitor {
-    ([], $({ $convention:ident, $name:ident }),*) => {
+    ($({ $convention:ident, $name:ident }),*) => {
         /// The visitor for plan nodes. visit all inputs and return the ret value of the left most input,
         /// and leaf node returns `R::default()`
         pub trait PlanVisitor<R:Default> {
             fn check_convention(&self, _convention: Convention) -> bool {
                 return true;
             }
+
+            /// This merge function is used to reduce results of plan inputs.
+            /// In order to always remind users to implement themselves, we don't provide an default implementation.
+            fn merge(a: R, b: R) -> R;
+
             paste! {
                 fn visit(&mut self, plan: PlanRef) -> R{
                     match plan.node_type() {
@@ -38,14 +43,11 @@ macro_rules! def_visitor {
                 $(
                     #[doc = "Visit [`" [<$convention $name>] "`] , the function should visit the inputs."]
                     fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> R {
-                        let inputs = plan.inputs();
-                        if inputs.is_empty() {
-                            return R::default();
-                        }
-                        let mut iter = plan.inputs().into_iter();
-                        let ret = self.visit(iter.next().unwrap());
-                        iter.for_each(|input| {self.visit(input);});
-                        ret
+                        plan.inputs()
+                            .into_iter()
+                            .map(|input| self.visit(input))
+                            .reduce(Self::merge)
+                            .unwrap_or_default()
                     }
                 )*
             }
@@ -54,3 +56,43 @@ macro_rules! def_visitor {
 }
 
 for_all_plan_nodes! { def_visitor }
+
+macro_rules! impl_has_variant {
+    ( $($variant:ty),* ) => {
+        paste! {
+            $(
+                pub fn [<has_ $variant:snake _where>]<P>(plan: PlanRef, pred: P) -> bool
+                where
+                    P: FnMut(&$variant) -> bool,
+                {
+                    struct HasWhere<P> {
+                        pred: P,
+                    }
+
+                    impl<P> PlanVisitor<bool> for HasWhere<P>
+                    where
+                        P: FnMut(&$variant) -> bool,
+                    {
+                        fn merge(a: bool, b: bool) -> bool {
+                            a | b
+                        }
+
+                        fn [<visit_ $variant:snake>](&mut self, node: &$variant) -> bool {
+                            (self.pred)(node)
+                        }
+                    }
+
+                    let mut visitor = HasWhere { pred };
+                    visitor.visit(plan)
+                }
+
+                #[allow(dead_code)]
+                pub fn [<has_ $variant:snake>](plan: PlanRef) -> bool {
+                    [<has_ $variant:snake _where>](plan, |_| true)
+                }
+            )*
+        }
+    };
+}
+
+impl_has_variant! { LogicalApply, LogicalOverAgg, BatchExchange, BatchSeqScan }

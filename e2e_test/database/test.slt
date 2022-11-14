@@ -1,11 +1,14 @@
+# This test is intended to be run in the database created by prepare.slt
+
 query T rowsort
 show schemas;
 ----
+information_schema
 public
 pg_catalog
 
 statement ok
-create table ddl_t (v1 int not null);
+create table ddl_t (v1 int);
 
 query T
 show tables;

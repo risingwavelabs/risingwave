@@ -18,6 +18,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
+use risingwave_pb::plan_common::JoinType;
 
 use super::{
     EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
@@ -27,7 +28,6 @@ use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicateDisplay, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::utils::ColIndexMapping;
 
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and then probes with data from outer (left-side) relation to
@@ -48,9 +48,7 @@ impl BatchHashJoin {
         let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
-            &logical
-                .l2i_col_mapping()
-                .composite(&logical.i2o_col_mapping()),
+            &logical,
         );
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
 
@@ -61,17 +59,35 @@ impl BatchHashJoin {
         }
     }
 
-    fn derive_dist(
+    pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        l2o_mapping: &ColIndexMapping,
+        logical: &LogicalJoin,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
-            (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                l2o_mapping.rewrite_provided_distribution(left)
-            }
-            (_, _) => unreachable!(),
+            // we can not derive the hash distribution from the side where outer join can generate a
+            // NULL row
+            (Distribution::HashShard(_), Distribution::HashShard(_)) => match logical.join_type() {
+                JoinType::Unspecified => unreachable!(),
+                JoinType::FullOuter => Distribution::SomeShard,
+                JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {
+                    let l2o = logical
+                        .l2i_col_mapping()
+                        .composite(&logical.i2o_col_mapping());
+                    l2o.rewrite_provided_distribution(left)
+                }
+                JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => {
+                    let r2o = logical
+                        .r2i_col_mapping()
+                        .composite(&logical.i2o_col_mapping());
+                    r2o.rewrite_provided_distribution(right)
+                }
+            },
+            (_, _) => unreachable!(
+                "suspicious distribution: left: {:?}, right: {:?}",
+                left, right
+            ),
         }
     }
 
@@ -82,7 +98,7 @@ impl BatchHashJoin {
 }
 
 impl fmt::Display for BatchHashJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("BatchHashJoin");
         builder.field("type", &format_args!("{:?}", self.logical.join_type()));
@@ -149,22 +165,57 @@ impl_plan_tree_node_for_binary! { BatchHashJoin }
 
 impl ToDistributedBatch for BatchHashJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let right = self.right().to_distributed_with_required(
+        let mut right = self.right().to_distributed_with_required(
             &Order::any(),
             &RequiredDist::shard_by_key(
                 self.right().schema().len(),
                 &self.eq_join_predicate().right_eq_indexes(),
             ),
         )?;
+        let mut left = self.left();
+
         let r2l = self
             .eq_join_predicate()
-            .r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
-        let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
-            right.distribution().clone(),
-        ));
-        let left = self
-            .left()
-            .to_distributed_with_required(&Order::any(), &left_dist)?;
+            .r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
+        let l2r = r2l.inverse();
+
+        let right_dist = right.distribution();
+        match right_dist {
+            Distribution::HashShard(_) => {
+                let left_dist = r2l
+                    .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
+                left = left.to_distributed_with_required(&Order::any(), &left_dist)?;
+            }
+            Distribution::UpstreamHashShard(_, _) => {
+                left = left.to_distributed_with_required(
+                    &Order::any(),
+                    &RequiredDist::shard_by_key(
+                        self.left().schema().len(),
+                        &self.eq_join_predicate().left_eq_indexes(),
+                    ),
+                )?;
+                let left_dist = left.distribution();
+                match left_dist {
+                    Distribution::HashShard(_) => {
+                        let right_dist = l2r.rewrite_required_distribution(
+                            &RequiredDist::PhysicalDist(left_dist.clone()),
+                        );
+                        right = right_dist.enforce_if_not_satisfies(right, &Order::any())?
+                    }
+                    Distribution::UpstreamHashShard(_, _) => {
+                        left =
+                            RequiredDist::hash_shard(&self.eq_join_predicate().left_eq_indexes())
+                                .enforce_if_not_satisfies(left, &Order::any())?;
+                        right =
+                            RequiredDist::hash_shard(&self.eq_join_predicate().right_eq_indexes())
+                                .enforce_if_not_satisfies(right, &Order::any())?;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => unreachable!(),
+        }
+
         Ok(self.clone_with_left_right(left, right).into())
     }
 }
@@ -185,6 +236,7 @@ impl ToBatchProst for BatchHashJoin {
                 .into_iter()
                 .map(|a| a as i32)
                 .collect(),
+            null_safe: self.eq_join_predicate.null_safes().into_iter().collect(),
             condition: self
                 .eq_join_predicate
                 .other_cond()

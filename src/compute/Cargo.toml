@@ -1,12 +1,13 @@
 [package]
 edition = "2021"
 name = "risingwave_compute"
-version = "0.1.11"
+version = "0.2.0-alpha"
 
 [dependencies]
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
+async_stack_trace = { path = "../utils/async_stack_trace" }
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -16,19 +17,17 @@ dyn-clone = "1"
 either = "1"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = "0.2"
 hyper = "0.14"
 itertools = "0.10"
-lazy_static = "1"
-log = "0.4"
-madsim = "=0.2.0-alpha.5"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"
+pprof = { version = "0.10", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
-prost = "0.10"
-rdkafka = { version = "0.28", features = ["cmake-build"] }
+prost = "0.11"
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
 risingwave_common_service = { path = "../common/common_service" }
@@ -45,7 +44,7 @@ serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.5", package = "madsim-tokio", features = [
+tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -55,13 +54,15 @@ tokio = { version = "=0.2.0-alpha.5", package = "madsim-tokio", features = [
     "fs",
 ] }
 tokio-stream = "0.1"
-tonic = { version = "=0.2.0-alpha.5", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors"] }
-tracing = { version = "0.1" }
+tracing = "0.1"
 twox-hash = "1"
 url = "2"
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
 
 [dev-dependencies]
 futures-async-stream = "0.2"

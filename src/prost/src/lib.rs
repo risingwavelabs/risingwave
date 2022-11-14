@@ -1,5 +1,21 @@
-#![allow(clippy::all)]
-#![allow(rustdoc::bare_urls)]
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#![expect(clippy::all)]
+#![expect(rustdoc::bare_urls)]
+#![expect(clippy::doc_markdown)]
+#![feature(lint_reasons)]
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -38,12 +54,20 @@ pub mod stream_service;
 #[cfg_attr(madsim, path = "sim/hummock.rs")]
 pub mod hummock;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/compactor.rs")]
+pub mod compactor;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/user.rs")]
 pub mod user;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/source.rs")]
 pub mod source;
-
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/monitor_service.rs")]
+pub mod monitor_service;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/health.rs")]
+pub mod health;
 
 #[rustfmt::skip]
 #[path = "catalog.serde.rs"]
@@ -82,15 +106,27 @@ pub mod stream_service_serde;
 #[path = "hummock.serde.rs"]
 pub mod hummock_serde;
 #[rustfmt::skip]
+#[path = "compactor.serde.rs"]
+pub mod compactor_serde;
+#[rustfmt::skip]
 #[path = "user.serde.rs"]
 pub mod user_serde;
 #[rustfmt::skip]
 #[path = "source.serde.rs"]
 pub mod source_serde;
+#[rustfmt::skip]
+#[path = "monitor_service.serde.rs"]
+pub mod monitor_service_serde;
 
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ProstFieldNotFound(pub &'static str);
+
+impl From<ProstFieldNotFound> for tonic::Status {
+    fn from(e: ProstFieldNotFound) -> Self {
+        tonic::Status::new(tonic::Code::Internal, e.0)
+    }
+}
 
 #[cfg(test)]
 mod tests {

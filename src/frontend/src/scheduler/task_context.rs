@@ -14,14 +14,16 @@
 
 use std::sync::Arc;
 
-use risingwave_batch::executor::BatchMetrics;
+use risingwave_batch::executor::BatchTaskMetricsWithTaskLabels;
 use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_common::catalog::SysCatalogReaderRef;
+use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_source::SourceManagerRef;
+use risingwave_rpc_client::ComputeClientPoolRef;
+use risingwave_source::TableSourceManagerRef;
 
-use crate::catalog::pg_catalog::SysCatalogReaderImpl;
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::session::{AuthContext, FrontendEnv};
 
 /// Batch task execution context in frontend.
@@ -39,32 +41,40 @@ impl FrontendBatchTaskContext {
 
 impl BatchTaskContext for FrontendBatchTaskContext {
     fn get_task_output(&self, _task_output_id: TaskOutputId) -> Result<TaskOutput> {
-        todo!()
+        unimplemented!("not supported in local mode")
     }
 
-    fn catalog_reader_ref(&self) -> Option<SysCatalogReaderRef> {
-        Some(Arc::new(SysCatalogReaderImpl::new(
+    fn catalog_reader(&self) -> SysCatalogReaderRef {
+        Arc::new(SysCatalogReaderImpl::new(
             self.env.catalog_reader().clone(),
             self.env.user_info_reader().clone(),
             self.env.worker_node_manager_ref(),
             self.env.meta_client_ref(),
             self.auth_context.clone(),
-        )))
+        ))
     }
 
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool {
         is_local_address(self.env.server_address(), peer_addr)
     }
 
-    fn source_manager_ref(&self) -> Option<SourceManagerRef> {
-        todo!()
+    fn source_manager(&self) -> TableSourceManagerRef {
+        unimplemented!("not supported in local mode")
     }
 
-    fn state_store(&self) -> Option<risingwave_storage::store_impl::StateStoreImpl> {
-        todo!()
+    fn state_store(&self) -> risingwave_storage::store_impl::StateStoreImpl {
+        unimplemented!("not supported in local mode")
     }
 
-    fn stats(&self) -> Arc<BatchMetrics> {
-        todo!()
+    fn task_metrics(&self) -> Option<BatchTaskMetricsWithTaskLabels> {
+        None
+    }
+
+    fn client_pool(&self) -> ComputeClientPoolRef {
+        self.env.client_pool()
+    }
+
+    fn get_config(&self) -> &BatchConfig {
+        self.env.batch_config()
     }
 }

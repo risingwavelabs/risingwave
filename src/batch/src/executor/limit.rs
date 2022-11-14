@@ -40,10 +40,10 @@ pub struct LimitExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for LimitExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        source: &ExecutorBuilder<'_, C>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "LimitExecutor should have only 1 child!");
+        let [child]: [_; 1] = inputs.try_into().unwrap();
 
         let limit_node =
             try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::Limit)?;
@@ -51,12 +51,12 @@ impl BoxedExecutorBuilder for LimitExecutor {
         let limit = limit_node.get_limit() as usize;
         let offset = limit_node.get_offset() as usize;
 
-        Ok(Box::new(Self {
-            child: inputs.remove(0),
+        Ok(Box::new(Self::new(
+            child,
             limit,
             offset,
-            identity: source.plan_node().get_identity().clone(),
-        }))
+            source.plan_node().get_identity().clone(),
+        )))
     }
 }
 
@@ -110,7 +110,7 @@ impl LimitExecutor {
             }
             yield data_chunk
                 .with_visibility(new_vis.into_iter().collect())
-                .compact()?;
+                .compact();
         }
     }
 }
@@ -129,9 +129,20 @@ impl Executor for LimitExecutor {
     }
 }
 
+impl LimitExecutor {
+    pub fn new(child: BoxedExecutor, limit: usize, offset: usize, identity: String) -> Self {
+        Self {
+            child,
+            limit,
+            offset,
+            identity,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+
     use std::vec;
 
     use futures_async_stream::for_await;
@@ -143,9 +154,8 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockExecutor;
 
-    fn create_column(vec: &[Option<i32>]) -> Result<Column> {
-        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        Ok(Column::new(array))
+    fn create_column(vec: &[Option<i32>]) -> Column {
+        PrimitiveArray::from_slice(vec).into()
     }
 
     async fn test_limit_all_visible(
@@ -160,8 +170,7 @@ mod tests {
                 .map(|x| Some(x as i32))
                 .collect_vec()
                 .as_slice(),
-        )
-        .unwrap();
+        );
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int32)],
         };
@@ -276,8 +285,7 @@ mod tests {
                 .map(|x| Some(x as i32))
                 .collect_vec()
                 .as_slice(),
-        )
-        .unwrap();
+        );
 
         let visible_array = BoolArray::from_slice(
             visible
@@ -286,10 +294,9 @@ mod tests {
                 .map(Some)
                 .collect_vec()
                 .as_slice(),
-        )
-        .unwrap();
+        );
 
-        let col1 = Column::new(Arc::new(visible_array.into()));
+        let col1 = visible_array.into();
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int32),
@@ -319,7 +326,7 @@ mod tests {
         let stream = limit_executor.execute();
         #[for_await]
         for chunk in stream {
-            results.push(chunk.unwrap().compact().unwrap());
+            results.push(chunk.unwrap().compact());
         }
         let chunks =
             DataChunk::rechunk(results.into_iter().collect_vec().as_slice(), row_num).unwrap();

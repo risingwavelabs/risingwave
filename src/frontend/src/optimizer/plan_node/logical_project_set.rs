@@ -14,17 +14,15 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::DataType;
+use risingwave_common::error::Result;
 
 use super::{
-    BatchProjectSet, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
+    generic, BatchProjectSet, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
-use crate::expr::{
-    Expr, ExprDisplay, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
-};
-use crate::risingwave_common::error::Result;
+use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
+use crate::optimizer::plan_node::generic::GenericPlanNode;
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
@@ -38,8 +36,7 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone)]
 pub struct LogicalProjectSet {
     pub base: PlanBase,
-    select_list: Vec<ExprImpl>,
-    input: PlanRef,
+    core: generic::ProjectSet<PlanRef>,
 }
 
 impl LogicalProjectSet {
@@ -49,15 +46,16 @@ impl LogicalProjectSet {
             "ProjectSet should have at least one table function."
         );
 
-        let ctx = input.ctx();
-        let schema = Self::derive_schema(&select_list, input.schema());
-        let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &select_list);
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
-        LogicalProjectSet {
-            base,
-            select_list,
-            input,
-        }
+        let core = generic::ProjectSet { select_list, input };
+
+        let ctx = core.ctx();
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
+
+        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
+
+        LogicalProjectSet { base, core }
     }
 
     /// `create` will analyze select exprs with table functions and construct a plan.
@@ -173,94 +171,52 @@ impl LogicalProjectSet {
         }
     }
 
-    fn derive_schema(select_list: &[ExprImpl], input_schema: &Schema) -> Schema {
-        let o2i = Self::o2i_col_mapping_inner(input_schema.len(), select_list);
-        let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
-        fields.extend(select_list.iter().enumerate().map(|(idx, expr)| {
-            let idx = idx + 1;
-            // Get field info from o2i.
-            let (name, sub_fields, type_name) = match o2i.try_map(idx) {
-                Some(input_idx) => {
-                    let field = input_schema.fields()[input_idx].clone();
-                    (field.name, field.sub_fields, field.type_name)
-                }
-                None => (
-                    format!("{:?}", ExprDisplay { expr, input_schema }),
-                    vec![],
-                    String::new(),
-                ),
-            };
-            Field::with_struct(expr.return_type(), name, sub_fields, type_name)
-        }));
-
-        Schema { fields }
+    fn derive_fd(
+        core: &generic::ProjectSet<PlanRef>,
+        input_fd_set: &FunctionalDependencySet,
+    ) -> FunctionalDependencySet {
+        let i2o = core.i2o_col_mapping();
+        i2o.rewrite_functional_dependency_set(input_fd_set.clone())
     }
 
-    fn derive_pk(
-        input_schema: &Schema,
-        input_pk: &[usize],
-        select_list: &[ExprImpl],
-    ) -> Vec<usize> {
-        let i2o = Self::i2o_col_mapping_inner(input_schema.len(), select_list);
-        let mut pk = input_pk
-            .iter()
-            .map(|pk_col| i2o.try_map(*pk_col))
-            .collect::<Option<Vec<_>>>()
-            .unwrap_or_default();
-        // add `projected_row_id` to pk
-        pk.push(0);
-        pk
+    pub fn select_list(&self) -> &Vec<ExprImpl> {
+        &self.core.select_list
     }
 
-    pub fn select_list(&self) -> &[ExprImpl] {
-        &self.select_list
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let _verbose = self.base.ctx.is_explain_verbose();
         // TODO: add verbose display like Project
 
         let mut builder = f.debug_struct(name);
-        builder.field("select_list", &self.select_list);
+        builder.field("select_list", self.select_list());
         builder.finish()
     }
 }
 
 impl LogicalProjectSet {
-    /// get the Mapping of columnIndex from output column index to input column index
-    fn o2i_col_mapping_inner(input_len: usize, select_list: &[ExprImpl]) -> ColIndexMapping {
-        let mut map = vec![None; 1 + select_list.len()];
-        for (i, item) in select_list.iter().enumerate() {
-            map[1 + i] = match item {
-                ExprImpl::InputRef(input) => Some(input.index()),
-                _ => None,
-            }
-        }
-        ColIndexMapping::with_target_size(map, input_len)
-    }
-
-    /// get the Mapping of columnIndex from input column index to output column index,if a input
-    /// column corresponds more than one out columns, mapping to any one
-    fn i2o_col_mapping_inner(input_len: usize, select_list: &[ExprImpl]) -> ColIndexMapping {
-        Self::o2i_col_mapping_inner(input_len, select_list).inverse()
-    }
-
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        Self::o2i_col_mapping_inner(self.input.schema().len(), self.select_list())
+        self.core.o2i_col_mapping()
     }
 
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        Self::i2o_col_mapping_inner(self.input.schema().len(), self.select_list())
+        self.core.i2o_col_mapping()
+    }
+
+    /// Map the order of the input to use the updated indices
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.core
+            .i2o_col_mapping()
+            .rewrite_provided_order(self.input().order())
     }
 }
 
 impl PlanTreeNodeUnary for LogicalProjectSet {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.select_list.clone())
+        Self::new(input, self.select_list().clone())
     }
 
     #[must_use]
@@ -270,7 +226,7 @@ impl PlanTreeNodeUnary for LogicalProjectSet {
         mut input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         let select_list = self
-            .select_list
+            .select_list()
             .clone()
             .into_iter()
             .map(|item| input_col_change.rewrite_expr(item))
@@ -307,7 +263,7 @@ impl PredicatePushdown for LogicalProjectSet {
 
 impl ToBatch for LogicalProjectSet {
     fn to_batch(&self) -> Result<PlanRef> {
-        let new_input = self.input.to_batch()?;
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         Ok(BatchProjectSet::new(new_logical).into())
     }
@@ -315,14 +271,17 @@ impl ToBatch for LogicalProjectSet {
 
 impl ToStream for LogicalProjectSet {
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
         let (project_set, out_col_change) =
             self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
-        let input_pk = input.pk_indices();
-        let i2o = Self::i2o_col_mapping_inner(input.schema().len(), project_set.select_list());
-        let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
+        let input_pk = input.logical_pk();
+        let i2o = self.core.i2o_col_mapping();
+        let col_need_to_add = input_pk
+            .iter()
+            .cloned()
+            .filter(|i| i2o.try_map(*i).is_none());
         let input_schema = input.schema();
         let select_list =
             project_set
@@ -348,5 +307,68 @@ impl ToStream for LogicalProjectSet {
         let new_input = self.input().to_stream()?;
         let new_logical = self.clone_with_input(new_input);
         Ok(StreamProjectSet::new(new_logical).into())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::HashSet;
+
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::expr::{ExprImpl, InputRef, TableFunction};
+    use crate::optimizer::plan_node::LogicalValues;
+    use crate::optimizer::property::FunctionalDependency;
+    use crate::session::OptimizerContext;
+
+    #[tokio::test]
+    async fn fd_derivation_project_set() {
+        // input: [v1, v2, v3]
+        // FD: v2 --> v3
+        // output: [projected_row_id, v3, v2, generate_series(v1, v2, v3)],
+        // FD: v2 --> v3
+
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int32, "v3"),
+        ];
+        let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        values
+            .base
+            .functional_dependency
+            .add_functional_dependency_by_column_indices(&[1], &[2]);
+        let project_set = LogicalProjectSet::new(
+            values.into(),
+            vec![
+                ExprImpl::InputRef(Box::new(InputRef::new(2, DataType::Int32))),
+                ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                ExprImpl::TableFunction(Box::new(
+                    TableFunction::new(
+                        crate::expr::TableFunctionType::Generate,
+                        vec![
+                            ExprImpl::InputRef(Box::new(InputRef::new(0, DataType::Int32))),
+                            ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                            ExprImpl::InputRef(Box::new(InputRef::new(2, DataType::Int32))),
+                        ],
+                    )
+                    .unwrap(),
+                )),
+            ],
+        );
+        let fd_set: HashSet<FunctionalDependency> = project_set
+            .base
+            .functional_dependency
+            .into_dependencies()
+            .into_iter()
+            .collect();
+        let expected_fd_set: HashSet<FunctionalDependency> =
+            [FunctionalDependency::with_indices(4, &[2], &[1])]
+                .into_iter()
+                .collect();
+        assert_eq!(fd_set, expected_fd_set);
     }
 }

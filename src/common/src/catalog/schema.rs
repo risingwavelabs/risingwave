@@ -19,7 +19,6 @@ use risingwave_pb::plan_common::Field as ProstField;
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
-use crate::error::{ErrorCode, Result};
 use crate::types::DataType;
 
 /// The field in the schema of the executor's return data
@@ -45,24 +44,6 @@ impl Field {
         ProstField {
             data_type: Some(self.data_type.to_protobuf()),
             name: self.name.to_string(),
-        }
-    }
-
-    /// Returns field and field index.
-    pub fn sub_field(&self, name: &String) -> Result<(Field, usize)> {
-        if let DataType::Struct { .. } = self.data_type {
-            for (index, field) in self.sub_fields.iter().enumerate() {
-                if field.name == *name {
-                    return Ok((field.clone(), index));
-                }
-            }
-            Err(ErrorCode::ItemNotFound(format!("Invalid field name: {}", name)).into())
-        } else {
-            Err(ErrorCode::ItemNotFound(format!(
-                "Cannot get field from non nested column: {}",
-                self.name
-            ))
-            .into())
         }
     }
 }

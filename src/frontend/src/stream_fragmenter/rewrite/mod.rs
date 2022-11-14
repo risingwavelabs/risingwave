@@ -13,3 +13,4 @@
 // limitations under the License.
 
 mod delta_join;
+pub(crate) use delta_join::build_delta_join_without_arrange;

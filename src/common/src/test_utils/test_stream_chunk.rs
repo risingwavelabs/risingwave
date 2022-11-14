@@ -86,8 +86,7 @@ impl BigStreamChunk {
                 &std::iter::repeat(Some(114_514))
                     .take(capacity)
                     .collect_vec(),
-            )
-            .unwrap();
+            );
             Column::from(array)
         };
 

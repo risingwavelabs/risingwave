@@ -1,0 +1,58 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation 
+
+# description: Test ordering the same value several times
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE integers(i INTEGER);
+
+statement ok
+INSERT INTO integers VALUES (0), (0), (0), (0);
+
+# 4 -> 8
+statement ok
+INSERT INTO integers SELECT * FROM integers;
+
+# 8 -> 16
+statement ok
+INSERT INTO integers SELECT * FROM integers;
+
+# 16 -> 32
+statement ok
+INSERT INTO integers SELECT * FROM integers;
+
+# 32 -> 64
+statement ok
+INSERT INTO integers SELECT * FROM integers;
+
+# 64 -> 128
+statement ok
+INSERT INTO integers SELECT * FROM integers;
+
+# 128 -> 256
+statement ok
+INSERT INTO integers SELECT * FROM integers;
+
+# 256 -> 512
+statement ok
+INSERT INTO integers SELECT * FROM integers;
+
+# 512 -> 1024
+statement ok
+INSERT INTO integers SELECT * FROM integers;
+
+# 1024 -> 2048
+statement ok
+INSERT INTO integers SELECT * FROM integers;
+
+# order by
+query I
+SELECT SUM(i) FROM (SELECT i FROM integers ORDER BY i) t1;
+----
+0
+
+statement ok
+drop table integers;

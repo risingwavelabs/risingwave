@@ -14,18 +14,21 @@
 
 use std::fmt::Debug;
 
+use anyhow::anyhow;
+use async_stack_trace::{SpanValue, StackTrace};
 use async_trait::async_trait;
-use risingwave_common::error::{internal_error, Result};
 use risingwave_common::util::addr::is_local_address;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::error::SendError;
 
+use super::permit::Sender;
+use crate::error::StreamResult;
 use crate::executor::Message;
 use crate::task::{ActorId, SharedContext};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]
 pub trait Output: Debug + Send + Sync + 'static {
-    async fn send(&mut self, message: Message) -> Result<()>;
+    async fn send(&mut self, message: Message) -> StreamResult<()>;
 
     /// The downstream actor id.
     fn actor_id(&self) -> ActorId;
@@ -44,7 +47,9 @@ pub type BoxedOutput = Box<dyn Output>;
 pub struct LocalOutput {
     actor_id: ActorId,
 
-    ch: Sender<Message>,
+    span: SpanValue,
+
+    ch: Sender,
 }
 
 impl Debug for LocalOutput {
@@ -56,18 +61,30 @@ impl Debug for LocalOutput {
 }
 
 impl LocalOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
-        Self { actor_id, ch }
+    pub fn new(actor_id: ActorId, ch: Sender) -> Self {
+        Self {
+            actor_id,
+            span: format!("LocalOutput (actor {:?})", actor_id).into(),
+            ch,
+        }
     }
 }
 
 #[async_trait]
 impl Output for LocalOutput {
-    async fn send(&mut self, message: Message) -> Result<()> {
+    async fn send(&mut self, message: Message) -> StreamResult<()> {
         self.ch
             .send(message)
+            .verbose_stack_trace(self.span.clone())
             .await
-            .map_err(|_| internal_error("failed to send"))
+            .map_err(|SendError(message)| {
+                anyhow!(
+                    "failed to send message to actor {}: {:#?}",
+                    self.actor_id,
+                    message
+                )
+                .into()
+            })
     }
 
     fn actor_id(&self) -> ActorId {
@@ -83,7 +100,9 @@ impl Output for LocalOutput {
 pub struct RemoteOutput {
     actor_id: ActorId,
 
-    ch: Sender<Message>,
+    span: SpanValue,
+
+    ch: Sender,
 }
 
 impl Debug for RemoteOutput {
@@ -95,23 +114,35 @@ impl Debug for RemoteOutput {
 }
 
 impl RemoteOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
-        Self { actor_id, ch }
+    pub fn new(actor_id: ActorId, ch: Sender) -> Self {
+        Self {
+            actor_id,
+            span: format!("RemoteOutput (actor {:?})", actor_id).into(),
+            ch,
+        }
     }
 }
 
 #[async_trait]
 impl Output for RemoteOutput {
-    async fn send(&mut self, message: Message) -> Result<()> {
+    async fn send(&mut self, message: Message) -> StreamResult<()> {
         let message = match message {
-            Message::Chunk(chk) => Message::Chunk(chk.compact()?),
+            Message::Chunk(chk) => Message::Chunk(chk.compact()),
             _ => message,
         };
 
         self.ch
             .send(message)
+            .verbose_stack_trace(self.span.clone())
             .await
-            .map_err(|_| internal_error("failed to send"))
+            .map_err(|SendError(message)| {
+                anyhow!(
+                    "failed to send message to actor {}: {:#?}",
+                    self.actor_id,
+                    message
+                )
+                .into()
+            })
     }
 
     fn actor_id(&self) -> ActorId {
@@ -125,7 +156,7 @@ pub fn new_output(
     context: &SharedContext,
     actor_id: ActorId,
     down_id: ActorId,
-) -> Result<BoxedOutput> {
+) -> StreamResult<BoxedOutput> {
     let tx = context.take_sender(&(actor_id, down_id))?;
 
     let is_local_address = match context.get_actor_info(&down_id) {

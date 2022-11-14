@@ -1,0 +1,191 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation
+
+# description: Test LIMIT keyword
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE test (a INTEGER, b INTEGER);
+
+statement ok
+INSERT INTO test VALUES (11, 22), (12, 21), (13, 22);
+
+# constant limit
+query I
+SELECT a FROM test order by 1 LIMIT 1;
+----
+11
+
+# decimal limit
+# query I
+# SELECT a FROM test order by 1 LIMIT 1.25;
+# ----
+# 11
+
+# We cannot handle expressions after LIMIT, so disable this and similar queries afterwards.
+# LIMIT with operation
+# query I
+# SELECT a FROM test order by 1 LIMIT 2-1;
+# ----
+# 11
+
+# LIMIT with non-scalar should fail
+statement error
+SELECT a FROM test LIMIT a;
+
+# LIMIT with non-scalar operation should also fail
+statement error
+SELECT a FROM test LIMIT a+1;
+
+# aggregate in limit
+statement error
+SELECT a FROM test LIMIT SUM(42);
+
+# window function in limit
+statement error
+SELECT a FROM test LIMIT row_number() OVER ();
+
+# LIMIT Bug #321 Crazy Result
+statement ok
+CREATE TABLE test2 (a VARCHAR);
+
+statement ok
+INSERT INTO test2 VALUES ('Hello World');
+
+query I
+SELECT * FROM test2 LIMIT 3;
+----
+Hello World
+
+# can only limit by integers
+statement error
+select 1 limit date '1992-01-01';
+
+# Test limits with no constants
+statement ok
+CREATE TABLE integers(i INTEGER);
+
+statement ok
+INSERT INTO integers VALUES (1), (2), (3), (4), (5);
+
+# statement ok
+# CREATE SEQUENCE seq START 3;
+
+# statement ok
+# PRAGMA disable_verification;
+
+# query I
+# SELECT * FROM integers LIMIT nextval('seq');
+# ----
+# 1
+# 2
+# 3
+
+# query I
+# SELECT * FROM integers LIMIT nextval('seq');
+# ----
+# 1
+# 2
+# 3
+# 4
+
+
+# non-foldable expression in limit
+# statement ok
+# SELECT * FROM integers LIMIT RANDOM();
+
+# subquery in limit
+# query I
+# SELECT * FROM integers as int order by 1 LIMIT (SELECT MIN(integers.i) FROM integers);
+# ----
+# 1
+
+# statement ok
+# CREATE SEQUENCE of_seq START 1;
+
+# query I
+# SELECT * FROM integers OFFSET nextval('of_seq');
+# ----
+# 2
+# 3
+# 4
+# 5
+
+# query I
+# SELECT * FROM integers OFFSET nextval('of_seq');
+# ----
+# 3
+# 4
+# 5
+
+# non-foldable expression in limit
+# statement ok
+# SELECT * FROM integers OFFSET RANDOM();
+
+# subquery in limit
+# query I
+# SELECT * FROM integers as int order by 1 OFFSET (SELECT MIN(integers.i) FROM integers);
+# ----
+# 2
+# 3
+# 4
+# 5
+
+# Both LIMIT and OFFSET together with subqueries
+# query I
+# SELECT * FROM integers as int order by 1 LIMIT (SELECT MAX(integers.i) FROM integers) OFFSET (SELECT MIN(integers.i) FROM integers);
+# ----
+# 2
+# 3
+# 4
+# 5
+
+# Subqueries that return zero rows = Same as omitting limit clause
+# query I
+# SELECT * FROM integers as int order by 1 LIMIT (SELECT max(integers.i) FROM integers where i > 5);
+# ----
+# 1
+# 2
+# 3
+# 4
+# 5
+
+# Limit of NULL, offset of NULL
+# query I
+# SELECT * FROM integers as int order by 1 LIMIT (SELECT max(integers.i) FROM integers where i > 5);
+# ----
+# 1
+# 2
+# 3
+# 4
+# 5
+
+# Subqueries that return NULL
+# query I
+# SELECT * FROM integers as int order by 1 LIMIT (SELECT NULL);
+# ----
+# 1
+# 2
+# 3
+# 4
+# 5
+
+
+# Subqueries that return negative values
+statement error
+SELECT * FROM integers as int LIMIT (SELECT -1);
+
+#Subqueries that return strings that can't be converted to integers
+statement error
+SELECT * FROM integers as int LIMIT (SELECT 'ab');
+
+statement ok
+drop table integers;
+
+statement ok
+drop table test;
+
+statement ok
+drop table test2;

@@ -24,7 +24,6 @@ use risingwave_common::types::{
     OrderedF64,
 };
 
-use super::cast::date_to_timestamp;
 use crate::{ExprError, Result};
 
 #[inline(always)]
@@ -157,7 +156,7 @@ pub fn interval_date_add<T1, T2, T3>(
     l: IntervalUnit,
     r: NaiveDateWrapper,
 ) -> Result<NaiveDateTimeWrapper> {
-    interval_timestamp_add::<T1, T2, T3>(l, date_to_timestamp(r)?)
+    interval_timestamp_add::<T1, T2, T3>(l, r.into())
 }
 
 #[inline(always)]
@@ -218,6 +217,33 @@ pub fn timestamp_interval_sub<T1, T2, T3>(
     r: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
     interval_timestamp_add::<T1, T2, T3>(r.negative(), l)
+}
+
+#[inline(always)]
+pub fn timestampz_interval_add<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
+    interval_timestampz_add::<T1, T2, T3>(r, l)
+}
+
+#[inline(always)]
+pub fn timestampz_interval_sub<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
+    interval_timestampz_add::<T1, T2, T3>(r.negative(), l)
+}
+
+#[inline(always)]
+pub fn interval_timestampz_add<T1, T2, T3>(l: IntervalUnit, r: i64) -> Result<i64> {
+    // Without session TimeZone, we cannot add month/day in local time. See #5826.
+    // However, we only reject months but accept days, assuming them are always 24-hour and ignoring
+    // Daylight Saving.
+    // This is to keep consistent with `tumble_start` of RisingWave / `date_bin` of PostgreSQL.
+    if l.get_months() != 0 {
+        return Err(ExprError::UnsupportedFunction(
+            "timestamp with time zone +/- interval of months".into(),
+        ));
+    }
+    let delta_usecs = l.get_days() as i64 * 24 * 60 * 60 * 1_000_000 + l.get_ms() * 1000;
+
+    r.checked_add(delta_usecs)
+        .ok_or(ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]

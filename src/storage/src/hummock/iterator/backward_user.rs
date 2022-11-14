@@ -12,32 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound::{self, *};
-use std::sync::Arc;
+use std::ops::Bound::*;
 
-use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
+use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
+use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
-    Backward, DirectedUserIterator, DirectedUserIteratorBuilder, HummockIterator,
-    UserIteratorPayloadType,
+    Backward, BackwardUserIteratorType, DirectedUserIterator, DirectedUserIteratorBuilder,
+    HummockIterator, UserIteratorPayloadType,
 };
-use crate::hummock::local_version::PinnedVersion;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BackwardSstableIterator, HummockResult};
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::StoreLocalStatistic;
 
 /// [`BackwardUserIterator`] can be used by user directly.
-pub struct BackwardUserIterator {
+pub struct BackwardUserIterator<I: HummockIterator<Direction = Backward>> {
     /// Inner table iterator.
-    iterator:
-        UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
+    iterator: I,
 
     /// We just met a new key
     just_met_new_key: bool,
 
     /// Last user key
-    last_key: Vec<u8>,
+    last_key: FullKey<Vec<u8>>,
 
     /// Last user value
     last_val: Vec<u8>,
@@ -49,64 +48,55 @@ pub struct BackwardUserIterator {
     out_of_range: bool,
 
     /// Start and end bounds of user key.
-    key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+    key_range: UserKeyRange,
 
     /// Only reads values if `epoch <= self.read_epoch`.
-    read_epoch: Epoch,
+    read_epoch: HummockEpoch,
 
     /// Only reads values if `ts > self.min_epoch`. use for ttl
-    min_epoch: Epoch,
+    min_epoch: HummockEpoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
-    _version: Option<Arc<PinnedVersion>>,
+    _version: Option<PinnedVersion>,
+
+    /// Store scan statistic
+    stats: StoreLocalStatistic,
 }
 
-impl BackwardUserIterator {
-    /// Creates [`BackwardUserIterator`] with maximum epoch.
-    #[cfg(test)]
-    pub(crate) fn new(
-        iterator: UnorderedMergeIteratorInner<
-            UserIteratorPayloadType<Backward, BackwardSstableIterator>,
-        >,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-    ) -> Self {
-        Self::with_epoch(iterator, key_range, Epoch::MAX, 0, None)
-    }
-
+impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// Creates [`BackwardUserIterator`] with given `read_epoch`.
     pub(crate) fn with_epoch(
-        iterator: UnorderedMergeIteratorInner<
-            UserIteratorPayloadType<Backward, BackwardSstableIterator>,
-        >,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        iterator: I,
+        key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> Self {
         Self {
             iterator,
             out_of_range: false,
             key_range,
             just_met_new_key: false,
-            last_key: Vec::new(),
+            last_key: FullKey::default(),
             last_val: Vec::new(),
             last_delete: true,
             read_epoch,
             min_epoch,
+            stats: StoreLocalStatistic::default(),
             _version: version,
         }
     }
 
-    fn out_of_range(&self, key: &[u8]) -> bool {
+    fn out_of_range(&self, key: &UserKey<Vec<u8>>) -> bool {
         match &self.key_range.0 {
-            Included(begin_key) => key < begin_key.as_slice(),
-            Excluded(begin_key) => key <= begin_key.as_slice(),
+            Included(begin_key) => key < begin_key,
+            Excluded(begin_key) => key <= begin_key,
             Unbounded => false,
         }
     }
 
     fn reset(&mut self) {
-        self.last_key.clear();
+        self.last_key = FullKey::default();
         self.just_met_new_key = false;
         self.last_delete = true;
         self.out_of_range = false;
@@ -148,35 +138,36 @@ impl BackwardUserIterator {
 
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
-            let epoch = get_epoch(full_key);
-            let key = to_user_key(full_key);
+            let epoch = full_key.epoch;
+            let key = &full_key.user_key;
 
             if epoch > self.min_epoch && epoch <= self.read_epoch {
                 if self.just_met_new_key {
-                    self.last_key.clear();
-                    self.last_key.extend_from_slice(key);
+                    self.last_key.set(full_key);
                     self.just_met_new_key = false;
                     // If we encounter an out-of-range key, stop early.
-                    if self.out_of_range(&self.last_key) {
+                    if self.out_of_range(&self.last_key.user_key) {
                         self.out_of_range = true;
                         break;
                     }
-                } else if self.last_key != key {
+                } else if self.last_key.user_key.as_ref() != *key {
                     if !self.last_delete {
                         // We remark that we don't check `out_of_range` here as the other two cases
                         // covered all situation. 2(a)
                         self.just_met_new_key = true;
+                        self.stats.processed_key_count += 1;
                         return Ok(());
                     } else {
                         // 2(b)
-                        self.last_key.clear();
-                        self.last_key.extend_from_slice(key);
+                        self.last_key.set(full_key);
                         // If we encounter an out-of-range key, stop early.
-                        if self.out_of_range(&self.last_key) {
+                        if self.out_of_range(&self.last_key.user_key) {
                             self.out_of_range = true;
                             break;
                         }
                     }
+                } else {
+                    self.stats.skip_multi_version_key_count += 1;
                 }
                 // TODO: Since the real world workload may follow power law or 20/80 rule, or
                 // whatever name. We may directly seek to the next key if we have
@@ -185,6 +176,8 @@ impl BackwardUserIterator {
                 // 1 and 2(a)
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
+                        // TODO: unconditionally set the last key may lead to redundant copies
+                        self.last_key.set(full_key);
                         self.last_val.clear();
                         self.last_val.extend_from_slice(val);
                         self.last_delete = false;
@@ -206,9 +199,9 @@ impl BackwardUserIterator {
     /// `rewind` or `seek` methods are called.
     ///
     /// Note: before call the function you need to ensure that the iterator is valid.
-    pub fn key(&self) -> &[u8] {
+    pub fn key(&self) -> &FullKey<Vec<u8>> {
         assert!(self.is_valid());
-        self.last_key.as_slice()
+        &self.last_key
     }
 
     /// The returned value is in the form of user value.
@@ -224,8 +217,11 @@ impl BackwardUserIterator {
         // Handle range scan
         match &self.key_range.1 {
             Included(end_key) => {
-                let full_key = &key_with_epoch(end_key.clone(), 0);
-                self.iterator.seek(full_key).await?;
+                let full_key = FullKey {
+                    user_key: end_key.clone(),
+                    epoch: 0,
+                };
+                self.iterator.seek(full_key.to_ref()).await?;
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => self.iterator.rewind().await?,
@@ -238,20 +234,21 @@ impl BackwardUserIterator {
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
-    pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
+    pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
         // Handle range scan when key > end_key
         let user_key = match &self.key_range.1 {
             Included(end_key) => {
-                if end_key.as_slice() < user_key {
-                    end_key.clone()
+                let end_key = end_key.as_ref();
+                if end_key < user_key {
+                    end_key
                 } else {
-                    Vec::from(user_key)
+                    user_key
                 }
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
-            Unbounded => Vec::from(user_key),
+            Unbounded => user_key,
         };
-        let full_key = &key_with_epoch(user_key, 0);
+        let full_key = FullKey { user_key, epoch: 0 };
         self.iterator.seek(full_key).await?;
 
         // Handle multi-version
@@ -269,23 +266,49 @@ impl BackwardUserIterator {
         let has_enough_input = self.iterator.is_valid() || !self.last_delete;
         has_enough_input && (!self.out_of_range)
     }
+
+    pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats);
+        self.iterator.collect_local_statistic(stats);
+    }
 }
 
-impl DirectedUserIteratorBuilder for BackwardUserIterator {
+#[cfg(test)]
+impl BackwardUserIterator<BackwardUserIteratorType> {
+    /// Creates [`BackwardUserIterator`] with maximum epoch.
+    pub(crate) fn for_test(
+        iterator: UnorderedMergeIteratorInner<
+            UserIteratorPayloadType<Backward, BackwardSstableIterator>,
+        >,
+        key_range: UserKeyRange,
+    ) -> Self {
+        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, 0, None)
+    }
+
+    /// Creates [`BackwardUserIterator`] with maximum epoch.
+    pub(crate) fn with_min_epoch(
+        iterator: UnorderedMergeIteratorInner<
+            UserIteratorPayloadType<Backward, BackwardSstableIterator>,
+        >,
+        key_range: UserKeyRange,
+        min_epoch: HummockEpoch,
+    ) -> Self {
+        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, min_epoch, None)
+    }
+}
+
+impl DirectedUserIteratorBuilder for BackwardUserIterator<BackwardUserIteratorType> {
     type Direction = Backward;
     type SstableIteratorType = BackwardSstableIterator;
 
     fn create(
-        iterator_iter: impl IntoIterator<
-            Item = UserIteratorPayloadType<Backward, BackwardSstableIterator>,
-        >,
-        stats: Arc<StateStoreMetrics>,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        iterator_iter: Vec<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
+        key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> DirectedUserIterator {
-        let iterator = UnorderedMergeIteratorInner::new(iterator_iter, stats);
+        let iterator = UnorderedMergeIteratorInner::new(iterator_iter.into_iter());
         DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(
             iterator, key_range, read_epoch, min_epoch, version,
         ))
@@ -297,26 +320,25 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator {
 mod tests {
     use std::cmp::Reverse;
     use std::collections::BTreeMap;
-    use std::ops::Bound::*;
-    use std::sync::Arc;
+    use std::ops::Bound::{self, *};
 
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
-    use risingwave_hummock_sdk::key::{prev_key, user_key};
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::prev_key;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
-        iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_value_of,
-        mock_sstable_store, TEST_KEYS_COUNT,
+        iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_user_key_of,
+        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::HummockIteratorUnion;
     use crate::hummock::sstable::Sstable;
     use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{BackwardSstableIterator, SstableStoreRef};
-    use crate::monitor::StateStoreMetrics;
 
     #[tokio::test]
     async fn test_backward_user_basic() {
@@ -362,15 +384,14 @@ mod tests {
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(handle0, sstable_store)),
         ];
 
-        let mi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
-        let mut ui = BackwardUserIterator::new(mi, (Unbounded, Unbounded));
+        let mi = UnorderedMergeIteratorInner::new(backward_iters);
+        let mut ui = BackwardUserIterator::for_test(mi, (Unbounded, Unbounded));
         let mut i = 3 * TEST_KEYS_COUNT;
         ui.rewind().await.unwrap();
         while ui.is_valid() {
             let key = ui.key();
             let val = ui.value();
-            assert_eq!(key, user_key(iterator_test_key_of(i).as_slice()));
+            assert_eq!(key, &iterator_test_key_of(i));
             assert_eq!(val, iterator_test_value_of(i).as_slice());
             i -= 1;
             ui.next().await.unwrap();
@@ -424,58 +445,42 @@ mod tests {
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(handle2, sstable_store)),
         ];
 
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
-        let mut bui = BackwardUserIterator::new(bmi, (Unbounded, Unbounded));
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
+        let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, Unbounded));
 
         // right edge case
-        bui.seek(user_key(iterator_test_key_of(0).as_slice()))
+        bui.seek(iterator_test_user_key_of(0).as_ref())
             .await
             .unwrap();
         assert!(!bui.is_valid());
 
         // normal case
-        bui.seek(user_key(
-            iterator_test_key_of(TEST_KEYS_COUNT + 4).as_slice(),
-        ))
-        .await
-        .unwrap();
+        bui.seek(iterator_test_user_key_of(TEST_KEYS_COUNT + 4).as_ref())
+            .await
+            .unwrap();
         let k = bui.key();
         let v = bui.value();
         assert_eq!(v, iterator_test_value_of(TEST_KEYS_COUNT + 4).as_slice());
-        assert_eq!(
-            k,
-            user_key(iterator_test_key_of(TEST_KEYS_COUNT + 4).as_slice())
-        );
-        bui.seek(user_key(
-            iterator_test_key_of(2 * TEST_KEYS_COUNT + 5).as_slice(),
-        ))
-        .await
-        .unwrap();
+        assert_eq!(k, &iterator_test_key_of(TEST_KEYS_COUNT + 4));
+        bui.seek(iterator_test_user_key_of(2 * TEST_KEYS_COUNT + 5).as_ref())
+            .await
+            .unwrap();
         let k = bui.key();
         let v = bui.value();
         assert_eq!(
             v,
             iterator_test_value_of(2 * TEST_KEYS_COUNT + 5).as_slice()
         );
-        assert_eq!(
-            k,
-            user_key(iterator_test_key_of(2 * TEST_KEYS_COUNT + 5).as_slice())
-        );
+        assert_eq!(k, &iterator_test_key_of(2 * TEST_KEYS_COUNT + 5));
 
         // left edge case
-        bui.seek(user_key(
-            iterator_test_key_of(3 * TEST_KEYS_COUNT).as_slice(),
-        ))
-        .await
-        .unwrap();
+        bui.seek(iterator_test_user_key_of(3 * TEST_KEYS_COUNT).as_ref())
+            .await
+            .unwrap();
         let k = bui.key();
         let v = bui.value();
         assert_eq!(v, iterator_test_value_of(3 * TEST_KEYS_COUNT).as_slice());
-        assert_eq!(
-            k,
-            user_key(iterator_test_key_of(3 * TEST_KEYS_COUNT).as_slice())
-        );
+        assert_eq!(k, &iterator_test_key_of(3 * TEST_KEYS_COUNT));
     }
 
     #[tokio::test]
@@ -506,9 +511,8 @@ mod tests {
                 sstable_store,
             )),
         ];
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
-        let mut bui = BackwardUserIterator::new(bmi, (Unbounded, Unbounded));
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
+        let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, Unbounded));
 
         bui.rewind().await.unwrap();
 
@@ -516,7 +520,7 @@ mod tests {
         let k = bui.key();
         let v = bui.value();
 
-        assert_eq!(k, user_key(iterator_test_key_of(1).as_slice()));
+        assert_eq!(k, &iterator_test_key_of_epoch(1, 400));
         assert_eq!(v, iterator_test_value_of(1));
 
         // only one valid kv pair
@@ -555,56 +559,55 @@ mod tests {
             handle,
             sstable_store,
         ))];
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
 
-        let begin_key = Included(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
-        let end_key = Included(user_key(iterator_test_key_of_epoch(7, 0).as_slice()).to_vec());
+        let begin_key = Included(iterator_test_user_key_of(2));
+        let end_key = Included(iterator_test_user_key_of(7));
 
-        let mut bui = BackwardUserIterator::new(bmi, (begin_key, end_key));
+        let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, end_key));
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(7).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- after-end-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(8).as_slice()))
+        bui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(7).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- end-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(7).as_slice()))
+        bui.seek(iterator_test_user_key_of(7).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(7).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- begin-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(2).as_slice()))
+        bui.seek(iterator_test_user_key_of(2).as_ref())
             .await
             .unwrap();
         assert!(!bui.is_valid());
 
         // ----- before-begin-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(1).as_slice()))
+        bui.seek(iterator_test_user_key_of(1).as_ref())
             .await
             .unwrap();
         assert!(!bui.is_valid());
@@ -638,56 +641,55 @@ mod tests {
             handle,
             sstable_store,
         ))];
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
 
-        let begin_key = Excluded(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
-        let end_key = Included(user_key(iterator_test_key_of_epoch(7, 0).as_slice()).to_vec());
+        let begin_key = Excluded(iterator_test_user_key_of(2));
+        let end_key = Included(iterator_test_user_key_of(7));
 
-        let mut bui = BackwardUserIterator::new(bmi, (begin_key, end_key));
+        let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, end_key));
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(7).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- after-bend-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(8).as_slice()))
+        bui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(7).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- end-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(7).as_slice()))
+        bui.seek(iterator_test_user_key_of(7).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(7).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- begin-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(2).as_slice()))
+        bui.seek(iterator_test_user_key_of(2).as_ref())
             .await
             .unwrap();
         assert!(!bui.is_valid());
 
         // ----- begin-begin-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(1).as_slice()))
+        bui.seek(iterator_test_user_key_of(1).as_ref())
             .await
             .unwrap();
         assert!(!bui.is_valid());
@@ -721,54 +723,53 @@ mod tests {
             cache.insert(sstable.id, sstable.id, 1, Box::new(sstable)),
             sstable_store,
         ))];
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
-        let end_key = Included(user_key(iterator_test_key_of_epoch(7, 0).as_slice()).to_vec());
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
+        let end_key = Included(iterator_test_user_key_of(7));
 
-        let mut bui = BackwardUserIterator::new(bmi, (Unbounded, end_key));
+        let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, end_key));
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(1).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(1, 200));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- end-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(7).as_slice()))
+        bui.seek(iterator_test_user_key_of(7).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(1).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(1, 200));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- in-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(6).as_slice()))
+        bui.seek(iterator_test_user_key_of(6).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(1).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(1, 200));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- begin-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(0).as_slice()))
+        bui.seek(iterator_test_user_key_of(0).as_ref())
             .await
             .unwrap();
         assert!(!bui.is_valid());
@@ -804,87 +805,89 @@ mod tests {
             handle,
             sstable_store,
         ))];
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
-        let begin_key = Included(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
+        let begin_key = Included(iterator_test_user_key_of(2));
 
-        let mut bui = BackwardUserIterator::new(bmi, (begin_key, Unbounded));
+        let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, Unbounded));
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(8).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(8, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- begin-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(2).as_slice()))
+        bui.seek(iterator_test_user_key_of(2).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- in-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(5).as_slice()))
+        bui.seek(iterator_test_user_key_of(5).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- end-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(8).as_slice()))
+        bui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(8).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(8, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
         // ----- after-end-range iterate -----
-        bui.seek(user_key(iterator_test_key_of(9).as_slice()))
+        bui.seek(iterator_test_user_key_of(9).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(8).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(8, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
     }
 
-    fn key_from_num(num: usize) -> Vec<u8> {
+    fn key_from_num(num: usize) -> UserKey<Vec<u8>> {
         let width = 20;
-        format!("{:0width$}", num, width = width)
-            .as_bytes()
-            .to_vec()
+        UserKey::for_test(
+            TableId::default(),
+            format!("{:0width$}", num, width = width)
+                .as_bytes()
+                .to_vec(),
+        )
     }
 
     async fn chaos_test_case(
         sstable: Sstable,
-        start_bound: Bound<Vec<u8>>,
-        end_bound: Bound<Vec<u8>>,
+        start_bound: Bound<UserKey<Vec<u8>>>,
+        end_bound: Bound<UserKey<Vec<u8>>>,
         truth: &ChaosTestTruth,
         sstable_store: SstableStoreRef,
     ) {
         let start_key = match &start_bound {
-            Bound::Included(b) => prev_key(&b.clone()),
+            Bound::Included(b) => UserKey::for_test(b.table_id, prev_key(&b.table_key.clone())),
             Bound::Excluded(b) => b.clone(),
             Unbounded => key_from_num(0),
         };
@@ -899,9 +902,8 @@ mod tests {
             handle,
             sstable_store,
         ))];
-        let bmi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
-        let mut bui = BackwardUserIterator::new(bmi, (start_bound, end_bound));
+        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
+        let mut bui = BackwardUserIterator::for_test(bmi, (start_bound, end_bound));
         let num_puts: usize = truth
             .iter()
             .map(|(key, inserts)| {
@@ -926,8 +928,7 @@ mod tests {
                 continue;
             }
             assert!(bui.is_valid(), "num_kvs:{}", num_kvs);
-            let full_key = key_with_epoch(key.clone(), time.0);
-            assert_eq!(bui.key(), user_key(&full_key), "num_kvs:{}", num_kvs);
+            assert_eq!(&bui.key().user_key, key, "num_kvs:{}", num_kvs);
             if let HummockValue::Put(bytes) = &value {
                 assert_eq!(bui.value(), bytes, "num_kvs:{}", num_kvs);
             }
@@ -938,7 +939,8 @@ mod tests {
         assert_eq!(num_kvs, num_puts);
     }
 
-    type ChaosTestTruth = BTreeMap<Vec<u8>, BTreeMap<Reverse<Epoch>, HummockValue<Vec<u8>>>>;
+    type ChaosTestTruth =
+        BTreeMap<UserKey<Vec<u8>>, BTreeMap<Reverse<HummockEpoch>, HummockValue<Vec<u8>>>>;
 
     async fn generate_chaos_test_data() -> (usize, Sstable, ChaosTestTruth, SstableStoreRef) {
         // We first generate the key value pairs.
@@ -953,7 +955,7 @@ mod tests {
             let mut prev_time = 500;
             let num_updates = rng.gen_range(1..10usize);
             for _ in 0..num_updates {
-                let time: Epoch = rng.gen_range(prev_time..=(prev_time + 1000));
+                let time: HummockEpoch = rng.gen_range(prev_time..=(prev_time + 1000));
                 let is_delete = rng.gen_range(0..=1usize) < 1usize;
                 match is_delete {
                     true => {
@@ -984,7 +986,10 @@ mod tests {
             0,
             truth.iter().flat_map(|(key, inserts)| {
                 inserts.iter().map(|(time, value)| {
-                    let full_key = key_with_epoch(key.clone(), time.0);
+                    let full_key = FullKey {
+                        user_key: key.clone(),
+                        epoch: time.0,
+                    };
                     (full_key, value.clone())
                 })
             }),
@@ -1125,7 +1130,6 @@ mod tests {
         Sstable {
             id: sst.id,
             meta: sst.meta.clone(),
-            blocks: vec![],
         }
     }
 
@@ -1151,16 +1155,14 @@ mod tests {
         ))];
 
         let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
-        let mi =
-            UnorderedMergeIteratorInner::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
-        let mut ui =
-            BackwardUserIterator::with_epoch(mi, (Unbounded, Unbounded), u64::MAX, min_epoch, None);
+        let mi = UnorderedMergeIteratorInner::new(backward_iters);
+        let mut ui = BackwardUserIterator::with_min_epoch(mi, (Unbounded, Unbounded), min_epoch);
         ui.rewind().await.unwrap();
 
         let mut i = 0;
         while ui.is_valid() {
             let key = ui.key();
-            let key_epoch = get_epoch(key);
+            let key_epoch = key.epoch;
             assert!(key_epoch > min_epoch);
 
             i += 1;

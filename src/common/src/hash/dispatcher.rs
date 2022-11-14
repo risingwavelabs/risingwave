@@ -18,7 +18,7 @@ use crate::types::DataType;
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum HashKeyKind {
+enum HashKeyKind {
     Key8,
     Key16,
     Key32,
@@ -43,33 +43,40 @@ impl HashKeyKind {
 }
 
 /// Number of bytes of one element in `HashKey` serialization of [`DataType`].
-pub enum HashKeySize {
+enum HashKeySize {
     /// For types with fixed size, e.g. int, float.
     Fixed(usize),
     /// For types with variable size, e.g. string.
     Variable,
 }
 
-pub trait HashKeyDispatcher {
-    type Input;
+/// A trait to help to dynamically dispatch [`HashKey`] template.
+///
+/// Suppose you want to build a trait object of type `T`, whose underlying implementation is `S<K:
+/// HashKey>`, you can implement a `HashKeyDispatcher` with `Output=T`. Then you can use
+/// `dispatch_by_kind` to build `T` directly without working with generic argument `K`.
+pub trait HashKeyDispatcher: Sized {
     type Output;
 
-    fn dispatch<K: HashKey>(input: Self::Input) -> Self::Output;
+    fn dispatch_impl<K: HashKey>(self) -> Self::Output;
 
-    fn dispatch_by_kind(kind: HashKeyKind, input: Self::Input) -> Self::Output {
-        match kind {
-            HashKeyKind::Key8 => Self::dispatch::<hash::Key8>(input),
-            HashKeyKind::Key16 => Self::dispatch::<hash::Key16>(input),
-            HashKeyKind::Key32 => Self::dispatch::<hash::Key32>(input),
-            HashKeyKind::Key64 => Self::dispatch::<hash::Key64>(input),
-            HashKeyKind::Key128 => Self::dispatch::<hash::Key128>(input),
-            HashKeyKind::Key256 => Self::dispatch::<hash::Key256>(input),
-            HashKeyKind::KeySerialized => Self::dispatch::<hash::KeySerialized>(input),
+    /// The data types used to build the hash key.
+    fn data_types(&self) -> &[DataType];
+
+    fn dispatch(self) -> Self::Output {
+        match calc_hash_key_kind(self.data_types()) {
+            HashKeyKind::Key8 => self.dispatch_impl::<hash::Key8>(),
+            HashKeyKind::Key16 => self.dispatch_impl::<hash::Key16>(),
+            HashKeyKind::Key32 => self.dispatch_impl::<hash::Key32>(),
+            HashKeyKind::Key64 => self.dispatch_impl::<hash::Key64>(),
+            HashKeyKind::Key128 => self.dispatch_impl::<hash::Key128>(),
+            HashKeyKind::Key256 => self.dispatch_impl::<hash::Key256>(),
+            HashKeyKind::KeySerialized => self.dispatch_impl::<hash::KeySerialized>(),
         }
     }
 }
 
-pub fn hash_key_size(data_type: &DataType) -> HashKeySize {
+fn hash_key_size(data_type: &DataType) -> HashKeySize {
     use std::mem::size_of;
 
     use crate::types::{
@@ -98,7 +105,8 @@ pub fn hash_key_size(data_type: &DataType) -> HashKeySize {
     }
 }
 
-pub const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
+const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
+
 /// Calculate what kind of hash key should be used given the key data types.
 ///
 /// When any of following conditions is met, we choose [`crate::hash::SerializedKey`]:
@@ -108,7 +116,7 @@ pub const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
 /// 4. Any column's serialized format can't be used for equality check.
 ///
 /// Otherwise we choose smallest [`crate::hash::FixedSizeKey`] whose size can hold all data types.
-pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
+fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
     if data_types.len() > MAX_FIXED_SIZE_KEY_ELEMENTS {
         return HashKeyKind::KeySerialized;
     }
@@ -137,7 +145,7 @@ pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
 #[cfg(test)]
 mod tests {
 
-    use crate::hash::{calc_hash_key_kind, HashKeyKind};
+    use super::{calc_hash_key_kind, HashKeyKind};
     use crate::types::DataType;
 
     fn all_data_types() -> Vec<DataType> {

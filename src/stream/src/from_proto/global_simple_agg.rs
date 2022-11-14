@@ -14,41 +14,45 @@
 
 //! Streaming Aggregators
 
-use super::agg_call::build_agg_call_from_prost;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
+
+use super::agg_common::{build_agg_call_from_prost, build_agg_state_storages_from_proto};
 use super::*;
-use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
+use crate::executor::aggregation::AggCall;
 use crate::executor::GlobalSimpleAggExecutor;
 
 pub struct GlobalSimpleAggExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
-    fn new_boxed_executor(
-        mut params: ExecutorParams,
+    async fn new_boxed_executor(
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+        stream: &mut LocalStreamManagerCore,
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::GlobalSimpleAgg)?;
+        let [input]: [_; 1] = params.input.try_into().unwrap();
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
-        let state_table_col_mappings: Vec<Vec<usize>> = node
-            .get_column_mappings()
-            .iter()
-            .map(|mapping| mapping.indices.iter().map(|idx| *idx as usize).collect())
-            .collect();
-
-        let state_tables = generate_state_tables_from_proto(store, &node.internal_tables, None);
+        let storages =
+            build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)
+                .await;
+        let result_table =
+            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, None).await;
 
         Ok(GlobalSimpleAggExecutor::new(
-            params.input.remove(0),
+            params.actor_context,
+            input,
             agg_calls,
+            storages,
+            result_table,
             params.pk_indices,
             params.executor_id,
-            state_tables,
-            state_table_col_mappings,
+            stream.config.developer.unsafe_stream_extreme_cache_size,
         )?
         .boxed())
     }

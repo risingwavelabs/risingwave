@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -21,12 +22,15 @@ use mysql_async::*;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{Datum, Decimal, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
+use strum_macros;
 
 use crate::sink::{Result, Sink, SinkError};
 
+pub const MYSQL_SINK: &str = "mysql";
+
 #[derive(Clone, Debug)]
-pub struct MySQLConfig {
+pub struct MySqlConfig {
     pub endpoint: String,
     pub table: String,
     pub database: Option<String>,
@@ -34,38 +38,64 @@ pub struct MySQLConfig {
     pub password: Option<String>,
 }
 
-// Primitive design of MySQLSink
+impl MySqlConfig {
+    pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+        let endpoint = values.get("endpoint").expect("endpoint must be set");
+        let table = values.get("table").expect("table must be set");
+        let database = values.get("database");
+        let user = values.get("user");
+        let password = values.get("password");
+
+        Ok(MySqlConfig {
+            endpoint: endpoint.to_string(),
+            table: table.to_string(),
+            database: database.cloned(),
+            user: user.cloned(),
+            password: password.cloned(),
+        })
+    }
+}
+
+// Primitive design of MySqlSink
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct MySQLSink {
-    cfg: MySQLConfig,
-
+pub struct MySqlSink {
+    cfg: MySqlConfig,
+    schema: Schema,
     conn: Conn,
     chunk_cache: Vec<(StreamChunk, Schema)>,
 }
 
-impl MySQLSink {
-    pub async fn new(cfg: MySQLConfig) -> Result<Self> {
+impl MySqlSink {
+    pub async fn new(cfg: MySqlConfig, schema: Schema) -> Result<Self> {
         // Build a connection and start transaction
-        let endpoint = cfg.endpoint.clone();
-        let mut endpoint = endpoint.split(':');
-        let mut builder = OptsBuilder::default()
-            .user(cfg.user.clone())
-            .pass(cfg.password.clone())
-            .ip_or_hostname(endpoint.next().unwrap())
-            .db_name(cfg.database.clone());
-        // TODO(nanderstabel): Fix ParseIntError
-        if let Some(port) = endpoint.next() {
-            builder = builder.tcp_port(port.parse().unwrap());
-        }
-
-        let conn = Conn::new(builder).await?;
-
+        let conn = Conn::new(get_builder(&cfg)).await?;
         Ok(Self {
             cfg,
             conn,
+            schema,
             chunk_cache: vec![],
         })
+    }
+
+    pub async fn prepare(&mut self) -> Result<()> {
+        // Create a table
+        let create_table = format!(
+            r"CREATE TABLE IF NOT EXISTS `{}`.`{}` ( {} );",
+            self.cfg.database.clone().unwrap(),
+            self.cfg.table,
+            join(
+                self.schema
+                    .names()
+                    .iter()
+                    .zip_eq(self.schema.data_types().iter())
+                    .map(|(n, dt)| format!("`{}` {}", n, MySqlDataType::from(dt)))
+                    .collect_vec(),
+                ", ",
+            )
+        );
+        self.conn.query_drop(create_table).await?;
+        Ok(())
     }
 
     fn endpoint(&self) -> String {
@@ -89,46 +119,90 @@ impl MySQLSink {
     }
 }
 
-#[derive(Debug)]
-struct MySQLValue(Value);
+fn get_builder(cfg: &MySqlConfig) -> OptsBuilder {
+    let endpoint = cfg.endpoint.clone();
+    let mut endpoint = endpoint.split(':');
+    let mut builder = OptsBuilder::default()
+        .user(cfg.user.clone())
+        .pass(cfg.password.clone())
+        .ip_or_hostname(endpoint.next().unwrap())
+        .db_name(cfg.database.clone());
+    // TODO(nanderstabel): Fix ParseIntError
+    if let Some(port) = endpoint.next() {
+        builder = builder.tcp_port(port.parse().unwrap());
+    }
+    builder
+}
 
-impl fmt::Display for MySQLValue {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+#[derive(Debug)]
+struct MySqlValue(Value);
+
+impl fmt::Display for MySqlValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0.as_sql(true))
     }
 }
 
-impl TryFrom<Datum> for MySQLValue {
+impl TryFrom<Datum> for MySqlValue {
     type Error = SinkError;
 
-    fn try_from(datum: Datum) -> Result<MySQLValue> {
+    fn try_from(datum: Datum) -> Result<MySqlValue> {
         if let Some(scalar) = datum {
             match scalar {
-                ScalarImpl::Int16(v) => Ok(MySQLValue(v.into())),
-                ScalarImpl::Int32(v) => Ok(MySQLValue(v.into())),
-                ScalarImpl::Int64(v) => Ok(MySQLValue(v.into())),
-                ScalarImpl::Float32(v) => Ok(MySQLValue(f32::from(v).into())),
-                ScalarImpl::Float64(v) => Ok(MySQLValue(f64::from(v).into())),
-                ScalarImpl::Bool(v) => Ok(MySQLValue(v.into())),
-                ScalarImpl::Decimal(Decimal::Normalized(v)) => Ok(MySQLValue(v.into())),
+                ScalarImpl::Int16(v) => Ok(MySqlValue(v.into())),
+                ScalarImpl::Int32(v) => Ok(MySqlValue(v.into())),
+                ScalarImpl::Int64(v) => Ok(MySqlValue(v.into())),
+                ScalarImpl::Float32(v) => Ok(MySqlValue(f32::from(v).into())),
+                ScalarImpl::Float64(v) => Ok(MySqlValue(f64::from(v).into())),
+                ScalarImpl::Bool(v) => Ok(MySqlValue(v.into())),
+                ScalarImpl::Decimal(Decimal::Normalized(v)) => Ok(MySqlValue(v.into())),
                 ScalarImpl::Decimal(_) => panic!("NaN, -inf, +inf are not supported by MySQL"),
-                ScalarImpl::Utf8(v) => Ok(MySQLValue(v.into())),
-                ScalarImpl::NaiveDate(v) => Ok(MySQLValue(format!("{}", v).into())),
-                ScalarImpl::NaiveTime(v) => Ok(MySQLValue(format!("{}", v).into())),
-                ScalarImpl::NaiveDateTime(v) => Ok(MySQLValue(format!("{}", v).into())),
-                // ScalarImpl::Interval(v) => Ok(MySQLValue(Value::NULL)),
+                ScalarImpl::Utf8(v) => Ok(MySqlValue(v.into())),
+                ScalarImpl::NaiveDate(v) => Ok(MySqlValue(format!("{}", v).into())),
+                ScalarImpl::NaiveTime(v) => Ok(MySqlValue(format!("{}", v).into())),
+                ScalarImpl::NaiveDateTime(v) => Ok(MySqlValue(format!("{}", v).into())),
+                // ScalarImpl::Interval(v) => Ok(MySqlValue(Value::NULL)),
                 _ => unimplemented!(),
             }
         } else {
-            Ok(MySQLValue(Value::NULL))
+            Ok(MySqlValue(Value::NULL))
+        }
+    }
+}
+
+#[allow(clippy::upper_case_acronyms)]
+#[derive(strum_macros::Display)]
+enum MySqlDataType {
+    BOOL,
+    SMALLINT,
+    INT,
+    BIGINT,
+    FLOAT,
+    DOUBLE,
+    // TODO(nanderstabel): find solution for varchar length.
+    #[strum(serialize = "VARCHAR(255)")]
+    VARCHAR,
+}
+
+impl From<&DataType> for MySqlDataType {
+    fn from(data_type: &DataType) -> MySqlDataType {
+        match data_type {
+            DataType::Boolean => MySqlDataType::BOOL,
+            DataType::Int16 => MySqlDataType::SMALLINT,
+            DataType::Int32 => MySqlDataType::INT,
+            DataType::Int64 => MySqlDataType::BIGINT,
+            DataType::Float32 => MySqlDataType::FLOAT,
+            DataType::Float64 => MySqlDataType::DOUBLE,
+            DataType::Varchar => MySqlDataType::VARCHAR,
+            _ => unimplemented!(),
         }
     }
 }
 
 #[async_trait]
-impl Sink for MySQLSink {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
-        self.chunk_cache.push((chunk, schema.clone()));
+impl Sink for MySqlSink {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        self.chunk_cache.push((chunk, self.schema.clone()));
         Ok(())
     }
 
@@ -139,7 +213,7 @@ impl Sink for MySQLSink {
     async fn commit(&mut self) -> Result<()> {
         let mut txn = self.conn.start_transaction(TxOpts::default()).await?;
         for (chunk, schema) in &self.chunk_cache {
-            write_to_mysql(&mut txn, chunk, schema, &self.cfg).await?;
+            write_to_mysql(&mut txn, chunk, schema.clone(), &self.cfg).await?;
         }
         txn.commit().await?;
 
@@ -155,15 +229,15 @@ impl Sink for MySQLSink {
 async fn write_to_mysql<'a>(
     txn: &mut Transaction<'a>,
     chunk: &StreamChunk,
-    schema: &Schema,
-    config: &MySQLConfig,
+    schema: Schema,
+    config: &MySqlConfig,
 ) -> Result<()> {
-    // Closure that takes an idx to create a vector of MySQLValues from a StreamChunk 'row'.
-    let values = |idx| -> Result<Vec<MySQLValue>> {
+    // Closure that takes an idx to create a vector of MySqlValues from a StreamChunk 'row'.
+    let values = |idx| -> Result<Vec<MySqlValue>> {
         chunk
             .columns()
             .iter()
-            .map(|x| MySQLValue::try_from(x.array_ref().datum_at(idx)))
+            .map(|x| MySqlValue::try_from(x.array_ref().datum_at(idx)))
             .collect_vec()
             .into_iter()
             .collect()
@@ -171,7 +245,7 @@ async fn write_to_mysql<'a>(
 
     // Closure that builds a String containing WHERE conditions, i.e. 'v1=1 AND v2=2'.
     // Perhaps better to replace this functionality with a new Sink trait method.
-    let conditions = |values: Vec<MySQLValue>| {
+    let conditions = |values: Vec<MySqlValue>| {
         schema
             .names()
             .iter()
@@ -203,12 +277,12 @@ async fn write_to_mysql<'a>(
                         join(conditions(values(idx)?), " AND ")
                     )
                 } else {
-                    return Err(SinkError::MySQL(
+                    return Err(SinkError::MySql(
                         "UpdateDelete should always be followed by an UpdateInsert!".into(),
                     ));
                 }
             }
-            _ => return Err(SinkError::MySQL("Unsupported operation".into())),
+            _ => return Err(SinkError::MySql("Unsupported operation".into())),
         };
         // TODO by doc, exec_drop will simply exec query and drop the result, we may check and retry
         // for jitter or other reasons
@@ -220,11 +294,9 @@ async fn write_to_mysql<'a>(
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
 
     use risingwave_common::array;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{ArrayImpl, I32Array, Op, Utf8Array};
+    use risingwave_common::array::{I32Array, Op, Utf8Array};
     use risingwave_common::catalog::Field;
     use risingwave_common::types::chrono_wrapper::*;
     use risingwave_common::types::DataType;
@@ -243,7 +315,7 @@ mod test {
     #[test]
     fn test_date() {
         assert_eq!(
-            MySQLValue::try_from(Some(ScalarImpl::NaiveDate(NaiveDateWrapper::default())))
+            MySqlValue::try_from(Some(ScalarImpl::NaiveDate(NaiveDateWrapper::default())))
                 .unwrap()
                 .to_string(),
             "'1970-01-01'"
@@ -253,7 +325,7 @@ mod test {
     #[test]
     fn test_time() {
         assert_eq!(
-            MySQLValue::try_from(Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::default())))
+            MySqlValue::try_from(Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::default())))
                 .unwrap()
                 .to_string(),
             "'00:00:00'"
@@ -263,7 +335,7 @@ mod test {
     #[test]
     fn test_datetime() {
         assert_eq!(
-            MySQLValue::try_from(Some(ScalarImpl::NaiveDateTime(
+            MySqlValue::try_from(Some(ScalarImpl::NaiveDateTime(
                 NaiveDateTimeWrapper::default()
             )))
             .unwrap()
@@ -275,7 +347,7 @@ mod test {
     #[test]
     fn test_decimal() {
         assert_eq!(
-            MySQLValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(
+            MySqlValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(
                 RustDecimal::new(0, 0)
             ))))
             .unwrap()
@@ -283,7 +355,7 @@ mod test {
             "'0'"
         );
         assert_eq!(
-            MySQLValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(
+            MySqlValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(
                 RustDecimal::new(124, 5)
             ))))
             .unwrap()
@@ -292,18 +364,64 @@ mod test {
         );
     }
 
+    impl Default for MySqlConfig {
+        fn default() -> Self {
+            MySqlConfig {
+                endpoint: "127.0.0.1:3306".to_string(),
+                table: "t".to_string(),
+                database: Some("test".into()),
+                user: Some("root".into()),
+                password: None,
+            }
+        }
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_create_table() -> Result<()> {
+        let cfg = MySqlConfig::default();
+        let schema = Schema::new(vec![Field {
+            data_type: DataType::Int32,
+            name: "v1".into(),
+            sub_fields: vec![],
+            type_name: "".into(),
+        }]);
+
+        let mut sink = MySqlSink::new(cfg.clone(), schema).await?;
+
+        let chunk = StreamChunk::new(
+            vec![Op::Insert, Op::Insert],
+            vec![array!(I32Array, [Some(1), Some(2)]).into()],
+            None,
+        );
+
+        sink.prepare().await?;
+        sink.begin_epoch(1000).await?;
+        sink.write_batch(chunk).await?;
+        sink.commit().await?;
+
+        #[derive(Debug, PartialEq, Eq, Clone)]
+        struct Res(i32);
+
+        let builder = get_builder(&cfg);
+
+        let mut conn = Conn::new(builder).await?;
+        let res = "SELECT v1 FROM `test`.`t`"
+            .with(())
+            .map(&mut conn, Res)
+            .await?;
+
+        assert_eq!(res, vec![Res(1), Res(2)]);
+
+        "DROP TABLE `test`.`t`".ignore(conn).await?;
+
+        Ok(())
+    }
+
     #[ignore]
     #[tokio::test]
     async fn test_drop() -> Result<()> {
-        let config = MySQLConfig {
-            endpoint: "127.0.0.1:3306".to_string(),
-            table: "t_drop".to_string(),
-            database: Some("test".into()),
-            user: Some("root".into()),
-            password: None,
-        };
-        let mut sink = MySQLSink::new(config.clone()).await?;
-
+        let cfg = MySqlConfig::default();
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
@@ -318,25 +436,26 @@ mod test {
                 type_name: "".into(),
             },
         ]);
+        let mut sink = MySqlSink::new(cfg.clone(), schema.clone()).await?;
 
         let chunk = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
             vec![
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    I32Array,
-                    [Some(1), Some(2), Some(3)]
-                )))),
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    Utf8Array,
-                    [Some("1"), Some("2"), Some("; drop database")]
-                )))),
+                array!(I32Array, [Some(1), Some(2), Some(3)]).into(),
+                array!(Utf8Array, [Some("1"), Some("2"), Some("; drop database")]).into(),
             ],
             None,
         );
 
+        sink.prepare().await?;
         sink.begin_epoch(1000).await?;
-        sink.write_batch(chunk, &schema).await?;
+        sink.write_batch(chunk).await?;
         sink.commit().await?;
+
+        let builder = get_builder(&cfg);
+
+        let conn = Conn::new(builder).await?;
+        "DROP TABLE `test`.`t`".ignore(conn).await?;
 
         Ok(())
     }

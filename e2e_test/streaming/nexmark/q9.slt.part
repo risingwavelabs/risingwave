@@ -1,0 +1,14 @@
+query ITT rowsort
+SELECT * FROM nexmark_q9
+----
+1000  mksxmeugsicmeb       ctlnxnegxdlo zggaqv aflamzpxmxulip shkpezalo                                       6328941  6329098  2015-07-15 00:00:00      2015-07-15 00:00:20.163   1002 11 1000 1001 73134520  2015-07-15 00:00:01
+1001  k  y                 f  astxkbp vgy pe jtlpjzysbnvjdnyrrxficrqbjrsybtomdrobgqgrs                        2419527  3754823  2015-07-15 00:00:00      2015-07-15 00:00:20.210   1006 13 1001 1004 96533552  2015-07-15 00:00:05.001
+1003  rkfwyjc              cyvvveizphozrodhvre vmchdo pvsajfv                                                33541340 33594567  2015-07-15 00:00:00.005  2015-07-15 00:00:20.121   1000 14 1003 1001 89027544  2015-07-15 00:00:07.002
+1004  dwa                  icy rmt                                                                           88223888 88237425  2015-07-15 00:00:00.005  2015-07-15 00:00:20.243   1000 14 1004 1001     3992  2015-07-15 00:00:03.001
+1006  fvfvyprmeqcfmsokjaj  awlnaxwbofphiljoozbz atniyvusqeh qsxpclctnsi f pgoh  imjptthtodl nlrtktx            919051   921122  2015-07-15 00:00:00.010  2015-07-15 00:00:20.284   1000 11 1006 1001 21659600  2015-07-15 00:00:16.004
+1007  qvjhifyhqrgouso      pkjs                                                                                109431   111045  2015-07-15 00:00:00.010  2015-07-15 00:00:20.022   1000 10 1007 1001      242  2015-07-15 00:00:05.002
+1008  mdtztirzcsh          rk lmlukaqoyxxdjcguaretkn sqn  dfn kcymmn kgh wlqnfeowjyp                          1364800  1406654  2015-07-15 00:00:00.010  2015-07-15 00:00:20.163   1000 11 1008 1002 28953332  2015-07-15 00:00:04.001
+1009  dfa                  ufknoqsbaf vtikfkfbdza  pzpax                                                       652008  1095505  2015-07-15 00:00:00.015  2015-07-15 00:00:20.287   1000 12 1009 1001   209960  2015-07-15 00:00:06.002
+1010  mscya c              yigaoa o fqqrvcixigjx evxwvua                                                     12706372 13660701  2015-07-15 00:00:00.015  2015-07-15 00:00:20.208   1000 11 1010 1002     2092  2015-07-15 00:00:19.005
+1011  fpwuutxfpbotietnq    brigshdigd actjkwfhxa vvec afppp f                                                    9033  6047832  2015-07-15 00:00:00.015  2015-07-15 00:00:20.189   1000 10 1011 1009    12201  2015-07-15 00:00:13.003
+1012  vxhbxffngwfonbmtp    sufsbhfkzcocackj qpvnktwwypxrfoowohdedmpplygbacquioy jrkehdqkwwolwsoamb   qrmq    22084502 22112847  2015-07-15 00:00:00.020  2015-07-15 00:00:20.062   1000 11 1012 1001 71083760  2015-07-15 00:00:06.002

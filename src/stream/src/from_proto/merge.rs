@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_pb::stream_plan::DispatcherType;
 
 use super::*;
 use crate::executor::exchange::input::new_input;
@@ -20,13 +21,14 @@ use crate::executor::{MergeExecutor, ReceiverExecutor};
 
 pub struct MergeExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for MergeExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         x_node: &StreamNode,
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(x_node.get_node_body().unwrap(), NodeBody::Merge)?;
         let upstreams = node.get_upstream_actor_id();
         let upstream_fragment_id = node.get_upstream_fragment_id();
@@ -40,7 +42,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 new_input(
                     &stream.context,
                     stream.streaming_metrics.clone(),
-                    params.actor_id,
+                    actor_context.id,
                     params.fragment_id,
                     upstream_actor_id,
                     upstream_fragment_id,
@@ -48,14 +50,27 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             })
             .try_collect()?;
 
-        if inputs.len() == 1 {
+        // If there's always only one upstream, we can use `ReceiverExecutor`. Note that it can't
+        // scale to multiple upstreams.
+        let always_single_input = match node.get_upstream_dispatcher_type()? {
+            DispatcherType::Unspecified => unreachable!(),
+            DispatcherType::Hash | DispatcherType::Broadcast => false,
+            // There could be arbitrary number of upstreams with simple dispatcher.
+            DispatcherType::Simple => false,
+            // There should be always only one upstream with no-shuffle dispatcher.
+            DispatcherType::NoShuffle => true,
+        };
+
+        if always_single_input {
             Ok(ReceiverExecutor::new(
                 schema,
                 params.pk_indices,
-                inputs.into_iter().next().unwrap(),
                 actor_context,
+                params.fragment_id,
+                upstream_fragment_id,
+                inputs.into_iter().exactly_one().unwrap(),
+                stream.context.clone(),
                 x_node.operator_id,
-                params.actor_id,
                 stream.streaming_metrics.clone(),
             )
             .boxed())
@@ -63,12 +78,12 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             Ok(MergeExecutor::new(
                 schema,
                 params.pk_indices,
-                params.actor_id,
+                actor_context,
                 params.fragment_id,
                 upstream_fragment_id,
+                params.executor_id,
                 inputs,
                 stream.context.clone(),
-                actor_context,
                 x_node.operator_id,
                 stream.streaming_metrics.clone(),
             )

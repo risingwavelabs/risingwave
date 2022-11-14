@@ -23,7 +23,6 @@ use risingwave_pb::meta::MetaLeaderInfo;
 use risingwave_pb::meta::MetaLeaseInfo;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
-use super::{HashMappingManager, HashMappingManagerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
@@ -48,10 +47,7 @@ where
     meta_store: Arc<S>,
 
     /// notification manager.
-    notification_manager: NotificationManagerRef,
-
-    /// hash mapping manager.
-    hash_mapping_manager: HashMappingManagerRef,
+    notification_manager: NotificationManagerRef<S>,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -66,25 +62,57 @@ where
 }
 
 /// Options shared by all meta service instances
+#[derive(Clone)]
 pub struct MetaOpts {
+    /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
+    /// abnormal cases.
     pub enable_recovery: bool,
-    pub enable_migrate: bool,
-    pub checkpoint_interval: Duration,
+    /// The interval of periodic barrier.
+    pub barrier_interval: Duration,
+    /// The maximum number of barriers in-flight in the compute nodes.
+    pub in_flight_barrier_nums: usize,
+    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
+    /// fragment on one parallel unit per compute node.
+    pub minimal_scheduling: bool,
 
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
-    pub in_flight_barrier_nums: usize,
+    /// Whether run in compaction detection test mode
+    pub compaction_deterministic_test: bool,
+
+    pub checkpoint_frequency: usize,
+
+    /// Interval of GC metadata in meta store and stale SSTs in object store.
+    pub vacuum_interval_sec: u64,
+    /// Threshold used by worker node to filter out new SSTs when scanning object store.
+    pub min_sst_retention_time_sec: u64,
+    /// The spin interval when collecting global GC watermark in hummock
+    pub collect_gc_watermark_spin_interval_sec: u64,
+    /// Enable sanity check when SSTs are committed
+    pub enable_committed_sst_sanity_check: bool,
+    /// Schedule compaction for all compaction groups with this interval.
+    pub periodic_compaction_interval_sec: u64,
+    /// Interval of reporting the number of nodes in the cluster.
+    pub node_num_monitor_interval_sec: u64,
 }
 
 impl Default for MetaOpts {
     fn default() -> Self {
         Self {
             enable_recovery: false,
-            enable_migrate: false,
-            checkpoint_interval: Duration::from_millis(250),
-            max_idle_ms: 0,
+            barrier_interval: Duration::from_millis(250),
             in_flight_barrier_nums: 40,
+            minimal_scheduling: false,
+            max_idle_ms: 0,
+            checkpoint_frequency: 10,
+            compaction_deterministic_test: false,
+            vacuum_interval_sec: 30,
+            min_sst_retention_time_sec: 3600 * 24 * 7,
+            collect_gc_watermark_spin_interval_sec: 5,
+            enable_committed_sst_sanity_check: false,
+            periodic_compaction_interval_sec: 60,
+            node_num_monitor_interval_sec: 10,
         }
     }
 }
@@ -92,13 +120,14 @@ impl Default for MetaOpts {
 impl MetaOpts {
     /// some test need `enable_recovery=true`
     #[cfg(test)]
-    pub fn test(enable_recovery: bool, enable_migrate: bool) -> Self {
+    pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
-            enable_migrate,
-            checkpoint_interval: Duration::from_millis(250),
+            barrier_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
+            checkpoint_frequency: 10,
+            ..Default::default()
         }
     }
 }
@@ -111,15 +140,13 @@ where
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
-        let notification_manager = Arc::new(NotificationManager::new());
-        let hash_mapping_manager = Arc::new(HashMappingManager::new());
+        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
 
         Self {
             id_gen_manager,
             meta_store,
             notification_manager,
-            hash_mapping_manager,
             stream_client_pool,
             idle_manager,
             info,
@@ -143,20 +170,12 @@ where
         self.id_gen_manager.deref()
     }
 
-    pub fn notification_manager_ref(&self) -> NotificationManagerRef {
+    pub fn notification_manager_ref(&self) -> NotificationManagerRef<S> {
         self.notification_manager.clone()
     }
 
-    pub fn notification_manager(&self) -> &NotificationManager {
+    pub fn notification_manager(&self) -> &NotificationManager<S> {
         self.notification_manager.deref()
-    }
-
-    pub fn hash_mapping_manager_ref(&self) -> HashMappingManagerRef {
-        self.hash_mapping_manager.clone()
-    }
-
-    pub fn hash_mapping_manager(&self) -> &HashMappingManager {
-        self.hash_mapping_manager.deref()
     }
 
     pub fn idle_manager_ref(&self) -> IdleManagerRef {
@@ -216,16 +235,14 @@ impl MetaSrvEnv<MemStore> {
             .await
             .unwrap();
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let notification_manager = Arc::new(NotificationManager::new());
+        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
-        let hash_mapping_manager = Arc::new(HashMappingManager::new());
         let idle_manager = Arc::new(IdleManager::disabled());
 
         Self {
             id_gen_manager,
             meta_store,
             notification_manager,
-            hash_mapping_manager,
             stream_client_pool,
             idle_manager,
             info: leader_info,

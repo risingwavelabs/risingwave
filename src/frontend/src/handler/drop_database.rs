@@ -16,8 +16,8 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_database(
@@ -25,10 +25,16 @@ pub async fn handle_drop_database(
     database_name: ObjectName,
     if_exists: bool,
     mode: Option<DropMode>,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader();
     let database_name = Binder::resolve_database_name(database_name)?;
+    if session.database() == database_name {
+        return Err(ErrorCode::InternalError(
+            "cannot drop the currently open database".to_string(),
+        )
+        .into());
+    }
     if mode.is_some() {
         return Err(ErrorCode::BindError("Drop database not support drop mode".to_string()).into());
     }
@@ -42,37 +48,21 @@ pub async fn handle_drop_database(
                 return if if_exists {
                     Ok(PgResponse::empty_result_with_notice(
                         StatementType::DROP_DATABASE,
-                        format!(
-                            "NOTICE: database {} does not exist, skipping",
-                            database_name
-                        ),
+                        format!("database \"{}\" does not exist, skipping", database_name),
                     ))
                 } else {
-                    Err(err)
+                    Err(err.into())
                 };
             }
         }
     };
-    let (database_id, owner) = {
-        // If the mode is `Restrict` or `None`, the `database` need to be empty.
-        if !database.is_empty() {
-            return Err(CatalogError::NotEmpty(
-                "database",
-                database_name,
-                "schema",
-                database.get_all_schema_names()[0].clone(),
-            )
-            .into());
-        }
-        (database.id(), database.owner())
-    };
 
-    if session.user_id() != owner {
+    if session.user_id() != database.owner() {
         return Err(ErrorCode::PermissionDenied("Do not have the privilege".to_string()).into());
     }
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_database(database_id).await?;
+    catalog_writer.drop_database(database.id()).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_DATABASE))
 }
 
@@ -88,22 +78,9 @@ mod tests {
 
         frontend.run_sql("CREATE DATABASE database").await.unwrap();
 
-        frontend
-            .run_sql("CREATE SCHEMA database.schema")
-            .await
-            .unwrap();
+        frontend.run_sql("CREATE SCHEMA schema").await.unwrap();
 
-        assert!(frontend.run_sql("DROP DATABASE database").await.is_err());
-
-        frontend
-            .run_sql("DROP SCHEMA database.schema")
-            .await
-            .unwrap();
-
-        frontend
-            .run_sql("DROP SCHEMA database.public")
-            .await
-            .unwrap();
+        frontend.run_sql("DROP SCHEMA public").await.unwrap();
 
         frontend.run_sql("CREATE USER user WITH NOSUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'").await.unwrap();
         let user_id = {

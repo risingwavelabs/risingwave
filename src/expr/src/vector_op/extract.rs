@@ -57,6 +57,17 @@ pub fn extract_from_timestamp(time_unit: &str, timestamp: NaiveDateTimeWrapper) 
     res
 }
 
+pub fn extract_from_timestampz(time_unit: &str, usecs: i64) -> Result<Decimal> {
+    match time_unit {
+        "EPOCH" => Ok(Decimal::from(usecs) / 1_000_000.into()),
+        // TODO(#5826): all other units depend on implicit session TimeZone
+        _ => bail!(
+            "Unsupported timestamp with time zone unit {} in extract function",
+            time_unit
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{NaiveDate, NaiveDateTime};

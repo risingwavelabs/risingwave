@@ -18,14 +18,13 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::HummockStorage;
+use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
     HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
 };
-use risingwave_storage::StateStoreImpl;
+use risingwave_storage::{StateStore, StateStoreImpl};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
@@ -86,8 +85,12 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
     ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>, Metrics)> {
         let meta_client = self.meta_opts.create_meta_client().await?;
 
-        let (heartbeat_handle, heartbeat_shutdown_sender) =
-            MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000));
+        let (heartbeat_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
+            meta_client.clone(),
+            Duration::from_millis(1000),
+            Duration::from_secs(600),
+            vec![],
+        );
         self.heartbeat_handle = Some(heartbeat_handle);
         self.heartbeat_shutdown_sender = Some(heartbeat_shutdown_sender);
 
@@ -105,9 +108,9 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
             object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
         };
 
-        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
+            "",
             Arc::new(config),
             Arc::new(MonitoredHummockMetaClient::new(
                 meta_client.clone(),
@@ -115,12 +118,18 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
             )),
             metrics.state_store_metrics.clone(),
             metrics.object_store_metrics.clone(),
-            filter_key_extractor_manager.clone(),
+            TieredCacheMetricsBuilder::unused(),
         )
         .await?;
 
-        if let StateStoreImpl::HummockStateStore(hummock_state_store) = state_store_impl {
-            Ok((meta_client, hummock_state_store, metrics))
+        if let Some(hummock_state_store) = state_store_impl.as_hummock() {
+            Ok((
+                meta_client,
+                hummock_state_store
+                    .clone()
+                    .monitored(metrics.state_store_metrics.clone()),
+                metrics,
+            ))
         } else {
             Err(anyhow!("only Hummock state store is supported in risectl"))
         }

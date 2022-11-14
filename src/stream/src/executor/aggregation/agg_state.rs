@@ -12,182 +12,153 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
-
-use itertools::Itertools;
-use risingwave_common::array::{ArrayBuilderImpl, Op};
+use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::{ArrayImpl, Row};
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
+use risingwave_common::must_match;
 use risingwave_common::types::Datum;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::aggregation::ManagedStateImpl;
+use super::minput::MaterializedInputState;
+use super::table::TableState;
+use super::value::ValueState;
+use super::AggCall;
+use crate::common::StateTableColumnMapping;
+use crate::executor::{PkIndices, StreamExecutorResult};
 
-/// States for [`crate::executor::LocalSimpleAggExecutor`],
-/// [`crate::executor::GlobalSimpleAggExecutor`] and [`crate::executor::HashAggExecutor`].
-pub struct AggState<S: StateStore> {
-    /// Current managed states for all [`crate::executor::aggregation::AggCall`]s.
-    pub managed_states: Vec<ManagedStateImpl<S>>,
+/// Represents the persistent storage of aggregation state.
+pub enum AggStateStorage<S: StateStore> {
+    /// The state is stored in the result table. No standalone state table is needed.
+    ResultValue,
 
-    /// Previous outputs of managed states. Initializing with `None`.
-    pub prev_states: Option<Vec<Datum>>,
+    /// The state is stored in a single state table whose schema is deduced by frontend and backend
+    /// with implicit consensus.
+    Table { table: StateTable<S> },
+
+    /// The state is stored as a materialization of input chunks, in a standalone state table.
+    /// `mapping` describes the mapping between the columns in the state table and the input
+    /// chunks.
+    MaterializedInput {
+        table: StateTable<S>,
+        mapping: StateTableColumnMapping,
+    },
 }
 
-impl<S: StateStore> Debug for AggState<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AggState")
-            .field("prev_states", &self.prev_states)
-            .finish()
+/// Verify if the data going through the state is valid by checking if `ops.len() ==
+/// visibility.len() == columns[x].len()`.
+fn verify_chunk(ops: Ops<'_>, visibility: Option<&Bitmap>, columns: &[&ArrayImpl]) -> bool {
+    let mut all_lengths = vec![ops.len()];
+    if let Some(visibility) = visibility {
+        all_lengths.push(visibility.len());
     }
+    all_lengths.extend(columns.iter().map(|x| x.len()));
+    all_lengths.iter().min() == all_lengths.iter().max()
 }
 
-/// We assume the first state of aggregation is always `StreamingRowCountAgg`.
-pub const ROW_COUNT_COLUMN: usize = 0;
+/// State for single aggregation call. It manages the state cache and interact with the
+/// underlying state store if necessary.
+pub enum AggState<S: StateStore> {
+    /// State as single scalar value, e.g. `count`, `sum`, append-only `min`/`max`.
+    Value(ValueState),
+
+    /// State as a single state table whose schema is deduced by frontend and backend with implicit
+    /// consensus, e.g. append-only `single_phase_approx_count_distinct`.
+    Table(TableState<S>),
+
+    /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
+    MaterializedInput(MaterializedInputState<S>),
+}
 
 impl<S: StateStore> AggState<S> {
-    pub async fn row_count(
+    /// Create an [`AggState`] from a given [`AggCall`].
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create(
+        agg_call: &AggCall,
+        storage: &AggStateStorage<S>,
+        row_count: usize,
+        prev_output: Option<&Datum>,
+        pk_indices: &PkIndices,
+        group_key: Option<&Row>,
+        extreme_cache_size: usize,
+        input_schema: &Schema,
+    ) -> StreamExecutorResult<Self> {
+        Ok(match storage {
+            AggStateStorage::ResultValue => {
+                Self::Value(ValueState::new(agg_call, prev_output.cloned())?)
+            }
+            AggStateStorage::Table { table } => {
+                Self::Table(TableState::new(agg_call, table, group_key).await?)
+            }
+            AggStateStorage::MaterializedInput { mapping, .. } => {
+                Self::MaterializedInput(MaterializedInputState::new(
+                    agg_call,
+                    pk_indices,
+                    mapping,
+                    row_count,
+                    extreme_cache_size,
+                    input_schema,
+                ))
+            }
+        })
+    }
+
+    /// Apply input chunk to the state.
+    pub fn apply_chunk(
         &mut self,
-        epoch: u64,
-        state_table: &RowBasedStateTable<S>,
-    ) -> StreamExecutorResult<i64> {
-        Ok(self.managed_states[ROW_COUNT_COLUMN]
-            .get_output(epoch, state_table)
-            .await?
-            .map(|x| *x.as_int64())
-            .unwrap_or(0))
-    }
-
-    pub fn prev_row_count(&self) -> i64 {
-        match &self.prev_states {
-            Some(states) => states[ROW_COUNT_COLUMN]
-                .as_ref()
-                .map(|x| *x.as_int64())
-                .unwrap_or(0),
-            None => 0,
-        }
-    }
-
-    /// Returns whether `prev_states` is filled.
-    pub fn is_dirty(&self) -> bool {
-        self.prev_states.is_some()
-    }
-
-    /// Used for recording the output of current states as previous states, before applying new
-    /// changes to the state. If the state is already marked dirty in this epoch, this function does
-    /// no-op.
-    /// After calling this function, `self.is_dirty()` will return `true`.
-    pub async fn may_mark_as_dirty(
-        &mut self,
-        epoch: u64,
-        state_tables: &[RowBasedStateTable<S>],
+        ops: Ops<'_>,
+        visibility: Option<&Bitmap>,
+        columns: &[&ArrayImpl],
+        storage: &mut AggStateStorage<S>,
     ) -> StreamExecutorResult<()> {
-        if self.is_dirty() {
-            return Ok(());
+        debug_assert!(verify_chunk(ops, visibility, columns));
+        match self {
+            Self::Value(state) => {
+                debug_assert!(matches!(storage, AggStateStorage::ResultValue));
+                state.apply_chunk(ops, visibility, columns)
+            }
+            Self::Table(state) => {
+                debug_assert!(matches!(storage, AggStateStorage::Table { .. }));
+                state.apply_chunk(ops, visibility, columns)
+            }
+            Self::MaterializedInput(state) => {
+                debug_assert!(matches!(storage, AggStateStorage::MaterializedInput { .. }));
+                state.apply_chunk(ops, visibility, columns)
+            }
         }
-
-        let mut outputs = vec![];
-        for (state, state_table) in self.managed_states.iter_mut().zip_eq(state_tables.iter()) {
-            outputs.push(state.get_output(epoch, state_table).await?);
-        }
-        self.prev_states = Some(outputs);
-        Ok(())
     }
 
-    /// Build changes into `builders` and `new_ops`, according to previous and current states. Note
-    /// that for [`crate::executor::HashAggExecutor`].
-    ///
-    /// Returns how many rows are appended in builders.
-    pub async fn build_changes(
+    /// Get the output of the state.
+    pub async fn get_output(
         &mut self,
-        builders: &mut [ArrayBuilderImpl],
-        new_ops: &mut Vec<Op>,
-        epoch: u64,
-        state_tables: &[RowBasedStateTable<S>],
-    ) -> StreamExecutorResult<usize> {
-        if !self.is_dirty() {
-            return Ok(0);
+        storage: &AggStateStorage<S>,
+        group_key: Option<&Row>,
+    ) -> StreamExecutorResult<Datum> {
+        match self {
+            Self::Value(state) => {
+                debug_assert!(matches!(storage, AggStateStorage::ResultValue));
+                Ok(state.get_output())
+            }
+            Self::Table(state) => {
+                debug_assert!(matches!(storage, AggStateStorage::Table { .. }));
+                state.get_output()
+            }
+            Self::MaterializedInput(state) => {
+                let state_table = must_match!(
+                    storage,
+                    AggStateStorage::MaterializedInput { table, .. } => table
+                );
+                state.get_output(state_table, group_key).await
+            }
         }
+    }
 
-        let row_count = self
-            .row_count(epoch, &state_tables[ROW_COUNT_COLUMN])
-            .await?;
-        let prev_row_count = self.prev_row_count();
-
-        trace!(
-            "prev_row_count = {}, row_count = {}",
-            prev_row_count,
-            row_count
-        );
-
-        let appended = match (prev_row_count, row_count) {
-            (0, 0) => {
-                // previous state is empty, current state is also empty.
-                // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
-                // while other aggs may not be `0`?
-
-                0
-            }
-
-            (0, _) => {
-                // previous state is empty, current state is not empty, insert one `Insert` op.
-                new_ops.push(Op::Insert);
-
-                for ((builder, state), state_table) in builders
-                    .iter_mut()
-                    .zip_eq(self.managed_states.iter_mut())
-                    .zip_eq(state_tables.iter())
-                {
-                    let data = state.get_output(epoch, state_table).await?;
-                    trace!("append_datum (0 -> N): {:?}", &data);
-                    builder.append_datum(&data)?;
-                }
-
-                1
-            }
-
-            (_, 0) => {
-                // previous state is not empty, current state is empty, insert one `Delete` op.
-                new_ops.push(Op::Delete);
-
-                for (builder, state) in builders
-                    .iter_mut()
-                    .zip_eq(self.prev_states.as_ref().unwrap().iter())
-                {
-                    trace!("append_datum (N -> 0): {:?}", &state);
-                    builder.append_datum(state)?;
-                }
-
-                1
-            }
-
-            _ => {
-                // previous state is not empty, current state is not empty, insert two `Update` op.
-                new_ops.push(Op::UpdateDelete);
-                new_ops.push(Op::UpdateInsert);
-
-                for (builder, prev_state, cur_state, state_table) in itertools::multizip((
-                    builders.iter_mut(),
-                    self.prev_states.as_ref().unwrap().iter(),
-                    self.managed_states.iter_mut(),
-                    state_tables.iter(),
-                )) {
-                    let cur_state = cur_state.get_output(epoch, state_table).await?;
-                    trace!(
-                        "append_datum (N -> N): prev = {:?}, cur = {:?}",
-                        prev_state,
-                        &cur_state
-                    );
-
-                    builder.append_datum(prev_state)?;
-                    builder.append_datum(&cur_state)?;
-                }
-
-                2
-            }
-        };
-
-        self.prev_states = None;
-
-        Ok(appended)
+    /// Reset the value state to initial state.
+    pub fn reset(&mut self) {
+        if let Self::Value(state) = self {
+            // now only value states need to be reset
+            state.reset();
+        }
     }
 }

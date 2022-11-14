@@ -1,0 +1,8 @@
+# thread 'risingwave-main' panicked at 'cannot convert ArrayImpl::Decimal to concrete type Float64', src/common/src/array/mod.rs:394:1
+query R rowsort
+select	100.00 * sum(case when i_data like 'PR%' then ol_amount else 0 end) / (1+sum(ol_amount)) as promo_revenue
+from	 orderline, item
+where	 ol_i_id = i_id and ol_delivery_d::timestamp >= '2007-01-02 00:00:00.000000'::timestamp
+    	and ol_delivery_d::timestamp < '2020-01-02 00:00:00.000000'::timestamp;
+----
+99.9812030075188

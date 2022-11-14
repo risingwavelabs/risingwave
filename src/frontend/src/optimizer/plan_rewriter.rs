@@ -20,7 +20,7 @@ use crate::optimizer::plan_node::*;
 
 /// Define `PlanRewriter` trait.
 macro_rules! def_rewriter {
-    ([], $({ $convention:ident, $name:ident }),*) => {
+    ($({ $convention:ident, $name:ident }),*) => {
 
         /// it's kind of like a [`PlanVisitor<PlanRef>`](super::plan_visitor::PlanVisitor), but with default behaviour of each rewrite method
         pub trait PlanRewriter {

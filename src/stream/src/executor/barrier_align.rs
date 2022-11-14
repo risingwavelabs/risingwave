@@ -13,34 +13,40 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Instant;
 
+use anyhow::Context;
+use enum_as_inner::EnumAsInner;
 use futures::future::{select, Either};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use madsim::time::Instant;
+use risingwave_common::bail;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, BoxedMessageStream, Message, StreamChunk};
+use super::{Barrier, BoxedMessageStream, Message, StreamChunk, StreamExecutorResult};
 use crate::executor::monitor::StreamingMetrics;
+use crate::task::ActorId;
 
-#[derive(Debug, PartialEq)]
+pub type AlignedMessageStreamItem = StreamExecutorResult<AlignedMessage>;
+pub trait AlignedMessageStream = futures::Stream<Item = AlignedMessageStreamItem> + Send;
+
+#[derive(Debug, EnumAsInner, PartialEq)]
 pub enum AlignedMessage {
+    Barrier(Barrier),
     Left(StreamChunk),
     Right(StreamChunk),
-    Barrier(Barrier),
 }
 
 #[try_stream(ok = AlignedMessage, error = StreamExecutorError)]
 pub async fn barrier_align(
     mut left: BoxedMessageStream,
     mut right: BoxedMessageStream,
-    actor_id: u64,
+    actor_id: ActorId,
     metrics: Arc<StreamingMetrics>,
 ) {
     let actor_id = actor_id.to_string();
-    use madsim::rand::Rng;
     loop {
-        let prefer_left: bool = madsim::rand::thread_rng().gen();
+        let prefer_left: bool = rand::random();
         let select_result = if prefer_left {
             select(left.next(), right.next()).await
         } else {
@@ -54,9 +60,12 @@ pub async fn barrier_align(
                 // left stream end, passthrough right chunks
                 while let Some(msg) = right.next().await {
                     match msg? {
+                        Message::Watermark(_) => {
+                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        }
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(_) => {
-                            panic!("right barrier received while left stream end")
+                            bail!("right barrier received while left stream end");
                         }
                     }
                 }
@@ -66,20 +75,33 @@ pub async fn barrier_align(
                 // right stream end, passthrough left chunks
                 while let Some(msg) = left.next().await {
                     match msg? {
+                        Message::Watermark(_) => {
+                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        }
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(_) => {
-                            panic!("left barrier received while right stream end")
+                            bail!("left barrier received while right stream end");
                         }
                     }
                 }
                 break;
             }
             Either::Left((Some(msg), _)) => match msg? {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                 Message::Barrier(_) => loop {
                     let start_time = Instant::now();
                     // received left barrier, waiting for right barrier
-                    match right.next().await.unwrap()? {
+                    match right
+                        .next()
+                        .await
+                        .context("failed to poll right message, stream closed unexpectedly")??
+                    {
+                        Message::Watermark(_) => {
+                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        }
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
@@ -93,11 +115,21 @@ pub async fn barrier_align(
                 },
             },
             Either::Right((Some(msg), _)) => match msg? {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                 Message::Barrier(_) => loop {
                     let start_time = Instant::now();
                     // received right barrier, waiting for left barrier
-                    match left.next().await.unwrap()? {
+                    match left
+                        .next()
+                        .await
+                        .context("failed to poll left message, stream closed unexpectedly")??
+                    {
+                        Message::Watermark(_) => {
+                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        }
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);

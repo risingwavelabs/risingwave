@@ -27,7 +27,7 @@ pub trait ScalarPartialOrd: Scalar {
 /// Implement `Scalar` and `ScalarRef` for native type.
 /// For `PrimitiveArrayItemType`, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
 macro_rules! impl_all_native_scalar {
-    ([], $({ $scalar_type:ty, $variant_name:ident } ),*) => {
+    ($({ $scalar_type:ty, $variant_name:ident } ),*) => {
         $(
             impl Scalar for $scalar_type {
                 type ScalarRefType<'a> = Self;
@@ -46,6 +46,10 @@ macro_rules! impl_all_native_scalar {
 
                 fn to_owned_scalar(&self) -> Self {
                     *self
+                }
+
+                fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+                    self.hash(state)
                 }
             }
         )*
@@ -102,11 +106,9 @@ impl<'a> ScalarRef<'a> for &'a str {
     fn to_owned_scalar(&self) -> String {
         self.to_string()
     }
-}
 
-impl ScalarPartialOrd for Decimal {
-    fn scalar_cmp(&self, other: Self) -> Option<std::cmp::Ordering> {
-        self.partial_cmp(&other)
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
     }
 }
 
@@ -149,6 +151,10 @@ impl<'a> ScalarRef<'a> for bool {
     fn to_owned_scalar(&self) -> bool {
         *self
     }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
 }
 
 /// Implement `Scalar` for `Decimal`.
@@ -170,6 +176,10 @@ impl<'a> ScalarRef<'a> for Decimal {
 
     fn to_owned_scalar(&self) -> Decimal {
         *self
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.normalize().hash(state)
     }
 }
 
@@ -193,6 +203,10 @@ impl<'a> ScalarRef<'a> for IntervalUnit {
     fn to_owned_scalar(&self) -> IntervalUnit {
         *self
     }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
 }
 
 /// Implement `Scalar` for `NaiveDateWrapper`.
@@ -214,6 +228,10 @@ impl<'a> ScalarRef<'a> for NaiveDateWrapper {
 
     fn to_owned_scalar(&self) -> NaiveDateWrapper {
         *self
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
     }
 }
 
@@ -237,6 +255,10 @@ impl<'a> ScalarRef<'a> for NaiveDateTimeWrapper {
     fn to_owned_scalar(&self) -> NaiveDateTimeWrapper {
         *self
     }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
 }
 
 /// Implement `Scalar` for `NaiveTimeWrapper`.
@@ -259,6 +281,10 @@ impl<'a> ScalarRef<'a> for NaiveTimeWrapper {
     fn to_owned_scalar(&self) -> NaiveTimeWrapper {
         *self
     }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
 }
 
 /// Implement `Scalar` for `StructValue`.
@@ -272,6 +298,10 @@ impl<'a> ScalarRef<'a> for StructRef<'a> {
             .map(|f| f.map(|s| s.into_scalar_impl()))
             .collect();
         StructValue::new(fields)
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash_scalar_inner(state)
     }
 }
 
@@ -287,30 +317,34 @@ impl<'a> ScalarRef<'a> for ListRef<'a> {
             .collect();
         ListValue::new(fields)
     }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash_scalar_inner(state)
+    }
 }
 
 impl ScalarImpl {
     pub fn get_ident(&self) -> &'static str {
         macro_rules! impl_all_get_ident {
-            ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                match $self {
+            ($({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+                match self {
                     $( Self::$variant_name(_) => stringify!($variant_name), )*
                 }
             };
         }
-        for_all_scalar_variants! { impl_all_get_ident, self }
+        for_all_scalar_variants! { impl_all_get_ident }
     }
 }
 
 impl<'scalar> ScalarRefImpl<'scalar> {
     pub fn get_ident(&self) -> &'static str {
         macro_rules! impl_all_get_ident {
-            ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                match $self {
+            ($({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+                match self {
                     $( Self::$variant_name(_) => stringify!($variant_name), )*
                 }
             };
         }
-        for_all_scalar_variants! { impl_all_get_ident, self }
+        for_all_scalar_variants! { impl_all_get_ident }
     }
 }

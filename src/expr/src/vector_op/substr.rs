@@ -81,7 +81,7 @@ mod tests {
                 (None, Some(len)) => substr_for(&s, len, writer)?,
                 _ => unreachable!(),
             };
-            let array = guard.into_inner().finish().unwrap();
+            let array = guard.into_inner().finish();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }

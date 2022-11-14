@@ -14,9 +14,9 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::future;
+use futures::StreamExt;
 
-use crate::source::{Column, ConnectorState, SourceMessage, SplitReader};
+use crate::source::{BoxSourceStream, Column, ConnectorState, SplitReader};
 
 /// [`DummySplitReader`] is a placeholder for source executor that is assigned no split. It will
 /// wait forever when calling `next`.
@@ -35,10 +35,7 @@ impl SplitReader for DummySplitReader {
         Ok(Self {})
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        let pending = future::pending();
-        let () = pending.await;
-
-        unreachable!()
+    fn into_stream(self) -> BoxSourceStream {
+        futures::stream::pending().boxed()
     }
 }

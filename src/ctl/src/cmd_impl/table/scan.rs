@@ -12,13 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Result};
 use futures::{pin_mut, StreamExt};
-use risingwave_frontend::catalog::TableCatalog;
+use risingwave_common::catalog::TableOption;
+use risingwave_frontend::TableCatalog;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
@@ -45,12 +50,10 @@ pub async fn get_table_catalog_by_id(meta: MetaClient, table_id: u32) -> Result<
 }
 
 pub fn print_table_catalog(table: &TableCatalog) {
-    let mut catalog = table.clone();
-    catalog.vnode_mapping = None;
-    println!("{:#?}", catalog);
+    println!("{:#?}", table);
 }
 
-pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
+pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
     StateTable::new_with_distribution(
         hummock,
         table.id,
@@ -59,13 +62,33 @@ pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> Stat
             .iter()
             .map(|x| x.column_desc.clone())
             .collect(),
-        table
-            .order_key()
-            .iter()
-            .map(|x| x.direct.to_order())
-            .collect(),
-        table.pk.clone(), // FIXME: should use order keys
+        table.pk().iter().map(|x| x.direct.to_order()).collect(),
+        table.pk().iter().map(|x| x.index).collect(),
         Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
+        table.value_indices.clone(),
+    )
+    .await
+}
+
+pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StorageTable<S> {
+    StorageTable::new_partial(
+        hummock,
+        table.id,
+        table
+            .columns()
+            .iter()
+            .map(|x| x.column_desc.clone())
+            .collect(),
+        table
+            .columns()
+            .iter()
+            .map(|x| x.column_desc.column_id)
+            .collect(),
+        table.pk().iter().map(|x| x.direct.to_order()).collect(),
+        table.pk().iter().map(|x| x.index).collect(),
+        Distribution::all_vnodes(table.distribution_key().to_vec()),
+        TableOption::build_table_option(&HashMap::new()),
+        (0..table.columns().len()).collect(),
     )
 }
 
@@ -90,10 +113,12 @@ async fn do_scan(
 ) -> Result<()> {
     print_table_catalog(&table);
 
-    // We use state table here instead of cell-based table to support iterating with u64::MAX epoch.
-    let state_table = make_state_table(hummock.clone(), &table);
-    let stream = state_table.iter(u64::MAX).await?;
-
+    println!("Rows:");
+    let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
+    let storage_table = make_storage_table(hummock, &table);
+    let stream = storage_table
+        .batch_iter(HummockReadEpoch::Committed(read_epoch))
+        .await?;
     pin_mut!(stream);
     while let Some(item) = stream.next().await {
         println!("{:?}", item?);

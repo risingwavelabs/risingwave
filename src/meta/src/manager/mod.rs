@@ -13,19 +13,16 @@
 // limitations under the License.
 
 mod catalog;
+mod cluster;
 mod env;
-mod hash_mapping;
 mod id;
 mod idle;
 mod notification;
-mod relation;
-mod user;
-
+mod streaming_job;
 pub use catalog::*;
+pub use cluster::*;
 pub use env::*;
-pub use hash_mapping::*;
 pub use id::*;
 pub use idle::*;
 pub use notification::*;
-pub use relation::*;
-pub use user::*;
+pub use streaming_job::*;

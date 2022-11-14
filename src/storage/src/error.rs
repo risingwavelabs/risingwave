@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::ArrayError;
+use std::backtrace::Backtrace;
+
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use thiserror::Error;
 
 use crate::hummock::HummockError;
@@ -27,25 +29,17 @@ pub enum StorageError {
         HummockError,
     ),
 
-    #[error("Storage table error: {0}")]
-    StorageTable(
-        #[backtrace]
-        #[source]
-        RwError,
-    ),
-
-    #[error("State table error: {0}")]
-    StateTable(
-        #[backtrace]
-        #[source]
-        RwError,
-    ),
-
-    #[error("Array error: {0}")]
-    ArrayError(#[from] ArrayError),
+    #[error("Deserialize row error {0}.")]
+    DeserializeRow(ValueEncodingError),
 }
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;
+
+impl From<ValueEncodingError> for StorageError {
+    fn from(error: ValueEncodingError) -> Self {
+        StorageError::DeserializeRow(error)
+    }
+}
 
 impl From<StorageError> for RwError {
     fn from(s: StorageError) -> Self {
@@ -59,7 +53,7 @@ impl std::fmt::Debug for StorageError {
 
         write!(f, "{}", self)?;
         writeln!(f)?;
-        if let Some(backtrace) = self.backtrace() {
+        if let Some(backtrace) = (&self as &dyn Error).request_ref::<Backtrace>() {
             // Since we forward all backtraces from source, `self.backtrace()` is the backtrace of
             // inner error.
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;

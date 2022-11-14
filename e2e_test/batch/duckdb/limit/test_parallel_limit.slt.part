@@ -1,0 +1,90 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation
+
+# description: Test parallel limit execution
+# group: [limit]
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE other_table (i int);
+
+statement ok
+insert into  other_table values (337), (948), (1779), (4779);
+
+statement ok
+CREATE TABLE integers (i int);
+
+statement ok
+INSERT INTO integers SELECT * FROM generate_series(0, 10000, 1) tbl(i);
+
+query I
+SELECT * FROM integers order by i LIMIT 5
+----
+0
+1
+2
+3
+4
+
+query I
+SELECT * FROM integers WHERE i>1978 OR i=334 order by i LIMIT 5
+----
+334
+1979
+1980
+1981
+1982
+
+query I
+SELECT * FROM integers WHERE i>1978 order by i LIMIT 5
+----
+1979
+1980
+1981
+1982
+1983
+
+query I
+SELECT * FROM integers WHERE i>4978 order by i LIMIT 5
+----
+4979
+4980
+4981
+4982
+4983
+
+# large offset
+query I
+SELECT * FROM integers WHERE i>4978 order by i LIMIT 5 OFFSET 100;
+----
+5079
+5080
+5081
+5082
+5083
+
+query I
+SELECT * FROM integers WHERE i>4978 order by i LIMIT 5 OFFSET 1000;
+----
+5979
+5980
+5981
+5982
+5983
+
+# IN-clause (semi join)
+query I
+SELECT * FROM integers WHERE i IN (SELECT * FROM other_table) order by i
+----
+337
+948
+1779
+4779
+
+statement ok
+DROP TABLE integers
+
+statement ok
+DROP table other_table

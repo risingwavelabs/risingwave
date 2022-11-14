@@ -72,12 +72,13 @@ query BBBBBBB rowsort
 SELECT v1 is true,
        v1 is not true,
        v1 is false,
-       v1 is not false
+       v1 is not false,
+       v1 is null
 FROM TB1;
 ----
-t f f t
-f t t f
-f t f t
+t f f t f
+f t t f f
+f t f t t
 
 
 

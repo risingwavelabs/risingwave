@@ -12,54 +12,47 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(backtrace)]
+#![expect(clippy::iter_kv_map, reason = "FIXME: fix later")]
+#![expect(
+    clippy::or_fun_call,
+    reason = "https://github.com/rust-lang/rust-clippy/issues/8574"
+)]
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
-#![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
-#![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(option_result_contains)]
-#![feature(let_else)]
 #![feature(type_alias_impl_trait)]
-#![feature(map_first_last)]
 #![feature(drain_filter)]
 #![feature(custom_test_frameworks)]
 #![feature(lint_reasons)]
 #![feature(map_try_insert)]
 #![feature(hash_drain_filter)]
+#![feature(is_some_and)]
+#![feature(btree_drain_filter)]
+#![feature(result_option_inspect)]
+#![feature(once_cell)]
+#![feature(let_chains)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
-extern crate core;
-
 mod barrier;
-pub mod cluster;
+#[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
 mod error;
 pub mod hummock;
 pub mod manager;
 mod model;
-pub mod rpc;
+mod rpc;
 pub mod storage;
 mod stream;
-pub mod test_utils;
 
 use std::time::Duration;
 
 use clap::{ArgEnum, Parser};
 pub use error::{MetaError, MetaResult};
-use risingwave_common::config::ComputeNodeConfig;
+use serde::{Deserialize, Serialize};
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
@@ -105,9 +98,9 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "ETCD_PASSWORD", default_value = "")]
     etcd_password: String,
 
-    /// Maximum allowed heartbeat interval in ms.
-    #[clap(long, default_value = "60000")]
-    max_heartbeat_interval: u32,
+    /// Maximum allowed heartbeat interval in seconds.
+    #[clap(long, default_value = "300")]
+    max_heartbeat_interval_secs: u32,
 
     #[clap(long)]
     dashboard_ui_path: Option<String>,
@@ -121,10 +114,6 @@ pub struct MetaNodeOpts {
     #[clap(long)]
     disable_recovery: bool,
 
-    /// enable migrate actors when recovery, disable by default.
-    #[clap(long)]
-    enable_migrate: bool,
-
     #[clap(long, default_value = "10")]
     meta_leader_lease_secs: u64,
 
@@ -132,22 +121,54 @@ pub struct MetaNodeOpts {
     /// It is mainly useful for playgrounds.
     #[clap(long)]
     dangerous_max_idle_secs: Option<u64>,
-}
 
-fn load_config(opts: &MetaNodeOpts) -> ComputeNodeConfig {
-    risingwave_common::config::load_config(&opts.config_path)
+    /// Whether to enable deterministic compaction scheduling, which
+    /// will disable all auto scheduling of compaction tasks
+    #[clap(long)]
+    enable_compaction_deterministic: bool,
+
+    /// Interval of GC metadata in meta store and stale SSTs in object store.
+    #[clap(long, default_value = "30")]
+    vacuum_interval_sec: u64,
+
+    /// Threshold used by worker node to filter out new SSTs when scanning object store, during
+    /// full SST GC.
+    #[clap(long, default_value = "604800")]
+    min_sst_retention_time_sec: u64,
+
+    /// The spin interval when collecting global GC watermark in hummock
+    #[clap(long, default_value = "5")]
+    collect_gc_watermark_spin_interval_sec: u64,
+
+    /// Enable sanity check when SSTs are committed. By default disabled.
+    #[clap(long)]
+    enable_committed_sst_sanity_check: bool,
+
+    /// Schedule compaction for all compaction groups with this interval.
+    #[clap(long, default_value = "60")]
+    pub periodic_compaction_interval_sec: u64,
+
+    #[clap(long, default_value = "10")]
+    node_num_monitor_interval_sec: u64,
 }
 
 use std::future::Future;
 use std::pin::Pin;
 
-/// Start meta node
+use risingwave_common::config::{load_config, StreamingConfig};
 
+/// Start meta node
 pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        let compute_config = load_config(&opts);
+        let meta_config: MetaNodeConfig = load_config(&opts.config_path).unwrap();
+        tracing::info!("Starting meta node with config {:?}", meta_config);
+        tracing::info!(
+            "Starting meta node with options periodic_compaction_interval_sec: {}, enable_compaction_deterministic: {}",
+            opts.periodic_compaction_interval_sec,
+            opts.enable_compaction_deterministic
+        );
         let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
@@ -166,11 +187,13 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             Backend::Mem => MetaStoreBackend::Mem,
         };
-        let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
-        let checkpoint_interval =
-            Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
+
+        let max_heartbeat_interval = Duration::from_secs(opts.max_heartbeat_interval_secs as u64);
+        let barrier_interval =
+            Duration::from_millis(meta_config.streaming.barrier_interval_ms as u64);
         let max_idle_ms = opts.dangerous_max_idle_secs.unwrap_or(0) * 1000;
-        let in_flight_barrier_nums = compute_config.streaming.in_flight_barrier_nums as usize;
+        let in_flight_barrier_nums = meta_config.streaming.in_flight_barrier_nums;
+        let checkpoint_frequency = meta_config.streaming.checkpoint_frequency;
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
@@ -187,10 +210,18 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             opts.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
-                enable_migrate: opts.enable_migrate,
-                checkpoint_interval,
-                max_idle_ms,
+                barrier_interval,
                 in_flight_barrier_nums,
+                minimal_scheduling: meta_config.streaming.minimal_scheduling,
+                max_idle_ms,
+                checkpoint_frequency,
+                compaction_deterministic_test: opts.enable_compaction_deterministic,
+                vacuum_interval_sec: opts.vacuum_interval_sec,
+                min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
+                collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
+                enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
+                periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,
+                node_num_monitor_interval_sec: opts.node_num_monitor_interval_sec,
             },
         )
         .await
@@ -198,4 +229,11 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         join_handle.await.unwrap();
         tracing::info!("Meta server is stopped");
     })
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct MetaNodeConfig {
+    // Below for streaming.
+    #[serde(default)]
+    pub streaming: StreamingConfig,
 }

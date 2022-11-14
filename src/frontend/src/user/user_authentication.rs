@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use md5;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::AuthInfo;
 use sha2::{Digest, Sha256};
@@ -67,7 +66,7 @@ pub fn encrypted_password(name: &str, password: &str) -> Option<AuthInfo> {
 
 /// Encrypt the password with MD5 as default.
 #[inline(always)]
-pub fn encrypt_default(name: &str, password: &str) -> AuthInfo {
+fn encrypt_default(name: &str, password: &str) -> AuthInfo {
     AuthInfo {
         encryption_type: EncryptionType::Md5 as i32,
         encrypted_value: md5_hash(name, password),

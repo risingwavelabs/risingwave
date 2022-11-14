@@ -15,8 +15,9 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
 };
@@ -27,7 +28,7 @@ pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
 use crate::hummock::{
     HummockValue, Sstable, SstableBuilderOptions, SstableIterator, SstableIteratorType,
-    SstableStoreRef,
+    SstableStoreRef, TieredCache,
 };
 use crate::monitor::ObjectStoreMetrics;
 
@@ -58,17 +59,37 @@ pub fn mock_sstable_store() -> SstableStoreRef {
 
 pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
-    Arc::new(SstableStore::new(store, path, 64 << 20, 64 << 20))
+    Arc::new(SstableStore::new(
+        store,
+        path,
+        64 << 20,
+        64 << 20,
+        TieredCache::none(),
+    ))
 }
 
-/// Generates keys like `key_test_00002` with epoch 233.
-pub fn iterator_test_key_of(idx: usize) -> Vec<u8> {
-    key_with_epoch(format!("key_test_{:05}", idx).as_bytes().to_vec(), 233)
+pub fn iterator_test_table_key_of(idx: usize) -> Vec<u8> {
+    format!("key_test_{:05}", idx).as_bytes().to_vec()
 }
 
-/// Generates keys like `key_test_00002` with epoch `epoch` .
-pub fn iterator_test_key_of_epoch(idx: usize, epoch: Epoch) -> Vec<u8> {
-    key_with_epoch(format!("key_test_{:05}", idx).as_bytes().to_vec(), epoch)
+pub fn iterator_test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
+    UserKey::for_test(TableId::default(), iterator_test_table_key_of(idx))
+}
+
+/// Generates keys like `{table_id=0}key_test_00002` with epoch 233.
+pub fn iterator_test_key_of(idx: usize) -> FullKey<Vec<u8>> {
+    FullKey {
+        user_key: iterator_test_user_key_of(idx),
+        epoch: 233,
+    }
+}
+
+/// Generates keys like `{table_id=0}key_test_00002` with epoch `epoch` .
+pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Vec<u8>> {
+    FullKey {
+        user_key: iterator_test_user_key_of(idx),
+        epoch,
+    }
 }
 
 /// The value of an index, like `value_test_00002` without value meta

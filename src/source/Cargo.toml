@@ -1,15 +1,15 @@
 [package]
 edition = "2021"
 name = "risingwave_source"
-version = "0.1.11"
+version = "0.2.0-alpha"
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/singularity-data/avro", branch = "master", features = ["snappy", "zstandard", "bzip", "xz"] }
+apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "master", features = ["snappy", "zstandard", "bzip", "xz"] }
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.46", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.16", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-config = { version = "0.49", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.19", default-features = false, features = ["rt-tokio", "native-tls"] }
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -17,43 +17,48 @@ crc32fast = "1"
 enum-as-inner = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = "0.2"
 itertools = "0.10"
-lazy_static = "1"
-log = "0.4"
-madsim = "=0.2.0-alpha.5"
 maplit = "1"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.10"
-protobuf = "2"
-protobuf-codegen-pure = "2"
+prost = { version = "0.11.0", features = ["no-recursion-limit"] }
+prost-reflect = "0.9.2"
 rand = "0.8"
-rdkafka = { version = "0.28", features = ["cmake-build"] }
+reqwest = "0.11"
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
-serde-protobuf = "0.8"
 serde-value = "0.7"
 serde_derive = "1"
 serde_json = "1"
+simd-json = { version = "0.6.0", features = ["allow-non-simd"] }
+simd-json-derive = "0.6.3"
 smallvec = "1"
 static_assertions = "1"
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.5", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
+tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1"
-tonic = { version = "=0.2.0-alpha.5", package = "madsim-tonic" }
-tracing = { version = "0.1", features = ["release_max_level_info"] }
+tonic = { version = "0.2", package = "madsim-tonic" }
+tracing = { version = "0.1" }
 twox-hash = "1"
 url = "2"
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
+criterion = "0.4"
 tempfile = "3"
+
+[[bench]]
+name = "json_parser"
+harness = false

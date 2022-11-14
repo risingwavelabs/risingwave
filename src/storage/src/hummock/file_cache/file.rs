@@ -21,6 +21,7 @@ use std::sync::Arc;
 use nix::fcntl::{fallocate, FallocateFlags};
 use nix::sys::stat::fstat;
 use nix::unistd::ftruncate;
+use tracing::Instrument;
 
 use super::error::Result;
 use super::{asyncify, utils, DioBuffer, DIO_BUFFER_ALLOCATOR, LOGICAL_BLOCK_SIZE, ST_BLOCK_SIZE};
@@ -74,8 +75,8 @@ impl CacheFile {
     /// Opens the cache file.
     ///
     /// The underlying file is opened with `O_DIRECT` flag. All I/O requests must be aligned with
-    /// the logical block size. Additionally, [`CacheFile`] requires I/O size must be a multipler of
-    /// `options.block_size` (which is required to be a multipler of the file system block size).
+    /// the logical block size. Additionally, [`CacheFile`] requires I/O size must be a multiple of
+    /// `options.block_size` (which is required to be a multiple of the file system block size).
     /// With this restriction, blocks can be directly reclaimed by the file system after hole
     /// punching.
     pub async fn open(path: impl AsRef<Path>, options: CacheFileOptions) -> Result<Self> {
@@ -87,7 +88,7 @@ impl CacheFile {
         oopts.create(true);
         oopts.read(true);
         oopts.write(true);
-        oopts.custom_flags(libc::O_DIRECT);
+        oopts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
 
         let (file, len, capacity) = asyncify(move || {
             let file = oopts.open(path)?;
@@ -96,7 +97,7 @@ impl CacheFile {
             fallocate(
                 fd,
                 FallocateFlags::FALLOC_FL_KEEP_SIZE,
-                stat.st_size as i64,
+                stat.st_size,
                 options.fallocate_unit as i64,
             )?;
             Ok((
@@ -122,6 +123,7 @@ impl CacheFile {
         Ok(cache_file)
     }
 
+    #[tracing::instrument(skip(buf))]
     pub async fn append(&self, buf: DioBuffer) -> Result<u64> {
         utils::debug_assert_aligned(self.core.block_size, buf.len());
 
@@ -129,6 +131,8 @@ impl CacheFile {
         let fallocate_unit = self.fallocate_unit;
 
         let offset = core.len.fetch_add(buf.len(), Ordering::SeqCst);
+
+        let span = tracing::trace_span!("write_all_at");
 
         asyncify(move || {
             let mut capacity = core.capacity.load(Ordering::Acquire);
@@ -166,7 +170,7 @@ impl CacheFile {
                 }
             }
 
-            core.file.write_all_at(&buf, offset as u64)?;
+            span.in_scope(|| core.file.write_all_at(&buf, offset as u64))?;
 
             Ok(())
         })
@@ -175,15 +179,27 @@ impl CacheFile {
         Ok(offset as u64)
     }
 
+    #[allow(clippy::uninit_vec)]
+    #[tracing::instrument(skip(self))]
     pub async fn read(&self, offset: u64, len: usize) -> Result<DioBuffer> {
         utils::debug_assert_aligned(self.core.block_size, len);
         let core = self.core.clone();
+
+        let span = tracing::trace_span!("read_exact_at", sid = tracing::field::Empty);
+
         asyncify(move || {
             let mut buf = DioBuffer::with_capacity_in(len, &DIO_BUFFER_ALLOCATOR);
-            buf.resize(len, 0);
-            core.file.read_exact_at(&mut buf, offset)?;
+            buf.reserve(len);
+            unsafe {
+                buf.set_len(len);
+            }
+
+            utils::bpf_buffer_trace!(buf, span);
+
+            span.in_scope(|| core.file.read_exact_at(&mut buf, offset))?;
             Ok(buf)
         })
+        .instrument(tracing::trace_span!("asyncify"))
         .await
     }
 

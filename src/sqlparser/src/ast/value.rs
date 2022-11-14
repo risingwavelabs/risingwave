@@ -13,9 +13,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
 use core::fmt;
-use core::str::FromStr;
 
-use risingwave_common::error::{ErrorCode, RwError};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +22,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Value {
     /// Numeric literal
-    Number(String, bool),
+    Number(String),
     /// 'string value'
     SingleQuotedString(String),
     /// N'string value'
@@ -59,9 +57,9 @@ pub enum Value {
 }
 
 impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Number(v, l) => write!(f, "{}{long}", v, long = if *l { "L" } else { "" }),
+            Value::Number(v) => write!(f, "{}", v),
             Value::DoubleQuotedString(v) => write!(f, "\"{}\"", v),
             Value::SingleQuotedString(v) => write!(f, "'{}'", escape_single_quote_string(v)),
             Value::NationalStringLiteral(v) => write!(f, "N'{}'", v),
@@ -124,7 +122,7 @@ pub enum DateTimeField {
 }
 
 impl fmt::Display for DateTimeField {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             DateTimeField::Year => "YEAR",
             DateTimeField::Month => "MONTH",
@@ -136,26 +134,10 @@ impl fmt::Display for DateTimeField {
     }
 }
 
-impl FromStr for DateTimeField {
-    type Err = RwError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "years" | "year" | "yrs" | "yr" | "y" => Ok(Self::Year),
-            "days" | "day" | "d" => Ok(Self::Day),
-            "hours" | "hour" | "hrs" | "hr" | "h" => Ok(Self::Hour),
-            "minutes" | "minute" | "mins" | "min" | "m" => Ok(Self::Minute),
-            "months" | "month" | "mons" | "mon" => Ok(Self::Month),
-            "seconds" | "second" | "secs" | "sec" | "s" => Ok(Self::Second),
-            _ => Err(ErrorCode::InvalidInputSyntax(format!("unknown unit {}", s)).into()),
-        }
-    }
-}
-
 pub struct EscapeSingleQuoteString<'a>(&'a str);
 
 impl<'a> fmt::Display for EscapeSingleQuoteString<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for c in self.0.chars() {
             if c == '\'' {
                 write!(f, "\'\'")?;
@@ -180,7 +162,7 @@ pub enum TrimWhereField {
 }
 
 impl fmt::Display for TrimWhereField {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TrimWhereField::*;
         f.write_str(match self {
             Both => "BOTH",

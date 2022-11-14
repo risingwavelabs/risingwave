@@ -14,22 +14,26 @@
 
 use anyhow::Result;
 use chrono::prelude::*;
-use chrono::Duration;
+use chrono::{Duration, DurationRound};
 use humantime::parse_duration;
-use rand::{thread_rng, Rng};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use serde_json::{json, Value};
 
 use super::DEFAULT_MAX_PAST;
+use crate::types::{Datum, NaiveDateTimeWrapper, Scalar};
 
 pub struct TimestampField {
     max_past: Duration,
     local_now: NaiveDateTime,
+    seed: u64,
 }
 
 impl TimestampField {
-    pub fn new(max_past_option: Option<String>) -> Result<Self> {
-        let local_now = Local::now().naive_local();
-        // std duration
+    pub fn new(max_past_option: Option<String>, seed: u64) -> Result<Self> {
+        let mut local_now = Local::now().naive_local();
+        local_now = local_now.duration_round(Duration::microseconds(1))?; // round to 1 us
+                                                                          // std duration
         let max_past = if let Some(max_past_option) = max_past_option {
             parse_duration(&max_past_option)?
         } else {
@@ -40,14 +44,22 @@ impl TimestampField {
             // convert to chrono::Duration
             max_past: chrono::Duration::from_std(max_past)?,
             local_now,
+            seed,
         })
     }
 
-    pub fn generate(&mut self) -> Value {
-        let seconds = self.max_past.num_seconds();
-        let mut rng = thread_rng();
-        let max_seconds = rng.gen_range(0..=seconds);
-        let res = self.local_now - Duration::seconds(max_seconds);
-        json!(res.to_string())
+    fn generate_data(&mut self, offset: u64) -> NaiveDateTime {
+        let milliseconds = self.max_past.num_milliseconds();
+        let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
+        let max_milliseconds = rng.gen_range(0..=milliseconds);
+        self.local_now - Duration::milliseconds(max_milliseconds)
+    }
+
+    pub fn generate(&mut self, offset: u64) -> Value {
+        json!(self.generate_data(offset).to_string())
+    }
+
+    pub fn generate_datum(&mut self, offset: u64) -> Datum {
+        Some(NaiveDateTimeWrapper::new(self.generate_data(offset)).to_scalar_value())
     }
 }

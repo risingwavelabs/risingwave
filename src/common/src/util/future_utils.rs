@@ -63,6 +63,6 @@ impl<S: Stream + Unpin> Stream for MergeStream<S> {
     }
 }
 
-pub fn select_all<S: Stream + Unpin>(streams: Vec<S>) -> MergeStream<S> {
-    MergeStream::new(streams)
+pub fn select_all<S: Stream + Unpin>(streams: impl IntoIterator<Item = S>) -> MergeStream<S> {
+    MergeStream::new(streams.into_iter().collect())
 }

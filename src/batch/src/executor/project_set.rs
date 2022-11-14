@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use either::{for_both, Either};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, ArrayRef, DataChunk, I64ArrayBuilder};
+use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -36,6 +33,7 @@ pub struct ProjectSetExecutor {
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
+    chunk_size: usize,
 }
 
 impl Executor for ProjectSetExecutor {
@@ -68,10 +66,10 @@ impl ProjectSetExecutor {
 
             // First column will be `projected_row_id`, which represents the index in the
             // output table
-            let mut projected_row_id_builder = I64ArrayBuilder::new(DEFAULT_CHUNK_BUFFER_SIZE);
+            let mut projected_row_id_builder = I64ArrayBuilder::new(self.chunk_size);
             let mut builders = data_types
                 .iter()
-                .map(|ty| ty.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
+                .map(|ty| ty.create_array_builder(self.chunk_size))
                 .collect_vec();
 
             let results: Vec<_> = self
@@ -107,31 +105,31 @@ impl ProjectSetExecutor {
                     .unwrap();
 
                 for i in 0..max_tf_len {
-                    projected_row_id_builder.append(Some(i as i64))?;
+                    projected_row_id_builder.append(Some(i as i64));
                 }
 
                 for (item, builder) in items.into_iter().zip_eq(builders.iter_mut()) {
                     match item {
                         Either::Left(array_ref) => {
-                            builder.append_array(&array_ref)?;
+                            builder.append_array(&array_ref);
                             for _ in 0..(max_tf_len - array_ref.len()) {
-                                builder.append_null()?;
+                                builder.append_null();
                             }
                         }
                         Either::Right(datum_ref) => {
                             for _ in 0..max_tf_len {
-                                builder.append_datum_ref(datum_ref)?;
+                                builder.append_datum_ref(datum_ref);
                             }
                         }
                     }
                 }
             }
             let mut columns = Vec::with_capacity(self.select_list.len() + 1);
-            let projected_row_id: ArrayRef = Arc::new(projected_row_id_builder.finish()?.into());
+            let projected_row_id: Column = projected_row_id_builder.finish().into();
             let cardinality = projected_row_id.len();
-            columns.push(Column::new(projected_row_id));
+            columns.push(projected_row_id);
             for builder in builders {
-                columns.push(Column::new(Arc::new(builder.finish()?)))
+                columns.push(builder.finish().into())
             }
 
             let chunk = DataChunk::new(columns, cardinality);
@@ -144,13 +142,10 @@ impl ProjectSetExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for ProjectSetExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        source: &ExecutorBuilder<'_, C>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(
-            inputs.len() == 1,
-            "ProjectSet executor should have only 1 child!"
-        );
+        let [child]: [_; 1] = inputs.try_into().unwrap();
 
         let project_set_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -160,7 +155,12 @@ impl BoxedExecutorBuilder for ProjectSetExecutor {
         let select_list: Vec<_> = project_set_node
             .get_select_list()
             .iter()
-            .map(ProjectSetSelectItem::from_prost)
+            .map(|proto| {
+                ProjectSetSelectItem::from_prost(
+                    proto,
+                    source.context.get_config().developer.batch_chunk_size,
+                )
+            })
             .try_collect()?;
 
         let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
@@ -172,9 +172,10 @@ impl BoxedExecutorBuilder for ProjectSetExecutor {
 
         Ok(Box::new(Self {
             select_list,
-            child: inputs.remove(0),
+            child,
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
+            chunk_size: source.context.get_config().developer.batch_chunk_size,
         }))
     }
 }
@@ -193,6 +194,8 @@ mod tests {
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::{Executor, ValuesExecutor};
     use crate::*;
+
+    const CHUNK_SIZE: usize = 1024;
 
     #[tokio::test]
     async fn test_project_set_executor() -> Result<()> {
@@ -231,6 +234,7 @@ mod tests {
             child: Box::new(mock_executor),
             schema: Schema { fields },
             identity: "ProjectSetExecutor".to_string(),
+            chunk_size: CHUNK_SIZE,
         });
 
         let fields = &proj_executor.schema().fields;
@@ -275,7 +279,7 @@ mod tests {
             vec![vec![]], // One single row with no column.
             Schema::default(),
             "ValuesExecutor".to_string(),
-            1024,
+            CHUNK_SIZE,
         ));
 
         let proj_executor = Box::new(ProjectSetExecutor {
@@ -283,6 +287,7 @@ mod tests {
             child: values_executor2,
             schema: schema_unnamed!(DataType::Int32, DataType::Int32),
             identity: "ProjectSetExecutor2".to_string(),
+            chunk_size: CHUNK_SIZE,
         });
         let mut stream = proj_executor.execute();
         let chunk = stream.next().await.unwrap().unwrap();

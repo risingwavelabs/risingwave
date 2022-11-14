@@ -12,21 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::agg_call::build_agg_call_from_prost;
+use super::agg_common::build_agg_call_from_prost;
 use super::*;
 use crate::executor::aggregation::AggCall;
 use crate::executor::LocalSimpleAggExecutor;
 
 pub struct LocalSimpleAggExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
-    fn new_boxed_executor(
-        mut params: ExecutorParams,
+    async fn new_boxed_executor(
+        params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::LocalSimpleAgg)?;
+        let [input]: [_; 1] = params.input.try_into().unwrap();
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
@@ -34,7 +36,8 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
             .try_collect()?;
 
         Ok(LocalSimpleAggExecutor::new(
-            params.input.remove(0),
+            params.actor_context,
+            input,
             agg_calls,
             params.pk_indices,
             params.executor_id,

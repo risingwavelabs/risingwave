@@ -1,14 +1,14 @@
 statement ok
-create table t1 (v1 int not null, v2 int not null, v3 int not null);
+create table t1 (v1 int, v2 int, v3 int);
 
 statement ok
-create table t2 (v1 int not null, v2 int not null, v3 int not null);
+create table t2 (v1 int, v2 int, v3 int);
 
 statement ok
-create table t3 (v1 int not null, v2 int not null, v3 int not null);
+create table t3 (v1 int, v2 int, v3 int);
 
 statement ok
-create table t4 (v1 real not null, v2 int not null, v3 real not null);
+create table t4 (v1 real, v2 int, v3 real);
 
 statement ok
 create table t5 (d decimal);
@@ -84,8 +84,8 @@ query IR rowsort
 select * from mv4
 ----
 1 NaN
-1 +Inf
-1 -Inf
+1 Infinity
+1 -Infinity
 
 statement ok
 drop materialized view mv1
@@ -113,3 +113,21 @@ drop table t4
 
 statement ok
 drop table t5
+
+statement ok
+create table t (v1 int, v2 int);
+
+statement error
+create materialized view mv(a) as select * from t;
+
+statement error 
+create materialized view mv(a,b,c) as select * from t;
+
+statement ok
+create materialized view mv(a,b) as select * from t;
+
+statement ok
+drop materialized view mv 
+
+statement ok
+drop table t 

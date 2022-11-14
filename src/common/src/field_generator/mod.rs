@@ -24,7 +24,8 @@ use serde_json::Value;
 pub use timestamp::*;
 pub use varchar::*;
 
-use crate::types::{DataType, Datum};
+use crate::array::StructValue;
+use crate::types::{DataType, Datum, ScalarImpl};
 
 pub const DEFAULT_MIN: i16 = i16::MIN;
 pub const DEFAULT_MAX: i16 = i16::MAX;
@@ -84,6 +85,7 @@ pub enum FieldGeneratorImpl {
     F64Random(F64RandomField),
     Varchar(VarcharField),
     Timestamp(TimestampField),
+    Struct(Vec<(String, FieldGeneratorImpl)>),
 }
 
 impl FieldGeneratorImpl {
@@ -153,12 +155,18 @@ impl FieldGeneratorImpl {
             DataType::Float64 => Ok(FieldGeneratorImpl::F64Random(F64RandomField::new(
                 min, max, seed,
             )?)),
-            DataType::Varchar => Ok(FieldGeneratorImpl::Varchar(VarcharField::new(length)?)),
+            DataType::Varchar => Ok(FieldGeneratorImpl::Varchar(VarcharField::new(
+                length, seed,
+            )?)),
             DataType::Timestamp => Ok(FieldGeneratorImpl::Timestamp(TimestampField::new(
-                mast_past,
+                mast_past, seed,
             )?)),
             _ => unimplemented!(),
         }
+    }
+
+    pub fn with_struct_fields(fields: Vec<(String, FieldGeneratorImpl)>) -> Result<Self> {
+        Ok(FieldGeneratorImpl::Struct(fields))
     }
 
     pub fn generate(&mut self, offset: u64) -> Value {
@@ -173,8 +181,15 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::I64Random(f) => f.generate(offset),
             FieldGeneratorImpl::F32Random(f) => f.generate(offset),
             FieldGeneratorImpl::F64Random(f) => f.generate(offset),
-            FieldGeneratorImpl::Varchar(f) => f.generate(),
-            FieldGeneratorImpl::Timestamp(f) => f.generate(),
+            FieldGeneratorImpl::Varchar(f) => f.generate(offset),
+            FieldGeneratorImpl::Timestamp(f) => f.generate(offset),
+            FieldGeneratorImpl::Struct(fields) => {
+                let map = fields
+                    .iter_mut()
+                    .map(|(name, gen)| (name.clone(), gen.generate(offset)))
+                    .collect();
+                Value::Object(map)
+            }
         }
     }
 
@@ -190,9 +205,15 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::I64Random(f) => f.generate_datum(offset),
             FieldGeneratorImpl::F32Random(f) => f.generate_datum(offset),
             FieldGeneratorImpl::F64Random(f) => f.generate_datum(offset),
-            // TODO: add generate_datum in VarcharField and TimestampField
-            FieldGeneratorImpl::Varchar(_) => todo!(),
-            FieldGeneratorImpl::Timestamp(_) => todo!(),
+            FieldGeneratorImpl::Varchar(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::Timestamp(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::Struct(fields) => {
+                let data = fields
+                    .iter_mut()
+                    .map(|(_, gen)| gen.generate_datum(offset))
+                    .collect();
+                Some(ScalarImpl::Struct(StructValue::new(data)))
+            }
         }
     }
 }
@@ -226,6 +247,44 @@ mod tests {
                 let expected_num = split_num * step + 1 + index as u64;
                 assert_eq!(expected_num, num.unwrap());
             }
+        }
+    }
+
+    #[test]
+    fn test_random_generate() {
+        for data_type in [
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Varchar,
+            DataType::Timestamp,
+        ] {
+            let mut generator =
+                FieldGeneratorImpl::with_random(data_type, None, None, None, None, 1234).unwrap();
+
+            let val1 = generator.generate(1);
+            let val2 = generator.generate(2);
+
+            assert_ne!(val1, val2);
+
+            let val1_new = generator.generate(1);
+            let val2_new = generator.generate(2);
+
+            assert_eq!(val1_new, val1);
+            assert_eq!(val2_new, val2);
+
+            let datum1 = generator.generate_datum(5);
+            let datum2 = generator.generate_datum(7);
+
+            assert_ne!(datum1, datum2);
+
+            let datum1_new = generator.generate_datum(5);
+            let datum2_new = generator.generate_datum(7);
+
+            assert_eq!(datum1_new, datum1);
+            assert_eq!(datum2_new, datum2);
         }
     }
 }

@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common_service::observer_manager::ObserverNodeImpl;
+use risingwave_common_service::observer_manager::{ObserverState, SubscribeCompactor};
 use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
-    SchemaFilterKeyExtractor,
+    FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
 };
-use risingwave_pb::catalog::{Source, Table};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 
@@ -29,47 +29,45 @@ pub struct CompactorObserverNode {
     version: u64,
 }
 
-impl ObserverNodeImpl for CompactorObserverNode {
+impl ObserverState for CompactorObserverNode {
+    type SubscribeType = SubscribeCompactor;
+
     fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
+
+        assert!(
+            resp.version > self.version,
+            "resp version={:?}, current version={:?}",
+            resp.version,
+            self.version
+        );
 
         match info.to_owned() {
             Info::Table(table_catalog) => {
                 self.handle_catalog_notification(resp.operation(), table_catalog);
             }
 
-            Info::Source(source_catalog) => {
-                self.handle_source_notification(resp.operation(), source_catalog);
-            }
+            Info::HummockVersionDeltas(_) => {}
 
             _ => {
                 panic!("error type notification");
             }
         }
+
+        self.version = resp.version;
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
-        if self.version > resp.version {
-            return Err(ErrorCode::InternalError(format!(
-                "the SnapshotVersion is incorrect local {} snapshot {}",
-                self.version, resp.version
-            ))
-            .into());
-        }
-
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
-                for table in snapshot.table {
-                    self.handle_catalog_notification(Operation::Add, table);
-                }
-
+                self.handle_catalog_snapshot(snapshot.tables);
                 self.version = resp.version;
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(
-                    "the first notify should be frontend snapshot, but get {:?}",
+                    "the first notify should be compactor snapshot, but get {:?}",
                     resp
                 ))
                 .into())
@@ -88,41 +86,26 @@ impl CompactorObserverNode {
         }
     }
 
+    fn handle_catalog_snapshot(&mut self, tables: Vec<Table>) {
+        let all_filter_key_extractors: HashMap<u32, Arc<FilterKeyExtractorImpl>> = tables
+            .iter()
+            .map(|t| (t.id, Arc::new(FilterKeyExtractorImpl::from_table(t))))
+            .collect();
+        self.filter_key_extractor_manager
+            .sync(all_filter_key_extractors);
+    }
+
     fn handle_catalog_notification(&mut self, operation: Operation, table_catalog: Table) {
         match operation {
             Operation::Add | Operation::Update => {
-                let filter_key_extractor = if table_catalog.read_pattern_prefix_column < 1 {
-                    // for now frontend had not infer the table_id_to_filter_key_extractor, so we
-                    // use FullKeyFilterKeyExtractor
-                    FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default())
-                } else {
-                    FilterKeyExtractorImpl::Schema(SchemaFilterKeyExtractor::new(&table_catalog))
-                };
-                self.filter_key_extractor_manager
-                    .update(table_catalog.id, Arc::new(filter_key_extractor));
-            }
-
-            Operation::Delete => {
-                self.filter_key_extractor_manager.remove(table_catalog.id);
-            }
-
-            _ => panic!("receive an unsupported notify {:?}", operation),
-        }
-    }
-
-    fn handle_source_notification(&mut self, operation: Operation, source_catalog: Source) {
-        match operation {
-            Operation::Add | Operation::Update => {
                 self.filter_key_extractor_manager.update(
-                    source_catalog.id,
-                    Arc::new(FilterKeyExtractorImpl::FullKey(
-                        FullKeyFilterKeyExtractor::default(),
-                    )),
+                    table_catalog.id,
+                    Arc::new(FilterKeyExtractorImpl::from_table(&table_catalog)),
                 );
             }
 
             Operation::Delete => {
-                self.filter_key_extractor_manager.remove(source_catalog.id);
+                self.filter_key_extractor_manager.remove(table_catalog.id);
             }
 
             _ => panic!("receive an unsupported notify {:?}", operation),

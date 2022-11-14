@@ -40,6 +40,9 @@ pub enum BatchError {
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
+
+    #[error("Prometheus error: {0}")]
+    Prometheus(#[from] prometheus::Error),
 }
 
 impl From<BatchError> for RwError {

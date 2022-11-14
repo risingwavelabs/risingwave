@@ -14,24 +14,26 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
-use madsim::time::Instant;
+use either::Either;
+use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
+use futures_async_stream::try_stream;
 use risingwave_batch::task::BatchManager;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
 };
+use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Permits, Receiver};
 use risingwave_stream::executor::Message;
 use risingwave_stream::task::LocalStreamManager;
-use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, Response, Status};
+use tonic::{Request, Response, Status, Streaming};
 
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 
 /// Buffer size of the receiver of the remote channel.
-const EXCHANGE_BUFFER_SIZE: usize = 1024;
+const BATCH_EXCHANGE_BUFFER_SIZE: usize = 1024;
 
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
@@ -40,12 +42,13 @@ pub struct ExchangeServiceImpl {
     metrics: Arc<ExchangeServiceMetrics>,
 }
 
-type ExchangeDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
 
 #[async_trait::async_trait]
 impl ExchangeService for ExchangeServiceImpl {
-    type GetDataStream = ExchangeDataStream;
-    type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
+    type GetDataStream = BatchDataStream;
+    type GetStreamStream = StreamDataStream;
 
     #[cfg_attr(coverage, no_coverage)]
     async fn get_data(
@@ -59,7 +62,7 @@ impl ExchangeService for ExchangeServiceImpl {
             .into_inner()
             .task_output_id
             .expect("Failed to get task output id.");
-        let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
+        let (tx, rx) = tokio::sync::mpsc::channel(BATCH_EXCHANGE_BUFFER_SIZE);
         if let Err(e) = self.batch_mgr.get_data(tx, peer_addr, &pb_task_output_id) {
             error!("Failed to serve exchange RPC from {}: {}", peer_addr, e);
             return Err(e.into());
@@ -70,28 +73,46 @@ impl ExchangeService for ExchangeServiceImpl {
 
     async fn get_stream(
         &self,
-        request: Request<GetStreamRequest>,
+        request: Request<Streaming<GetStreamRequest>>,
     ) -> std::result::Result<Response<Self::GetStreamStream>, Status> {
+        use risingwave_pb::task_service::get_stream_request::*;
+
         let peer_addr = request
             .remote_addr()
             .ok_or_else(|| Status::unavailable("get_stream connection unestablished"))?;
-        let req = request.into_inner();
-        let up_down_actor_ids = (req.up_actor_id, req.down_actor_id);
-        let up_down_fragment_ids = (req.up_fragment_id, req.down_fragment_id);
-        let receiver = self.stream_mgr.take_receiver(up_down_actor_ids)?;
-        match self
-            .get_stream_impl(peer_addr, receiver, up_down_actor_ids, up_down_fragment_ids)
-            .await
-        {
-            Ok(resp) => Ok(resp),
-            Err(e) => {
-                error!(
-                    "Failed to server stream exchange RPC from {}: {}",
-                    peer_addr, e
-                );
-                Err(e.into())
+
+        let mut request_stream = request.into_inner();
+
+        // Extract the first `Get` request from the stream.
+        let get_req = {
+            let req = request_stream
+                .next()
+                .await
+                .ok_or_else(|| Status::invalid_argument("get_stream request is empty"))??;
+            match req.value.unwrap() {
+                Value::Get(get) => get,
+                Value::AddPermits(_) => unreachable!("the first message must be `Get`"),
             }
-        }
+        };
+
+        let up_down_actor_ids = (get_req.up_actor_id, get_req.down_actor_id);
+        let up_down_fragment_ids = (get_req.up_fragment_id, get_req.down_fragment_id);
+        let receiver = self.stream_mgr.take_receiver(up_down_actor_ids).await?;
+
+        // Map the remaining stream to add-permits.
+        let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
+            Value::Get(_) => unreachable!("the following messages must be `AddPermits`"),
+            Value::AddPermits(add_permits) => add_permits.permits,
+        });
+
+        Ok(Response::new(Self::get_stream_impl(
+            self.metrics.clone(),
+            peer_addr,
+            receiver,
+            add_permits_stream,
+            up_down_actor_ids,
+            up_down_fragment_ids,
+        )))
     }
 }
 
@@ -108,80 +129,76 @@ impl ExchangeServiceImpl {
         }
     }
 
+    #[try_stream(ok = GetStreamResponse, error = Status)]
     async fn get_stream_impl(
-        &self,
+        metrics: Arc<ExchangeServiceMetrics>,
         peer_addr: SocketAddr,
-        mut receiver: Receiver<Message>,
+        mut receiver: Receiver,
+        add_permits_stream: impl Stream<Item = std::result::Result<Permits, tonic::Status>>,
         up_down_actor_ids: (u32, u32),
         up_down_fragment_ids: (u32, u32),
-    ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
-        let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
-        let metrics = self.metrics.clone();
+    ) {
         tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
-        tokio::spawn(async move {
-            let up_actor_id = up_down_actor_ids.0.to_string();
-            let down_actor_id = up_down_actor_ids.1.to_string();
-            let up_fragment_id = up_down_fragment_ids.0.to_string();
-            let down_fragment_id = up_down_fragment_ids.1.to_string();
+        let up_actor_id = up_down_actor_ids.0.to_string();
+        let down_actor_id = up_down_actor_ids.1.to_string();
+        let up_fragment_id = up_down_fragment_ids.0.to_string();
+        let down_fragment_id = up_down_fragment_ids.1.to_string();
 
-            let mut rr = 0;
-            const SAMPLING_FREQUENCY: u64 = 100;
+        let permits = receiver.permits();
 
-            loop {
-                let msg = receiver.recv().await;
-                match msg {
-                    // the sender is closed, we close the receiver and stop forwarding message
-                    None => break,
-                    Some(msg) => {
-                        // add serialization duration metric with given sampling frequency
-                        let proto = if rr % SAMPLING_FREQUENCY == 0 {
-                            let start_time = Instant::now();
-                            let proto = msg.to_protobuf();
-                            metrics
-                                .actor_sampled_serialize_duration_ns
-                                .with_label_values(&[&up_actor_id])
-                                .inc_by(start_time.elapsed().as_nanos() as u64);
-                            proto
-                        } else {
-                            msg.to_protobuf()
-                        };
-                        rr += 1;
+        // Select from the permits back from the downstream and the upstream receiver.
+        let select_stream = futures::stream::select(
+            add_permits_stream.map_ok(Either::Left),
+            #[try_stream]
+            async move {
+                while let Some(m) = receiver.recv_raw().await {
+                    yield Either::Right(m);
+                }
+            },
+        );
+        pin_mut!(select_stream);
 
-                        let res = match proto {
-                            Ok(stream_msg) => Ok(GetStreamResponse {
-                                message: Some(stream_msg),
-                            }),
-                            Err(e) => Err(e.into()),
-                        };
+        let mut rr = 0;
+        const SAMPLING_FREQUENCY: u64 = 100;
 
-                        let bytes = match res.as_ref() {
-                            Ok(msg) => Message::get_encoded_len(msg),
-                            Err(_) => 0,
-                        };
+        while let Some(r) = select_stream.try_next().await? {
+            match r {
+                Either::Left(permits_to_add) => {
+                    permits.add_permits(permits_to_add as usize);
+                }
+                Either::Right(MessageWithPermits { message, permits }) => {
+                    // add serialization duration metric with given sampling frequency
+                    let proto = if rr % SAMPLING_FREQUENCY == 0 {
+                        let start_time = Instant::now();
+                        let proto = message.to_protobuf();
+                        metrics
+                            .actor_sampled_serialize_duration_ns
+                            .with_label_values(&[&up_actor_id])
+                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        proto
+                    } else {
+                        message.to_protobuf()
+                    };
+                    rr += 1;
 
-                        let _ = match tx.send(res).await.map_err(|e| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "failed to send stream data: {}",
-                                e
-                            )))
-                        }) {
-                            Ok(_) => {
-                                metrics
-                                    .stream_exchange_bytes
-                                    .with_label_values(&[&up_actor_id, &down_actor_id])
-                                    .inc_by(bytes as u64);
-                                metrics
-                                    .stream_fragment_exchange_bytes
-                                    .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                                    .inc_by(bytes as u64);
-                                Ok(())
-                            }
-                            Err(e) => tx.send(Err(e.into())).await,
-                        };
-                    }
+                    let response = GetStreamResponse {
+                        message: Some(proto),
+                        permits, // forward the acquired permit to the downstream
+                    };
+                    let bytes = Message::get_encoded_len(&response);
+
+                    yield response;
+
+                    metrics
+                        .stream_exchange_bytes
+                        .with_label_values(&[&up_actor_id, &down_actor_id])
+                        .inc_by(bytes as u64);
+                    metrics
+                        .stream_fragment_exchange_bytes
+                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
+                        .inc_by(bytes as u64);
                 }
             }
-        });
-        Ok(Response::new(ReceiverStream::new(rx)))
+        }
     }
 }

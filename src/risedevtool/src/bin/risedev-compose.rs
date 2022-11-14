@@ -135,7 +135,10 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::ComputeNode(c) => (c.address.clone(), c.compose(&compose_config)?),
+            ServiceConfig::ComputeNode(c) => {
+                volumes.insert(c.id.clone(), ComposeVolume::default());
+                (c.address.clone(), c.compose(&compose_config)?)
+            }
             ServiceConfig::MetaNode(c) => {
                 if opts.deploy {
                     let public_ip = &compose_deploy_config
@@ -156,7 +159,7 @@ fn main() -> Result<()> {
                 }
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::FrontendV2(c) => {
+            ServiceConfig::Frontend(c) => {
                 if opts.deploy {
                     let arg = format!("--frontend {} --frontend-port {}", c.address, c.port);
                     writeln!(

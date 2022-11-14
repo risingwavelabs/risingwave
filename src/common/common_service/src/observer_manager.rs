@@ -15,24 +15,48 @@
 use std::time::Duration;
 
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::common::WorkerType;
-use risingwave_pb::meta::SubscribeResponse;
-use risingwave_rpc_client::{MetaClient, NotificationStream};
+use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
+use risingwave_rpc_client::error::RpcError;
+use risingwave_rpc_client::MetaClient;
 use tokio::task::JoinHandle;
+use tonic::{Status, Streaming};
+
+pub trait SubscribeTypeEnum {
+    fn subscribe_type() -> SubscribeType;
+}
+
+pub struct SubscribeFrontend {}
+impl SubscribeTypeEnum for SubscribeFrontend {
+    fn subscribe_type() -> SubscribeType {
+        SubscribeType::Frontend
+    }
+}
+
+pub struct SubscribeHummock {}
+impl SubscribeTypeEnum for SubscribeHummock {
+    fn subscribe_type() -> SubscribeType {
+        SubscribeType::Hummock
+    }
+}
+
+pub struct SubscribeCompactor {}
+impl SubscribeTypeEnum for SubscribeCompactor {
+    fn subscribe_type() -> SubscribeType {
+        SubscribeType::Compactor
+    }
+}
 
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
 /// We can write the notification logic by implementing `ObserverNodeImpl`.
-pub struct ObserverManager {
-    rx: Box<dyn NotificationStream>,
-    meta_client: MetaClient,
-    addr: HostAddr,
-    worker_type: WorkerType,
-    observer_states: Box<dyn ObserverNodeImpl + Send>,
+pub struct ObserverManager<T: NotificationClient, S: ObserverState> {
+    rx: T::Channel,
+    client: T,
+    observer_states: S,
 }
 
-pub trait ObserverNodeImpl {
+pub trait ObserverState: Send + 'static {
+    type SubscribeType: SubscribeTypeEnum;
     /// modify data after receiving notification from meta
     fn handle_notification(&mut self, resp: SubscribeResponse);
 
@@ -40,19 +64,26 @@ pub trait ObserverNodeImpl {
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()>;
 }
 
-impl ObserverManager {
-    pub async fn new(
-        meta_client: MetaClient,
-        addr: HostAddr,
-        observer_states: Box<dyn ObserverNodeImpl + Send>,
-        worker_type: WorkerType,
-    ) -> Self {
-        let rx = meta_client.subscribe(&addr, worker_type).await.unwrap();
+impl<S: ObserverState> ObserverManager<RpcNotificationClient, S> {
+    pub async fn new_with_meta_client(meta_client: MetaClient, observer_states: S) -> Self {
+        let client = RpcNotificationClient { meta_client };
+        Self::new(client, observer_states).await
+    }
+}
+
+impl<T, S> ObserverManager<T, S>
+where
+    T: NotificationClient,
+    S: ObserverState,
+{
+    pub async fn new(client: T, observer_states: S) -> Self {
+        let rx = client
+            .subscribe(S::SubscribeType::subscribe_type())
+            .await
+            .unwrap();
         Self {
             rx,
-            meta_client,
-            addr,
-            worker_type,
+            client,
             observer_states,
         }
     }
@@ -60,7 +91,7 @@ impl ObserverManager {
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and
     /// call the `handle_initialization_notification` and `handle_notification` to update node data.
     pub async fn start(mut self) -> Result<JoinHandle<()>> {
-        let first_resp = self.rx.next().await?.ok_or_else(|| {
+        let first_resp = self.rx.message().await?.ok_or_else(|| {
             ErrorCode::InternalError(
                 "ObserverManager start failed, Stream of notification terminated at the start."
                     .to_string(),
@@ -70,7 +101,7 @@ impl ObserverManager {
             .handle_initialization_notification(first_resp)?;
         let handle = tokio::spawn(async move {
             loop {
-                match self.rx.next().await {
+                match self.rx.message().await {
                     Ok(resp) => {
                         if resp.is_none() {
                             tracing::error!("Stream of notification terminated.");
@@ -93,14 +124,14 @@ impl ObserverManager {
     async fn re_subscribe(&mut self) {
         loop {
             match self
-                .meta_client
-                .subscribe(&self.addr, self.worker_type)
+                .client
+                .subscribe(S::SubscribeType::subscribe_type())
                 .await
             {
                 Ok(rx) => {
                     tracing::debug!("re-subscribe success");
                     self.rx = rx;
-                    if let Ok(Some(snapshot_resp)) = self.rx.next().await {
+                    if let Ok(Some(snapshot_resp)) = self.rx.message().await {
                         self.observer_states
                             .handle_initialization_notification(snapshot_resp)
                             .expect("handle snapshot notification failed after re-subscribe");
@@ -115,3 +146,46 @@ impl ObserverManager {
     }
 }
 const RE_SUBSCRIBE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+
+#[async_trait::async_trait]
+pub trait Channel: Send + 'static {
+    type Item;
+    async fn message(&mut self) -> std::result::Result<Option<Self::Item>, Status>;
+}
+
+#[async_trait::async_trait]
+impl<T: Send + 'static> Channel for Streaming<T> {
+    type Item = T;
+
+    async fn message(&mut self) -> std::result::Result<Option<T>, Status> {
+        self.message().await
+    }
+}
+
+#[async_trait::async_trait]
+pub trait NotificationClient: Send + Sync + 'static {
+    type Channel: Channel<Item = SubscribeResponse>;
+    async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel>;
+}
+
+pub struct RpcNotificationClient {
+    meta_client: MetaClient,
+}
+
+impl RpcNotificationClient {
+    pub fn new(meta_client: MetaClient) -> Self {
+        Self { meta_client }
+    }
+}
+
+#[async_trait::async_trait]
+impl NotificationClient for RpcNotificationClient {
+    type Channel = Streaming<SubscribeResponse>;
+
+    async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
+        self.meta_client
+            .subscribe(subscribe_type)
+            .await
+            .map_err(RpcError::into)
+    }
+}

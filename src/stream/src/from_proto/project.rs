@@ -19,14 +19,16 @@ use crate::executor::ProjectExecutor;
 
 pub struct ProjectExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for ProjectExecutorBuilder {
-    fn new_boxed_executor(
-        mut params: ExecutorParams,
+    async fn new_boxed_executor(
+        params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Project)?;
+        let [input]: [_; 1] = params.input.try_into().unwrap();
         let project_exprs: Vec<_> = node
             .get_select_list()
             .iter()
@@ -34,7 +36,8 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             .try_collect()?;
 
         Ok(ProjectExecutor::new(
-            params.input.remove(0),
+            params.actor_context,
+            input,
             params.pk_indices,
             project_exprs,
             params.executor_id,

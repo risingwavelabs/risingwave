@@ -12,22 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(once_cell)]
+#![feature(let_chains)]
+
 use std::vec;
 
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_frontend::binder::bind_data_type;
-use risingwave_frontend::expr::DataTypeName;
+use risingwave_common::types::DataTypeName;
+use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, ColumnDef, Cte, Expr, Ident, Join, JoinConstraint, JoinOperator, ObjectName,
-    OrderByExpr, Query, Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With,
+    BinaryOperator, ColumnDef, Cte, Distinct, Expr, Ident, Join, JoinConstraint, JoinOperator,
+    ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr, Statement, TableWithJoins, With,
 };
 use risingwave_sqlparser::parser::Parser;
 
 mod expr;
 pub use expr::print_function_table;
 mod relation;
+pub mod runner;
 mod scalar;
 mod time_window;
 mod utils;
@@ -282,12 +286,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         order_by
     }
 
-    fn gen_limit(&mut self) -> Option<Expr> {
+    fn gen_limit(&mut self) -> Option<String> {
         if !self.is_mview && self.rng.gen_bool(0.2) {
-            Some(Expr::Value(Value::Number(
-                self.rng.gen_range(0..=100).to_string(),
-                false,
-            )))
+            Some(self.rng.gen_range(0..=100).to_string())
         } else {
             None
         }
@@ -301,7 +302,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let having = self.gen_having(!group_by.is_empty());
         let (select_list, schema) = self.gen_select_list();
         let select = Select {
-            distinct: false,
+            distinct: Distinct::All,
             projection: select_list,
             from,
             lateral_views: vec![],
@@ -368,7 +369,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         if self.is_mview {
             // TODO: These constraints are workarounds required by mview.
-            // Tracked by: <https://github.com/singularity-data/risingwave/issues/4024>.
+            // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/4024>.
             assert!(!self.tables.is_empty());
             return from;
         }

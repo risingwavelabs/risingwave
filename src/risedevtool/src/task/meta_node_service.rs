@@ -75,11 +75,6 @@ impl MetaNodeService {
             }
         }
 
-        if config.enable_dashboard_v2 {
-            cmd.arg("--dashboard-ui-path")
-                .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
-        }
-
         if config.unsafe_disable_recovery {
             cmd.arg("--disable-recovery");
         }
@@ -88,6 +83,25 @@ impl MetaNodeService {
             if sec > 0 {
                 cmd.arg("--dangerous-max-idle-secs").arg(format!("{}", sec));
             }
+        }
+
+        cmd.arg("--vacuum-interval-sec")
+            .arg(format!("{}", config.vacuum_interval_sec))
+            .arg("--max-heartbeat-interval-secs")
+            .arg(format!("{}", config.max_heartbeat_interval_secs))
+            .arg("--collect-gc-watermark-spin-interval-sec")
+            .arg(format!("{}", config.collect_gc_watermark_spin_interval_sec))
+            .arg("--min-sst-retention-time-sec")
+            .arg(format!("{}", config.min_sst_retention_time_sec))
+            .arg("--periodic-compaction-interval-sec")
+            .arg(format!("{}", config.periodic_compaction_interval_sec));
+
+        if config.enable_compaction_deterministic {
+            cmd.arg("--enable-compaction-deterministic");
+        }
+
+        if config.enable_committed_sst_sanity_check {
+            cmd.arg("--enable-committed-sst-sanity-check");
         }
 
         Ok(())
@@ -102,17 +116,30 @@ impl Task for MetaNodeService {
         let mut cmd = self.meta_node()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",
                 Path::new(&env::var("PREFIX_LOG")?).join(format!("profile-{}", self.id())),
             );
         }
+
+        if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
+            // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
+            cmd.env(
+                "_RJEM_MALLOC_CONF",
+                "prof:true,lg_prof_interval:32,lg_prof_sample:19,prof_prefix:meta-node",
+            );
+        }
+
         Self::apply_command_args(&mut cmd, &self.config)?;
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
+
+        cmd.arg("--dashboard-ui-path")
+            .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

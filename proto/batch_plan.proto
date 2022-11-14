@@ -10,7 +10,7 @@ import "plan_common.proto";
 option optimize_for = SPEED;
 
 message RowSeqScanNode {
-  plan_common.CellBasedTableDesc table_desc = 1;
+  plan_common.StorageTableDesc table_desc = 1;
   repeated int32 column_ids = 2;
   // All the ranges need to be read. i.e., they are OR'ed.
   //
@@ -23,7 +23,7 @@ message RowSeqScanNode {
 }
 
 message SysRowSeqScanNode {
-  string table_name = 1;
+  uint32 table_id = 1;
   repeated plan_common.ColumnDesc column_descs = 2;
 }
 
@@ -66,15 +66,21 @@ message FilterNode {
 message InsertNode {
   uint32 table_source_id = 1;
   repeated int32 column_ids = 2;
+  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
+  uint32 associated_mview_id = 3;
 }
 
 message DeleteNode {
   uint32 table_source_id = 1;
+  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
+  uint32 associated_mview_id = 2;
 }
 
 message UpdateNode {
   uint32 table_source_id = 1;
   repeated expr.ExprNode exprs = 2;
+  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
+  uint32 associated_mview_id = 3;
 }
 
 message ValuesNode {
@@ -85,19 +91,26 @@ message ValuesNode {
   repeated plan_common.Field fields = 2;
 }
 
-message OrderByNode {
+message SortNode {
   repeated plan_common.ColumnOrder column_orders = 1;
 }
 
 message TopNNode {
   repeated plan_common.ColumnOrder column_orders = 1;
-  uint32 limit = 2;
-  uint32 offset = 3;
+  uint64 limit = 2;
+  uint64 offset = 3;
+}
+
+message GroupTopNNode {
+  repeated plan_common.ColumnOrder column_orders = 1;
+  uint64 limit = 2;
+  uint64 offset = 3;
+  repeated uint32 group_key = 4;
 }
 
 message LimitNode {
-  uint32 limit = 1;
-  uint32 offset = 2;
+  uint64 limit = 1;
+  uint64 offset = 2;
 }
 
 message NestedLoopJoinNode {
@@ -133,6 +146,9 @@ message HashJoinNode {
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
   repeated uint32 output_indices = 5;
+  // Null safe means it treats `null = null` as true.
+  // Each key pair can be null safe independently. (left_key, right_key, null_safe)
+  repeated bool null_safe = 6;
 }
 
 message SortMergeJoinNode {
@@ -193,16 +209,35 @@ message MergeSortExchangeNode {
   repeated plan_common.ColumnOrder column_orders = 2;
 }
 
-message LookupJoinNode {
+message LocalLookupJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode condition = 2;
-  repeated uint32 build_side_key = 3;
-  plan_common.CellBasedTableDesc probe_side_table_desc = 4;
-  repeated uint32 probe_side_vnode_mapping = 5;
-  repeated int32 probe_side_column_ids = 6;
+  repeated uint32 outer_side_key = 3;
+  plan_common.StorageTableDesc inner_side_table_desc = 4;
+  repeated uint32 inner_side_vnode_mapping = 5;
+  repeated int32 inner_side_column_ids = 6;
   repeated uint32 output_indices = 7;
   repeated common.WorkerNode worker_nodes = 8;
+  // Null safe means it treats `null = null` as true.
+  // Each key pair can be null safe independently. (left_key, right_key, null_safe)
+  repeated bool null_safe = 9;
 }
+
+// RFC: A new schedule way for distributed lookup join
+// https://github.com/risingwavelabs/rfcs/pull/6
+message DistributedLookupJoinNode {
+  plan_common.JoinType join_type = 1;
+  expr.ExprNode condition = 2;
+  repeated uint32 outer_side_key = 3;
+  plan_common.StorageTableDesc inner_side_table_desc = 4;
+  repeated int32 inner_side_column_ids = 5;
+  repeated uint32 output_indices = 6;
+  // Null safe means it treats `null = null` as true.
+  // Each key pair can be null safe independently. (left_key, right_key, null_safe)
+  repeated bool null_safe = 7;
+}
+
+message UnionNode {}
 
 message PlanNode {
   repeated PlanNode children = 1;
@@ -214,7 +249,7 @@ message PlanNode {
     HashAggNode hash_agg = 7;
     FilterNode filter = 8;
     ExchangeNode exchange = 9;
-    OrderByNode order_by = 10;
+    SortNode sort = 10;
     NestedLoopJoinNode nested_loop_join = 11;
     TopNNode top_n = 14;
     SortAggNode sort_agg = 15;
@@ -228,8 +263,11 @@ message PlanNode {
     TableFunctionNode table_function = 26;
     SysRowSeqScanNode sys_row_seq_scan = 27;
     ExpandNode expand = 28;
-    LookupJoinNode lookup_join = 29;
+    LocalLookupJoinNode local_lookup_join = 29;
     ProjectSetNode project_set = 30;
+    UnionNode union = 31;
+    GroupTopNNode group_top_n = 32;
+    DistributedLookupJoinNode distributed_lookup_join = 33;
   }
   string identity = 24;
 }
@@ -245,6 +283,7 @@ message ExchangeInfo {
     SINGLE = 1;
     BROADCAST = 2;
     HASH = 3;
+    CONSISTENT_HASH = 4;
   }
   message BroadcastInfo {
     uint32 count = 1;
@@ -253,10 +292,16 @@ message ExchangeInfo {
     uint32 output_count = 1;
     repeated uint32 key = 3;
   }
+  message ConsistentHashInfo {
+    // `vmap` maps virtual node to down stream task id
+    repeated uint32 vmap = 1;
+    repeated uint32 key = 2;
+  }
   DistributionMode mode = 1;
   oneof distribution {
     BroadcastInfo broadcast_info = 2;
     HashInfo hash_info = 3;
+    ConsistentHashInfo consistent_hash_info = 4;
   }
 }
 

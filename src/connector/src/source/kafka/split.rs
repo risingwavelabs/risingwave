@@ -16,7 +16,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::source::SplitMetaData;
+use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct KafkaSplit {
@@ -27,8 +27,9 @@ pub struct KafkaSplit {
 }
 
 impl SplitMetaData for KafkaSplit {
-    fn id(&self) -> String {
-        format!("{}", self.partition)
+    fn id(&self) -> SplitId {
+        // TODO: should avoid constructing a string every time
+        format!("{}", self.partition).into()
     }
 
     fn encode_to_bytes(&self) -> Bytes {
@@ -62,5 +63,9 @@ impl KafkaSplit {
             self.stop_offset,
             self.topic.clone(),
         )
+    }
+
+    pub fn get_topic_and_partition(&self) -> (String, i32) {
+        (self.topic.clone(), self.partition)
     }
 }

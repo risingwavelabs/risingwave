@@ -8,16 +8,20 @@ risedev:
     # If you want to use the local s3 storage, enable the following line
     # - use: minio
 
-    # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
+   # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
     # - use: aws-s3
-    #   bucket: some-bucket
+      
+      # bucket: test-bucket
+      
+      # If you want to use other s3 compatible object store, open this flag:
+      # s3-compatible: false
+      
 
     # if you want to enable etcd backend, uncomment the following lines.
     # - use: etcd
     #   unsafe-no-fsync: true
 
     - use: meta-node
-      enable-dashboard-v2: false
       unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend
@@ -92,6 +96,23 @@ risedev:
     - use: kafka
       persist-data: true
 
+  full-compaction-test:
+    - use: aws-s3
+      bucket: some-bucket # configure a valid bucket name
+    - use: etcd
+    - use: meta-node
+      periodic-compaction-interval-sec: 99999
+      enable-compaction-deterministic: true
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+    - use: prometheus
+    - use: grafana
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
+
   full-benchmark:
     - use: minio
     - use: etcd
@@ -115,15 +136,24 @@ risedev:
 
   playground:
     - use: meta-node
-      enable-dashboard-v2: false
       unsafe-disable-recovery: true
       max-idle-secs-to-exit: 1800
     - use: compute-node
     - use: frontend
 
+  playground-test:
+    - use: meta-node
+      unsafe-disable-recovery: true
+      max-idle-secs-to-exit: 1800
+      vacuum-interval-sec: 1
+      collect-gc-watermark-spin-interval-sec: 1
+      min-sst-retention-time-sec: 0
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+
   playground-3cn:
     - use: meta-node
-      enable-dashboard-v2: false
       unsafe-disable-recovery: true
       max-idle-secs-to-exit: 1800
     - use: compute-node
@@ -140,7 +170,6 @@ risedev:
 
   docker-playground:
     - use: meta-node
-      enable-dashboard-v2: false
       unsafe-disable-recovery: true
       listen-address: "0.0.0.0"
       address: "127.0.0.1"
@@ -154,7 +183,6 @@ risedev:
   # The profile for the online playground
   online-docker-playground:
     - use: meta-node
-      enable-dashboard-v2: false
       unsafe-disable-recovery: true
       max-idle-secs-to-exit: 1800
       listen-address: "0.0.0.0"
@@ -252,16 +280,22 @@ risedev:
       id: compute-node-0
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-0}
+      async-stack-trace: verbose
+      enable-tiered-cache: true
 
     - use: compute-node
       id: compute-node-1
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-1}
+      async-stack-trace: verbose
+      enable-tiered-cache: true
 
     - use: compute-node
       id: compute-node-2
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-2}
+      async-stack-trace: verbose
+      enable-tiered-cache: true
 
     - use: frontend
       id: frontend-node-0
@@ -272,6 +306,8 @@ risedev:
       id: compactor-0
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-source-0}
+      max-concurrent-task-number: 15
+      compaction-worker-threads-number: 15
 
     - use: redpanda
       address: ${dns-host:rw-source-0}
@@ -296,7 +332,9 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
+      enable-committed-sst-sanity-check: true
     - use: compute-node
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
 
@@ -306,17 +344,78 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
+      enable-committed-sst-sanity-check: true
     - use: compute-node
       port: 5687
       exporter-port: 1222
+      enable-tiered-cache: true
     - use: compute-node
       port: 5688
       exporter-port: 1223
+      enable-tiered-cache: true
     - use: compute-node
       port: 5689
       exporter-port: 1224
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
+
+  ci-3cn-3fe:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+      enable-committed-sst-sanity-check: true
+    - use: compute-node
+      port: 5687
+      exporter-port: 1222
+      enable-tiered-cache: true
+    - use: compute-node
+      port: 5688
+      exporter-port: 1223
+      enable-tiered-cache: true
+    - use: compute-node
+      port: 5689
+      exporter-port: 1224
+      enable-tiered-cache: true
+    - use: frontend
+      port: 4565
+      exporter-port: 2222
+    - use: frontend
+      port: 4566
+      exporter-port: 2223
+    - use: frontend
+      port: 4567
+      exporter-port: 2224
+    - use: compactor
+
+  ci-3cn-3fe-in-memory:
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+      port: 5687
+      exporter-port: 1222
+      enable-in-memory-kv-state-backend: true
+    - use: compute-node
+      port: 5688
+      exporter-port: 1223
+      enable-in-memory-kv-state-backend: true
+    - use: compute-node
+      port: 5689
+      exporter-port: 1224
+      enable-in-memory-kv-state-backend: true
+    - use: frontend
+      port: 4565
+      exporter-port: 2222
+    - use: frontend
+      port: 4566
+      exporter-port: 2223
+    - use: frontend
+      port: 4567
+      exporter-port: 2224
 
   ci-kafka:
     - use: minio
@@ -325,6 +424,7 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
     - use: zookeeper
@@ -339,13 +439,26 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
     - use: redis
 
+  ci-compaction-test:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+      periodic-compaction-interval-sec: 99999
+      enable-compaction-deterministic: true
+    - use: compute-node
+      enable-tiered-cache: true
+    - use: frontend
+    - use: compactor
 
 compose:
-  risingwave: "ghcr.io/singularity-data/risingwave:latest"
+  risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
   minio: "quay.io/minio/minio:latest"
   redpanda: "docker.vectorized.io/vectorized/redpanda:latest"
@@ -423,6 +536,13 @@ template:
     # Id of this instance
     id: compute-node-${port}
 
+    # Whether to enable async stack trace for this compute node, `off`, `on`, or `verbose`.
+    # Considering the performance, `verbose` mode only effect under `release` profile with `debug_assertions` off.
+    async-stack-trace: on
+
+    # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
+    enable-tiered-cache: false
+
     # Minio instances used by this compute node
     provide-minio: "minio*"
 
@@ -443,6 +563,9 @@ template:
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
+
+    # Whether to enable in-memory pure KV state backend
+    enable-in-memory-kv-state-backend: false
 
   meta-node:
     # Meta-node advertise address
@@ -469,11 +592,30 @@ template:
     # Etcd backend config
     provide-etcd-backend: "etcd*"
 
-    # Whether to enable dashboard-v2
-    enable-dashboard-v2: false
+    # Maximum allowed heartbeat interval in seconds.
+    max-heartbeat-interval-secs: 600
 
     # Whether to disable recovery mode
     unsafe-disable-recovery: false
+
+    # Interval of GC stale metadata and SST
+    vacuum-interval-sec: 30
+
+    # Interval of periodical compaction
+    periodic-compaction-interval-sec: 60
+
+    # Whether run in compaction deterministic test mode
+    enable-compaction-deterministic: false
+
+    # The spin interval when collecting global GC watermark in hummock
+    collect-gc-watermark-spin-interval-sec: 5
+
+    # Threshold used by worker node to filter out new SSTs when scanning object store, during full SST GC.
+    # 7 days by default.
+    min-sst-retention-time-sec: 604800
+
+    # Enable sanity check when SSTs are committed. Disabled by default.
+    enable-committed-sst-sanity-check: false
 
   prometheus:
     # Advertise address of Prometheus
@@ -515,6 +657,9 @@ template:
     # Redpanda used by this Prometheus instance
     provide-redpanda: "redpanda*"
 
+    # Frontend used by this Prometheus instance
+    provide-frontend: "frontend*"
+
   frontend:
     # Advertise address of frontend
     address: "127.0.0.1"
@@ -524,6 +669,9 @@ template:
 
     # Listen address
     listen-address: ${address}
+
+    # Prometheus exporter listen port
+    exporter-port: 2222
 
     # Id of this instance
     id: frontend-${port}
@@ -561,6 +709,9 @@ template:
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
+
+    # Hint used by meta node
+    max-concurrent-task-number: 15
 
   grafana:
     # Listen address of Grafana
@@ -600,6 +751,9 @@ template:
     bucket: test-bucket
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
+
+    # used to support other s3 compatible object store. 
+    s3-compatible: false
 
   # Apache Kafka service
   kafka:

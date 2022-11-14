@@ -20,13 +20,16 @@ use risingwave_pb::expr::expr_node::Type;
 
 use super::BoxedExpression;
 use crate::expr::template::BinaryNullableExpression;
-use crate::for_all_cmp_variants;
 use crate::vector_op::array_access::array_access;
-use crate::vector_op::cmp::{general_is_distinct_from, str_is_distinct_from};
+use crate::vector_op::cmp::{
+    general_is_distinct_from, general_is_not_distinct_from, str_is_distinct_from,
+    str_is_not_distinct_from,
+};
 use crate::vector_op::conjunction::{and, or};
+use crate::{for_all_cmp_variants, ExprError, Result};
 
 macro_rules! gen_nullable_cmp_impl {
-    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),*) => {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),* $(,)?) => {
         match ($l.return_type(), $r.return_type()) {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
@@ -50,7 +53,10 @@ macro_rules! gen_nullable_cmp_impl {
                 }
             ),*
             _ => {
-                unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type())
+                return Err(ExprError::UnsupportedFunction(format!(
+                    "{:?} cmp {:?}",
+                    $l.return_type(), $r.return_type()
+                )));
             }
         }
     };
@@ -61,8 +67,8 @@ pub fn new_nullable_binary_expr(
     ret: DataType,
     l: BoxedExpression,
     r: BoxedExpression,
-) -> BoxedExpression {
-    match expr_type {
+) -> Result<BoxedExpression> {
+    let expr = match expr_type {
         Type::ArrayAccess => build_array_access_expr(ret, l, r),
         Type::And => Box::new(
             BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _>::new(l, r, ret, and),
@@ -70,14 +76,18 @@ pub fn new_nullable_binary_expr(
         Type::Or => Box::new(
             BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _>::new(l, r, ret, or),
         ),
-        Type::IsDistinctFrom => new_distinct_from_expr(l, r, ret),
+        Type::IsDistinctFrom => new_distinct_from_expr(l, r, ret)?,
+        Type::IsNotDistinctFrom => new_not_distinct_from_expr(l, r, ret)?,
         tp => {
-            unimplemented!(
-                "The expression {:?} using vectorized expression framework is not supported yet!",
-                tp
-            )
+            return Err(ExprError::UnsupportedFunction(format!(
+                "{:?}({:?}, {:?})",
+                tp,
+                l.return_type(),
+                r.return_type(),
+            )));
         }
-    }
+    };
+    Ok(expr)
 }
 
 fn build_array_access_expr(
@@ -121,10 +131,10 @@ pub fn new_distinct_from_expr(
     l: BoxedExpression,
     r: BoxedExpression,
     ret: DataType,
-) -> BoxedExpression {
+) -> Result<BoxedExpression> {
     use crate::expr::data_types::*;
 
-    match (l.return_type(), r.return_type()) {
+    let expr: BoxedExpression = match (l.return_type(), r.return_type()) {
         (DataType::Varchar, DataType::Varchar) => Box::new(BinaryNullableExpression::<
             Utf8Array,
             Utf8Array,
@@ -136,7 +146,31 @@ pub fn new_distinct_from_expr(
         _ => {
             for_all_cmp_variants! {gen_nullable_cmp_impl, l, r, ret, general_is_distinct_from}
         }
-    }
+    };
+    Ok(expr)
+}
+
+pub fn new_not_distinct_from_expr(
+    l: BoxedExpression,
+    r: BoxedExpression,
+    ret: DataType,
+) -> Result<BoxedExpression> {
+    use crate::expr::data_types::*;
+
+    let expr: BoxedExpression = match (l.return_type(), r.return_type()) {
+        (DataType::Varchar, DataType::Varchar) => Box::new(BinaryNullableExpression::<
+            Utf8Array,
+            Utf8Array,
+            BoolArray,
+            _,
+        >::new(
+            l, r, ret, str_is_not_distinct_from
+        )),
+        _ => {
+            for_all_cmp_variants! {gen_nullable_cmp_impl, l, r, ret, general_is_not_distinct_from}
+        }
+    };
+    Ok(expr)
 }
 
 #[cfg(test)]
@@ -257,6 +291,36 @@ mod tests {
 
         let expr = make_expression(
             Type::IsDistinctFrom,
+            &[TypeName::Int32, TypeName::Int32],
+            &[0, 1],
+        );
+        let vec_executor = build_from_prost(&expr).unwrap();
+
+        for i in 0..lhs.len() {
+            let row = Row::new(vec![
+                lhs[i].map(|x| x.to_scalar_value()),
+                rhs[i].map(|x| x.to_scalar_value()),
+            ]);
+            let res = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].map(|x| x.to_scalar_value());
+            assert_eq!(res, expected);
+        }
+    }
+
+    #[test]
+    fn test_is_not_distinct_from() {
+        let lhs = vec![None, None, Some(1), Some(2), Some(3)];
+        let rhs = vec![None, Some(1), None, Some(2), Some(4)];
+        let target = vec![
+            Some(true),
+            Some(false),
+            Some(false),
+            Some(true),
+            Some(false),
+        ];
+
+        let expr = make_expression(
+            Type::IsNotDistinctFrom,
             &[TypeName::Int32, TypeName::Int32],
             &[0, 1],
         );

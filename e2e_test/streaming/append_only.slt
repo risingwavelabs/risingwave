@@ -1,8 +1,8 @@
 statement ok
-create table t1 (v1 int not null, v2 int not null) with (appendonly = true);
+create table t1 (v1 int, v2 int) with (appendonly = true);
 
 statement ok
-create table t2 (v1 int not null, v3 int not null) with (appendonly = true);
+create table t2 (v1 int, v3 int) with (appendonly = true);
 
 statement ok
 insert into t1 values (1,2), (2,3);
@@ -37,7 +37,7 @@ select * from mv1;
 
 ## HashAgg
 statement ok
-create table t4 (v1 real not null, v2 int not null, v3 real not null) with (appendonly = true);
+create table t4 (v1 real, v2 int, v3 real) with (appendonly = true);
 
 statement ok
 insert into t4 values (1,1,4), (5,1,4), (1,9,1), (9,8,1), (0,2,3);

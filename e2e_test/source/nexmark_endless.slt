@@ -1,0 +1,29 @@
+include ../nexmark/create_sources.slt.part
+
+# Note: It will take a very long time to create all of the NexMark materialized views,
+# so we just create Q5 and Q7 here
+include ../streaming/nexmark/views/q7.slt.part
+include ../streaming/nexmark/views/q5.slt.part
+
+sleep 15s
+
+statement ok
+flush;
+
+query I
+select count(*) > 0 as has_results from nexmark_q7;
+----
+t
+
+query I
+select count(*) > 0 as has_results from nexmark_q5;
+----
+t
+
+statement ok
+drop materialized view nexmark_q7;
+
+statement ok
+drop materialized view nexmark_q5;
+
+include ../nexmark/drop_sources.slt.part

@@ -16,10 +16,11 @@ use std::sync::Arc;
 
 use risingwave_common::config::BatchConfig;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_source::{SourceManager, SourceManagerRef};
+use risingwave_rpc_client::ComputeClientPoolRef;
+use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
-use crate::executor::monitor::BatchMetrics;
+use crate::executor::BatchTaskMetrics;
 use crate::task::BatchManager;
 
 pub(crate) type WorkerNodeId = u32;
@@ -35,7 +36,7 @@ pub struct BatchEnvironment {
     task_manager: Arc<BatchManager>,
 
     /// Reference to the source manager. This is used to query the sources.
-    source_manager: SourceManagerRef,
+    source_manager: TableSourceManagerRef,
 
     /// Batch related configurations.
     config: Arc<BatchConfig>,
@@ -46,19 +47,24 @@ pub struct BatchEnvironment {
     /// State store for table scanning.
     state_store: StateStoreImpl,
 
-    /// Statistics.
-    stats: Arc<BatchMetrics>,
+    /// Task level metrics.
+    task_metrics: Arc<BatchTaskMetrics>,
+
+    /// Compute client pool for grpc exchange.
+    client_pool: ComputeClientPoolRef,
 }
 
 impl BatchEnvironment {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        source_manager: SourceManagerRef,
+        source_manager: TableSourceManagerRef,
         task_manager: Arc<BatchManager>,
         server_addr: HostAddr,
         config: Arc<BatchConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
-        stats: Arc<BatchMetrics>,
+        task_metrics: Arc<BatchTaskMetrics>,
+        client_pool: ComputeClientPoolRef,
     ) -> Self {
         BatchEnvironment {
             server_addr,
@@ -67,26 +73,28 @@ impl BatchEnvironment {
             config,
             worker_id,
             state_store,
-            stats,
+            task_metrics,
+            client_pool,
         }
     }
 
     // Create an instance for testing purpose.
     #[cfg(test)]
     pub fn for_test() -> Self {
-        use risingwave_source::MemSourceManager;
+        use risingwave_rpc_client::ComputeClientPool;
         use risingwave_storage::monitor::StateStoreMetrics;
 
         BatchEnvironment {
-            task_manager: Arc::new(BatchManager::new()),
+            task_manager: Arc::new(BatchManager::new(None)),
             server_addr: "127.0.0.1:5688".parse().unwrap(),
-            source_manager: std::sync::Arc::new(MemSourceManager::default()),
+            source_manager: std::sync::Arc::new(TableSourceManager::default()),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 StateStoreMetrics::unused(),
             )),
-            stats: Arc::new(BatchMetrics::unused()),
+            task_metrics: Arc::new(BatchTaskMetrics::for_test()),
+            client_pool: Arc::new(ComputeClientPool::default()),
         }
     }
 
@@ -98,12 +106,11 @@ impl BatchEnvironment {
         self.task_manager.clone()
     }
 
-    #[expect(clippy::explicit_auto_deref)]
-    pub fn source_manager(&self) -> &dyn SourceManager {
-        &*self.source_manager
+    pub fn source_manager(&self) -> &TableSourceManager {
+        &self.source_manager
     }
 
-    pub fn source_manager_ref(&self) -> SourceManagerRef {
+    pub fn source_manager_ref(&self) -> TableSourceManagerRef {
         self.source_manager.clone()
     }
 
@@ -119,7 +126,11 @@ impl BatchEnvironment {
         self.state_store.clone()
     }
 
-    pub fn stats(&self) -> Arc<BatchMetrics> {
-        self.stats.clone()
+    pub fn task_metrics(&self) -> Arc<BatchTaskMetrics> {
+        self.task_metrics.clone()
+    }
+
+    pub fn client_pool(&self) -> ComputeClientPoolRef {
+        self.client_pool.clone()
     }
 }

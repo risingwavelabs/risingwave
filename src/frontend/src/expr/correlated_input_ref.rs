@@ -21,7 +21,7 @@ use super::Expr;
 pub type Depth = usize;
 pub type CorrelatedId = u32;
 
-/// Relative `Depth` is the number of of nesting levels of the subquery relative to the refered
+/// Relative `Depth` is the number of of nesting levels of the subquery relative to the referred
 /// relation, and should be non-zero.
 /// Absolute `CorrelatedId` is the id of the related Apply operator, and should be non-zero.
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -32,7 +32,7 @@ pub enum Position {
 
 /// A reference to a column outside the subquery.
 ///
-/// `index` is the index in the refered relation.
+/// `index` is the index in the referred relation.
 /// `position` has two mode Relative and Absolute.
 /// For binding we use relative position, for optimization we use absolute position.
 #[derive(Clone, Eq, PartialEq, Hash)]

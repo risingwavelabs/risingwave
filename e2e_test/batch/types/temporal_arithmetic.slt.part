@@ -1,0 +1,199 @@
+query T
+select timestamp '1926-08-17 00:00:00' + interval '1' second + interval '1' second;
+----
+1926-08-17 00:00:02
+
+query T
+select timestamp '1926-08-17 00:00:00' + interval '1' year + interval '14' month - interval '1' day + interval '1' hour + interval '1' minute - interval '1' second;
+----
+1928-10-16 01:00:59
+
+query T
+select interval '1' day + timestamp '2022-02-22 00:00:00';
+----
+2022-02-23 00:00:00
+
+query T
+select interval '1' second * 59;
+----
+00:00:59
+
+query T
+select 61 * interval '1' second;
+----
+00:01:01
+
+query T
+select timestamp '1926-08-17 00:00:00';
+----
+1926-08-17 00:00:00
+
+query T
+select timestamp '1926-08-17';
+----
+1926-08-17 00:00:00
+
+query T
+select timestamp '1926-08-17' + interval '1' year + interval '14' month - interval '1' day + interval '1' hour + interval '1' minute - interval '1' second;
+----
+1928-10-16 01:00:59
+
+query T
+select interval '1' day + timestamp '2022-02-22';
+----
+2022-02-23 00:00:00
+
+query T
+select timestamp '2022-02-22 10:23';
+----
+2022-02-22 10:23:00
+
+query T
+select time '10:23';
+----
+10:23:00
+
+query T
+select interval '14000' / int '14';
+----
+00:16:40
+
+query T
+select interval '20' / float '12.5';
+----
+00:00:01.6
+
+query T
+select interval '12 days' / 4.2;
+----
+2 days 20:34:17.143
+
+query T
+SELECT interval '1 month' / 2000;
+----
+00:21:36
+
+query T
+select interval '1' year / 5;
+----
+2 mons 12 days 00:00:00
+
+query T
+select Date '2022-06-23' + 4;
+----
+2022-06-27
+
+query T
+select 4 + Date '2022-06-23';
+----
+2022-06-27
+
+query T
+select Date '2022-06-23' - 4;
+----
+2022-06-19
+
+query T
+select Date '2022-06-23' + TIME '19:24:00';
+----
+2022-06-23 19:24:00
+
+query T
+select TIME '19:24:00' + Date '2022-06-23';
+----
+2022-06-23 19:24:00
+
+query T
+select TIME '18:20:49' - TIME '16:07:16';
+----
+02:13:33
+
+query T
+select TIME '18:20:49' - interval '2 hours';
+----
+16:20:49
+
+query T
+select TIME '18:20:49' - interval '1 day';
+----
+18:20:49
+
+query T
+select TIME '18:20:49' + interval '1 day';
+----
+18:20:49
+
+query T
+select TIME '18:20:49' + interval '1 hour';
+----
+19:20:49
+
+query T
+select real '6.1' * interval '1' second;
+----
+00:00:06.1
+
+query T
+select real '61.1' * interval '1' second;
+----
+00:01:01.1
+
+query T
+select real '0.0' * interval '1' second;
+----
+00:00:00
+
+query T
+select real '0' * interval '1' second;
+----
+00:00:00
+
+query T
+select real '86' * interval '849884';
+----
+2 years 4 mons 5 days 22:47:04
+
+query T
+select interval '1' second * real '6.1';
+----
+00:00:06.1
+
+query T
+select interval '1' second * real '61.1';
+----
+00:01:01.1
+
+query T
+select interval '1' second * real '0.0';
+----
+00:00:00
+
+query T
+select interval '1' second * real '0';
+----
+00:00:00
+
+query T
+select interval '849884' * real '86';
+----
+2 years 4 mons 5 days 22:47:04
+
+query T
+select '12:30:00'::time * 2;
+----
+25:00:00
+
+query T
+select interval '1' / 10;
+----
+00:00:00.1
+
+query T
+select interval '1' / 100;
+----
+00:00:00.01
+
+query T
+select interval '1' / 1000;
+----
+00:00:00.001

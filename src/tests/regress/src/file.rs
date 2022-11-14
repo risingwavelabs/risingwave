@@ -18,7 +18,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
-use log::info;
+use tracing::info;
 
 use crate::Opts;
 

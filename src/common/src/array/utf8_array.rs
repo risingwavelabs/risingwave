@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{Hash, Hasher};
 use std::iter;
 use std::mem::size_of;
 
@@ -21,12 +20,12 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, ArrayResult, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, ArrayResult};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
 /// `Utf8Array` is a collection of Rust Utf8 `String`s.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Utf8Array {
     offset: Vec<usize>,
     bitmap: Bitmap,
@@ -121,29 +120,29 @@ impl Array for Utf8Array {
         self.bitmap = bitmap;
     }
 
-    #[inline(always)]
-    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
-        if !self.is_null(idx) {
-            let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
-            state.write(data_slice);
-        } else {
-            NULL_VAL_FOR_HASH.hash(state);
-        }
-    }
-
-    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = Utf8ArrayBuilder::new(capacity);
-        Ok(ArrayBuilderImpl::Utf8(array_builder))
+        ArrayBuilderImpl::Utf8(array_builder)
     }
 }
 
 impl Utf8Array {
-    pub fn from_slice(data: &[Option<&str>]) -> ArrayResult<Self> {
+    pub fn from_slice(data: &[Option<&str>]) -> Self {
         let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
-            builder.append(*i)?;
+            builder.append(*i);
         }
         builder.finish()
+    }
+
+    /// Retrieve the ownership of the single string value. Panics if there're multiple or no values.
+    pub fn into_single_value(self) -> Option<String> {
+        assert_eq!(self.len(), 1);
+        if !self.is_null(0) {
+            Some(unsafe { String::from_utf8_unchecked(self.data) })
+        } else {
+            None
+        }
     }
 }
 
@@ -168,7 +167,7 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         }
     }
 
-    fn append<'a>(&'a mut self, value: Option<&'a str>) -> ArrayResult<()> {
+    fn append<'a>(&'a mut self, value: Option<&'a str>) {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
@@ -180,10 +179,9 @@ impl ArrayBuilder for Utf8ArrayBuilder {
                 self.offset.push(self.data.len())
             }
         }
-        Ok(())
     }
 
-    fn append_array(&mut self, other: &Utf8Array) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &Utf8Array) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
@@ -192,15 +190,25 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         for other_offset in &other.offset[1..] {
             self.offset.push(*other_offset + start);
         }
-        Ok(())
     }
 
-    fn finish(self) -> ArrayResult<Utf8Array> {
-        Ok(Utf8Array {
+    fn pop(&mut self) -> Option<()> {
+        if self.bitmap.pop().is_some() {
+            self.offset.pop().unwrap();
+            let end = self.offset.last().unwrap();
+            self.data.truncate(*end);
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    fn finish(self) -> Utf8Array {
+        Utf8Array {
             bitmap: (self.bitmap).finish(),
             data: self.data,
             offset: self.offset,
-        })
+        }
     }
 }
 
@@ -234,7 +242,7 @@ pub struct BytesWriter {
 impl BytesWriter {
     /// `write_ref` will consume `BytesWriter` and pass the ownership of `builder` to `BytesGuard`.
     pub fn write_ref(mut self, value: &str) -> ArrayResult<BytesGuard> {
-        self.builder.append(Some(value))?;
+        self.builder.append(Some(value));
         Ok(BytesGuard {
             builder: self.builder,
         })
@@ -301,9 +309,12 @@ impl BytesGuard {
 
 #[cfg(test)]
 mod tests {
+    use std::hash::Hash;
+
     use itertools::Itertools;
 
     use super::*;
+    use crate::array::NULL_VAL_FOR_HASH;
     use crate::error::Result;
 
     #[test]
@@ -311,12 +322,12 @@ mod tests {
         let mut builder = Utf8ArrayBuilder::new(0);
         for i in 0..100 {
             if i % 2 == 0 {
-                builder.append(Some(&format!("{}", i))).unwrap();
+                builder.append(Some(&format!("{}", i)));
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
-        builder.finish().unwrap();
+        builder.finish();
     }
 
     #[test]
@@ -329,7 +340,7 @@ mod tests {
         }
         let guard = partial_writer.finish()?;
         let builder = guard.into_inner();
-        let array = builder.finish()?;
+        let array = builder.finish();
         assert_eq!(array.len(), 1);
         assert_eq!(array.value_at(0), Some("ranran"));
         assert_eq!(unsafe { array.value_at_unchecked(0) }, Some("ranran"));
@@ -348,11 +359,7 @@ mod tests {
             Some("666666"),
         ];
 
-        let result_array = Utf8Array::from_slice(&input);
-
-        assert!(result_array.is_ok());
-        let array = result_array.unwrap();
-
+        let array = Utf8Array::from_slice(&input);
         assert_eq!(array.len(), input.len());
 
         assert_eq!(
@@ -374,10 +381,7 @@ mod tests {
             Some("666666"),
         ];
 
-        let result_array = Utf8Array::from_slice(&input);
-
-        assert!(result_array.is_ok());
-        let array = result_array.unwrap();
+        let array = Utf8Array::from_slice(&input);
         let buffers = array.to_protobuf().values;
         assert!(buffers.len() >= 2);
     }
@@ -420,10 +424,7 @@ mod tests {
                 .collect_vec(),
         ];
 
-        let arrs = vecs
-            .iter()
-            .map(|v| Utf8Array::from_slice(v).unwrap())
-            .collect_vec();
+        let arrs = vecs.iter().map(|v| Utf8Array::from_slice(v)).collect_vec();
 
         let hasher_builder = RandomXxHashBuilder64::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];

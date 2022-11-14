@@ -1,0 +1,68 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation 
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE a (c STRUCT<i STRUCT<a INTEGER>, j INTEGER>);
+
+statement ok
+INSERT INTO a VALUES (ROW(ROW(3), 4))
+
+query I
+SELECT * FROM a
+----
+((3),4)
+
+query I
+SELECT ((c).i).a FROM a
+----
+3
+
+statement ok
+INSERT INTO a VALUES (NULL)
+
+query I rowsort
+SELECT * FROM a
+----
+((3),4)
+NULL
+
+query I rowsort
+SELECT ((c).i).a FROM a
+----
+3
+NULL
+
+# nulls at different levels
+statement ok
+INSERT INTO a VALUES (ROW(ROW(NULL), 1))
+
+statement ok
+INSERT INTO a VALUES (ROW(ROW(1), NULL))
+
+statement ok
+INSERT INTO a VALUES (ROW(NULL, 1))
+
+query I rowsort
+SELECT * FROM a
+----
+(NULL,1)
+((NULL),1)
+((3),4)
+((1),NULL)
+NULL
+
+# nested struct mismatch on insertion
+statement error
+INSERT INTO a VALUES (1)
+
+statement error
+INSERT INTO a VALUES (ROW(1, 2))
+
+statement error
+INSERT INTO a VALUES (ROW(ROW(1, 2, 3), 1))
+
+statement ok
+DROP TABLE a;

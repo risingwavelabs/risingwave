@@ -12,19 +12,86 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Debug;
+use std::io::{Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
+use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
+use postgres_types::{ToSql, Type};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
-#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+use super::to_binary::ToBinary;
+use super::to_text::ToText;
+use crate::array::ArrayResult;
+
+#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
+    #[display("{0}")]
     Normalized(RustDecimal),
+    #[display("NaN")]
     NaN,
-    PositiveINF,
-    NegativeINF,
+    #[display("Infinity")]
+    PositiveInf,
+    #[display("-Infinity")]
+    NegativeInf,
+}
+
+impl ToText for Decimal {
+    fn to_text(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl Decimal {
+    /// Used by `PrimitiveArray` to serialize the array to protobuf.
+    pub fn to_protobuf(self, output: &mut impl Write) -> ArrayResult<usize> {
+        let buf = self.unordered_serialize();
+        output.write_all(&buf)?;
+        Ok(buf.len())
+    }
+
+    /// Used by `DecimalValueReader` to deserialize the array from protobuf.
+    pub fn from_protobuf(input: &mut impl Read) -> ArrayResult<Self> {
+        let mut buf = [0u8; 16];
+        input.read_exact(&mut buf)?;
+        Ok(Self::unordered_deserialize(buf))
+    }
+}
+
+impl ToBinary for Decimal {
+    fn to_binary(&self) -> Option<Bytes> {
+        let mut output = BytesMut::new();
+        match self {
+            Decimal::Normalized(d) => {
+                d.to_sql(&Type::ANY, &mut output).unwrap();
+                return Some(output.freeze());
+            }
+            Decimal::NaN => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xC000);
+                output.put_i16(0);
+            }
+            Decimal::PositiveInf => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xD000);
+                output.put_i16(0);
+            }
+            Decimal::NegativeInf => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xF000);
+                output.put_i16(0);
+            }
+        };
+        Some(output.freeze())
+    }
 }
 
 macro_rules! impl_from_integer {
@@ -52,8 +119,8 @@ macro_rules! impl_to_float {
             match self {
                 Self::Normalized(d) => d.$to_float(),
                 Self::NaN => Some(<$T>::NAN),
-                Self::PositiveINF => Some(<$T>::INFINITY),
-                Self::NegativeINF => Some(<$T>::NEG_INFINITY),
+                Self::PositiveInf => Some(<$T>::INFINITY),
+                Self::NegativeInf => Some(<$T>::NEG_INFINITY),
             }
         })*
     }
@@ -64,8 +131,8 @@ macro_rules! impl_from_float {
         $(fn $from_float(num: $T) -> Option<Self> {
             match num {
                 num if num.is_nan() => Some(Decimal::NaN),
-                num if num.is_infinite() && num.is_sign_positive() => Some(Decimal::PositiveINF),
-                num if num.is_infinite() && num.is_sign_negative() => Some(Decimal::NegativeINF),
+                num if num.is_infinite() && num.is_sign_positive() => Some(Decimal::PositiveInf),
+                num if num.is_infinite() && num.is_sign_negative() => Some(Decimal::NegativeInf),
                 num => {
                     RustDecimal::$from_float(num).map(Decimal::Normalized)
                 },
@@ -179,12 +246,12 @@ impl Add for Decimal {
             (Self::Normalized(lhs), Self::Normalized(rhs)) => Self::Normalized(lhs + rhs),
             (Self::NaN, _) => Self::NaN,
             (_, Self::NaN) => Self::NaN,
-            (Self::PositiveINF, Self::NegativeINF) => Self::NaN,
-            (Self::NegativeINF, Self::PositiveINF) => Self::NaN,
-            (Self::PositiveINF, _) => Self::PositiveINF,
-            (_, Self::PositiveINF) => Self::PositiveINF,
-            (Self::NegativeINF, _) => Self::NegativeINF,
-            (_, Self::NegativeINF) => Self::NegativeINF,
+            (Self::PositiveInf, Self::NegativeInf) => Self::NaN,
+            (Self::NegativeInf, Self::PositiveInf) => Self::NaN,
+            (Self::PositiveInf, _) => Self::PositiveInf,
+            (_, Self::PositiveInf) => Self::PositiveInf,
+            (Self::NegativeInf, _) => Self::NegativeInf,
+            (_, Self::NegativeInf) => Self::NegativeInf,
         }
     }
 }
@@ -196,8 +263,8 @@ impl Neg for Decimal {
         match self {
             Self::Normalized(d) => Self::Normalized(-d),
             Self::NaN => Self::NaN,
-            Self::PositiveINF => Self::NegativeINF,
-            Self::NegativeINF => Self::PositiveINF,
+            Self::PositiveInf => Self::NegativeInf,
+            Self::NegativeInf => Self::PositiveInf,
         }
     }
 }
@@ -207,8 +274,8 @@ impl CheckedNeg for Decimal {
         match self {
             Self::Normalized(d) => Some(Self::Normalized(-d)),
             Self::NaN => Some(Self::NaN),
-            Self::PositiveINF => Some(Self::NegativeINF),
-            Self::NegativeINF => Some(Self::PositiveINF),
+            Self::PositiveInf => Some(Self::NegativeInf),
+            Self::NegativeInf => Some(Self::PositiveInf),
         }
     }
 }
@@ -222,18 +289,18 @@ impl Rem for Decimal {
                 Self::Normalized(lhs % rhs)
             }
             (Self::Normalized(_), Self::Normalized(_)) => Self::NaN,
-            (Self::Normalized(lhs), Self::PositiveINF)
+            (Self::Normalized(lhs), Self::PositiveInf)
                 if lhs.is_sign_positive() || lhs.is_zero() =>
             {
                 Self::Normalized(lhs)
             }
-            (Self::Normalized(d), Self::PositiveINF) => Self::Normalized(d),
-            (Self::Normalized(lhs), Self::NegativeINF)
+            (Self::Normalized(d), Self::PositiveInf) => Self::Normalized(d),
+            (Self::Normalized(lhs), Self::NegativeInf)
                 if lhs.is_sign_negative() || lhs.is_zero() =>
             {
                 Self::Normalized(lhs)
             }
-            (Self::Normalized(d), Self::NegativeINF) => Self::Normalized(d),
+            (Self::Normalized(d), Self::NegativeInf) => Self::Normalized(d),
             _ => Self::NaN,
         }
     }
@@ -251,27 +318,27 @@ impl Div for Decimal {
             (lhs, Self::Normalized(rhs)) if rhs.is_zero() => match lhs {
                 Self::Normalized(lhs) => {
                     if lhs.is_sign_positive() && !lhs.is_zero() {
-                        Self::PositiveINF
+                        Self::PositiveInf
                     } else if lhs.is_sign_negative() && !lhs.is_zero() {
-                        Self::NegativeINF
+                        Self::NegativeInf
                     } else {
                         Self::NaN
                     }
                 }
-                Self::PositiveINF => Self::PositiveINF,
-                Self::NegativeINF => Self::NegativeINF,
+                Self::PositiveInf => Self::PositiveInf,
+                Self::NegativeInf => Self::NegativeInf,
                 _ => unreachable!(),
             },
             // div by +/-inf
-            (Self::Normalized(_), Self::PositiveINF) => Self::Normalized(RustDecimal::from(0)),
-            (_, Self::PositiveINF) => Self::NaN,
-            (Self::Normalized(_), Self::NegativeINF) => Self::Normalized(RustDecimal::from(0)),
-            (_, Self::NegativeINF) => Self::NaN,
+            (Self::Normalized(_), Self::PositiveInf) => Self::Normalized(RustDecimal::from(0)),
+            (_, Self::PositiveInf) => Self::NaN,
+            (Self::Normalized(_), Self::NegativeInf) => Self::Normalized(RustDecimal::from(0)),
+            (_, Self::NegativeInf) => Self::NaN,
             // div inf
-            (Self::PositiveINF, Self::Normalized(d)) if d.is_sign_positive() => Self::PositiveINF,
-            (Self::PositiveINF, Self::Normalized(d)) if d.is_sign_negative() => Self::NegativeINF,
-            (Self::NegativeINF, Self::Normalized(d)) if d.is_sign_positive() => Self::NegativeINF,
-            (Self::NegativeINF, Self::Normalized(d)) if d.is_sign_negative() => Self::PositiveINF,
+            (Self::PositiveInf, Self::Normalized(d)) if d.is_sign_positive() => Self::PositiveInf,
+            (Self::PositiveInf, Self::Normalized(d)) if d.is_sign_negative() => Self::NegativeInf,
+            (Self::NegativeInf, Self::Normalized(d)) if d.is_sign_positive() => Self::NegativeInf,
+            (Self::NegativeInf, Self::Normalized(d)) if d.is_sign_negative() => Self::PositiveInf,
             // normal case
             (Self::Normalized(lhs), Self::Normalized(rhs)) => Self::Normalized(lhs / rhs),
             _ => unreachable!(),
@@ -287,49 +354,49 @@ impl Mul for Decimal {
             (Self::Normalized(lhs), Self::Normalized(rhs)) => Self::Normalized(lhs * rhs),
             (Self::NaN, _) => Self::NaN,
             (_, Self::NaN) => Self::NaN,
-            (Self::PositiveINF, Self::Normalized(rhs))
+            (Self::PositiveInf, Self::Normalized(rhs))
                 if !rhs.is_zero() && rhs.is_sign_negative() =>
             {
-                Self::NegativeINF
+                Self::NegativeInf
             }
-            (Self::PositiveINF, Self::Normalized(rhs))
+            (Self::PositiveInf, Self::Normalized(rhs))
                 if !rhs.is_zero() && rhs.is_sign_positive() =>
             {
-                Self::PositiveINF
+                Self::PositiveInf
             }
-            (Self::PositiveINF, Self::PositiveINF) => Self::PositiveINF,
-            (Self::PositiveINF, Self::NegativeINF) => Self::NegativeINF,
-            (Self::Normalized(lhs), Self::PositiveINF)
+            (Self::PositiveInf, Self::PositiveInf) => Self::PositiveInf,
+            (Self::PositiveInf, Self::NegativeInf) => Self::NegativeInf,
+            (Self::Normalized(lhs), Self::PositiveInf)
                 if !lhs.is_zero() && lhs.is_sign_negative() =>
             {
-                Self::NegativeINF
+                Self::NegativeInf
             }
-            (Self::Normalized(lhs), Self::PositiveINF)
+            (Self::Normalized(lhs), Self::PositiveInf)
                 if !lhs.is_zero() && lhs.is_sign_positive() =>
             {
-                Self::PositiveINF
+                Self::PositiveInf
             }
-            (Self::NegativeINF, Self::PositiveINF) => Self::NegativeINF,
-            (Self::NegativeINF, Self::Normalized(rhs))
+            (Self::NegativeInf, Self::PositiveInf) => Self::NegativeInf,
+            (Self::NegativeInf, Self::Normalized(rhs))
                 if !rhs.is_zero() && rhs.is_sign_negative() =>
             {
-                Self::PositiveINF
+                Self::PositiveInf
             }
-            (Self::NegativeINF, Self::Normalized(rhs))
+            (Self::NegativeInf, Self::Normalized(rhs))
                 if !rhs.is_zero() && rhs.is_sign_positive() =>
             {
-                Self::NegativeINF
+                Self::NegativeInf
             }
-            (Self::NegativeINF, Self::NegativeINF) => Self::PositiveINF,
-            (Self::Normalized(lhs), Self::NegativeINF)
+            (Self::NegativeInf, Self::NegativeInf) => Self::PositiveInf,
+            (Self::Normalized(lhs), Self::NegativeInf)
                 if !lhs.is_zero() && lhs.is_sign_negative() =>
             {
-                Self::PositiveINF
+                Self::PositiveInf
             }
-            (Self::Normalized(lhs), Self::NegativeINF)
+            (Self::Normalized(lhs), Self::NegativeInf)
                 if !lhs.is_zero() && lhs.is_sign_positive() =>
             {
-                Self::NegativeINF
+                Self::NegativeInf
             }
             // 0 * {inf, nan} => nan
             _ => Self::NaN,
@@ -345,23 +412,12 @@ impl Sub for Decimal {
             (Self::Normalized(lhs), Self::Normalized(rhs)) => Self::Normalized(lhs - rhs),
             (Self::NaN, _) => Self::NaN,
             (_, Self::NaN) => Self::NaN,
-            (Self::PositiveINF, Self::PositiveINF) => Self::NaN,
-            (Self::NegativeINF, Self::NegativeINF) => Self::NaN,
-            (Self::PositiveINF, _) => Self::PositiveINF,
-            (_, Self::PositiveINF) => Self::NegativeINF,
-            (Self::NegativeINF, _) => Self::NegativeINF,
-            (_, Self::NegativeINF) => Self::PositiveINF,
-        }
-    }
-}
-
-impl Display for Decimal {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Normalized(d) => Display::fmt(&d, f),
-            Self::NaN => Display::fmt("NaN", f),
-            Self::PositiveINF => Display::fmt("+Inf", f),
-            Self::NegativeINF => Display::fmt("-Inf", f),
+            (Self::PositiveInf, Self::PositiveInf) => Self::NaN,
+            (Self::NegativeInf, Self::NegativeInf) => Self::NaN,
+            (Self::PositiveInf, _) => Self::PositiveInf,
+            (_, Self::PositiveInf) => Self::NegativeInf,
+            (Self::NegativeInf, _) => Self::NegativeInf,
+            (_, Self::NegativeInf) => Self::PositiveInf,
         }
     }
 }
@@ -463,7 +519,7 @@ impl Decimal {
         // Since the largest scale supported by `rust_decimal` is 28,
         // and we first compare scale, we use 29 and 30 to denote +Inf and NaN.
         match self {
-            Self::NegativeINF => (0, 29),
+            Self::NegativeInf => (0, 29),
             Self::Normalized(d) => {
                 // We remark that we do not dynamic numeric, i.e. the scale of all the numeric in
                 // the system is fixed. So we don't need to do any rescale, just use
@@ -472,7 +528,7 @@ impl Decimal {
                 // 28.
                 (d.mantissa(), d.scale() as u8)
             }
-            Self::PositiveINF => (0, 30),
+            Self::PositiveInf => (0, 30),
             Self::NaN => (0, 31),
         }
     }
@@ -483,8 +539,8 @@ impl Decimal {
         match self {
             Self::Normalized(d) => d.serialize(),
             Self::NaN => [vec![1u8], vec![0u8; 15]].concat().try_into().unwrap(),
-            Self::PositiveINF => [vec![2u8], vec![0u8; 15]].concat().try_into().unwrap(),
-            Self::NegativeINF => [vec![3u8], vec![0u8; 15]].concat().try_into().unwrap(),
+            Self::PositiveInf => [vec![2u8], vec![0u8; 15]].concat().try_into().unwrap(),
+            Self::NegativeInf => [vec![3u8], vec![0u8; 15]].concat().try_into().unwrap(),
         }
     }
 
@@ -492,8 +548,8 @@ impl Decimal {
         match bytes[0] {
             0u8 => Self::Normalized(RustDecimal::deserialize(bytes)),
             1u8 => Self::NaN,
-            2u8 => Self::PositiveINF,
-            3u8 => Self::NegativeINF,
+            2u8 => Self::PositiveInf,
+            3u8 => Self::NegativeInf,
             _ => unreachable!(),
         }
     }
@@ -508,8 +564,8 @@ impl Decimal {
                 }
             }
             Self::NaN => Some(Self::NaN),
-            Self::PositiveINF => Some(Self::PositiveINF),
-            Self::NegativeINF => Some(Self::PositiveINF),
+            Self::PositiveInf => Some(Self::PositiveInf),
+            Self::NegativeInf => Some(Self::PositiveInf),
         }
     }
 }
@@ -539,10 +595,10 @@ impl FromStr for Decimal {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "nan" | "NaN" | "NAN" => Ok(Decimal::NaN),
-            "inf" | "INF" | "+inf" | "+INF" | "+Inf" => Ok(Decimal::PositiveINF),
-            "-inf" | "-INF" | "-Inf" => Ok(Decimal::NegativeINF),
+        match s.to_ascii_lowercase().as_str() {
+            "nan" => Ok(Decimal::NaN),
+            "inf" | "+inf" | "infinity" | "+infinity" => Ok(Decimal::PositiveInf),
+            "-inf" | "-infinity" => Ok(Decimal::NegativeInf),
             s => RustDecimal::from_str(s).map(Decimal::Normalized),
         }
     }
@@ -588,8 +644,8 @@ mod tests {
     fn check_op_with_float() {
         let decimals = [
             Decimal::NaN,
-            Decimal::PositiveINF,
-            Decimal::NegativeINF,
+            Decimal::PositiveInf,
+            Decimal::NegativeInf,
             Decimal::from_f32(1.0).unwrap(),
             Decimal::from_f32(-1.0).unwrap(),
             Decimal::from_f32(0.0).unwrap(),
@@ -618,49 +674,54 @@ mod tests {
         assert_eq!(Decimal::from_str("nan").unwrap(), Decimal::NaN,);
         assert_eq!(Decimal::from_str("NaN").unwrap(), Decimal::NaN,);
         assert_eq!(Decimal::from_str("NAN").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("nAn").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("nAN").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("Nan").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("NAn").unwrap(), Decimal::NaN,);
 
-        assert_eq!(Decimal::from_str("inf").unwrap(), Decimal::PositiveINF,);
-        assert_eq!(Decimal::from_str("INF").unwrap(), Decimal::PositiveINF,);
-        assert_eq!(Decimal::from_str("+inf").unwrap(), Decimal::PositiveINF,);
-        assert_eq!(Decimal::from_str("+INF").unwrap(), Decimal::PositiveINF,);
-        assert_eq!(Decimal::from_str("+Inf").unwrap(), Decimal::PositiveINF,);
+        assert_eq!(Decimal::from_str("inf").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("INF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("iNF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("inF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("InF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("INf").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+inf").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+INF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+Inf").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+iNF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+inF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+InF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+INf").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("inFINity").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(
+            Decimal::from_str("+infiNIty").unwrap(),
+            Decimal::PositiveInf,
+        );
 
-        assert_eq!(Decimal::from_str("-inf").unwrap(), Decimal::NegativeINF,);
-        assert_eq!(Decimal::from_str("-INF").unwrap(), Decimal::NegativeINF,);
-        assert_eq!(Decimal::from_str("-Inf").unwrap(), Decimal::NegativeINF,);
-
-        assert!(Decimal::from_str("nAn").is_err());
-        assert!(Decimal::from_str("nAN").is_err());
-        assert!(Decimal::from_str("Nan").is_err());
-        assert!(Decimal::from_str("NAn").is_err());
-
-        assert!(Decimal::from_str("iNF").is_err());
-        assert!(Decimal::from_str("inF").is_err());
-        assert!(Decimal::from_str("InF").is_err());
-        assert!(Decimal::from_str("INf").is_err());
-
-        assert!(Decimal::from_str("+iNF").is_err());
-        assert!(Decimal::from_str("+inF").is_err());
-        assert!(Decimal::from_str("+InF").is_err());
-        assert!(Decimal::from_str("+INf").is_err());
-
-        assert!(Decimal::from_str("-iNF").is_err());
-        assert!(Decimal::from_str("-inF").is_err());
-        assert!(Decimal::from_str("-InF").is_err());
-        assert!(Decimal::from_str("-INf").is_err());
+        assert_eq!(Decimal::from_str("-inf").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(Decimal::from_str("-INF").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(Decimal::from_str("-Inf").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(Decimal::from_str("-iNF").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(Decimal::from_str("-inF").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(Decimal::from_str("-InF").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(Decimal::from_str("-INf").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(
+            Decimal::from_str("-INfinity").unwrap(),
+            Decimal::NegativeInf,
+        );
 
         assert_eq!(
-            Decimal::from_f32(10.0).unwrap() / Decimal::PositiveINF,
+            Decimal::from_f32(10.0).unwrap() / Decimal::PositiveInf,
             Decimal::from_f32(0.0).unwrap(),
         );
         assert_eq!(
             Decimal::from_f32(f32::INFINITY).unwrap(),
-            Decimal::PositiveINF
+            Decimal::PositiveInf
         );
         assert_eq!(Decimal::from_f64(f64::NAN).unwrap(), Decimal::NaN);
         assert_eq!(
             Decimal::from_f64(f64::INFINITY).unwrap(),
-            Decimal::PositiveINF
+            Decimal::PositiveInf
         );
         assert_eq!(
             Decimal::unordered_deserialize(Decimal::from_f64(1.234).unwrap().unordered_serialize()),

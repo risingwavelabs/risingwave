@@ -16,11 +16,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
+use risingwave_common::session_config::SearchPath;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
 
-pub mod bind_context;
+mod bind_context;
 mod delete;
-pub(crate) mod expr;
+mod expr;
 mod insert;
 mod query;
 mod relation;
@@ -33,7 +34,7 @@ mod values;
 
 pub use bind_context::{BindContext, LateralBindContext};
 pub use delete::BoundDelete;
-pub use expr::bind_data_type;
+pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{
@@ -41,7 +42,7 @@ pub use relation::{
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use risingwave_common::error::ErrorCode;
-pub use select::BoundSelect;
+pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
 pub use update::BoundUpdate;
@@ -71,8 +72,11 @@ pub struct Binder {
     lateral_contexts: Vec<LateralBindContext>,
 
     next_subquery_id: usize,
+    next_values_id: usize,
     /// Map the cte's name to its Relation::Subquery.
     cte_to_relation: HashMap<String, (BoundQuery, TableAlias)>,
+
+    search_path: SearchPath,
 }
 
 impl Binder {
@@ -85,7 +89,9 @@ impl Binder {
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
             next_subquery_id: 0,
+            next_values_id: 0,
             cte_to_relation: HashMap::new(),
+            search_path: session.config().get_search_path(),
         }
     }
 
@@ -147,6 +153,12 @@ impl Binder {
     fn next_subquery_id(&mut self) -> usize {
         let id = self.next_subquery_id;
         self.next_subquery_id += 1;
+        id
+    }
+
+    fn next_values_id(&mut self) -> usize {
+        let id = self.next_values_id;
+        self.next_values_id += 1;
         id
     }
 }

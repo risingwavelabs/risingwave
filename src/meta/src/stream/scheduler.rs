@@ -12,31 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, LinkedList};
 use std::iter::empty;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
+use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
+use risingwave_common::types::VnodeMapping;
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
-use super::record_table_vnode_mappings;
-use crate::cluster::{ClusterManagerRef, WorkerId, WorkerLocations};
-use crate::manager::HashMappingManagerRef;
+use crate::manager::{WorkerId, WorkerLocations};
 use crate::model::ActorId;
-use crate::storage::MetaStore;
+use crate::stream::{build_vnode_mapping, vnode_mapping_to_bitmaps};
 use crate::MetaResult;
 
 /// [`Scheduler`] defines schedule logic for mv actors.
-pub struct Scheduler<S: MetaStore> {
-    cluster_manager: ClusterManagerRef<S>,
-    /// Maintains vnode mappings of all scheduled fragments.
-    hash_mapping_manager: HashMappingManagerRef,
+pub struct Scheduler {
+    /// The parallel units of the cluster in a round-robin manner on each worker.
+    all_parallel_units: Vec<ParallelUnit>,
 }
 
 /// [`ScheduledLocations`] represents the location of scheduled result.
@@ -130,25 +127,44 @@ impl ScheduledLocations {
     }
 }
 
-impl<S> Scheduler<S>
-where
-    S: MetaStore,
-{
-    pub fn new(
-        cluster_manager: ClusterManagerRef<S>,
-        hash_mapping_manager: HashMappingManagerRef,
-    ) -> Self {
+impl Scheduler {
+    pub fn new(parallel_units: impl IntoIterator<Item = ParallelUnit>) -> Self {
+        // Group parallel units with worker node.
+        let mut parallel_units_map = BTreeMap::new();
+        for p in parallel_units {
+            parallel_units_map
+                .entry(p.worker_node_id)
+                .or_insert_with(Vec::new)
+                .push(p);
+        }
+        let mut parallel_units: LinkedList<_> = parallel_units_map
+            .into_iter()
+            .map(|(_k, v)| v.into_iter())
+            .collect();
+
+        // Visit the parallel units in a round-robin manner on each worker.
+        let mut round_robin = Vec::new();
+        while !parallel_units.is_empty() {
+            parallel_units.drain_filter(|ps| {
+                if let Some(p) = ps.next() {
+                    round_robin.push(p);
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+
         Self {
-            cluster_manager,
-            hash_mapping_manager,
+            all_parallel_units: round_robin,
         }
     }
 
-    /// [`Self::schedule`] schedules input fragments to different parallel units (workers).
+    /// Schedules input fragments to different parallel units (workers).
     /// The schedule procedure is two-fold:
     /// (1) For singleton fragments, we schedule each to one parallel unit randomly.
-    /// (2) For normal fragments, we schedule them to all the parallel units in the cluster.
-    pub async fn schedule(
+    /// (2) For normal fragments, we schedule them to each worker node in a round-robin manner.
+    pub fn schedule(
         &self,
         fragment: &mut Fragment,
         locations: &mut ScheduledLocations,
@@ -169,15 +185,15 @@ where
                     locations.schedule_colocate_with(&actor.upstream_actor_id)?
                 } else {
                     // Randomly choose one parallel unit to schedule from all parallel units.
-                    let parallel_units = self.cluster_manager.list_parallel_units().await;
-                    parallel_units
+                    self.all_parallel_units
                         .choose(&mut rand::thread_rng())
-                        .unwrap()
-                        .clone()
+                        .cloned()
+                        .context("no parallel unit to schedule")?
                 };
 
             // Build vnode mapping. However, we'll leave vnode field of actors unset for singletons.
-            self.set_fragment_vnode_mapping(fragment, &[parallel_unit.clone()])?;
+            let _vnode_mapping =
+                self.set_fragment_vnode_mapping(fragment, &[parallel_unit.clone()])?;
 
             // Record actor locations.
             locations
@@ -185,44 +201,32 @@ where
                 .insert(fragment.actors[0].actor_id, parallel_unit);
         } else {
             // Normal fragment
-
-            // Find out all the hash parallel units in the cluster.
-            let mut parallel_units = self.cluster_manager.list_parallel_units().await;
-            // FIXME(Kexiang): select appropriate parallel_units, currently only support
-            // `parallel_degree < parallel_units.size()`
-            parallel_units.truncate(fragment.actors.len());
+            let parallel_units = if self.all_parallel_units.len() < fragment.actors.len() {
+                bail!(
+                    "not enough parallel units to schedule, required {} got {}",
+                    fragment.actors.len(),
+                    self.all_parallel_units.len(),
+                );
+            } else {
+                // By taking a prefix of all parallel units, we schedule the actors round-robin-ly.
+                // Then sort them by parallel unit id to make the actor ids continuous against the
+                // parallel unit id.
+                let mut parallel_units = self.all_parallel_units[..fragment.actors.len()].to_vec();
+                parallel_units.sort_unstable_by_key(|p| p.id);
+                parallel_units
+            };
 
             // Build vnode mapping according to the parallel units.
-            self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
-
-            // Find out the vnodes that a parallel unit owns.
-            let vnode_mapping = self
-                .hash_mapping_manager
-                .get_fragment_hash_mapping(&fragment.fragment_id)
-                .unwrap();
-
-            let mut vnode_bitmaps = HashMap::new();
-            vnode_mapping
-                .iter()
-                .enumerate()
-                .for_each(|(vnode, parallel_unit)| {
-                    vnode_bitmaps
-                        .entry(*parallel_unit)
-                        .or_insert_with(|| BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT))
-                        .set(vnode, true);
-                });
-            let vnode_bitmaps = vnode_bitmaps
-                .into_iter()
-                .map(|(u, b)| (u, b.finish()))
-                .collect::<HashMap<_, _>>();
+            let vnode_mapping = self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
+            let vnode_bitmaps = vnode_mapping_to_bitmaps(vnode_mapping);
 
             // Record actor locations and set vnodes into the actors.
-            for (idx, actor) in fragment.actors.iter_mut().enumerate() {
+            for (actor, parallel_unit) in fragment.actors.iter_mut().zip_eq(parallel_units) {
                 let parallel_unit =
                     if actor.same_worker_node_as_upstream && !actor.upstream_actor_id.is_empty() {
                         locations.schedule_colocate_with(&actor.upstream_actor_id)?
                     } else {
-                        parallel_units[idx % parallel_units.len()].clone()
+                        parallel_unit.clone()
                     };
 
                 actor.vnode_bitmap =
@@ -244,26 +248,16 @@ where
         &self,
         fragment: &mut Fragment,
         parallel_units: &[ParallelUnit],
-    ) -> MetaResult<()> {
-        let vnode_mapping = self
-            .hash_mapping_manager
-            .build_fragment_hash_mapping(fragment.fragment_id, parallel_units);
+    ) -> MetaResult<VnodeMapping> {
+        let vnode_mapping = build_vnode_mapping(parallel_units);
         let (original_indices, data) = compress_data(&vnode_mapping);
         fragment.vnode_mapping = Some(ParallelUnitMapping {
             original_indices,
             data,
-            ..Default::default()
+            fragment_id: fragment.fragment_id,
         });
-        // Looking at the first actor is enough, since all actors in one fragment have identical
-        // state table id.
-        let actor = fragment.actors.first().unwrap();
-        let stream_node = actor.get_nodes()?;
-        record_table_vnode_mappings(
-            &self.hash_mapping_manager,
-            stream_node,
-            fragment.fragment_id,
-        )?;
-        Ok(())
+
+        Ok(vnode_mapping)
     }
 }
 
@@ -275,14 +269,14 @@ mod test {
     use itertools::Itertools;
     use risingwave_common::buffer::Bitmap;
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
+    use risingwave_pb::catalog::Table;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::stream_plan::stream_node::NodeBody;
     use risingwave_pb::stream_plan::{MaterializeNode, StreamActor, StreamNode, TopNNode};
 
     use super::*;
-    use crate::cluster::ClusterManager;
-    use crate::manager::MetaSrvEnv;
+    use crate::manager::{ClusterManager, MetaSrvEnv};
 
     #[tokio::test]
     async fn test_schedule() -> MetaResult<()> {
@@ -303,7 +297,7 @@ mod test {
             cluster_manager.activate_worker_node(host).await?;
         }
 
-        let scheduler = Scheduler::new(cluster_manager, env.hash_mapping_manager_ref());
+        let scheduler = Scheduler::new(cluster_manager.list_active_parallel_units().await);
         let mut locations = ScheduledLocations::new();
 
         let mut actor_id = 1u32;
@@ -318,6 +312,10 @@ mod test {
                         fragment_id: id,
                         nodes: Some(StreamNode {
                             node_body: Some(NodeBody::TopN(TopNNode {
+                                table: Some(Table {
+                                    id: 0,
+                                    ..Default::default()
+                                }),
                                 ..Default::default()
                             })),
                             ..Default::default()
@@ -326,8 +324,9 @@ mod test {
                         upstream_actor_id: vec![],
                         same_worker_node_as_upstream: false,
                         vnode_bitmap: None,
+                        mview_definition: "".to_owned(),
                     }],
-                    vnode_mapping: None,
+                    ..Default::default()
                 };
                 actor_id += 1;
                 fragment
@@ -343,7 +342,7 @@ mod test {
                         fragment_id,
                         nodes: Some(StreamNode {
                             node_body: Some(NodeBody::Materialize(MaterializeNode {
-                                table_id: fragment_id as u32,
+                                table_id: fragment_id,
                                 ..Default::default()
                             })),
                             ..Default::default()
@@ -352,6 +351,7 @@ mod test {
                         upstream_actor_id: vec![],
                         same_worker_node_as_upstream: false,
                         vnode_bitmap: None,
+                        mview_definition: "".to_owned(),
                     })
                     .collect_vec();
                 actor_id += node_count * parallel_degree as u32;
@@ -360,27 +360,17 @@ mod test {
                     fragment_type: 0,
                     distribution_type: FragmentDistributionType::Hash as i32,
                     actors,
-                    vnode_mapping: None,
+                    ..Default::default()
                 }
             })
             .collect_vec();
 
         // Test round robin schedule for singleton fragments
         for fragment in &mut single_fragments {
-            scheduler.schedule(fragment, &mut locations).await.unwrap();
+            scheduler.schedule(fragment, &mut locations).unwrap();
         }
         for fragment in single_fragments {
-            assert_ne!(
-                env.hash_mapping_manager()
-                    .get_fragment_hash_mapping(&fragment.fragment_id),
-                None
-            );
-            // We use fragment id as table id here.
-            assert_eq!(
-                env.hash_mapping_manager()
-                    .get_table_hash_mapping(&fragment.fragment_id),
-                None
-            );
+            assert_ne!(fragment.vnode_mapping, None);
             for actor in fragment.actors {
                 assert!(actor.vnode_bitmap.is_none());
             }
@@ -388,7 +378,7 @@ mod test {
 
         // Test normal schedule for other fragments
         for fragment in &mut normal_fragments {
-            scheduler.schedule(fragment, &mut locations).await.unwrap();
+            scheduler.schedule(fragment, &mut locations).unwrap();
         }
         assert_eq!(
             locations
@@ -405,22 +395,12 @@ mod test {
             node_count as usize * parallel_degree
         );
         for fragment in normal_fragments {
-            assert_ne!(
-                env.hash_mapping_manager()
-                    .get_fragment_hash_mapping(&fragment.fragment_id),
-                None
-            );
-            // We use fragment id as table id here.
-            assert_ne!(
-                env.hash_mapping_manager()
-                    .get_table_hash_mapping(&fragment.fragment_id),
-                None
-            );
+            assert_ne!(fragment.vnode_mapping, None,);
             let mut vnode_sum = 0;
             for actor in fragment.actors {
                 vnode_sum += Bitmap::from(actor.get_vnode_bitmap()?).num_high_bits();
             }
-            assert_eq!(vnode_sum as usize, VIRTUAL_NODE_COUNT);
+            assert_eq!(vnode_sum, VIRTUAL_NODE_COUNT);
         }
 
         Ok(())

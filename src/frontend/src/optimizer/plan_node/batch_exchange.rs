@@ -34,14 +34,13 @@ impl BatchExchange {
     pub fn new(input: PlanRef, order: Order, dist: Distribution) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
-        let _pk_indices = input.pk_indices().to_vec();
         let base = PlanBase::new_batch(ctx, schema, dist, order);
         BatchExchange { base, input }
     }
 }
 
 impl fmt::Display for BatchExchange {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "BatchExchange {{ order: {}, dist: {} }}",

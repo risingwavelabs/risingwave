@@ -14,13 +14,14 @@
 
 //! Build executor from protobuf.
 
-mod agg_call;
+mod agg_common;
 mod batch_query;
 mod chain;
 mod dynamic_filter;
 mod expand;
 mod filter;
 mod global_simple_agg;
+mod group_top_n;
 mod hash_agg;
 mod hash_join;
 mod hop_window;
@@ -32,18 +33,19 @@ mod mview;
 mod project;
 mod project_set;
 mod sink;
+mod sort;
 mod source;
 mod top_n;
 mod top_n_appendonly;
 mod union;
+mod watermark_filter;
 
 // import for submodules
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use self::batch_query::*;
 use self::chain::*;
@@ -51,6 +53,7 @@ use self::dynamic_filter::*;
 use self::expand::*;
 use self::filter::*;
 use self::global_simple_agg::*;
+use self::group_top_n::GroupTopNExecutorBuilder;
 use self::hash_agg::*;
 use self::hash_join::*;
 use self::hop_window::*;
@@ -62,21 +65,25 @@ use self::mview::*;
 use self::project::*;
 use self::project_set::*;
 use self::sink::*;
+use self::sort::*;
 use self::source::*;
 use self::top_n::*;
 use self::top_n_appendonly::*;
 use self::union::*;
+use self::watermark_filter::WatermarkFilterBuilder;
+use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
+#[async_trait::async_trait]
 trait ExecutorBuilder {
     /// Create a [`BoxedExecutor`] from [`StreamNode`].
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor>;
+    ) -> StreamResult<BoxedExecutor>;
 }
 
 macro_rules! build_executor {
@@ -84,7 +91,7 @@ macro_rules! build_executor {
         match $node.get_node_body().unwrap() {
             $(
                 $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor($source, $node, $store, $stream)
+                    <$data_type>::new_boxed_executor($source, $node, $store, $stream).await
                 },
             )*
             NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) => unreachable!()
@@ -93,12 +100,12 @@ macro_rules! build_executor {
 }
 
 /// Create an executor from protobuf [`StreamNode`].
-pub fn create_executor(
+pub async fn create_executor(
     params: ExecutorParams,
     stream: &mut LocalStreamManagerCore,
     node: &StreamNode,
     store: impl StateStore,
-) -> Result<BoxedExecutor> {
+) -> StreamResult<BoxedExecutor> {
     build_executor! {
         params,
         node,
@@ -126,5 +133,8 @@ pub fn create_executor(
         NodeBody::Expand => ExpandExecutorBuilder,
         NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
         NodeBody::ProjectSet => ProjectSetExecutorBuilder,
+        NodeBody::GroupTopN => GroupTopNExecutorBuilder,
+        NodeBody::Sort => SortExecutorBuilder,
+        NodeBody::WatermarkFilter => WatermarkFilterBuilder,
     }
 }

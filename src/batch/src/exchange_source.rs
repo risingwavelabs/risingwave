@@ -20,6 +20,7 @@ use risingwave_common::array::DataChunk;
 use crate::execution::grpc_exchange::GrpcExchangeSource;
 use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::test_utils::FakeExchangeSource;
+use crate::task::TaskId;
 
 /// Each `ExchangeSource` maps to one task, it takes the execution result from task chunk by chunk.
 pub trait ExchangeSource: Send + Debug {
@@ -28,6 +29,9 @@ pub trait ExchangeSource: Send + Debug {
     where
         Self: 'a;
     fn take_data(&mut self) -> Self::TakeDataFuture<'_>;
+
+    /// Get upstream task id.
+    fn get_task_id(&self) -> TaskId;
 }
 
 #[derive(Debug)]
@@ -45,6 +49,14 @@ impl ExchangeSourceImpl {
             ExchangeSourceImpl::Grpc(grpc) => grpc.take_data().await,
             ExchangeSourceImpl::Local(local) => local.take_data().await,
             ExchangeSourceImpl::Fake(fake) => fake.take_data().await,
+        }
+    }
+
+    pub(crate) fn get_task_id(&self) -> TaskId {
+        match self {
+            ExchangeSourceImpl::Grpc(grpc) => grpc.get_task_id(),
+            ExchangeSourceImpl::Local(local) => local.get_task_id(),
+            ExchangeSourceImpl::Fake(fake) => fake.get_task_id(),
         }
     }
 }

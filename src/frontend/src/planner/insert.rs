@@ -23,7 +23,7 @@ use crate::planner::Planner;
 
 impl Planner {
     pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<PlanRoot> {
-        let mut input = self.plan_query(insert.source)?.as_subplan();
+        let mut input = self.plan_query(insert.source)?.into_subplan();
         if !insert.cast_exprs.is_empty() {
             input = LogicalProject::create(input, insert.cast_exprs);
         }
@@ -32,6 +32,7 @@ impl Planner {
             input,
             insert.table_source.name,
             insert.table_source.source_id,
+            insert.table_source.associated_mview_id,
         )?
         .into();
         // For insert, frontend will only schedule one task so do not need this to be single.

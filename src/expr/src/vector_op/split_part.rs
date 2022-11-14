@@ -109,7 +109,7 @@ mod tests {
                 Ok(guard) => {
                     let expected = expected.unwrap();
 
-                    let array = guard.into_inner().finish().unwrap();
+                    let array = guard.into_inner().finish();
                     let actual = array.value_at(0).unwrap();
 
                     assert_eq!(expected, actual, "\nat case {i}: {:?}\n", case)

@@ -10,7 +10,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![warn(clippy::all)]
 //! Test SQL syntax, which all sqlparser dialects must parse in the same way.
 //!
 //! Note that it does not mean all SQL here is valid in all the dialects, only
@@ -154,7 +153,6 @@ fn parse_update_with_table_alias() {
                             name: Ident::new("u"),
                             columns: vec![]
                         }),
-                        args: vec![],
                     },
                     joins: vec![]
                 },
@@ -249,27 +247,41 @@ fn parse_top_level() {
 fn parse_simple_select() {
     let sql = "SELECT id, fname, lname FROM customer WHERE id = 1 LIMIT 5";
     let select = verified_only_select(sql);
-    assert!(!select.distinct);
+    assert_eq!(select.distinct, Distinct::All);
     assert_eq!(3, select.projection.len());
     let select = verified_query(sql);
-    assert_eq!(Some(Expr::Value(number("5"))), select.limit);
+    assert_eq!(Some("5".to_string()), select.limit);
 }
 
 #[test]
 fn parse_limit_is_not_an_alias() {
     // In dialects supporting LIMIT it shouldn't be parsed as a table alias
     let ast = verified_query("SELECT id FROM customer LIMIT 1");
-    assert_eq!(Some(Expr::Value(number("1"))), ast.limit);
+    assert_eq!(Some("1".to_string()), ast.limit);
 
     let ast = verified_query("SELECT 1 LIMIT 5");
-    assert_eq!(Some(Expr::Value(number("5"))), ast.limit);
+    assert_eq!(Some("5".to_string()), ast.limit);
 }
 
 #[test]
 fn parse_select_distinct() {
     let sql = "SELECT DISTINCT name FROM customer";
     let select = verified_only_select(sql);
-    assert!(select.distinct);
+    assert_eq!(select.distinct, Distinct::Distinct);
+    assert_eq!(
+        &SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("name"))),
+        only(&select.projection)
+    );
+}
+
+#[test]
+fn parse_select_distinct_on() {
+    let sql = "SELECT DISTINCT ON (id) name FROM customer";
+    let select = verified_only_select(sql);
+    assert_eq!(
+        select.distinct,
+        Distinct::DistinctOn(vec![Expr::Identifier(Ident::new("id"))])
+    );
     assert_eq!(
         &SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("name"))),
         only(&select.projection)
@@ -285,7 +297,7 @@ fn parse_select_all() {
 fn parse_select_all_distinct() {
     let result = parse_sql_statements("SELECT ALL DISTINCT name FROM customer");
     assert_eq!(
-        ParserError::ParserError("Cannot specify both ALL and DISTINCT".to_string()),
+        ParserError::ParserError("syntax error at or near \"DISTINCT\"".to_string()),
         result.unwrap_err(),
     );
 }
@@ -323,10 +335,10 @@ fn parse_select_wildcard() {
 
 #[test]
 fn parse_count_wildcard() {
-    verified_only_select("SELECT COUNT(*) FROM Order WHERE id = 10");
+    verified_only_select("SELECT COUNT(*) FROM Orders WHERE id = 10");
 
     verified_only_select(
-        "SELECT COUNT(Employee.*) FROM Order JOIN Employee ON Order.employee = Employee.id",
+        "SELECT COUNT(Employee.*) FROM Orders JOIN Employee ON Orders.employee = Employee.id",
     );
 }
 
@@ -486,7 +498,7 @@ fn parse_escaped_single_quote_string_predicate() {
 fn parse_number() {
     let expr = verified_expr("1.0");
 
-    assert_eq!(expr, Expr::Value(Value::Number("1.0".into(), false)));
+    assert_eq!(expr, Expr::Value(Value::Number("1.0".into())));
 }
 
 #[test]
@@ -994,7 +1006,7 @@ fn parse_select_order_by_limit() {
         ],
         select.order_by
     );
-    assert_eq!(Some(Expr::Value(number("2"))), select.limit);
+    assert_eq!(Some("2".to_string()), select.limit);
 }
 
 #[test]
@@ -1017,7 +1029,7 @@ fn parse_select_order_by_nulls_order() {
         ],
         select.order_by
     );
-    assert_eq!(Some(Expr::Value(number("2"))), select.limit);
+    assert_eq!(Some("2".to_string()), select.limit);
 }
 
 #[test]
@@ -1191,7 +1203,7 @@ fn parse_extract() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Extract {
-            field: DateTimeField::Year,
+            field: "YEAR".to_string(),
             expr: Box::new(Expr::Identifier(Ident::new("d"))),
         },
         expr_from_projection(only(&select.projection)),
@@ -1205,9 +1217,9 @@ fn parse_extract() {
     verified_stmt("SELECT EXTRACT(MINUTE FROM d)");
     verified_stmt("SELECT EXTRACT(SECOND FROM d)");
 
-    let res = parse_sql_statements("SELECT EXTRACT(MILLISECOND FROM d)");
+    let res = parse_sql_statements("SELECT EXTRACT(0 FROM d)");
     assert_eq!(
-        ParserError::ParserError("Expected date/time field, found: MILLISECOND".to_string()),
+        ParserError::ParserError("Expected date/time field, found: 0".to_string()),
         res.unwrap_err()
     );
 }
@@ -1736,23 +1748,15 @@ fn parse_bad_constraint() {
     );
 }
 
-fn run_explain_analyze(
-    query: &str,
-    expected_verbose: bool,
-    expected_analyze: bool,
-    expected_trace: bool,
-) {
-    match verified_stmt(query) {
+fn run_explain_analyze(query: &str, expected_analyze: bool, expected_options: ExplainOptions) {
+    match one_statement_parses_to(query, "") {
         Statement::Explain {
-            describe_alias: _,
             analyze,
-            verbose,
-            trace,
             statement,
+            options,
         } => {
-            assert_eq!(verbose, expected_verbose);
             assert_eq!(analyze, expected_analyze);
-            assert_eq!(trace, expected_trace);
+            assert_eq!(options, expected_options);
             assert_eq!("SELECT sqrt(id) FROM foo", statement.to_string());
         }
         _ => panic!("Unexpected Statement, must be Explain"),
@@ -1761,32 +1765,116 @@ fn run_explain_analyze(
 
 #[test]
 fn parse_explain_analyze_with_simple_select() {
-    run_explain_analyze("EXPLAIN SELECT sqrt(id) FROM foo", false, false, false);
     run_explain_analyze(
-        "EXPLAIN VERBOSE SELECT sqrt(id) FROM foo",
-        true,
+        "EXPLAIN SELECT sqrt(id) FROM foo",
         false,
+        ExplainOptions {
+            ..Default::default()
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN (VERBOSE) SELECT sqrt(id) FROM foo",
         false,
+        ExplainOptions {
+            verbose: true,
+            ..Default::default()
+        },
     );
     run_explain_analyze(
         "EXPLAIN ANALYZE SELECT sqrt(id) FROM foo",
-        false,
         true,
-        false,
+        ExplainOptions {
+            ..Default::default()
+        },
     );
-    run_explain_analyze("EXPLAIN TRACE SELECT sqrt(id) FROM foo", false, false, true);
     run_explain_analyze(
-        "EXPLAIN ANALYZE VERBOSE SELECT sqrt(id) FROM foo",
-        true,
-        true,
+        "EXPLAIN (TRACE) SELECT sqrt(id) FROM foo",
         false,
+        ExplainOptions {
+            trace: true,
+            ..Default::default()
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN ANALYZE (VERBOSE) SELECT sqrt(id) FROM foo",
+        true,
+        ExplainOptions {
+            verbose: true,
+            ..Default::default()
+        },
     );
 
     run_explain_analyze(
-        "EXPLAIN VERBOSE TRACE SELECT sqrt(id) FROM foo",
-        true,
+        "EXPLAIN (VERBOSE  , TRACE) SELECT sqrt(id) FROM foo",
         false,
-        true,
+        ExplainOptions {
+            verbose: true,
+            trace: true,
+            ..Default::default()
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN (DISTSQL, TRACE ,VERBOSE) SELECT sqrt(id) FROM foo",
+        false,
+        ExplainOptions {
+            trace: true,
+            verbose: true,
+            explain_type: ExplainType::DistSql,
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN (DISTSQL, TRACE false ,VERBOSE true) SELECT sqrt(id) FROM foo",
+        false,
+        ExplainOptions {
+            trace: false,
+            verbose: true,
+            explain_type: ExplainType::DistSql,
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN (TYPE DISTSQL, TRACE false ,VERBOSE true) SELECT sqrt(id) FROM foo",
+        false,
+        ExplainOptions {
+            trace: false,
+            verbose: true,
+            explain_type: ExplainType::DistSql,
+        },
+    );
+}
+
+#[test]
+fn parse_explain_with_invalid_options() {
+    let res = parse_sql_statements("EXPLAIN (V) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError(
+            "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: V"
+                .to_string()
+        ),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN (VERBOSE TRACE) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError("Expected ), found: TRACE".to_string()),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN () SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError(
+            "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )"
+                .to_string()
+        ),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError(
+            "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )"
+                .to_string()
+        ),
+        res.unwrap_err()
     );
 }
 
@@ -1911,7 +1999,7 @@ fn parse_aggregate_with_filter() {
                 left: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier(Ident::new("a"))),
                     op: BinaryOperator::Gt,
-                    right: Box::new(Expr::Value(Value::Number("0".to_string(), false)))
+                    right: Box::new(Expr::Value(Value::Number("0".to_string())))
                 }))),
                 op: BinaryOperator::And,
                 right: Box::new(Expr::Nested(Box::new(Expr::IsNotNull(Box::new(
@@ -2133,10 +2221,9 @@ fn parse_delimited_identifiers() {
     );
     // check FROM
     match only(select.from).relation {
-        TableFactor::Table { name, alias, args } => {
+        TableFactor::Table { name, alias } => {
             assert_eq!(vec![Ident::with_quote('"', "a table")], name.0);
             assert_eq!(Ident::with_quote('"', "alias"), alias.unwrap().name);
-            assert!(args.is_empty());
         }
         _ => panic!("Expecting TableFactor::Table"),
     }
@@ -2260,7 +2347,6 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t1".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 joins: vec![],
             },
@@ -2268,7 +2354,6 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 joins: vec![],
             }
@@ -2284,13 +2369,11 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t1a".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t1b".into()]),
                         alias: None,
-                        args: vec![],
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2299,13 +2382,11 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2a".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t2b".into()]),
                         alias: None,
-                        args: vec![],
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2324,7 +2405,6 @@ fn parse_cross_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new("t2")]),
                 alias: None,
-                args: vec![],
             },
             join_operator: JoinOperator::CrossJoin
         },
@@ -2343,7 +2423,6 @@ fn parse_joins_on() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new(relation.into())]),
                 alias,
-                args: vec![],
             },
             join_operator: f(JoinConstraint::On(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("c1".into())),
@@ -2395,7 +2474,6 @@ fn parse_joins_using() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new(relation.into())]),
                 alias,
-                args: vec![],
             },
             join_operator: f(JoinConstraint::Using(vec!["c1".into()])),
         }
@@ -2439,7 +2517,6 @@ fn parse_natural_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new("t2")]),
                 alias: None,
-                args: vec![],
             },
             join_operator: f(JoinConstraint::Natural),
         }
@@ -2651,11 +2728,11 @@ fn parse_derived_tables() {
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
-    let sql = "SELECT * FROM (((SELECT 1)))";
+    let sql = "SELECT * FROM (SELECT 1)";
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
-    let sql = "SELECT * FROM t NATURAL JOIN (((SELECT 1)))";
+    let sql = "SELECT * FROM t NATURAL JOIN (SELECT 1)";
     let _ = verified_only_select(sql);
     // TODO: add assertions
 
@@ -2677,7 +2754,6 @@ fn parse_derived_tables() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
-                    args: vec![],
                 },
                 join_operator: JoinOperator::Inner(JoinConstraint::Natural),
             }],
@@ -3114,19 +3190,16 @@ fn parse_invalid_subquery_without_parens() {
 
 #[test]
 fn parse_offset() {
-    let expect = Some(Offset {
-        value: Expr::Value(number("2")),
-        rows: OffsetRows::Rows,
-    });
-    let ast = verified_query("SELECT foo FROM bar OFFSET 2 ROWS");
+    let expect = Some("2".to_string());
+    let ast = verified_query("SELECT foo FROM bar OFFSET 2");
     assert_eq!(ast.offset, expect);
-    let ast = verified_query("SELECT foo FROM bar WHERE foo = 4 OFFSET 2 ROWS");
+    let ast = verified_query("SELECT foo FROM bar WHERE foo = 4 OFFSET 2");
     assert_eq!(ast.offset, expect);
-    let ast = verified_query("SELECT foo FROM bar ORDER BY baz OFFSET 2 ROWS");
+    let ast = verified_query("SELECT foo FROM bar ORDER BY baz OFFSET 2");
     assert_eq!(ast.offset, expect);
-    let ast = verified_query("SELECT foo FROM bar WHERE foo = 4 ORDER BY baz OFFSET 2 ROWS");
+    let ast = verified_query("SELECT foo FROM bar WHERE foo = 4 ORDER BY baz OFFSET 2");
     assert_eq!(ast.offset, expect);
-    let ast = verified_query("SELECT foo FROM (SELECT * FROM bar OFFSET 2 ROWS) OFFSET 2 ROWS");
+    let ast = verified_query("SELECT foo FROM (SELECT * FROM bar OFFSET 2) OFFSET 2");
     assert_eq!(ast.offset, expect);
     match ast.body {
         SetExpr::Select(s) => match only(s.from).relation {
@@ -3137,38 +3210,20 @@ fn parse_offset() {
         },
         _ => panic!("Test broke"),
     }
-    let ast = verified_query("SELECT 'foo' OFFSET 0 ROWS");
-    assert_eq!(
-        ast.offset,
-        Some(Offset {
-            value: Expr::Value(number("0")),
-            rows: OffsetRows::Rows,
-        })
-    );
-    let ast = verified_query("SELECT 'foo' OFFSET 1 ROW");
-    assert_eq!(
-        ast.offset,
-        Some(Offset {
-            value: Expr::Value(number("1")),
-            rows: OffsetRows::Row,
-        })
-    );
+    let ast = query("SELECT 'foo' OFFSET 0 ROWS", "SELECT 'foo' OFFSET 0");
+    assert_eq!(ast.offset, Some("0".to_string()));
+    let ast = query("SELECT 'foo' OFFSET 1 ROW", "SELECT 'foo' OFFSET 1");
+    assert_eq!(ast.offset, Some("1".to_string()));
     let ast = verified_query("SELECT 'foo' OFFSET 1");
-    assert_eq!(
-        ast.offset,
-        Some(Offset {
-            value: Expr::Value(number("1")),
-            rows: OffsetRows::None,
-        })
-    );
+    assert_eq!(ast.offset, Some("1".to_string()));
 }
 
 #[test]
 fn parse_fetch() {
     let fetch_first_two_rows_only = Some(Fetch {
         with_ties: false,
-        percent: false,
-        quantity: Some(Expr::Value(number("2"))),
+
+        quantity: Some("2".to_string()),
     });
     let ast = verified_query("SELECT foo FROM bar FETCH FIRST 2 ROWS ONLY");
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
@@ -3179,7 +3234,6 @@ fn parse_fetch() {
         ast.fetch,
         Some(Fetch {
             with_ties: false,
-            percent: false,
             quantity: None,
         })
     );
@@ -3194,29 +3248,13 @@ fn parse_fetch() {
         ast.fetch,
         Some(Fetch {
             with_ties: true,
-            percent: false,
-            quantity: Some(Expr::Value(number("2"))),
-        })
-    );
-    let ast = verified_query("SELECT foo FROM bar FETCH FIRST 50 PERCENT ROWS ONLY");
-    assert_eq!(
-        ast.fetch,
-        Some(Fetch {
-            with_ties: false,
-            percent: true,
-            quantity: Some(Expr::Value(number("50"))),
+            quantity: Some("2".to_string()),
         })
     );
     let ast = verified_query(
-        "SELECT foo FROM bar WHERE foo = 4 ORDER BY baz OFFSET 2 ROWS FETCH FIRST 2 ROWS ONLY",
+        "SELECT foo FROM bar WHERE foo = 4 ORDER BY baz OFFSET 2 FETCH FIRST 2 ROWS ONLY",
     );
-    assert_eq!(
-        ast.offset,
-        Some(Offset {
-            value: Expr::Value(number("2")),
-            rows: OffsetRows::Rows,
-        })
-    );
+    assert_eq!(ast.offset, Some("2".to_string()));
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
     let ast = verified_query(
         "SELECT foo FROM (SELECT * FROM bar FETCH FIRST 2 ROWS ONLY) FETCH FIRST 2 ROWS ONLY",
@@ -3231,25 +3269,13 @@ fn parse_fetch() {
         },
         _ => panic!("Test broke"),
     }
-    let ast = verified_query("SELECT foo FROM (SELECT * FROM bar OFFSET 2 ROWS FETCH FIRST 2 ROWS ONLY) OFFSET 2 ROWS FETCH FIRST 2 ROWS ONLY");
-    assert_eq!(
-        ast.offset,
-        Some(Offset {
-            value: Expr::Value(number("2")),
-            rows: OffsetRows::Rows,
-        })
-    );
+    let ast = verified_query("SELECT foo FROM (SELECT * FROM bar OFFSET 2 FETCH FIRST 2 ROWS ONLY) OFFSET 2 FETCH FIRST 2 ROWS ONLY");
+    assert_eq!(ast.offset, Some("2".to_string()));
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
     match ast.body {
         SetExpr::Select(s) => match only(s.from).relation {
             TableFactor::Derived { subquery, .. } => {
-                assert_eq!(
-                    subquery.offset,
-                    Some(Offset {
-                        value: Expr::Value(number("2")),
-                        rows: OffsetRows::Rows,
-                    })
-                );
+                assert_eq!(subquery.offset, Some("2".to_string()));
                 assert_eq!(subquery.fetch, fetch_first_two_rows_only);
             }
             _ => panic!("Test broke"),
@@ -3269,12 +3295,12 @@ fn parse_fetch_variations() {
         "SELECT foo FROM bar FETCH FIRST 10 ROWS ONLY",
     );
     one_statement_parses_to(
-        "SELECT foo FROM bar FETCH NEXT 10 ROWS WITH TIES",
-        "SELECT foo FROM bar FETCH FIRST 10 ROWS WITH TIES",
+        "SELECT foo FROM bar ORDER BY baz FETCH NEXT 10 ROWS WITH TIES",
+        "SELECT foo FROM bar ORDER BY baz FETCH FIRST 10 ROWS WITH TIES",
     );
     one_statement_parses_to(
-        "SELECT foo FROM bar FETCH NEXT ROWS WITH TIES",
-        "SELECT foo FROM bar FETCH FIRST ROWS WITH TIES",
+        "SELECT foo FROM bar ORDER BY baz FETCH NEXT ROWS WITH TIES",
+        "SELECT foo FROM bar ORDER BY baz FETCH FIRST ROWS WITH TIES",
     );
     one_statement_parses_to(
         "SELECT foo FROM bar FETCH FIRST ROWS ONLY",
@@ -3288,7 +3314,7 @@ fn lateral_derived() {
         let lateral_str = if lateral_in { "LATERAL " } else { "" };
         let sql = format!(
             "SELECT * FROM customer LEFT JOIN {}\
-             (SELECT * FROM order WHERE order.customer = customer.id LIMIT 3) AS order ON true",
+             (SELECT * FROM orders WHERE orders.customer = customer.id LIMIT 3) AS orders ON true",
             lateral_str
         );
         let select = verified_only_select(&sql);
@@ -3306,10 +3332,10 @@ fn lateral_derived() {
         } = join.relation
         {
             assert_eq!(lateral_in, lateral);
-            assert_eq!(Ident::new("order"), alias.name);
+            assert_eq!(Ident::new("orders"), alias.name);
             assert_eq!(
                 subquery.to_string(),
-                "SELECT * FROM order WHERE order.customer = customer.id LIMIT 3"
+                "SELECT * FROM orders WHERE orders.customer = customer.id LIMIT 3"
             );
         } else {
             unreachable!()
@@ -3369,9 +3395,6 @@ fn parse_start_transaction() {
     }
 
     verified_stmt("START TRANSACTION");
-    one_statement_parses_to("BEGIN", "START TRANSACTION");
-    one_statement_parses_to("BEGIN WORK", "START TRANSACTION");
-    one_statement_parses_to("BEGIN TRANSACTION", "START TRANSACTION");
 
     verified_stmt("START TRANSACTION ISOLATION LEVEL READ UNCOMMITTED");
     verified_stmt("START TRANSACTION ISOLATION LEVEL READ COMMITTED");
@@ -3406,6 +3429,13 @@ fn parse_start_transaction() {
         ParserError::ParserError("Expected transaction mode, found: EOF".to_string()),
         res.unwrap_err()
     );
+}
+
+#[test]
+fn parse_begin() {
+    one_statement_parses_to("BEGIN", "BEGIN");
+    one_statement_parses_to("BEGIN WORK", "BEGIN");
+    one_statement_parses_to("BEGIN TRANSACTION", "BEGIN");
 }
 
 #[test]
@@ -3478,7 +3508,7 @@ fn parse_rollback() {
 
 #[test]
 fn parse_create_index() {
-    let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name,age DESC)";
+    let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name,age DESC) INCLUDE(other) DISTRIBUTED BY(name)";
     let indexed_columns = vec![
         OrderByExpr {
             expr: Expr::Identifier(Ident::new("name")),
@@ -3491,17 +3521,24 @@ fn parse_create_index() {
             nulls_first: None,
         },
     ];
+
+    let include_columns = vec![Ident::new("other")];
+    let distributed_columns = vec![Ident::new("name")];
     match verified_stmt(sql) {
         Statement::CreateIndex {
             name,
             table_name,
             columns,
+            include,
+            distributed_by,
             unique,
             if_not_exists,
         } => {
             assert_eq!("idx_name", name.to_string());
             assert_eq!("test", table_name.to_string());
             assert_eq!(indexed_columns, columns);
+            assert_eq!(include_columns, include);
+            assert_eq!(distributed_columns, distributed_by);
             assert!(unique);
             assert!(if_not_exists)
         }

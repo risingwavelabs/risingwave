@@ -30,36 +30,21 @@ pub struct Query {
     /// ORDER BY
     pub order_by: Vec<OrderByExpr>,
     /// `LIMIT { <N> | ALL }`
-    pub limit: Option<Expr>,
+    pub limit: Option<String>,
     /// `OFFSET <N> [ { ROW | ROWS } ]`
-    pub offset: Option<Offset>,
+    ///
+    /// `ROW` and `ROWS` are noise words that don't influence the effect of the clause.
+    /// They are provided for ANSI compatibility.
+    pub offset: Option<String>,
     /// `FETCH { FIRST | NEXT } <N> [ PERCENT ] { ROW | ROWS } | { ONLY | WITH TIES }`
+    ///
+    /// `ROW` and `ROWS` as well as `FIRST` and `NEXT` are noise words that don't influence the
+    /// effect of the clause. They are provided for ANSI compatibility.
     pub fetch: Option<Fetch>,
 }
 
-impl Query {
-    pub fn get_limit_value(&self) -> Option<usize> {
-        match self.limit {
-            Some(Expr::Value(Value::Number(ref limit, _))) => limit.parse().ok(),
-            Some(_) => unreachable!(),
-            _ => None,
-        }
-    }
-
-    pub fn get_offset_value(&self) -> Option<usize> {
-        match self.offset {
-            Some(Offset {
-                value: Expr::Value(Value::Number(ref offset, _)),
-                ..
-            }) => offset.parse().ok(),
-            Some(_) => unreachable!(),
-            _ => None,
-        }
-    }
-}
-
 impl fmt::Display for Query {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(ref with) = self.with {
             write!(f, "{} ", with)?;
         }
@@ -71,7 +56,7 @@ impl fmt::Display for Query {
             write!(f, " LIMIT {}", limit)?;
         }
         if let Some(ref offset) = self.offset {
-            write!(f, " {}", offset)?;
+            write!(f, " OFFSET {}", offset)?;
         }
         if let Some(ref fetch) = self.fetch {
             write!(f, " {}", fetch)?;
@@ -99,17 +84,14 @@ pub enum SetExpr {
         right: Box<SetExpr>,
     },
     Values(Values),
-    Insert(Statement),
-    // TODO: ANSI SQL supports `TABLE` here.
 }
 
 impl fmt::Display for SetExpr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SetExpr::Select(s) => write!(f, "{}", s),
             SetExpr::Query(q) => write!(f, "({})", q),
             SetExpr::Values(v) => write!(f, "{}", v),
-            SetExpr::Insert(v) => write!(f, "{}", v),
             SetExpr::SetOperation {
                 left,
                 right,
@@ -132,7 +114,7 @@ pub enum SetOperator {
 }
 
 impl fmt::Display for SetOperator {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             SetOperator::Union => "UNION",
             SetOperator::Except => "EXCEPT",
@@ -147,7 +129,7 @@ impl fmt::Display for SetOperator {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Select {
-    pub distinct: bool,
+    pub distinct: Distinct,
     /// projection expressions
     pub projection: Vec<SelectItem>,
     /// FROM
@@ -163,8 +145,8 @@ pub struct Select {
 }
 
 impl fmt::Display for Select {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "SELECT{}", if self.distinct { " DISTINCT" } else { "" })?;
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SELECT{}", &self.distinct)?;
         write!(f, " {}", display_comma_separated(&self.projection))?;
         if !self.from.is_empty() {
             write!(f, " FROM {}", display_comma_separated(&self.from))?;
@@ -187,6 +169,41 @@ impl fmt::Display for Select {
     }
 }
 
+/// An `ALL`, `DISTINCT` or `DISTINCT ON (expr, ...)` after `SELECT`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Distinct {
+    /// An optional parameter that returns all matching rows.
+    #[default]
+    All,
+    /// A parameter that removes duplicates from the result-set.
+    Distinct,
+    /// An optional parameter that eliminates duplicate data based on the expressions.
+    DistinctOn(Vec<Expr>),
+}
+
+impl Distinct {
+    pub const fn is_all(&self) -> bool {
+        matches!(self, Distinct::All)
+    }
+
+    pub const fn is_distinct(&self) -> bool {
+        matches!(self, Distinct::Distinct)
+    }
+}
+
+impl fmt::Display for Distinct {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Distinct::All => write!(f, ""),
+            Distinct::Distinct => write!(f, " DISTINCT"),
+            Distinct::DistinctOn(exprs) => {
+                write!(f, " DISTINCT ON ({})", display_comma_separated(exprs))
+            }
+        }
+    }
+}
+
 /// A hive LATERAL VIEW with potential column aliases
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -202,7 +219,7 @@ pub struct LateralView {
 }
 
 impl fmt::Display for LateralView {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             " LATERAL VIEW{outer} {} {}",
@@ -229,7 +246,7 @@ pub struct With {
 }
 
 impl fmt::Display for With {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "WITH {}{}",
@@ -252,7 +269,7 @@ pub struct Cte {
 }
 
 impl fmt::Display for Cte {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} AS ({})", self.alias, self.query)?;
         if let Some(ref fr) = self.from {
             write!(f, " FROM {}", fr)?;
@@ -279,7 +296,7 @@ pub enum SelectItem {
 }
 
 impl fmt::Display for SelectItem {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             SelectItem::UnnamedExpr(expr) => write!(f, "{}", expr),
             SelectItem::ExprWithAlias { expr, alias } => write!(f, "{} AS {}", expr, alias),
@@ -298,7 +315,7 @@ pub struct TableWithJoins {
 }
 
 impl fmt::Display for TableWithJoins {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.relation)?;
         for join in &self.joins {
             write!(f, "{}", join)?;
@@ -314,10 +331,6 @@ pub enum TableFactor {
     Table {
         name: ObjectName,
         alias: Option<TableAlias>,
-        /// Arguments of a table-valued function, as supported by Postgres
-        /// and MSSQL. Note that deprecated MSSQL `FROM foo (NOLOCK)` syntax
-        /// will also be parsed as `args`.
-        args: Vec<FunctionArg>,
     },
     Derived {
         lateral: bool,
@@ -326,8 +339,9 @@ pub enum TableFactor {
     },
     /// `<expr>[ AS <alias> ]`
     TableFunction {
-        expr: Expr,
+        name: ObjectName,
         alias: Option<TableAlias>,
+        args: Vec<FunctionArg>,
     },
     /// Represents a parenthesized table factor. The SQL spec only allows a
     /// join expression (`(foo <JOIN> bar [ <JOIN> baz ... ])`) to be nested,
@@ -339,13 +353,10 @@ pub enum TableFactor {
 }
 
 impl fmt::Display for TableFactor {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TableFactor::Table { name, alias, args } => {
+            TableFactor::Table { name, alias } => {
                 write!(f, "{}", name)?;
-                if !args.is_empty() {
-                    write!(f, "({})", display_comma_separated(args))?;
-                }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
                 }
@@ -365,8 +376,8 @@ impl fmt::Display for TableFactor {
                 }
                 Ok(())
             }
-            TableFactor::TableFunction { expr, alias } => {
-                write!(f, "TABLE({})", expr)?;
+            TableFactor::TableFunction { name, alias, args } => {
+                write!(f, "{}({})", name, display_comma_separated(args))?;
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
                 }
@@ -385,7 +396,7 @@ pub struct TableAlias {
 }
 
 impl fmt::Display for TableAlias {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)?;
         if !self.columns.is_empty() {
             write!(f, " ({})", display_comma_separated(&self.columns))?;
@@ -402,7 +413,7 @@ pub struct Join {
 }
 
 impl fmt::Display for Join {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn prefix(constraint: &JoinConstraint) -> &'static str {
             match constraint {
                 JoinConstraint::Natural => "NATURAL ",
@@ -412,7 +423,7 @@ impl fmt::Display for Join {
         fn suffix(constraint: &'_ JoinConstraint) -> impl fmt::Display + '_ {
             struct Suffix<'a>(&'a JoinConstraint);
             impl<'a> fmt::Display for Suffix<'a> {
-                fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     match self.0 {
                         JoinConstraint::On(expr) => write!(f, " ON {}", expr),
                         JoinConstraint::Using(attrs) => {
@@ -489,7 +500,7 @@ pub struct OrderByExpr {
 }
 
 impl fmt::Display for OrderByExpr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.expr)?;
         match self.asc {
             Some(true) => write!(f, " ASC")?,
@@ -507,51 +518,16 @@ impl fmt::Display for OrderByExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Offset {
-    pub value: Expr,
-    pub rows: OffsetRows,
-}
-
-impl fmt::Display for Offset {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "OFFSET {}{}", self.value, self.rows)
-    }
-}
-
-/// Stores the keyword after `OFFSET <number>`
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum OffsetRows {
-    /// Omitting ROW/ROWS is non-standard MySQL quirk.
-    None,
-    Row,
-    Rows,
-}
-
-impl fmt::Display for OffsetRows {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            OffsetRows::None => Ok(()),
-            OffsetRows::Row => write!(f, " ROW"),
-            OffsetRows::Rows => write!(f, " ROWS"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Fetch {
     pub with_ties: bool,
-    pub percent: bool,
-    pub quantity: Option<Expr>,
+    pub quantity: Option<String>,
 }
 
 impl fmt::Display for Fetch {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let extension = if self.with_ties { "WITH TIES" } else { "ONLY" };
         if let Some(ref quantity) = self.quantity {
-            let percent = if self.percent { " PERCENT" } else { "" };
-            write!(f, "FETCH FIRST {}{} ROWS {}", quantity, percent, extension)
+            write!(f, "FETCH FIRST {} ROWS {}", quantity, extension)
         } else {
             write!(f, "FETCH FIRST ROWS {}", extension)
         }
@@ -568,7 +544,7 @@ pub struct Top {
 }
 
 impl fmt::Display for Top {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let extension = if self.with_ties { " WITH TIES" } else { "" };
         if let Some(ref quantity) = self.quantity {
             let percent = if self.percent { " PERCENT" } else { "" };
@@ -584,7 +560,7 @@ impl fmt::Display for Top {
 pub struct Values(pub Vec<Vec<Expr>>);
 
 impl fmt::Display for Values {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "VALUES ")?;
         let mut delim = "";
         for row in &self.0 {

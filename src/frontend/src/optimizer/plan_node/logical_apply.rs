@@ -18,11 +18,13 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
+use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown, ToBatch,
-    ToStream,
+    ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
+    PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::CorrelatedId;
+use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
@@ -40,28 +42,37 @@ pub struct LogicalApply {
     correlated_id: CorrelatedId,
     /// The indices of `CorrelatedInputRef`s in `right`.
     correlated_indices: Vec<usize>,
+    /// If the subquery produces more than one result we have to report an error.
+    max_one_row: bool,
 }
 
 impl fmt::Display for LogicalApply {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "LogicalApply {{ type: {:?}, on: {}, correlated_id: {} }}",
-            &self.join_type,
-            {
-                let mut concat_schema = self.left().schema().fields.clone();
-                concat_schema.extend(self.right().schema().fields.clone());
-                let concat_schema = Schema::new(concat_schema);
-                format!(
-                    "{}",
-                    ConditionDisplay {
-                        condition: &self.on,
-                        input_schema: &concat_schema
-                    }
-                )
-            },
-            self.correlated_id
-        )
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut builder = f.debug_struct("LogicalApply");
+
+        builder.field("type", &format_args!("{:?}", &self.join_type));
+
+        let mut concat_schema = self.left().schema().fields.clone();
+        concat_schema.extend(self.right().schema().fields.clone());
+        let concat_schema = Schema::new(concat_schema);
+        builder.field(
+            "on",
+            &format_args!(
+                "{}",
+                ConditionDisplay {
+                    condition: &self.on,
+                    input_schema: &concat_schema
+                }
+            ),
+        );
+
+        builder.field("correlated_id", &self.correlated_id);
+
+        if self.max_one_row {
+            builder.field("max_one_row", &self.max_one_row);
+        }
+
+        builder.finish()
     }
 }
 
@@ -73,22 +84,21 @@ impl LogicalApply {
         on: Condition,
         correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
+        max_one_row: bool,
     ) -> Self {
         let ctx = left.ctx();
-        let out_column_num =
-            LogicalJoin::out_column_num(left.schema().len(), right.schema().len(), join_type);
-        let output_indices = (0..out_column_num).collect::<Vec<_>>();
-        let schema =
-            LogicalJoin::derive_schema(left.schema(), right.schema(), join_type, &output_indices);
-        let pk_indices = LogicalJoin::derive_pk(
-            left.schema().len(),
-            right.schema().len(),
-            left.pk_indices(),
-            right.pk_indices(),
-            join_type,
-            &output_indices,
-        );
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let join_core = generic::Join::with_full_output(left, right, join_type, on);
+        let schema = join_core.schema();
+        let pk_indices = join_core.logical_pk();
+        let (functional_dependency, pk_indices) = match pk_indices {
+            Some(pk_indices) => (
+                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
+                pk_indices,
+            ),
+            None => (FunctionalDependencySet::new(schema.len()), vec![]),
+        };
+        let (left, right, on, join_type, _output_indices) = join_core.decompose();
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalApply {
             base,
             left,
@@ -97,6 +107,7 @@ impl LogicalApply {
             join_type,
             correlated_id,
             correlated_indices,
+            max_one_row,
         }
     }
 
@@ -107,6 +118,7 @@ impl LogicalApply {
         on: Condition,
         correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
+        max_one_row: bool,
     ) -> PlanRef {
         Self::new(
             left,
@@ -115,6 +127,7 @@ impl LogicalApply {
             on,
             correlated_id,
             correlated_indices,
+            max_one_row,
         )
         .into()
     }
@@ -133,6 +146,7 @@ impl LogicalApply {
         JoinType,
         CorrelatedId,
         Vec<usize>,
+        bool,
     ) {
         (
             self.left,
@@ -141,11 +155,93 @@ impl LogicalApply {
             self.join_type,
             self.correlated_id,
             self.correlated_indices,
+            self.max_one_row,
         )
     }
 
     pub fn correlated_id(&self) -> CorrelatedId {
         self.correlated_id
+    }
+
+    pub fn correlated_indices(&self) -> Vec<usize> {
+        self.correlated_indices.to_owned()
+    }
+
+    pub fn max_one_row(&self) -> bool {
+        self.max_one_row
+    }
+
+    /// Translate Apply.
+    ///
+    /// Used to convert other kinds of Apply to cross Apply.
+    pub fn translate_apply(self, new_apply_left: PlanRef, eq_predicates: Vec<ExprImpl>) -> PlanRef {
+        let (
+            apply_left,
+            apply_right,
+            on,
+            apply_type,
+            correlated_id,
+            correlated_indices,
+            max_one_row,
+        ) = self.decompose();
+        let apply_left_len = apply_left.schema().len();
+        let correlated_indices_len = correlated_indices.len();
+
+        let new_apply = LogicalApply::create(
+            new_apply_left,
+            apply_right,
+            JoinType::Inner,
+            Condition::true_cond(),
+            correlated_id,
+            correlated_indices,
+            max_one_row,
+        );
+
+        let on = Self::rewrite_on(on, correlated_indices_len, apply_left_len).and(Condition {
+            conjunctions: eq_predicates,
+        });
+        let new_join = LogicalJoin::new(apply_left, new_apply, apply_type, on);
+
+        if new_join.join_type() != JoinType::LeftSemi {
+            // `new_join`'s schema is different from original apply's schema, so `LogicalProject` is
+            // used to ensure they are the same.
+            let mut exprs: Vec<ExprImpl> = vec![];
+            new_join
+                .schema()
+                .data_types()
+                .into_iter()
+                .enumerate()
+                .for_each(|(index, data_type)| {
+                    if index < apply_left_len || index >= apply_left_len + correlated_indices_len {
+                        exprs.push(InputRef::new(index, data_type).into());
+                    }
+                });
+            LogicalProject::create(new_join.into(), exprs)
+        } else {
+            new_join.into()
+        }
+    }
+
+    fn rewrite_on(on: Condition, offset: usize, apply_left_len: usize) -> Condition {
+        struct Rewriter {
+            offset: usize,
+            apply_left_len: usize,
+        }
+        impl ExprRewriter for Rewriter {
+            fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+                let index = input_ref.index();
+                if index >= self.apply_left_len {
+                    InputRef::new(index + self.offset, input_ref.return_type()).into()
+                } else {
+                    input_ref.into()
+                }
+            }
+        }
+        let mut rewriter = Rewriter {
+            offset,
+            apply_left_len,
+        };
+        on.rewrite_expr(&mut rewriter)
     }
 }
 
@@ -166,6 +262,7 @@ impl PlanTreeNodeBinary for LogicalApply {
             self.on.clone(),
             self.correlated_id,
             self.correlated_indices.clone(),
+            self.max_one_row,
         )
     }
 }

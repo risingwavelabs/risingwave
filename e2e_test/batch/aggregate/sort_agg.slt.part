@@ -1,0 +1,38 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(v1 int, v2 int)
+
+statement ok
+insert into t values (4, 7), (9, 3), (10, 12), (1, 1), (10, 20), (4, 1), (-10, 100), (100, 10)
+
+statement ok
+create materialized view mv as select * from t order by v1 desc
+
+query I rowsort
+select v1, max(v2) from mv group by v1
+----
+-10 100
+1 1
+10 20
+100 10
+4 7
+9 3
+
+
+query II
+select v1, max(v2) from t group by v1 order by v1 desc
+----
+100 10
+10 20
+9 3
+4 7
+1 1
+-10 100
+
+statement ok
+drop materialized view mv
+
+statement ok
+drop table t

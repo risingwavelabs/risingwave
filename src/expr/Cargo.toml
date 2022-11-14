@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_expr"
-version = "0.1.11"
+version = "0.2.0-alpha"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,28 +12,30 @@ async-trait = "0.1"
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 crc32fast = "1"
+dyn-clone = "1"
 either = "1"
 itertools = "0.10"
-lazy_static = "1"
-log = "0.4"
-lru = "0.7"
-madsim = "=0.2.0-alpha.5"
 md5 = "0.7.0"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
+parse-display = "0.6"
 paste = "1"
-prost = "0.10"
+postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
+prost = "0.11"
 regex = "1"
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
+speedate = "0.7.0"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.5", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1"
 toml = "0.5"
-tonic = { version = "=0.2.0-alpha.5", package = "madsim-tonic" }
-value-encoding = { path = "../utils/value-encoding" }
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+tonic = { version = "0.2", package = "madsim-tonic" }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }

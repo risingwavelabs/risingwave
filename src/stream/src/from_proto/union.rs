@@ -17,13 +17,14 @@ use crate::executor::UnionExecutor;
 
 pub struct UnionExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for UnionExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         try_match_expand!(node.get_node_body().unwrap(), NodeBody::Union)?;
         Ok(UnionExecutor::new(params.pk_indices, params.input).boxed())
     }

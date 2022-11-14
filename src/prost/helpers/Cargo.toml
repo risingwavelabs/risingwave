@@ -11,4 +11,6 @@ proc-macro-error = "1.0"
 proc-macro2 = { version = "1", default-features = false }
 quote = "1"
 syn = "1"
-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }

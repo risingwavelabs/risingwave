@@ -12,50 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Buf, BufMut};
-use clap::Parser;
+use futures::future::join_all;
 use itertools::Itertools;
+use prometheus::Registry;
 use rand::{Rng, SeedableRng};
 use risingwave_storage::hummock::file_cache::cache::{FileCache, FileCacheOptions};
-use risingwave_storage::hummock::file_cache::coding::CacheKey;
+use risingwave_storage::hummock::file_cache::metrics::FileCacheMetrics;
+use risingwave_storage::hummock::file_cache::store::FsType;
+use risingwave_storage::hummock::{TieredCacheKey, TieredCacheValue};
 use tokio::sync::oneshot;
+use tracing::Instrument;
 
 use crate::analyze::{analyze, monitor, Hook, Metrics};
-use crate::utils::{dev_stat_path, iostat};
-
-#[derive(Parser, Debug, Clone)]
-struct Args {
-    #[clap(short, long)]
-    path: String,
-    #[clap(long, default_value = "1073741824")] // 1 GiB
-    capacity: usize,
-    #[clap(long, default_value = "134217728")] // 2 * 64 MiB
-    total_buffer_capacity: usize,
-    #[clap(long, default_value = "67108864")] // 64 MiB
-    cache_file_fallocate_unit: usize,
-
-    #[clap(long, default_value = "1048576")] // 1 MiB
-    bs: usize,
-    #[clap(long, default_value = "8")]
-    concurrency: usize,
-    #[clap(long, default_value = "600")] // 600s
-    time: u64,
-    #[clap(long, default_value = "1")]
-    read: usize,
-    #[clap(long, default_value = "1")]
-    write: usize,
-    #[clap(long, default_value = "10000")]
-    look_up_range: u32,
-    #[clap(long, default_value = "0")] // 0ms
-    loop_min_interval: u64,
-
-    #[clap(long, default_value = "1")] // (s)
-    report_interval: u64,
-}
+use crate::rate::RateLimiter;
+use crate::utils::{dev_stat_path, file_stat_path, iostat};
+use crate::Args;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 struct Index {
@@ -63,7 +39,7 @@ struct Index {
     idx: u32,
 }
 
-impl CacheKey for Index {
+impl TieredCacheKey for Index {
     fn encoded_len() -> usize {
         8
     }
@@ -80,24 +56,36 @@ impl CacheKey for Index {
     }
 }
 
-pub async fn run() {
-    let args = Args::parse();
-
+pub async fn run(args: Args, stop: oneshot::Receiver<()>) {
     let metrics = Metrics::default();
     let hook = Arc::new(Hook::new(metrics.clone()));
 
     let options = FileCacheOptions {
         dir: args.path.clone(),
-        capacity: args.capacity,
-        total_buffer_capacity: args.total_buffer_capacity,
-        cache_file_fallocate_unit: args.cache_file_fallocate_unit,
-        filters: vec![],
+        capacity: args.capacity * 1024 * 1024,
+        total_buffer_capacity: args.total_buffer_capacity * 1024 * 1024,
+        cache_file_fallocate_unit: args.cache_file_fallocate_unit * 1024 * 1024,
+        cache_meta_fallocate_unit: args.cache_meta_fallocate_unit * 1024 * 1024,
+        cache_file_max_write_size: args.cache_file_max_write_size * 1024 * 1024,
         flush_buffer_hooks: vec![hook],
     };
 
-    let cache: FileCache<Index> = FileCache::open(options).await.unwrap();
+    let cache: FileCache<Index, CacheValue> =
+        FileCache::open(options, Arc::new(FileCacheMetrics::new(Registry::new())))
+            .await
+            .unwrap();
 
-    let iostat_path = dev_stat_path(&args.path);
+    let iostat_path = match cache.fs_type() {
+        FsType::Tmpfs => panic!("file cache bench is not supported on tmpfs"),
+        FsType::Btrfs => {
+            if args.iostat_dev.is_empty() {
+                panic!("cannot decide which block device to monitor for btrfs, please specify device name with \'--iostat-dev\'");
+            } else {
+                dev_stat_path(&args.iostat_dev)
+            }
+        }
+        _ => file_stat_path(&args.path),
+    };
 
     let iostat_start = iostat(&iostat_path);
     let metrics_dump_start = metrics.dump();
@@ -138,7 +126,7 @@ pub async fn run() {
     });
 
     tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.unwrap();
+        stop.await.unwrap();
         for tx in txs {
             let _ = tx.send(());
         }
@@ -163,27 +151,106 @@ pub async fn run() {
 
     // TODO: Remove this after graceful shutdown is done.
     // Waiting for the inflight flush io to pervent files from being closed.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct CacheValue(Vec<u8>);
+
+impl TieredCacheValue for CacheValue {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn encoded_len(&self) -> usize {
+        self.len()
+    }
+
+    fn encode(&self, mut buf: &mut [u8]) {
+        buf.put_slice(&self.0)
+    }
+
+    fn decode(buf: Vec<u8>) -> Self {
+        Self(buf)
+    }
 }
 
 async fn bench(
     id: usize,
     args: Args,
-    cache: FileCache<Index>,
+    cache: FileCache<Index, CacheValue>,
+    time: u64,
+    metrics: Metrics,
+    stop: oneshot::Receiver<()>,
+) {
+    let bs = args.bs * 1024;
+    let w_rate = if args.w_rate == 0.0 {
+        None
+    } else {
+        Some(args.w_rate * 1024.0 * 1024.0)
+    };
+    let r_rate = if args.r_rate == 0.0 {
+        None
+    } else {
+        Some(args.r_rate * 1024.0 * 1024.0)
+    };
+
+    let index = Arc::new(AtomicU32::new(0));
+
+    let (w_stop_tx, w_stop_rx) = oneshot::channel();
+    let (r_stop_tx, r_stop_rx) = oneshot::channel();
+
+    let handle_w = tokio::spawn(write(
+        id,
+        bs,
+        w_rate,
+        index.clone(),
+        cache.clone(),
+        time,
+        metrics.clone(),
+        w_stop_rx,
+    ));
+    let handle_r = tokio::spawn(read(
+        id,
+        bs,
+        r_rate,
+        index,
+        cache,
+        time,
+        metrics,
+        r_stop_rx,
+        args.look_up_range,
+    ));
+    tokio::spawn(async move {
+        if let Ok(()) = stop.await {
+            let _ = w_stop_tx.send(());
+            let _ = r_stop_tx.send(());
+        }
+    });
+
+    join_all([handle_r, handle_w]).await;
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn read(
+    id: usize,
+    bs: usize,
+    rate: Option<f64>,
+    index: Arc<AtomicU32>,
+    cache: FileCache<Index, CacheValue>,
     time: u64,
     metrics: Metrics,
     mut stop: oneshot::Receiver<()>,
+    look_up_range: u32,
 ) {
-    let start = Instant::now();
-
     let mut rng = rand::rngs::StdRng::seed_from_u64(0);
 
+    let start = Instant::now();
+
     let sst = id as u32;
-    let mut idx = 0;
+    let mut limiter = rate.map(RateLimiter::new);
 
     loop {
-        let loop_start = Instant::now();
-
         match stop.try_recv() {
             Err(oneshot::error::TryRecvError::Empty) => {}
             _ => return,
@@ -192,56 +259,87 @@ async fn bench(
             return;
         }
 
-        for _ in 0..args.write {
-            idx += 1;
-            let key = Index { sst, idx };
-            let value = vec![b'x'; args.bs];
+        let idx = index.load(Ordering::Relaxed);
+        let key = Index {
+            sst,
+            idx: rng.gen_range(std::cmp::max(idx, look_up_range + 1) - look_up_range..=idx),
+        };
 
-            let start = Instant::now();
-            cache.insert(key, value).unwrap();
+        if let Some(limiter) = &mut limiter && let Some(wait) = limiter.consume(bs as f64) {
+            tokio::time::sleep(wait).await;
+        }
+
+        let start = Instant::now();
+        let hit = cache
+            .get(&key)
+            .instrument(tracing::trace_span!("read_once"))
+            .await
+            .unwrap()
+            .is_some();
+        let lat = start.elapsed().as_micros() as u64;
+        if hit {
             metrics
-                .insert_lats
+                .get_hit_lats
                 .write()
-                .record(start.elapsed().as_micros() as u64)
+                .record(lat)
                 .expect("record out of range");
-            metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
-            metrics.insert_bytes.fetch_add(args.bs, Ordering::Relaxed);
-        }
-        for _ in 0..args.read {
-            let key = Index {
-                sst,
-                idx: rng.gen_range(
-                    std::cmp::max(idx, args.look_up_range + 1) - args.look_up_range..=idx,
-                ),
-            };
-
-            let start = Instant::now();
-            let hit = cache.get(&key).await.unwrap().is_some();
-            let lat = start.elapsed().as_micros() as u64;
-            if hit {
-                metrics
-                    .get_hit_lats
-                    .write()
-                    .record(lat)
-                    .expect("record out of range");
-            } else {
-                metrics
-                    .get_miss_lats
-                    .write()
-                    .record(lat)
-                    .expect("record out of range");
-                metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
-            }
-            metrics.get_ios.fetch_add(1, Ordering::Relaxed);
-        }
-
-        if args.loop_min_interval == 0 {
-            tokio::task::yield_now().await;
         } else {
-            let elapsed = loop_start.elapsed().as_millis() as u64;
-            if elapsed < args.loop_min_interval {
-                tokio::time::sleep(Duration::from_millis(args.loop_min_interval - elapsed)).await;
-            }
+            metrics
+                .get_miss_lats
+                .write()
+                .record(lat)
+                .expect("record out of range");
+            metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
         }
+        metrics.get_ios.fetch_add(1, Ordering::Relaxed);
+
+        tokio::task::consume_budget().await;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn write(
+    id: usize,
+    bs: usize,
+    rate: Option<f64>,
+    index: Arc<AtomicU32>,
+    cache: FileCache<Index, CacheValue>,
+    time: u64,
+    metrics: Metrics,
+    mut stop: oneshot::Receiver<()>,
+) {
+    let start = Instant::now();
+
+    let sst = id as u32;
+    let mut limiter = rate.map(RateLimiter::new);
+
+    loop {
+        match stop.try_recv() {
+            Err(oneshot::error::TryRecvError::Empty) => {}
+            _ => return,
+        }
+        if start.elapsed().as_secs() >= time {
+            return;
+        }
+
+        let idx = index.fetch_add(1, Ordering::Relaxed);
+        let key = Index { sst, idx };
+        let value = CacheValue(vec![b'x'; bs]);
+
+        if let Some(limiter) = &mut limiter && let Some(wait) = limiter.consume(bs as f64) {
+            tokio::time::sleep(wait).await;
+        }
+
+        let start = Instant::now();
+        cache.insert(key, value).unwrap();
+        metrics
+            .insert_lats
+            .write()
+            .record(start.elapsed().as_micros() as u64)
+            .expect("record out of range");
+        metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
+        metrics.insert_bytes.fetch_add(bs, Ordering::Relaxed);
+
+        tokio::task::consume_budget().await;
     }
 }

@@ -15,14 +15,19 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::logical_agg::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::generic::PlanAggCall;
+use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::RequiredDist;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
-/// Streaming local simple agg, only for stateless agg.
+/// Streaming local simple agg.
+///
+/// Should only be used for stateless agg, including `sum`, `count` and *append-only* `min`/`max`.
+///
+/// The output of `StreamLocalSimpleAgg` doesn't have pk columns, so the result can only
+/// be used by `StreamGlobalSimpleAgg` with `ManagedValueState`s.
 #[derive(Debug, Clone)]
 pub struct StreamLocalSimpleAgg {
     pub base: PlanBase,
@@ -32,21 +37,18 @@ pub struct StreamLocalSimpleAgg {
 impl StreamLocalSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.base.pk_indices.to_vec();
+        let pk_indices = logical.base.logical_pk.to_vec();
         let input = logical.input();
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
-        // Although output are only inserts,
-        // this stream cannot be materialized,
-        // so its `append_only` property is false.
-        let append_only = false;
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             pk_indices,
+            logical.functional_dependency().clone(),
             input_dist.clone(),
-            append_only,
+            input.append_only(),
         );
         StreamLocalSimpleAgg { base, logical }
     }
@@ -57,7 +59,7 @@ impl StreamLocalSimpleAgg {
 }
 
 impl fmt::Display for StreamLocalSimpleAgg {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.logical
             .fmt_with_name(f, "StreamStatelessLocalSimpleAgg")
     }
@@ -74,10 +76,9 @@ impl PlanTreeNodeUnary for StreamLocalSimpleAgg {
 }
 impl_plan_tree_node_for_unary! { StreamLocalSimpleAgg }
 
-impl ToStreamProst for StreamLocalSimpleAgg {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamLocalSimpleAgg {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let (internal_tables, column_mappings) = self.logical.infer_internal_table_catalog();
         ProstStreamNode::LocalSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
@@ -85,27 +86,13 @@ impl ToStreamProst for StreamLocalSimpleAgg {
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
             distribution_key: self
-                .base
-                .dist
+                .distribution()
                 .dist_column_indices()
                 .iter()
                 .map(|idx| *idx as u32)
                 .collect_vec(),
-            internal_tables: internal_tables
-                .into_iter()
-                .map(|table_catalog| {
-                    table_catalog.to_prost(
-                        SchemaId::placeholder() as u32,
-                        DatabaseId::placeholder() as u32,
-                    )
-                })
-                .collect_vec(),
-            column_mappings: column_mappings
-                .into_iter()
-                .map(|v| ColumnMapping {
-                    indices: v.iter().map(|x| *x as u32).collect(),
-                })
-                .collect(),
+            agg_call_states: vec![],
+            result_table: None,
             is_append_only: self.input().append_only(),
         })
     }

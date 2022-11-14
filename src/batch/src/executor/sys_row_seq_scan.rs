@@ -15,7 +15,7 @@
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, SysCatalogReaderRef};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, SysCatalogReaderRef, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -25,7 +25,7 @@ use crate::executor::{
 use crate::task::BatchTaskContext;
 
 pub struct SysRowSeqScanExecutor {
-    table_name: String,
+    table_id: TableId,
     schema: Schema,
     column_ids: Vec<ColumnId>,
     identity: String,
@@ -35,14 +35,14 @@ pub struct SysRowSeqScanExecutor {
 
 impl SysRowSeqScanExecutor {
     pub fn new(
-        table_name: String,
+        table_id: TableId,
         schema: Schema,
         column_id: Vec<ColumnId>,
         identity: String,
         sys_catalog_reader: SysCatalogReaderRef,
     ) -> Self {
         Self {
-            table_name,
+            table_id,
             schema,
             column_ids: column_id,
             identity,
@@ -56,7 +56,7 @@ pub struct SysRowSeqScanExecutorBuilder {}
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for SysRowSeqScanExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(
@@ -67,9 +67,9 @@ impl BoxedExecutorBuilder for SysRowSeqScanExecutorBuilder {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::SysRowSeqScan
         )?;
-        let sys_catalog_reader = source.context.try_get_catalog_reader_ref()?;
+        let sys_catalog_reader = source.context.catalog_reader();
 
-        let table_name = seq_scan_node.table_name.clone();
+        let table_id = seq_scan_node.get_table_id().into();
         let column_descs = seq_scan_node
             .column_descs
             .iter()
@@ -79,7 +79,7 @@ impl BoxedExecutorBuilder for SysRowSeqScanExecutorBuilder {
         let column_ids = column_descs.iter().map(|d| d.column_id).collect_vec();
         let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
         Ok(Box::new(SysRowSeqScanExecutor::new(
-            table_name,
+            table_id,
             schema,
             column_ids,
             source.plan_node().get_identity().clone(),
@@ -105,7 +105,7 @@ impl Executor for SysRowSeqScanExecutor {
 impl SysRowSeqScanExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_executor(self: Box<Self>) {
-        let rows = self.sys_catalog_reader.read_table(&self.table_name).await?;
+        let rows = self.sys_catalog_reader.read_table(&self.table_id).await?;
         let filtered_rows = rows
             .iter()
             .map(|row| {
@@ -118,8 +118,7 @@ impl SysRowSeqScanExecutor {
             })
             .collect_vec();
 
-        let chunk = DataChunk::from_rows(&filtered_rows, &self.schema.data_types())
-            .map_err(RwError::from)?;
+        let chunk = DataChunk::from_rows(&filtered_rows, &self.schema.data_types());
         yield chunk
     }
 }

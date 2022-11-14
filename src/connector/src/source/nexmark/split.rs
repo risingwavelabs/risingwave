@@ -16,7 +16,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::source::SplitMetaData;
+use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Hash)]
 pub struct NexmarkSplit {
@@ -26,8 +26,9 @@ pub struct NexmarkSplit {
 }
 
 impl SplitMetaData for NexmarkSplit {
-    fn id(&self) -> String {
-        format!("{}-{}", self.split_num, self.split_index)
+    fn id(&self) -> SplitId {
+        // TODO: should avoid constructing a string every time
+        format!("{}-{}", self.split_num, self.split_index).into()
     }
 
     fn encode_to_bytes(&self) -> Bytes {

@@ -23,16 +23,15 @@ pub struct BarrierManagerState {
     pub in_flight_prev_epoch: Epoch,
 }
 
+const BARRIER_MANAGER_STATE_KEY: &[u8] = b"barrier_manager_state";
+
 impl BarrierManagerState {
     pub async fn create<S>(store: &S) -> Self
     where
         S: MetaStore,
     {
         let in_flight_prev_epoch = match store
-            .get_cf(
-                DEFAULT_COLUMN_FAMILY,
-                b"barrier_manager_state_epoch_inflight",
-            )
+            .get_cf(DEFAULT_COLUMN_FAMILY, BARRIER_MANAGER_STATE_KEY)
             .await
         {
             Ok(byte_vec) => u64::from_be_bytes(byte_vec.as_slice().try_into().unwrap()).into(),
@@ -51,7 +50,7 @@ impl BarrierManagerState {
         store
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
-                b"barrier_manager_state_epoch_inflight".to_vec(),
+                BARRIER_MANAGER_STATE_KEY.to_vec(),
                 self.in_flight_prev_epoch.0.to_be_bytes().to_vec(),
             )
             .await

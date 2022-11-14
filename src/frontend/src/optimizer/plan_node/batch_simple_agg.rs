@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
-use super::logical_agg::PlanAggCall;
+use super::generic::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -49,7 +49,7 @@ impl BatchSimpleAgg {
 }
 
 impl fmt::Display for BatchSimpleAgg {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.logical.fmt_with_name(f, "BatchSimpleAgg")
     }
 }
@@ -73,8 +73,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
 
         // TODO: distinct agg cannot use 2-phase agg yet.
         if dist_input.distribution().satisfies(&RequiredDist::AnyShard)
-            && self.logical.agg_calls().iter().all(|call| !call.distinct)
-            && !self.logical.is_agg_result_affected_by_order()
+            && self.logical.can_agg_two_phase()
         {
             // partial agg
             let partial_agg = self.clone_with_input(dist_input).into();

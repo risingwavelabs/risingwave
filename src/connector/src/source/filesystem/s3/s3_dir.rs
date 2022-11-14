@@ -21,11 +21,11 @@ use aws_sdk_sqs::client as sqs_client;
 use aws_smithy_types::tristate::TriState;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
-use log::{debug, error, info};
 use sync::watch;
 use thiserror::Error;
 use tokio::sync;
 use tokio::sync::mpsc::Sender;
+use tracing::{debug, error, info};
 
 use crate::source::filesystem::file_common::{
     Directory, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat, StatusWatch,
@@ -181,7 +181,8 @@ impl From<S3Properties> for S3SourceBasicConfig {
 pub(crate) fn new_s3_client(s3_source_config: S3SourceConfig) -> s3_client::Client {
     let config_for_s3 = match s3_source_config.custom_config {
         Some(conf) => {
-            let retry_conf = aws_config::RetryConfig::new().with_max_attempts(conf.max_retry_times);
+            let retry_conf =
+                aws_config::RetryConfig::standard().with_max_attempts(conf.max_retry_times);
             let timeout_conf = aws_config::timeout::Config::new().with_http_timeouts(
                 Http::new()
                     .with_connect_timeout(TriState::Set(conf.conn_time_out))
@@ -546,7 +547,7 @@ pub(crate) mod test {
         println!("list_curr_entries = {:?}", curr_entries);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[tokio::test]
     #[ignore]
     async fn test_s3_directory_entries_change() {
         let shared_config = new_share_config(TEST_REGION_NAME.to_string(), AwsCredential::Default)

@@ -1,0 +1,27 @@
+query IIITTTT rowsort
+SELECT * FROM nexmark_q18
+----
+1000 1001 366 channel-9891 https://www.nexmark.com/dhv/smk/gfok/item.htm?query=1 2015-07-15 00:00:25.006 zwtgfachqjpffrplonfttcxixellixjbejdxrpslceydbcjnlhnzwxdks
+1000 1002 322 channel-2691 https://www.nexmark.com/dyg/ozd/gp_/item.htm?query=1&channel_id=1051721728 2015-07-15 00:00:08.002 rmfblzbgfonebnxejptccmvhakgnagewhbolwyiygsyyfsuwjiwuohrkxavxuhxzycjiprahpyygej
+1000 1003 9353 Facebook https://www.nexmark.com/_mks/ppeq/sic/item.htm?query=1 2015-07-15 00:00:11.003 qnxoeqlppooteqhxfzeoqlmkwforwtzyqyhjfzpgbaucbbxieuvvpfeubalvrgdexgfilcdkjuh
+1000 1004 92441 Google https://www.nexmark.com/vzbh/gkz_/yha/item.htm?query=1 2015-07-15 00:00:24.006 vigdixojctlzzlhdczfojxzrvrrfqbtnstozecfukalltorefhjucxsjbqnyyjvumn
+1000 1006 1433650 channel-5311 https://www.nexmark.com/__du/lcuf/nhcz/item.htm?query=1&channel_id=47710208 2015-07-15 00:00:12.003 xjflgxfiltfokisttnrueiyejuesecuwhxulwpkqnisqkfnyjbtdpmeimlyrphctf
+1000 1007 12655 channel-5136 https://www.nexmark.com/xzzn/qfz/_kk/item.htm?query=1&channel_id=136839168 2015-07-15 00:00:02.001 cnipfyemyybafidbftraixbzwzfuiqotzjhwebelxuettusmmofqypfsrtivrqtvghzvdtqhqxc
+1000 1010 235 Facebook https://www.nexmark.com/_mks/ppeq/sic/item.htm?query=1 2015-07-15 00:00:04.001 xsslxlqwhaglqtqrdvspopxkmpvdjinwtglewwvzdwgulmguzhqlqfjsehjaljtkbehlvttbmxuvfhf
+1001 1001 222 channel-4639 https://www.nexmark.com/_lwa/jepz/slr/item.htm?query=1&channel_id=129499136 2015-07-15 00:00:19.004 srnrswlrlfjgsglzbhhtypluvykcygqjvrgihflqrlzohptveqnshbshbankokgoooqttrgskh
+1001 1004 96533552 Facebook https://www.nexmark.com/_mks/ppeq/sic/item.htm?query=1 2015-07-15 00:00:05.001 tbxkmcsgxetgedefplmecyqssamffgwrvmcgxzjsilauvxiyesrmlphkxik
+1001 1008 34546 Apple https://www.nexmark.com/rxa/bnn/fl_/item.htm?query=1 2015-07-15 00:00:08.002 royyfdziwhoefjfckzoxckpooqmbtqxwltmcypaotuqzuebexxkwdnfctcooei
+1002 1001 190 Google https://www.nexmark.com/vzbh/gkz_/yha/item.htm?query=1 2015-07-15 00:00:21.005 rvcnfijweawzxscxasktbfnjhxmhwprafafcizoythlvpkbgutnvqbthfgqsgcvhip
+1003 1001 42953 channel-7914 https://www.nexmark.com/fkb/zfwu/tcq/item.htm?query=1&channel_id=1467482112 2015-07-15 00:00:09.003 ibhvqzzjihezplknyuirszjxwzjmjufyrotaiaskermnpxxuznzmpqxactmhuvzglf
+1004 1000 783536 Baidu https://www.nexmark.com/pd_/a_y/p_f_/item.htm?query=1 2015-07-15 00:00:21.005 gjzqqtmvzsrbrnkxtnlfyodjwqvingsihakejqkidyyzemiindosrxcjbjaekihncddiit
+1004 1001 2062 Baidu https://www.nexmark.com/pd_/a_y/p_f_/item.htm?query=1 2015-07-15 00:00:14.004 gknwvwczpduarvvbzkjgyxipbnzjbnhcneurucjqfitazyhdylgqqqlsskojl
+1006 1001 3414043 channel-8070 https://www.nexmark.com/kyop/avga/kkq/item.htm?query=1&channel_id=1643642880 2015-07-15 00:00:16.004 aiuubtfwalgmjsgiqkpkovqheatbweauormiveilvgbrymereqlinivuwgcwigzmyhcdvypc
+1007 1001 242 channel-3148 https://www.nexmark.com/jgy/pdmx/h_yl/item.htm?query=1&channel_id=842006528 2015-07-15 00:00:05.002 yzzgchwigbfzxrrlpmlclcdqipozeqibwntzwrhofvbewxuamxbftdgqauhjeiiqzyt
+1008 1002 28953332 channel-5698 https://www.nexmark.com/_ft/bwy/hh_/item.htm?query=1&channel_id=1114112000 2015-07-15 00:00:04.001 vcwipbxmlunhuydoptqjecuqoinqioxibjdwtfxapnmuzzsjpwitcfexncgnxyaistbstubeuotsgs
+1009 1001 806 channel-2421 https://www.nexmark.com/vicj/m_a/vop/item.htm?query=1&channel_id=1366294528 2015-07-15 00:00:17.004 efpmkkcrybqeodykzswczvmslauxgasmtvhbjswnjlhwlyuicaawprcp
+1010 1001 213 Facebook https://www.nexmark.com/_mks/ppeq/sic/item.htm?query=1 2015-07-15 00:00:15.004 xlyazoncjinqftzslwzpbwsfwjvuvytifuctjzzhiawdoxgzispzdwritryvkj
+1010 1002 2092 Baidu https://www.nexmark.com/pd_/a_y/p_f_/item.htm?query=1 2015-07-15 00:00:19.005 xsnnlcwqvsvtykjjjytqdarszxiunbpikhlltzcbzgtyrczlujqaxptncekuigacyszuoggizexd
+1011 1001 5255 Google https://www.nexmark.com/vzbh/gkz_/yha/item.htm?query=1 2015-07-15 00:00:10.003 jwqpxghlxenjdndnxxesigkexntlplwjewvocnlygtedoybqjtcgdlxrsjwk
+1011 1009 12201 Apple https://www.nexmark.com/rxa/bnn/fl_/item.htm?query=1 2015-07-15 00:00:13.003 itfogghkclpdkraffmwdsyblmwwaxxxgembvwyvzcmxjqejwjjsudqezwbhonfydwubtbnqgct
+1012 1001 3378476 channel-5845 https://www.nexmark.com/ph_/qho/awfo/item.htm?query=1 2015-07-15 00:00:20.005 pzekasaqfyqeykupxciyhmstbecetphgcsqpjywqqtttrzbnitwvrkxefbq
+1012 1003 19269 channel-5775 https://www.nexmark.com/g_oh/jlh/q_cf/item.htm?query=1&channel_id=244842496 2015-07-15 00:00:03.001 zvhixblfatttovhezudfnaqkzhngltvwoclmbtiyeikjxqgmcvvhhclaudqyauwat

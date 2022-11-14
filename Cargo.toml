@@ -11,7 +11,7 @@ members = [
   "src/ctl",
   "src/expr",
   "src/frontend",
-  "src/frontend/test_runner",
+  "src/frontend/planner_test",
   "src/meta",
   "src/object_store",
   "src/prost",
@@ -27,17 +27,28 @@ members = [
   "src/storage/hummock_test",
   "src/stream",
   "src/test_runner",
+  "src/tests/compaction_test",
   "src/tests/regress",
   "src/tests/simulation",
+  "src/tests/simulation_scale",
   "src/tests/sqlsmith",
+  "src/tracing",
+  "src/utils/async_stack_trace",
+  "src/utils/local_stats_alloc",
   "src/utils/memcomparable",
+  "src/utils/nexmark",
   "src/utils/pgwire",
   "src/utils/runtime",
-  "src/utils/static-link",
-  "src/utils/stats_alloc",
-  "src/utils/value-encoding",
+  "src/utils/sync-point",
+  "src/utils/workspace-config",
   "src/workspace-hack",
 ]
+
+[profile.dev]
+lto = 'off'
+
+[profile.release]
+debug = true
 
 [profile.bench]
 opt-level = 3
@@ -49,5 +60,41 @@ debug-assertions = false
 overflow-checks = false
 rpath = false
 
-[profile.release]
+# The profile used for CI in main branch.
+# This profile inherits from the release profile, but turns on some checks and assertions for us to
+# better catch bugs in CI.
+[profile.ci-release]
+inherits = "release"
 debug = true
+debug-assertions = true
+overflow-checks = true
+
+# The profile used for CI in pull requests.
+# External dependencies are built with optimization enabled, while crates in this workspace are built
+# with `dev` profile and full debug info. This is a trade-off between build time and e2e test time.
+[profile.ci-dev]
+inherits = "dev"
+incremental = false
+[profile.ci-dev.package."*"] # external dependencies
+opt-level = 1
+[profile.ci-dev.package."tokio"]
+opt-level = 3
+[profile.ci-dev.package."async_stack_trace"]
+opt-level = 3
+[profile.ci-dev.package."indextree"]
+opt-level = 3
+
+# The profile used for deterministic simulation tests in CI.
+# The simulator can only run single-threaded, so optimization is required to make the running time
+# reasonable. The optimization level is customized to speed up the build.
+[profile.ci-sim]
+inherits = "dev"
+opt-level = 2
+
+# Patch third-party crates for deterministic simulation.
+[patch.crates-io]
+quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "a819877" }
+getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "cc95ee3" }
+tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
+tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
+postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }

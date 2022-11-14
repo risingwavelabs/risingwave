@@ -10,10 +10,9 @@ option optimize_for = SPEED;
 message AuthInfo {
   enum EncryptionType {
     UNSPECIFIED = 0;
-    UNKNOWN = 1;
-    PLAINTEXT = 2;
-    SHA256 = 3;
-    MD5 = 4;
+    PLAINTEXT = 1;
+    SHA256 = 2;
+    MD5 = 3;
   }
   EncryptionType encryption_type = 1;
   bytes encrypted_value = 2;
@@ -23,26 +22,26 @@ message AuthInfo {
 message UserInfo {
   uint32 id = 1;
   string name = 2;
-  bool is_supper = 3;
+  bool is_super = 3;
   bool can_create_db = 4;
-  bool can_login = 5;
-  AuthInfo auth_info = 6;
+  bool can_create_user = 5;
+  bool can_login = 6;
+  AuthInfo auth_info = 7;
 
   /// Granted privileges will be only updated through the command of GRANT/REVOKE.
-  repeated GrantPrivilege grant_privileges = 7;
+  repeated GrantPrivilege grant_privileges = 8;
 }
 
 // GrantPrivilege defines a privilege granted to a user.
 message GrantPrivilege {
   enum Action {
     UNSPECIFIED = 0;
-    UNKNOWN = 1;
-    SELECT = 2;
-    INSERT = 3;
-    UPDATE = 4;
-    DELETE = 5;
-    CREATE = 6;
-    CONNECT = 7;
+    SELECT = 1;
+    INSERT = 2;
+    UPDATE = 3;
+    DELETE = 4;
+    CREATE = 5;
+    CONNECT = 6;
   }
 
   message ActionWithGrantOption {
@@ -58,6 +57,7 @@ message GrantPrivilege {
     uint32 source_id = 4;
     uint32 all_tables_schema_id = 5;
     uint32 all_sources_schema_id = 6;
+    uint32 view_id = 8;
   }
   repeated ActionWithGrantOption action_with_opts = 7;
 }
@@ -82,12 +82,13 @@ message DropUserResponse {
 
 message UpdateUserRequest {
   enum UpdateField {
-    UNKNOWN = 0;
+    UNSPECIFIED = 0;
     SUPER = 1;
     LOGIN = 2;
     CREATE_DB = 3;
     AUTH_INFO = 4;
     RENAME = 5;
+    CREATE_USER = 6;
   }
   UserInfo user = 1;
   repeated UpdateField update_fields = 2;
@@ -125,8 +126,6 @@ message RevokePrivilegeResponse {
 }
 
 service UserService {
-  // TODO: add UpdateUser method to support `ALTER USER`, need more investigation. The FieldMask may be helpful:
-  // https://developers.google.com/protocol-buffers/docs/reference/java/com/google/protobuf/FieldMask.html.
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
   rpc DropUser(DropUserRequest) returns (DropUserResponse);
   rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);

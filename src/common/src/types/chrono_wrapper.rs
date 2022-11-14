@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
-use std::fmt::{Display, Formatter};
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::io::Write;
 
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use postgres_types::{ToSql, Type};
 
+use super::to_binary::ToBinary;
+use super::to_text::ToText;
 use super::{CheckedAdd, IntervalUnit};
 use crate::array::ArrayResult;
-use crate::error::{Result, RwError};
+use crate::util::value_encoding;
 use crate::util::value_encoding::error::ValueEncodingError;
+
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
 /// Minus this magic number to store the number of days since 1970-01-01.
 pub const UNIX_EPOCH_DAYS: i32 = 719_163;
@@ -31,51 +33,24 @@ const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 macro_rules! impl_chrono_wrapper {
-    ($({ $variant_name:ident, $chrono:ty, $_array:ident, $_builder:ident }),*) => {
-        $(
-            #[derive(Clone, Copy, Debug, Eq, PartialOrd, Ord)]
-            #[repr(transparent)]
-            pub struct $variant_name(pub $chrono);
+    ($variant_name:ident, $chrono:ty) => {
+        #[derive(
+            Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, parse_display::Display,
+        )]
+        #[repr(transparent)]
+        pub struct $variant_name(pub $chrono);
 
-            impl $variant_name {
-                pub fn new(data: $chrono) -> Self {
-                    $variant_name(data)
-                }
+        impl $variant_name {
+            pub fn new(data: $chrono) -> Self {
+                $variant_name(data)
             }
-
-            impl Hash for $variant_name {
-                fn hash<H: Hasher>(&self, state: &mut H) {
-                    self.0.hash(state);
-                }
-            }
-
-            impl PartialEq for $variant_name {
-                fn eq(&self, other: &Self) -> bool {
-                    self.0 == other.0
-                }
-            }
-
-            impl Display for $variant_name {
-                fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-                    Display::fmt(&self.0, f)
-                }
-            }
-        )*
-    };
-}
-
-#[macro_export]
-macro_rules! for_all_chrono_variants {
-    ($macro:ident) => {
-        $macro! {
-            { NaiveDateWrapper, NaiveDate, NaiveDateArray, NaiveDateArrayBuilder },
-            { NaiveDateTimeWrapper, NaiveDateTime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
-            { NaiveTimeWrapper, NaiveTime, NaiveTimeArray, NaiveTimeArrayBuilder }
         }
     };
 }
 
-for_all_chrono_variants! { impl_chrono_wrapper }
+impl_chrono_wrapper!(NaiveDateWrapper, NaiveDate);
+impl_chrono_wrapper!(NaiveDateTimeWrapper, NaiveDateTime);
+impl_chrono_wrapper!(NaiveTimeWrapper, NaiveTime);
 
 impl Default for NaiveDateWrapper {
     fn default() -> Self {
@@ -95,6 +70,48 @@ impl Default for NaiveDateTimeWrapper {
     }
 }
 
+impl ToText for NaiveDateWrapper {
+    fn to_text(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+impl ToText for NaiveTimeWrapper {
+    fn to_text(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+impl ToText for NaiveDateTimeWrapper {
+    fn to_text(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+impl ToBinary for NaiveDateWrapper {
+    fn to_binary(&self) -> Option<Bytes> {
+        let mut output = BytesMut::new();
+        self.0.to_sql(&Type::ANY, &mut output).unwrap();
+        Some(output.freeze())
+    }
+}
+
+impl ToBinary for NaiveTimeWrapper {
+    fn to_binary(&self) -> Option<Bytes> {
+        let mut output = BytesMut::new();
+        self.0.to_sql(&Type::ANY, &mut output).unwrap();
+        Some(output.freeze())
+    }
+}
+
+impl ToBinary for NaiveDateTimeWrapper {
+    fn to_binary(&self) -> Option<Bytes> {
+        let mut output = BytesMut::new();
+        self.0.to_sql(&Type::ANY, &mut output).unwrap();
+        Some(output.freeze())
+    }
+}
+
 impl NaiveDateWrapper {
     pub fn with_days(days: i32) -> memcomparable::Result<Self> {
         Ok(NaiveDateWrapper::new(
@@ -103,10 +120,11 @@ impl NaiveDateWrapper {
         ))
     }
 
-    pub fn new_with_days_value_encoding(days: i32) -> Result<Self> {
+    pub fn with_days_value(days: i32) -> value_encoding::Result<Self> {
         Ok(NaiveDateWrapper::new(
+            #[allow(clippy::unnecessary_lazy_evaluations)]
             NaiveDate::from_num_days_from_ce_opt(days)
-                .ok_or(ValueEncodingError::InvalidNaiveDateEncoding(days))?,
+                .ok_or_else(|| ValueEncodingError::InvalidNaiveDateEncoding(days))?,
         ))
     }
 
@@ -116,7 +134,7 @@ impl NaiveDateWrapper {
             .map_err(Into::into)
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+    pub fn to_protobuf_owned(self) -> Vec<u8> {
         self.0.num_days_from_ce().to_be_bytes().to_vec()
     }
 
@@ -141,14 +159,15 @@ impl NaiveTimeWrapper {
         ))
     }
 
-    pub fn new_with_secs_nano_value_encoding(secs: u32, nano: u32) -> Result<Self> {
+    pub fn with_secs_nano_value(secs: u32, nano: u32) -> value_encoding::Result<Self> {
+        #[allow(clippy::unnecessary_lazy_evaluations)] // TODO: remove in toolchain bump
         Ok(NaiveTimeWrapper::new(
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
-                .ok_or(ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
+                .ok_or_else(|| ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
         ))
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+    pub fn to_protobuf_owned(self) -> Vec<u8> {
         let buf = BytesMut::with_capacity(8);
         let mut writer = buf.writer();
         self.to_protobuf(&mut writer).unwrap();
@@ -183,17 +202,18 @@ impl NaiveTimeWrapper {
 impl NaiveDateTimeWrapper {
     pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> memcomparable::Result<Self> {
         Ok(NaiveDateTimeWrapper::new({
+            #[allow(clippy::unnecessary_lazy_evaluations)] // TODO: remove in toolchain bump
             NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
                 memcomparable::Error::InvalidNaiveDateTimeEncoding(secs, nsecs),
             )?
         }))
     }
 
-    pub fn new_with_secs_nsecs_value_encoding(secs: i64, nsecs: u32) -> Result<Self> {
+    pub fn with_secs_nsecs_value(secs: i64, nsecs: u32) -> value_encoding::Result<Self> {
         Ok(NaiveDateTimeWrapper::new({
-            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
-                ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs),
-            )?
+            #[allow(clippy::unnecessary_lazy_evaluations)] // TODO: remove in toolchain bump
+            NaiveDateTime::from_timestamp_opt(secs, nsecs)
+                .ok_or_else(|| ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs))?
         }))
     }
 
@@ -205,7 +225,7 @@ impl NaiveDateTimeWrapper {
             .map_err(Into::into)
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+    pub fn to_protobuf_owned(self) -> Vec<u8> {
         self.0.timestamp_nanos().to_be_bytes().to_vec()
     }
 
@@ -224,11 +244,9 @@ impl NaiveDateTimeWrapper {
     }
 }
 
-impl TryFrom<NaiveDateWrapper> for NaiveDateTimeWrapper {
-    type Error = RwError;
-
-    fn try_from(date: NaiveDateWrapper) -> Result<Self> {
-        Ok(NaiveDateTimeWrapper::new(date.0.and_hms(0, 0, 0)))
+impl From<NaiveDateWrapper> for NaiveDateTimeWrapper {
+    fn from(date: NaiveDateWrapper) -> Self {
+        NaiveDateTimeWrapper::new(date.0.and_hms(0, 0, 0))
     }
 }
 
@@ -277,7 +295,7 @@ impl CheckedAdd<IntervalUnit> for NaiveDateTimeWrapper {
 
             // Fix the days after changing date.
             // For example, 1970.1.31 + 1 month = 1970.2.28
-            day = min(day, get_mouth_days(year, month as usize));
+            day = day.min(get_mouth_days(year, month as usize));
             date = NaiveDate::from_ymd(year, month as u32, day as u32);
         }
         let mut datetime = NaiveDateTime::new(date, self.0.time());

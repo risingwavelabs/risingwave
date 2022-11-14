@@ -22,10 +22,9 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
-use crate::barrier::BarrierManagerRef;
-use crate::manager::MetaSrvEnv;
+use crate::barrier::BarrierScheduler;
+use crate::manager::{FragmentManagerRef, MetaSrvEnv};
 use crate::storage::MetaStore;
-use crate::stream::FragmentManagerRef;
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
@@ -35,7 +34,7 @@ where
     S: MetaStore,
 {
     env: MetaSrvEnv<S>,
-    barrier_manager: BarrierManagerRef<S>,
+    barrier_scheduler: BarrierScheduler<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
 
@@ -45,12 +44,12 @@ where
 {
     pub fn new(
         env: MetaSrvEnv<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        barrier_scheduler: BarrierScheduler<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         StreamServiceImpl {
             env,
-            barrier_manager,
+            barrier_scheduler,
             fragment_manager,
         }
     }
@@ -64,10 +63,13 @@ where
     #[cfg_attr(coverage, no_coverage)]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         self.env.idle_manager().record_activity();
-        let _req = request.into_inner();
+        let req = request.into_inner();
 
-        self.barrier_manager.flush().await?;
-        Ok(Response::new(FlushResponse { status: None }))
+        let snapshot = self.barrier_scheduler.flush(req.checkpoint).await?;
+        Ok(Response::new(FlushResponse {
+            status: None,
+            snapshot: Some(snapshot),
+        }))
     }
 
     #[cfg_attr(coverage, no_coverage)]

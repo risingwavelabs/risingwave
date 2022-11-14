@@ -21,14 +21,16 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
 use super::{
-    Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
-    StreamExecutorResult,
+    ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor,
+    SimpleExecutorWrapper, StreamExecutorResult,
 };
+use crate::common::InfallibleExpression;
 
 pub type ProjectExecutor = SimpleExecutorWrapper<SimpleProjectExecutor>;
 
 impl ProjectExecutor {
     pub fn new(
+        ctx: ActorContextRef,
         input: Box<dyn Executor>,
         pk_indices: PkIndices,
         exprs: Vec<BoxedExpression>,
@@ -41,7 +43,7 @@ impl ProjectExecutor {
         };
         SimpleExecutorWrapper {
             input,
-            inner: SimpleProjectExecutor::new(info, exprs, execuotr_id),
+            inner: SimpleProjectExecutor::new(ctx, info, exprs, execuotr_id),
         }
     }
 }
@@ -50,6 +52,7 @@ impl ProjectExecutor {
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct SimpleProjectExecutor {
+    ctx: ActorContextRef,
     info: ExecutorInfo,
 
     /// Expressions of the current projection.
@@ -57,7 +60,12 @@ pub struct SimpleProjectExecutor {
 }
 
 impl SimpleProjectExecutor {
-    pub fn new(input_info: ExecutorInfo, exprs: Vec<BoxedExpression>, executor_id: u64) -> Self {
+    pub fn new(
+        ctx: ActorContextRef,
+        input_info: ExecutorInfo,
+        exprs: Vec<BoxedExpression>,
+        executor_id: u64,
+    ) -> Self {
         let schema = Schema {
             fields: exprs
                 .iter()
@@ -65,6 +73,7 @@ impl SimpleProjectExecutor {
                 .collect_vec(),
         };
         Self {
+            ctx,
             info: ExecutorInfo {
                 schema,
                 pk_indices: input_info.pk_indices,
@@ -84,19 +93,20 @@ impl Debug for SimpleProjectExecutor {
 }
 
 impl SimpleExecutor for SimpleProjectExecutor {
-    fn map_filter_chunk(
-        &mut self,
-        chunk: StreamChunk,
-    ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact()?;
+    fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>> {
+        let chunk = chunk.compact();
 
         let (data_chunk, ops) = chunk.into_parts();
 
         let projected_columns = self
             .exprs
-            .iter_mut()
-            .map(|expr| expr.eval(&data_chunk).map(Column::new))
-            .collect::<Result<Vec<Column>, _>>()?;
+            .iter()
+            .map(|expr| {
+                Column::new(expr.eval_infallible(&data_chunk, |err| {
+                    self.ctx.on_compute_error(err, &self.info.identity)
+                }))
+            })
+            .collect();
 
         let new_chunk = StreamChunk::new(ops, projected_columns, None);
         Ok(Some(new_chunk))
@@ -106,7 +116,7 @@ impl SimpleExecutor for SimpleProjectExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -158,9 +168,11 @@ mod tests {
             DataType::Int64,
             Box::new(left_expr),
             Box::new(right_expr),
-        );
+        )
+        .unwrap();
 
         let project = Box::new(ProjectExecutor::new(
+            ActorContext::create(123),
             Box::new(source),
             vec![],
             vec![test_expr],

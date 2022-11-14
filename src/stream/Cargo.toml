@@ -1,13 +1,16 @@
 [package]
 name = "risingwave_stream"
-version = "0.1.11"
+version = "0.2.0-alpha"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1"
+async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
+async_stack_trace = { path = "../utils/async_stack_trace" }
+auto_enums = { version = "0.7", features = ["futures"] }
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -16,24 +19,26 @@ dyn-clone = "1"
 either = "1"
 enum-as-inner = "0.5"
 farmhash = "1"
+fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
+global_stats_alloc = { path = "../utils/global_stats_alloc" }
 hyper = "0.14"
 iter-chunks = "0.1"
 itertools = "0.10"
-lazy_static = "1"
-log = "0.4"
-madsim = "=0.2.0-alpha.5"
+local_stats_alloc = { path = "../utils/local_stats_alloc" }
+lru = { git = "https://github.com/risingwavelabs/lru-rs.git", branch = "evict_by_timestamp" }
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
+minitrace = "0.4"
 minstant = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.10"
-rdkafka = { version = "0.28", features = ["cmake-build"] }
+prost = "0.11"
+rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }
@@ -47,9 +52,10 @@ serde-value = "0.7"
 serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
-stats_alloc = { path = "../utils/stats_alloc" }
+stats_alloc = { version = "0.1", features = ["nightly"] }
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.5", package = "madsim-tokio", features = [
+tikv-jemalloc-ctl = "0.5"
+tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -60,13 +66,15 @@ tokio = { version = "=0.2.0-alpha.5", package = "madsim-tokio", features = [
 ] }
 tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
-tonic = { version = "=0.2.0-alpha.5", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
-tracing = { version = "0.1" }
+tracing = "0.1"
 tracing-futures = "0.2"
 twox-hash = "1"
 url = "2"
-value-encoding = { path = "../utils/value-encoding" }
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+
 [dev-dependencies]
 assert_matches = "1"

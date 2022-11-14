@@ -81,7 +81,7 @@ pub enum DataType {
 }
 
 impl fmt::Display for DataType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DataType::Char(size) => format_type_with_optional_length(f, "CHAR", size),
             DataType::Varchar => write!(f, "CHARACTER VARYING"),
@@ -127,7 +127,7 @@ impl fmt::Display for DataType {
 }
 
 fn format_type_with_optional_length(
-    f: &mut fmt::Formatter,
+    f: &mut fmt::Formatter<'_>,
     sql_type: &'static str,
     len: &Option<u64>,
 ) -> fmt::Result {
@@ -146,7 +146,7 @@ pub struct StructField {
 }
 
 impl fmt::Display for StructField {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", self.name, self.data_type)
     }
 }

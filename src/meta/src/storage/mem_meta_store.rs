@@ -67,6 +67,13 @@ impl Snapshot for MemSnapshot {
     }
 }
 
+impl MemStore {
+    /// Create a new in-memory store.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 #[async_trait]
 impl MetaStore for MemStore {
     type Snapshot = MemSnapshot;

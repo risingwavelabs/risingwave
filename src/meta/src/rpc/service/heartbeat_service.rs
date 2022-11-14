@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
-use crate::cluster::ClusterManagerRef;
+use crate::manager::ClusterManagerRef;
 use crate::storage::MetaStore;
 
 #[derive(Clone)]
@@ -47,10 +48,29 @@ where
         request: Request<HeartbeatRequest>,
     ) -> Result<Response<HeartbeatResponse>, Status> {
         let req = request.into_inner();
-        let result = self.cluster_manager.heartbeat(req.node_id).await;
+        let result = self
+            .cluster_manager
+            .heartbeat(
+                req.node_id,
+                req.info
+                    .into_iter()
+                    .filter_map(|node_info| node_info.info)
+                    .collect_vec(),
+            )
+            .await;
         match result {
             Ok(_) => Ok(Response::new(HeartbeatResponse { status: None })),
-            Err(e) => Err(e.into()),
+            Err(e) => {
+                if e.is_invalid_worker() {
+                    return Ok(Response::new(HeartbeatResponse {
+                        status: Some(risingwave_pb::common::Status {
+                            code: risingwave_pb::common::status::Code::UnknownWorker as i32,
+                            message: format!("{}", e),
+                        }),
+                    }));
+                }
+                Err(e.into())
+            }
         }
     }
 }

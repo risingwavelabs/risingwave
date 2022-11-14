@@ -18,7 +18,7 @@ while getopts 't:p:' opt; do
             exit 1
             ;;
         : )
-            echo "Invalid option: $OPTARG requires an arguemnt" 1>&2
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
             ;;
     esac
 done
@@ -34,7 +34,13 @@ echo "--- Rust format check"
 cargo fmt --all -- --check
 
 echo "--- Build Rust components"
-cargo build -p risingwave_cmd_all -p risedev -p risingwave_regress_test --features static-link --profile "$profile"
+cargo build \
+    -p risingwave_cmd_all \
+    -p risedev \
+    -p risingwave_regress_test \
+    -p risingwave_sqlsmith \
+    -p risingwave_compaction_test \
+    --features "static-link static-log-level" --profile "$profile"
 
 echo "--- Compress RisingWave debug info"
 objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave
@@ -43,9 +49,13 @@ echo "--- Show link info"
 ldd target/"$target"/risingwave
 
 echo "--- Upload artifacts"
+cp target/"$target"/compaction-test ./compaction-test-"$profile"
 cp target/"$target"/risingwave ./risingwave-"$profile"
-cp target/"$target"/risedev-playground ./risedev-playground-"$profile"
+cp target/"$target"/risedev-dev ./risedev-dev-"$profile"
 cp target/"$target"/risingwave_regress_test ./risingwave_regress_test-"$profile"
+cp target/"$target"/sqlsmith ./sqlsmith-"$profile"
 buildkite-agent artifact upload risingwave-"$profile"
-buildkite-agent artifact upload risedev-playground-"$profile"
+buildkite-agent artifact upload risedev-dev-"$profile"
 buildkite-agent artifact upload risingwave_regress_test-"$profile"
+buildkite-agent artifact upload ./sqlsmith-"$profile"
+buildkite-agent artifact upload ./compaction-test-"$profile"

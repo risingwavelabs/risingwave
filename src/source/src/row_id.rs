@@ -32,7 +32,7 @@ pub struct RowIdGenerator {
     /// Last timestamp part of row id.
     last_duration_ms: i64,
     /// Current vnode id.
-    vnode_id: u32,
+    pub vnode_id: u32,
     /// Last sequence part of row id.
     sequence: u16,
 }
@@ -60,7 +60,7 @@ impl RowIdGenerator {
             | self.sequence as i64
     }
 
-    fn try_update_duration(&mut self) {
+    async fn try_update_duration(&mut self) {
         let current_duration = self.epoch.elapsed().unwrap();
         let current_duration_ms = current_duration.as_millis() as i64;
         if current_duration_ms < self.last_duration_ms {
@@ -79,37 +79,43 @@ impl RowIdGenerator {
             // millisecond. Here we do not consider time goes backwards, it can also be covered
             // here.
             tracing::warn!("Sequence for row-id reached upper bound, spin loop.");
-            std::thread::sleep(
+            tokio::time::sleep(
                 Duration::from_millis(current_duration.subsec_millis() as u64 + 1)
                     - Duration::from_nanos(current_duration.subsec_nanos() as u64),
-            );
+            )
+            .await;
         }
     }
 
-    pub fn next_batch(&mut self, length: usize) -> Vec<RowId> {
-        self.try_update_duration();
+    /// Generate a sequence `RowId`s.
+    ///
+    /// This may block for a while if too many IDs are generated in one millisecond.
+    pub async fn next_batch(&mut self, length: usize) -> Vec<RowId> {
+        self.try_update_duration().await;
         let mut ret = Vec::with_capacity(length);
         while ret.len() < length {
             if self.sequence < SEQUENCE_UPPER_BOUND {
                 ret.push(self.row_id());
                 self.sequence += 1;
             } else {
-                self.try_update_duration();
+                self.try_update_duration().await;
             }
         }
-
         ret
     }
 
+    /// Generate a new `RowId`.
+    ///
+    /// This may block for a while if too many IDs are generated in one millisecond.
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> RowId {
-        self.try_update_duration();
-        if self.sequence < SEQUENCE_UPPER_BOUND {
-            let row_id = self.row_id();
-            self.sequence += 1;
-            row_id
-        } else {
-            self.next()
+    pub async fn next(&mut self) -> RowId {
+        loop {
+            self.try_update_duration().await;
+            if self.sequence < SEQUENCE_UPPER_BOUND {
+                let row_id = self.row_id();
+                self.sequence += 1;
+                return row_id;
+            }
         }
     }
 }
@@ -120,17 +126,17 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_generator() {
+    #[tokio::test]
+    async fn test_generator() {
         let mut generator = RowIdGenerator::new(0);
-        let mut last_row_id = generator.next();
+        let mut last_row_id = generator.next().await;
         for _ in 0..100000 {
-            let row_id = generator.next();
+            let row_id = generator.next().await;
             assert!(row_id > last_row_id);
             last_row_id = row_id;
         }
-        std::thread::sleep(Duration::from_millis(10));
-        let row_id = generator.next();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let row_id = generator.next().await;
         assert!(row_id > last_row_id);
         assert_ne!(
             row_id >> TIMESTAMP_SHIFT_BITS,
@@ -139,7 +145,9 @@ mod tests {
         assert_eq!(row_id & (SEQUENCE_UPPER_BOUND as i64 - 1), 0);
 
         let mut generator = RowIdGenerator::new(1);
-        let row_ids = generator.next_batch((SEQUENCE_UPPER_BOUND + 10) as usize);
+        let row_ids = generator
+            .next_batch((SEQUENCE_UPPER_BOUND + 10) as usize)
+            .await;
         let mut expected = (0..SEQUENCE_UPPER_BOUND).collect_vec();
         expected.extend(0..10);
         assert_eq!(

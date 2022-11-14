@@ -20,40 +20,47 @@ auto-retry: &auto-retry
       limit: 2
 
 steps:
-  - label: "build ({{matrix.profile}} mode)"
-    command: "ci/scripts/build.sh -t {{matrix.target}} -p {{matrix.profile}}"
-    key: "build"
-    timeout_in_minutes: 15
-    retry: *auto-retry
+  - label: "build (dev mode)"
+    command: "ci/scripts/build.sh -t ci-dev -p ci-dev"
+    key: "build-dev"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    matrix:
-      setup:
-        target:
-          - "debug"
-          - "release"
-        profile:
-          - "dev"
-          - "release"
-      adjustments:
-        - with:
-            target: "debug"
-            profile: "release"
-          skip: true
-        - with:
-            target: "release"
-            profile: "dev"
-          skip: true
-
-  - label: "end-to-end test ({{matrix.profile}} mode)"
-    command: "ci/scripts/e2e-test.sh -p {{matrix.profile}}"
-    depends_on: "build"
     timeout_in_minutes: 10
     retry: *auto-retry
+
+  - label: "build (release mode)"
+    command: "ci/scripts/build.sh -t ci-release -p ci-release"
+    key: "build-release"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 20
+    retry: *auto-retry
+
+  - label: "docslt"
+    command: "ci/scripts/docslt.sh"
+    key: "docslt"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end test (dev mode)"
+    command: "ci/scripts/e2e-test.sh -p ci-dev"
+    depends_on:
+      - "build-dev"
+      - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
@@ -67,17 +74,14 @@ steps:
           files: "*-junit.xml"
           format: "junit"
       - ./ci/plugins/upload-failure-logs
-    matrix:
-      setup:
-        profile:
-          - "dev"
-          - "release"
-
-  - label: "end-to-end test (parallelized) ({{matrix.profile}} mode)"
-    command: "ci/scripts/e2e-test-parallel.sh -p {{matrix.profile}}"
-    depends_on: "build"
     timeout_in_minutes: 10
     retry: *auto-retry
+
+  - label: "end-to-end test (release mode)"
+    command: "ci/scripts/e2e-test.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
@@ -91,108 +95,95 @@ steps:
           files: "*-junit.xml"
           format: "junit"
       - ./ci/plugins/upload-failure-logs
-    matrix:
-      setup:
-        profile:
-          - "dev"
-          - "release"
-    soft_fail: true
-
-  - label: "end-to-end source test"
-    command: "ci/scripts/e2e-source-test.sh"
-    depends_on: "build"
-    plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "regress test"
-    command: "ci/scripts/regress-test.sh"
-    depends_on: "build"
+  - label: "end-to-end test (parallel) (dev mode)"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
+    depends_on:
+      - "build-dev"
+      - "docslt"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
-          run: regress-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
-    retry: *auto-retry
-
-  - label: "unit test"
-    command: "ci/scripts/pr-unit-test.sh"
-    plugins:
-      - ./ci/plugins/swapfile
       - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
           env:
-            CODECOV_TOKEN: my-codecov-token
-            BUILDKITE_ANALYTICS_TOKEN: buildkite-test-analytics-token
+            BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
-          environment:
-            - CODECOV_TOKEN
+          mount-buildkite-agent: true
       - test-collector#v1.0.0:
-          files: "target/nextest/ci/junit-*.xml"
+          files: "*-junit.xml"
           format: "junit"
-    timeout_in_minutes: 15
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "pre unit test"
-    command: "ci/scripts/pre-unit-test.sh"
+  - label: "end-to-end test (parallel) (release mode)"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
-    timeout_in_minutes: 15
+          mount-buildkite-agent: true
+      - test-collector#v1.0.0:
+          files: "*-junit.xml"
+          format: "junit"
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "unit test (deterministic simulation)"
-    command: "ci/scripts/deterministic-simulation-test.sh"
+  - label: "end-to-end test (parallel, in-memory) (release mode)"
+    command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 15
-    soft_fail: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
 
-  - label: "misc check"
-    command: "ci/scripts/misc-check.sh"
+  - label: "end-to-end source test (release mode)"
+    command: "ci/scripts/e2e-source-test.sh -p ci-release"
+    depends_on: "build-release"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
-      - shellcheck#v1.2.0:
-          files: ./**/*.sh
-    timeout_in_minutes: 10
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
     retry: *auto-retry
 
   - label: "release"
     command: "ci/scripts/release.sh"
     if: build.tag != null
-    depends_on: "build"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
+      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
-          run: rw-build-env
+          run: release-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
             - BUILDKITE_TAG
-    timeout_in_minutes: 5
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "release docker image: amd64"
@@ -200,12 +191,13 @@ steps:
     key: "build-amd64"
     if: build.tag != null
     env:
-      PUSH_GHCR: true
+      PUSH: true
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     timeout_in_minutes: 25
     retry: *auto-retry
 
@@ -214,12 +206,13 @@ steps:
     key: "build-aarch64"
     if: build.tag != null
     env:
-      PUSH_GHCR: true
+      PUSH: true
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     timeout_in_minutes: 25
     retry: *auto-retry
     agents:
@@ -236,5 +229,6 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     timeout_in_minutes: 10
     retry: *auto-retry

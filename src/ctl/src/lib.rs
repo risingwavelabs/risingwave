@@ -15,7 +15,12 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
-mod cmd_impl;
+
+use crate::cmd_impl::hummock::{
+    build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
+};
+
+pub mod cmd_impl;
 pub(crate) mod common;
 
 /// risectl provides internal access to the RisingWave cluster. Generally, you will need
@@ -47,19 +52,38 @@ enum Commands {
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
+    /// Commands for tracing the compute nodes
+    Trace,
+    // TODO(yuhao): profile other nodes
+    /// Commands for profilng the compute nodes
+    Profile {
+        #[clap(short, long = "sleep")]
+        sleep: u64,
+    },
 }
 
 #[derive(Subcommand)]
 enum HummockCommands {
     /// list latest Hummock version on meta node
     ListVersion,
+
+    /// list hummock version deltas in the meta store
+    ListVersionDeltas {
+        #[clap(short, long = "start-version-delta-id", default_value_t = 0)]
+        start_id: u64,
+
+        #[clap(short, long = "num-epochs", default_value_t = 100)]
+        num_epochs: u32,
+    },
+    /// Forbid hummock commit new epochs, which is a prerequisite for compaction deterministic test
+    DisableCommitEpoch,
     /// list all Hummock key-value pairs
     ListKv {
         #[clap(short, long = "epoch", default_value_t = u64::MAX)]
         epoch: u64,
 
         #[clap(short, long = "table-id")]
-        table_id: Option<u32>,
+        table_id: u32,
     },
     SstDump,
     /// trigger a targeted compaction through compaction_group_id
@@ -72,6 +96,41 @@ enum HummockCommands {
 
         #[clap(short, long = "level", default_value_t = 1)]
         level: u32,
+    },
+    /// trigger a full GC for SSTs that is not in version and with timestamp <= now -
+    /// sst_retention_time_sec.
+    TriggerFullGc {
+        #[clap(short, long = "sst_retention_time_sec", default_value_t = 259200)]
+        sst_retention_time_sec: u64,
+    },
+    /// List pinned versions of each worker.
+    ListPinnedVersions {},
+    /// List pinned snapshots of each worker.
+    ListPinnedSnapshots {},
+    /// List all compaction groups.
+    ListCompactionGroup,
+    /// Update compaction config for compaction groups.
+    UpdateCompactionConfig {
+        #[clap(long)]
+        compaction_group_ids: Vec<u64>,
+        #[clap(long)]
+        max_bytes_for_level_base: Option<u64>,
+        #[clap(long)]
+        max_bytes_for_level_multiplier: Option<u64>,
+        #[clap(long)]
+        max_compaction_bytes: Option<u64>,
+        #[clap(long)]
+        sub_level_max_compaction_bytes: Option<u64>,
+        #[clap(long)]
+        level0_trigger_file_number: Option<u64>,
+        #[clap(long)]
+        level0_tier_compact_file_number: Option<u64>,
+        #[clap(long)]
+        target_file_size_base: Option<u64>,
+        #[clap(long)]
+        compaction_filter_mask: Option<u32>,
+        #[clap(long)]
+        max_sub_compaction: Option<u32>,
     },
 }
 
@@ -99,15 +158,47 @@ enum MetaCommands {
     Resume,
     /// get cluster info
     ClusterInfo,
+    /// Reschedule the parallel unit in the stream graph
+    ///
+    /// The format is `fragment_id-[removed]+[added]`
+    /// You can provide either `removed` only or `added` only, but `removed` should be preceded by
+    /// `added` when both are provided.
+    ///
+    /// For example, for plan `100-[1,2,3]+[4,5]` the follow request will be generated:
+    /// {
+    ///     100: Reschedule {
+    ///         added_parallel_units: [4,5],
+    ///         removed_parallel_units: [1,2,3],
+    ///     }
+    /// }
+    /// Use ; to separate multiple fragment
+    #[clap(verbatim_doc_comment)]
+    Reschedule {
+        /// Plan of reschedule
+        #[clap(long)]
+        plan: String,
+        /// Show the plan only, no actual operation
+        #[clap(long)]
+        dry_run: bool,
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
+        Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
+            cmd_impl::hummock::disable_commit_epoch().await?
+        }
         Commands::Hummock(HummockCommands::ListVersion) => {
-            tokio::spawn(cmd_impl::hummock::list_version()).await??;
+            cmd_impl::hummock::list_version().await?;
+        }
+        Commands::Hummock(HummockCommands::ListVersionDeltas {
+            start_id,
+            num_epochs,
+        }) => {
+            cmd_impl::hummock::list_version_deltas(start_id, num_epochs).await?;
         }
         Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
-            tokio::spawn(cmd_impl::hummock::list_kv(epoch, table_id)).await??;
+            cmd_impl::hummock::list_kv(epoch, table_id).await?;
         }
         Commands::Hummock(HummockCommands::SstDump) => cmd_impl::hummock::sst_dump().await.unwrap(),
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
@@ -115,26 +206,61 @@ pub async fn start(opts: CliOpts) -> Result<()> {
             table_id,
             level,
         }) => {
-            tokio::spawn(cmd_impl::hummock::trigger_manual_compaction(
-                compaction_group_id,
-                table_id,
-                level,
-            ))
-            .await??
+            cmd_impl::hummock::trigger_manual_compaction(compaction_group_id, table_id, level)
+                .await?
         }
-        Commands::Table(TableCommands::Scan { mv_name }) => {
-            tokio::spawn(cmd_impl::table::scan(mv_name)).await??
+        Commands::Hummock(HummockCommands::TriggerFullGc {
+            sst_retention_time_sec,
+        }) => cmd_impl::hummock::trigger_full_gc(sst_retention_time_sec).await?,
+        Commands::Hummock(HummockCommands::ListPinnedVersions {}) => list_pinned_versions().await?,
+        Commands::Hummock(HummockCommands::ListPinnedSnapshots {}) => {
+            list_pinned_snapshots().await?
         }
+        Commands::Hummock(HummockCommands::ListCompactionGroup) => {
+            cmd_impl::hummock::list_compaction_group().await?
+        }
+        Commands::Hummock(HummockCommands::UpdateCompactionConfig {
+            compaction_group_ids,
+            max_bytes_for_level_base,
+            max_bytes_for_level_multiplier,
+            max_compaction_bytes,
+            sub_level_max_compaction_bytes,
+            level0_trigger_file_number,
+            level0_tier_compact_file_number,
+            target_file_size_base,
+            compaction_filter_mask,
+            max_sub_compaction,
+        }) => {
+            cmd_impl::hummock::update_compaction_config(
+                compaction_group_ids,
+                build_compaction_config_vec(
+                    max_bytes_for_level_base,
+                    max_bytes_for_level_multiplier,
+                    max_compaction_bytes,
+                    sub_level_max_compaction_bytes,
+                    level0_trigger_file_number,
+                    level0_tier_compact_file_number,
+                    target_file_size_base,
+                    compaction_filter_mask,
+                    max_sub_compaction,
+                ),
+            )
+            .await?
+        }
+        Commands::Table(TableCommands::Scan { mv_name }) => cmd_impl::table::scan(mv_name).await?,
         Commands::Table(TableCommands::ScanById { table_id }) => {
-            tokio::spawn(cmd_impl::table::scan_id(table_id)).await??
+            cmd_impl::table::scan_id(table_id).await?
         }
-        Commands::Table(TableCommands::List) => tokio::spawn(cmd_impl::table::list()).await??,
-        Commands::Bench(cmd) => tokio::spawn(cmd_impl::bench::do_bench(cmd)).await??,
-        Commands::Meta(MetaCommands::Pause) => tokio::spawn(cmd_impl::meta::pause()).await??,
-        Commands::Meta(MetaCommands::Resume) => tokio::spawn(cmd_impl::meta::resume()).await??,
-        Commands::Meta(MetaCommands::ClusterInfo) => {
-            tokio::spawn(cmd_impl::meta::cluster_info()).await??
+        Commands::Table(TableCommands::List) => cmd_impl::table::list().await?,
+        Commands::Bench(cmd) => cmd_impl::bench::do_bench(cmd).await?,
+        Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause().await?,
+        Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume().await?,
+        Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
+        Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => {
+            cmd_impl::meta::reschedule(plan, dry_run).await?
         }
+        Commands::Trace => cmd_impl::trace::trace().await?,
+        Commands::Profile { sleep } => cmd_impl::profile::profile(sleep).await?,
     }
     Ok(())
 }

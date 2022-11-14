@@ -40,7 +40,7 @@ impl Default for ConflictDetector {
 }
 
 impl ConflictDetector {
-    pub fn new_from_config(options: Arc<StorageConfig>) -> Option<Arc<ConflictDetector>> {
+    pub fn new_from_config(options: &StorageConfig) -> Option<Arc<ConflictDetector>> {
         if options.write_conflict_detection_enabled {
             Some(Arc::new(ConflictDetector::default()))
         } else {
@@ -108,22 +108,23 @@ impl ConflictDetector {
     }
 
     /// Archives an epoch. An archived epoch cannot be written anymore.
-    pub fn archive_epoch(&self, epoch: HummockEpoch) {
+    pub fn archive_epoch(&self, epochs: Vec<HummockEpoch>) {
         assert!(
-            epoch > self.get_epoch_watermark(),
-            "write to an archived epoch: {} , current_epoch :{}",
-            epoch,
+            epochs.first().gt(&Some(&self.get_epoch_watermark())),
+            "write to an archived epoch: {:?} , current_epoch :{}",
+            epochs,
             self.get_epoch_watermark(),
         );
-
-        if let Some(written_key) = self.epoch_history.get(&epoch) {
-            assert!(
-                written_key.is_some(),
-                "epoch has been archived: epoch is {}",
-                epoch
-            );
-        }
-        self.epoch_history.insert(epoch, None);
+        epochs.into_iter().for_each(|epoch| {
+            if let Some(written_key) = self.epoch_history.get(&epoch) {
+                assert!(
+                    written_key.is_some(),
+                    "epoch has been archived: epoch is {}",
+                    epoch
+                );
+            }
+            self.epoch_history.insert(epoch, None);
+        })
     }
 }
 
@@ -184,7 +185,7 @@ mod test {
                 .as_slice(),
             233,
         );
-        detector.archive_epoch(233);
+        detector.archive_epoch(vec![233]);
         detector.check_conflict_and_track_write_batch(
             once((Bytes::from("key1"), HummockValue::Delete))
                 .collect_vec()
@@ -203,7 +204,7 @@ mod test {
                 .as_slice(),
             233,
         );
-        detector.archive_epoch(233);
+        detector.archive_epoch(vec![233]);
         detector.check_conflict_and_track_write_batch(
             once((Bytes::from("key1"), HummockValue::Delete))
                 .collect_vec()
@@ -222,7 +223,7 @@ mod test {
             233,
         );
         assert!(detector.epoch_history.get(&233).unwrap().is_some());
-        detector.archive_epoch(233);
+        detector.archive_epoch(vec![233]);
         assert!(detector.epoch_history.get(&233).unwrap().is_none());
         detector.set_watermark(233);
         assert!(detector.epoch_history.get(&233).is_none());

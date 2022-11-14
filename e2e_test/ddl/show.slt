@@ -1,5 +1,5 @@
 statement ok
-create table t3 (v1 int not null, v2 int not null, v3 int not null);
+create table t3 (v1 int, v2 int, v3 int);
 
 statement ok
 create materialized view mv3 as select sum(v1) as sum_v1 from t3;
@@ -27,7 +27,7 @@ describe t3;
 v1 Int32
 v2 Int32
 v3 Int32
-idx1 index(v1, v2)
+idx1 index(v1, v2) distributed by(v1, v2)
 
 statement ok
 drop index idx1;
@@ -40,6 +40,7 @@ dev
 query T rowsort
 show schemas;
 ----
+information_schema
 public
 pg_catalog
 

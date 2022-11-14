@@ -12,38 +12,120 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::pin::Pin;
+use std::sync::{Arc, RwLock};
+use std::task::{Context, Poll};
 
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
-use log::debug;
-use rand::seq::SliceRandom;
+use pgwire::pg_server::{BoxedError, Session, SessionId};
+use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
-use risingwave_common::types::ParallelUnitId;
-use risingwave_pb::batch_plan::exchange_info::DistributionMode;
-use risingwave_pb::batch_plan::{
-    ExchangeInfo, PlanFragment, PlanNode as BatchPlanProst, TaskId, TaskOutputId,
-};
+use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
-use uuid::Uuid;
+use tracing::debug;
 
 use super::QueryExecution;
+use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult,
+    ExecutionContextRef, HummockSnapshotGuard, HummockSnapshotManagerRef, SchedulerResult,
 };
 
-pub struct QueryResultFetcher {
-    // TODO: Remove these after implemented worker node level snapshot pinnning
-    epoch: u64,
-    hummock_snapshot_manager: HummockSnapshotManagerRef,
+pub struct DistributedQueryStream {
+    chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
+    // Used for cleaning up `QueryExecution` after all data are polled.
+    query_id: QueryId,
+    query_execution_info: QueryExecutionInfoRef,
+}
 
+impl DistributedQueryStream {
+    pub fn query_id(&self) -> &QueryId {
+        &self.query_id
+    }
+}
+
+impl Stream for DistributedQueryStream {
+    type Item = Result<DataChunk, BoxedError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.chunk_rx.poll_recv(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(chunk) => match chunk {
+                Some(chunk_result) => match chunk_result {
+                    Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
+                    Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
+                },
+                None => Poll::Ready(None),
+            },
+        }
+    }
+}
+
+impl Drop for DistributedQueryStream {
+    fn drop(&mut self) {
+        // Clear `QueryExecution`. Avoid holding it after execution ends.
+        let mut query_execution_info = self.query_execution_info.write().unwrap();
+        query_execution_info.delete_query(&self.query_id);
+    }
+}
+
+pub struct QueryResultFetcher {
     task_output_id: TaskOutputId,
     task_host: HostAddress,
     compute_client_pool: ComputeClientPoolRef,
+
+    chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
+
+    // `query_id` and `query_execution_info` are used for cleaning up `QueryExecution` after
+    // execution.
+    query_id: QueryId,
+    query_execution_info: QueryExecutionInfoRef,
+}
+
+/// [`QueryExecutionInfo`] stores necessary information of query executions. Currently, a
+/// `QueryExecution` will be removed right after it ends execution. We might add additional fields
+/// in the future.
+#[derive(Clone, Default)]
+pub struct QueryExecutionInfo {
+    query_execution_map: HashMap<QueryId, Arc<QueryExecution>>,
+}
+
+impl QueryExecutionInfo {
+    #[cfg(test)]
+    pub fn new_from_map(query_execution_map: HashMap<QueryId, Arc<QueryExecution>>) -> Self {
+        Self {
+            query_execution_map,
+        }
+    }
+}
+
+pub type QueryExecutionInfoRef = Arc<RwLock<QueryExecutionInfo>>;
+
+impl QueryExecutionInfo {
+    pub fn add_query(&mut self, query_id: QueryId, query_execution: Arc<QueryExecution>) {
+        self.query_execution_map.insert(query_id, query_execution);
+    }
+
+    pub fn delete_query(&mut self, query_id: &QueryId) {
+        self.query_execution_map.remove(query_id);
+    }
+
+    pub fn abort_queries(&self, session_id: SessionId) {
+        for query in self.query_execution_map.values() {
+            // `QueryExecutionInfo` might have queries from different sessions.
+            if query.session_id == session_id {
+                let query = query.clone();
+                // Spawn a task to abort. Avoid await point in this function.
+                tokio::spawn(async move { query.abort().await });
+            }
+        }
+    }
 }
 
 /// Manages execution of distributed batch queries.
@@ -52,161 +134,129 @@ pub struct QueryManager {
     worker_node_manager: WorkerNodeManagerRef,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
+    catalog_reader: CatalogReader,
+    query_execution_info: QueryExecutionInfoRef,
 }
+
+type QueryManagerRef = Arc<QueryManager>;
 
 impl QueryManager {
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         compute_client_pool: ComputeClientPoolRef,
+        catalog_reader: CatalogReader,
     ) -> Self {
         Self {
             worker_node_manager,
             hummock_snapshot_manager,
             compute_client_pool,
+            catalog_reader,
+            query_execution_info: Arc::new(RwLock::new(QueryExecutionInfo::default())),
         }
-    }
-
-    /// Schedule query to single node.
-    ///
-    /// This is kept for dml only.
-    pub async fn schedule_single(
-        &self,
-        _context: ExecutionContextRef,
-        plan: BatchPlanProst,
-        vnodes: Option<Vec<ParallelUnitId>>,
-    ) -> SchedulerResult<impl DataChunkStream> {
-        let worker_node_addr = match vnodes {
-            Some(mut parallel_unit_ids) => {
-                parallel_unit_ids.dedup();
-                let candidates = self
-                    .worker_node_manager
-                    .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-                candidates
-                    .choose(&mut rand::thread_rng())
-                    .unwrap()
-                    .clone()
-                    .host
-                    .unwrap()
-            }
-            None => self.worker_node_manager.next_random()?.host.unwrap(),
-        };
-
-        let compute_client = self
-            .compute_client_pool
-            .get_client_for_addr((&worker_node_addr).into())
-            .await?;
-
-        let query_id = QueryId {
-            id: Uuid::new_v4().to_string(),
-        };
-
-        // Build task id and task sink id
-        let task_id = TaskId {
-            query_id: query_id.id.clone(),
-            stage_id: 0,
-            task_id: 0,
-        };
-        let task_output_id = TaskOutputId {
-            task_id: Some(task_id.clone()),
-            output_id: 0,
-        };
-
-        let epoch = self
-            .hummock_snapshot_manager
-            .get_epoch(query_id.clone())
-            .await?;
-
-        // The exchange of DML is Single.
-        let plan = PlanFragment {
-            root: Some(plan),
-            exchange_info: Some(ExchangeInfo {
-                mode: DistributionMode::Single as i32,
-                ..Default::default()
-            }),
-        };
-        let creat_task_resp = compute_client
-            .create_task(task_id.clone(), plan, epoch)
-            .await;
-        self.hummock_snapshot_manager
-            .unpin_snapshot(epoch, &query_id)
-            .await?;
-        creat_task_resp?;
-
-        let query_result_fetcher = QueryResultFetcher::new(
-            epoch,
-            self.hummock_snapshot_manager.clone(),
-            task_output_id,
-            worker_node_addr,
-            self.compute_client_pool.clone(),
-        );
-
-        Ok(query_result_fetcher.run())
     }
 
     pub async fn schedule(
         &self,
-        _context: ExecutionContextRef,
+        context: ExecutionContextRef,
         query: Query,
-    ) -> SchedulerResult<impl DataChunkStream> {
-        let query_id = query.query_id().clone();
-        let epoch = self
-            .hummock_snapshot_manager
-            .get_epoch(query_id.clone())
-            .await?;
+        pinned_snapshot: HummockSnapshotGuard,
+    ) -> SchedulerResult<DistributedQueryStream> {
+        let query_id = query.query_id.clone();
+        let query_execution = Arc::new(QueryExecution::new(query, context.session().id()));
 
-        let query_execution = QueryExecution::new(
-            query,
-            epoch,
-            self.worker_node_manager.clone(),
-            self.hummock_snapshot_manager.clone(),
-            self.compute_client_pool.clone(),
-        );
+        // Add queries status when begin.
+        context
+            .session()
+            .env()
+            .query_manager()
+            .add_query(query_id.clone(), query_execution.clone());
 
-        let query_result_fetcher = match query_execution.start().await {
-            Ok(query_result_fetcher) => query_result_fetcher,
-            Err(e) => {
-                self.hummock_snapshot_manager
-                    .unpin_snapshot(epoch, &query_id)
-                    .await?;
-                return Err(e);
-            }
-        };
+        // Starts the execution of the query.
+        let query_result_fetcher = query_execution
+            .start(
+                context.clone(),
+                self.worker_node_manager.clone(),
+                pinned_snapshot,
+                self.compute_client_pool.clone(),
+                self.catalog_reader.clone(),
+                self.query_execution_info.clone(),
+            )
+            .await
+            .map_err(|err| {
+                // Clean up query execution on error.
+                context
+                    .session()
+                    .env()
+                    .query_manager()
+                    .delete_query(&query_id);
+                err
+            })?;
 
-        Ok(query_result_fetcher.run())
+        Ok(query_result_fetcher.stream_from_channel())
+    }
+
+    pub fn cancel_queries_in_session(&self, session_id: SessionId) {
+        let query_execution_info = self.query_execution_info.read().unwrap();
+        query_execution_info.abort_queries(session_id);
+    }
+
+    pub fn add_query(&self, query_id: QueryId, query_execution: Arc<QueryExecution>) {
+        let mut query_execution_info = self.query_execution_info.write().unwrap();
+        query_execution_info.add_query(query_id, query_execution);
+    }
+
+    pub fn delete_query(&self, query_id: &QueryId) {
+        let mut query_execution_info = self.query_execution_info.write().unwrap();
+        query_execution_info.delete_query(query_id);
     }
 }
 
 impl QueryResultFetcher {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        epoch: u64,
-        hummock_snapshot_manager: HummockSnapshotManagerRef,
         task_output_id: TaskOutputId,
         task_host: HostAddress,
         compute_client_pool: ComputeClientPoolRef,
+        chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
+        query_id: QueryId,
+        query_execution_info: QueryExecutionInfoRef,
     ) -> Self {
         Self {
-            epoch,
-            hummock_snapshot_manager,
             task_output_id,
             task_host,
             compute_client_pool,
+            chunk_rx,
+            query_id,
+            query_execution_info,
         }
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    async fn run(self) {
+    async fn run_inner(self) {
         debug!(
             "Starting to run query result fetcher, task output id: {:?}, task_host: {:?}",
             self.task_output_id, self.task_host
         );
         let compute_client = self
             .compute_client_pool
-            .get_client_for_addr((&self.task_host).into())
+            .get_by_addr((&self.task_host).into())
             .await?;
         let mut stream = compute_client.get_data(self.task_output_id.clone()).await?;
         while let Some(response) = stream.next().await {
             yield DataChunk::from_protobuf(response?.get_record_batch()?)?;
+        }
+    }
+
+    fn run(self) -> BoxedDataChunkStream {
+        Box::pin(self.run_inner())
+    }
+
+    fn stream_from_channel(self) -> DistributedQueryStream {
+        DistributedQueryStream {
+            chunk_rx: self.chunk_rx,
+            query_id: self.query_id,
+            query_execution_info: self.query_execution_info,
         }
     }
 }
@@ -214,7 +264,6 @@ impl QueryResultFetcher {
 impl Debug for QueryResultFetcher {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("QueryResultFetcher")
-            .field("epoch", &self.epoch)
             .field("task_output_id", &self.task_output_id)
             .field("task_host", &self.task_host)
             .finish()

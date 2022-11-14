@@ -49,6 +49,11 @@ impl<B: Buf> Deserializer<B> {
         self.input.input
     }
 
+    /// Check if the inner buffer still has remaining data.
+    pub fn has_remaining(&self) -> bool {
+        self.input.input.has_remaining()
+    }
+
     /// Return the position of inner buffer from the `Deserializer`.
     pub fn position(&self) -> usize {
         self.input_len - self.input.input.remaining()
@@ -149,22 +154,6 @@ impl<B: Buf> Deserializer<B> {
         loop {
             let byte = self.input.get_u8();
             if byte == 0 {
-                break;
-            }
-            byte_array.push(byte);
-        }
-        Ok(byte_array)
-    }
-
-    /// Read u8 from Bytes input in decimal form (Do not include null tag). Used by value encoding
-    /// (`serialize_cell`). TODO: It is a temporal solution For value encoding. Will moved to
-    /// value encoding serializer in future.
-    pub fn read_decimal_v2(&mut self) -> Result<Vec<u8>> {
-        let flag = self.input.get_u8();
-        let mut byte_array = vec![flag];
-        loop {
-            let byte = self.input.get_u8();
-            if byte == 100 {
                 break;
             }
             byte_array.push(byte);

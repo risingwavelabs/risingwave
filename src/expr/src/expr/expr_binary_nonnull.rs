@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{
-    Array, BoolArray, DecimalArray, I32Array, IntervalArray, ListArray, NaiveDateArray,
+    Array, BoolArray, DecimalArray, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
     NaiveDateTimeArray, StructArray, Utf8Array,
 };
 use risingwave_common::types::*;
@@ -22,15 +22,20 @@ use risingwave_pb::expr::expr_node::Type;
 use crate::expr::expr_binary_bytes::new_concat_op;
 use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
-use crate::for_all_cmp_variants;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
-use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
+use crate::vector_op::extract::{
+    extract_from_date, extract_from_timestamp, extract_from_timestampz,
+};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
-use crate::vector_op::tumble::{tumble_start_date, tumble_start_date_time};
+use crate::vector_op::timestampz::{timestamp_at_time_zone, timestampz_at_time_zone};
+use crate::vector_op::tumble::{
+    tumble_start_date, tumble_start_date_time, tumble_start_timestampz,
+};
+use crate::{for_all_cmp_variants, ExprError, Result};
 
 /// This macro helps create arithmetic expression.
 /// It receive all the combinations of `gen_binary_expr` and generate corresponding match cases
@@ -61,11 +66,14 @@ macro_rules! gen_atm_impl {
                             $ret,
                             $func::< <$i1! { type_array } as Array>::OwnedItem, <$i2! { type_array } as Array>::OwnedItem, <$rt! { type_array } as Array>::OwnedItem>,
                         )
-                    )
+                    ) as BoxedExpression
                 },
             )*
             _ => {
-                unimplemented!("The expression ({:?}, {:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type(), $ret)
+                return Err(ExprError::UnsupportedFunction(format!(
+                    "{:?} atm {:?}",
+                    $l.return_type(), $r.return_type()
+                )));
             }
         }
     };
@@ -74,7 +82,7 @@ macro_rules! gen_atm_impl {
 /// This macro helps create comparison expression. Its output array is a bool array
 /// Similar to `gen_atm_impl`.
 macro_rules! gen_cmp_impl {
-    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),*) => {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),* $(,)?) => {
         match ($l.return_type(), $r.return_type()) {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
@@ -94,11 +102,14 @@ macro_rules! gen_cmp_impl {
                                 <$cast! { type_array } as Array>::OwnedItem
                             >,
                         )
-                    )
+                    ) as BoxedExpression
                 }
             ),*
             _ => {
-                unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type())
+                return Err(ExprError::UnsupportedFunction(format!(
+                    "{:?} cmp {:?}",
+                    $l.return_type(), $r.return_type()
+                )));
             }
         }
     };
@@ -126,11 +137,14 @@ macro_rules! gen_shift_impl {
                                 <$i2! { type_array } as Array>::OwnedItem>,
 
                         )
-                    )
+                    ) as BoxedExpression
                 },
             )*
             _ => {
-                unimplemented!("The expression ({:?}, {:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type(), $ret)
+                return Err(ExprError::UnsupportedFunction(format!(
+                    "{:?} shift {:?}",
+                    $l.return_type(), $r.return_type()
+                )));
             }
         }
     };
@@ -153,17 +167,19 @@ macro_rules! gen_binary_expr_cmp {
                     $r,
                     $ret,
                     gen_str_cmp($op),
-                ))
+                )) as BoxedExpression
             }
-            (DataType::Struct { fields: _ }, DataType::Struct { fields: _ }) => Box::new(
-                BinaryExpression::<StructArray, StructArray, BoolArray, _>::new(
-                    $l,
-                    $r,
-                    $ret,
-                    gen_struct_cmp($op),
-                ),
-            ),
-            (DataType::List { datatype: _ }, DataType::List { datatype: _ }) => {
+            (DataType::Struct { .. }, DataType::Struct { .. }) => {
+                Box::new(
+                    BinaryExpression::<StructArray, StructArray, BoolArray, _>::new(
+                        $l,
+                        $r,
+                        $ret,
+                        gen_struct_cmp($op),
+                    ),
+                )
+            }
+            (DataType::List { .. }, DataType::List { .. }) => {
                 Box::new(BinaryExpression::<ListArray, ListArray, BoolArray, _>::new(
                     $l,
                     $r,
@@ -225,8 +241,8 @@ macro_rules! gen_binary_expr_atm {
             { decimal, int16, decimal, $general_f },
             { decimal, int32, decimal, $general_f },
             { decimal, int64, decimal, $general_f },
-            { decimal, float32, decimal, $general_f },
-            { decimal, float64, decimal, $general_f },
+            { decimal, float32, float64, $general_f },
+            { decimal, float64, float64, $general_f },
             { int16, decimal, decimal, $general_f },
             { int32, decimal, decimal, $general_f },
             { int64, decimal, decimal, $general_f },
@@ -304,26 +320,67 @@ macro_rules! gen_binary_expr_shift {
     };
 }
 
-fn build_extract_expr(ret: DataType, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
-    match r.return_type() {
-        DataType::Date => Box::new(
-            BinaryExpression::<Utf8Array, NaiveDateArray, DecimalArray, _>::new(
-                l,
-                r,
-                ret,
-                extract_from_date,
-            ),
-        ),
+fn build_extract_expr(
+    ret: DataType,
+    l: BoxedExpression,
+    r: BoxedExpression,
+) -> Result<BoxedExpression> {
+    let expr: BoxedExpression =
+        match r.return_type() {
+            DataType::Date => Box::new(BinaryExpression::<
+                Utf8Array,
+                NaiveDateArray,
+                DecimalArray,
+                _,
+            >::new(l, r, ret, extract_from_date)),
+            DataType::Timestamp => Box::new(BinaryExpression::<
+                Utf8Array,
+                NaiveDateTimeArray,
+                DecimalArray,
+                _,
+            >::new(l, r, ret, extract_from_timestamp)),
+            DataType::Timestampz => Box::new(BinaryExpression::<
+                Utf8Array,
+                I64Array,
+                DecimalArray,
+                _,
+            >::new(l, r, ret, extract_from_timestampz)),
+            _ => {
+                return Err(ExprError::UnsupportedFunction(format!(
+                    "Extract ( {:?} ) is not supported yet!",
+                    r.return_type()
+                )))
+            }
+        };
+    Ok(expr)
+}
+
+fn build_at_time_zone_expr(
+    ret: DataType,
+    l: BoxedExpression,
+    r: BoxedExpression,
+) -> Result<BoxedExpression> {
+    let expr: BoxedExpression = match l.return_type() {
         DataType::Timestamp => Box::new(BinaryExpression::<
+            NaiveDateTimeArray,
+            Utf8Array,
+            I64Array,
+            _,
+        >::new(l, r, ret, timestamp_at_time_zone)),
+        DataType::Timestampz => Box::new(BinaryExpression::<
+            I64Array,
             Utf8Array,
             NaiveDateTimeArray,
-            DecimalArray,
             _,
-        >::new(l, r, ret, extract_from_timestamp)),
+        >::new(l, r, ret, timestampz_at_time_zone)),
         _ => {
-            unimplemented!("Extract ( {:?} ) is not supported yet!", r.return_type())
+            return Err(ExprError::UnsupportedFunction(format!(
+                "{:?} AT TIME ZONE is not supported yet!",
+                l.return_type()
+            )))
         }
-    }
+    };
+    Ok(expr)
 }
 
 pub fn new_binary_expr(
@@ -331,9 +388,9 @@ pub fn new_binary_expr(
     ret: DataType,
     l: BoxedExpression,
     r: BoxedExpression,
-) -> BoxedExpression {
+) -> Result<BoxedExpression> {
     use crate::expr::data_types::*;
-    match expr_type {
+    let expr = match expr_type {
         Type::Equal => {
             gen_binary_expr_cmp! {gen_cmp_impl, general_eq, EQ, l, r, ret}
         }
@@ -358,6 +415,8 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_add,
                 {
+                    { timestampz, interval, timestampz, timestampz_interval_add },
+                    { interval, timestampz, timestampz, interval_timestampz_add },
                     { timestamp, interval, timestamp, timestamp_interval_add },
                     { interval, timestamp, timestamp, interval_timestamp_add },
                     { interval, date, timestamp, interval_date_add },
@@ -378,6 +437,7 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_sub,
                 {
+                    { timestampz, interval, timestampz, timestampz_interval_sub },
                     { timestamp, timestamp, interval, timestamp_timestamp_sub },
                     { timestamp, interval, timestamp, timestamp_interval_sub },
                     { date, date, int32, date_date_sub },
@@ -483,7 +543,8 @@ pub fn new_binary_expr(
                 },
             }
         }
-        Type::Extract => build_extract_expr(ret, l, r),
+        Type::Extract => build_extract_expr(ret, l, r)?,
+        Type::AtTimeZone => build_at_time_zone_expr(ret, l, r)?,
         Type::RoundDigit => Box::new(
             BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
                 l,
@@ -495,24 +556,27 @@ pub fn new_binary_expr(
         Type::Position => Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
             l, r, ret, position,
         )),
-        Type::TumbleStart => new_tumble_start(l, r, ret),
+        Type::TumbleStart => new_tumble_start(l, r, ret)?,
         Type::ConcatOp => new_concat_op(l, r, ret),
 
         tp => {
-            unimplemented!(
-                "The expression {:?} using vectorized expression framework is not supported yet!",
-                tp
-            )
+            return Err(ExprError::UnsupportedFunction(format!(
+                "{:?}({:?}, {:?})",
+                tp,
+                l.return_type(),
+                r.return_type(),
+            )));
         }
-    }
+    };
+    Ok(expr)
 }
 
 fn new_tumble_start(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
     return_type: DataType,
-) -> BoxedExpression {
-    match expr_ia1.return_type() {
+) -> Result<BoxedExpression> {
+    let expr: BoxedExpression = match expr_ia1.return_type() {
         DataType::Date => Box::new(BinaryExpression::<
             NaiveDateArray,
             IntervalArray,
@@ -529,11 +593,22 @@ fn new_tumble_start(
         >::new(
             expr_ia1, expr_ia2, return_type, tumble_start_date_time
         )),
-        _ => unimplemented!(
-            "tumble_start is not supported for {:?}",
-            expr_ia1.return_type()
+        DataType::Timestampz => Box::new(
+            BinaryExpression::<I64Array, IntervalArray, I64Array, _>::new(
+                expr_ia1,
+                expr_ia2,
+                return_type,
+                tumble_start_timestampz,
+            ),
         ),
-    }
+        _ => {
+            return Err(ExprError::UnsupportedFunction(format!(
+                "tumble_start is not supported for {:?}",
+                expr_ia1.return_type()
+            )))
+        }
+    };
+    Ok(expr)
 }
 
 pub fn new_like_default(
@@ -552,7 +627,6 @@ pub fn new_like_default(
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDate;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::interval_array::IntervalArray;
     use risingwave_common::array::*;
     use risingwave_common::types::{
@@ -633,16 +707,8 @@ mod tests {
             }
         }
 
-        let col1 = Column::new(
-            I32Array::from_slice(&lhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
-        let col2 = Column::new(
-            I32Array::from_slice(&rhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1 = I32Array::from_slice(&lhs).into();
+        let col2 = I32Array::from_slice(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -691,16 +757,8 @@ mod tests {
             }
         }
 
-        let col1 = Column::new(
-            NaiveDateArray::from_slice(&lhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
-        let col2 = Column::new(
-            IntervalArray::from_slice(&rhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1 = NaiveDateArray::from_slice(&lhs).into();
+        let col2 = IntervalArray::from_slice(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Date, TypeName::Interval], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -752,16 +810,8 @@ mod tests {
             }
         }
 
-        let col1 = Column::new(
-            DecimalArray::from_slice(&lhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
-        let col2 = Column::new(
-            DecimalArray::from_slice(&rhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1 = DecimalArray::from_slice(&lhs).into();
+        let col2 = DecimalArray::from_slice(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();

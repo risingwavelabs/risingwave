@@ -3,6 +3,16 @@ values(extract(hour from timestamp '2001-02-16 20:38:40'));
 ----
 20
 
+query R
+SELECT EXTRACT(DOW FROM TIMESTAMP '2001-02-16 20:38:40');
+----
+5
+
+query R
+SELECT EXTRACT(DOY FROM TIMESTAMP '2001-02-16 20:38:40');
+----
+47
+
 query TTTTT
 select timestamp '2001-03-16 23:38:45' - timestamp '2001-02-16 20:38:40';
 ----
@@ -15,6 +25,11 @@ f
 
 query T
 select TIME '19:46:41' >= TIME '11:33:43';
+----
+t
+
+query T
+select time '12:30:00' < interval '1 day';
 ----
 t
 

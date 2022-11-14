@@ -16,7 +16,7 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode;
-use risingwave_common::types::{unnested_list_type, DataType};
+use risingwave_common::types::{unnested_list_type, DataType, ScalarImpl};
 use risingwave_pb::expr::table_function::Type;
 use risingwave_pb::expr::TableFunction as TableFunctionProst;
 
@@ -34,7 +34,7 @@ pub struct TableFunction {
     pub function_type: TableFunctionType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum TableFunctionType {
     Generate,
     Unnest,
@@ -42,7 +42,7 @@ pub enum TableFunctionType {
 }
 
 impl TableFunctionType {
-    fn to_protobuf(&self) -> Type {
+    fn to_protobuf(self) -> Type {
         match self {
             TableFunctionType::Generate => Type::Generate,
             TableFunctionType::Unnest => Type::Unnest,
@@ -143,13 +143,40 @@ impl TableFunction {
                     .into())
                 }
             }
-            TableFunctionType::RegexpMatches => Ok(TableFunction {
-                args,
-                return_type: DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                },
-                function_type: TableFunctionType::RegexpMatches,
-            }),
+            TableFunctionType::RegexpMatches => {
+                if args.len() != 2 && args.len() != 3 {
+                    return Err(ErrorCode::BindError(
+                        "the length of args of generate series function should be 2 or 3"
+                            .to_string(),
+                    )
+                    .into());
+                }
+                if let Some(flag) = args.get(2) {
+                    if let ExprImpl::Literal(lit) = flag &&
+                      let Some(ScalarImpl::Utf8(flag)) = lit.get_data() {
+                        if flag != "g" {
+                            return Err(ErrorCode::NotImplemented(
+                                "flag in regexp_matches".to_string(),
+                                4545.into()
+                            ).into());
+                        }
+                        // Currently when 'g' is not present, regexp_matches will also return multiple rows.
+                        // This is intuitive, but differs from PG's default behavior.
+                    } else {
+                        return Err(ErrorCode::BindError(
+                            "flag in regexp_matches should be a constant string".to_string(),
+                        )
+                        .into())
+                    };
+                }
+                Ok(TableFunction {
+                    args,
+                    return_type: DataType::List {
+                        datatype: Box::new(DataType::Varchar),
+                    },
+                    function_type: TableFunctionType::RegexpMatches,
+                })
+            }
         }
     }
 

@@ -349,7 +349,7 @@ mod test {
         MockFileSystemConf("/mock/path".to_string(), 1, 5, 10000)
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[tokio::test]
     async fn test_mock_file_system() {
         let file_system = MockFileSystem::new(default_filesystem_conf());
         let files_change_before = file_system.list_files().await;
@@ -370,7 +370,7 @@ mod test {
         tokio::task::yield_now().await;
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[tokio::test]
     async fn test_push_entries_change() {
         let file_system = MockFileSystem::new(default_filesystem_conf());
         let directory = DummyDirectory::new(file_system.clone());

@@ -25,14 +25,14 @@ pub struct RedisConfig;
 pub struct RedisSink;
 
 impl RedisSink {
-    pub fn new(_cfg: RedisConfig) -> Result<Self> {
+    pub fn new(_cfg: RedisConfig, _schema: Schema) -> Result<Self> {
         todo!()
     }
 }
 
 #[async_trait]
 impl Sink for RedisSink {
-    async fn write_batch(&mut self, _chunk: StreamChunk, _schema: &Schema) -> Result<()> {
+    async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
         todo!();
     }
 

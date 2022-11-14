@@ -14,7 +14,7 @@
 
 //! Configures the RisingWave binary, including logging, locks, panic handler, etc.
 
-mod trace_runtime;
+#![feature(panic_update_hook)]
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -24,21 +24,6 @@ use tracing::Level;
 use tracing_subscriber::filter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
-
-/// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
-/// logs are needed, add them here.
-fn configure_risingwave_targets_jaeger(targets: filter::Targets) -> filter::Targets {
-    targets
-        // enable trace for most modules
-        .with_target("risingwave_stream", Level::TRACE)
-        .with_target("risingwave_batch", Level::TRACE)
-        .with_target("risingwave_storage", Level::TRACE)
-        .with_target("risingwave_sqlparser", Level::INFO)
-        // disable events that are too verbose
-        // if you want to enable any of them, find the target name and set it to `TRACE`
-        // .with_target("events::stream::mview::scan", Level::TRACE)
-        .with_target("events", Level::ERROR)
-}
 
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
 /// logs are needed, add them here.
@@ -53,6 +38,7 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("risingwave_connector", Level::INFO)
         .with_target("risingwave_frontend", Level::INFO)
         .with_target("risingwave_meta", Level::INFO)
+        .with_target("risingwave_tracing", Level::INFO)
         .with_target("pgwire", Level::ERROR)
         // disable events that are too verbose
         // if you want to enable any of them, find the target name and set it to `TRACE`
@@ -90,22 +76,21 @@ impl LoggerSettings {
 }
 
 /// Set panic hook to abort the process (without losing debug info and stack trace).
-pub fn set_panic_abort() {
-    use std::panic;
-
-    let default_hook = panic::take_hook();
-
-    panic::set_hook(Box::new(move |info| {
+pub fn set_panic_hook() {
+    std::panic::update_hook(|default_hook, info| {
         default_hook(info);
+
+        if let Some(context) = async_stack_trace::current_context() {
+            println!("\n\n*** async stack trace context of current task ***\n");
+            println!("{}\n", context);
+        }
+
         std::process::abort();
-    }));
+    });
 }
 
 /// Init logger for RisingWave binaries.
-#[cfg(not(madsim))]
 pub fn init_risingwave_logger(settings: LoggerSettings) {
-    use isahc::config::Configurable;
-
     let fmt_layer = {
         // Configure log output to stdout
         let fmt_layer = tracing_subscriber::fmt::layer()
@@ -113,13 +98,17 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_ansi(settings.colorful);
 
         let filter = filter::Targets::new()
+            .with_target("aws_sdk_s3", Level::INFO)
+            .with_target("aws_config", Level::WARN)
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("hyper", Level::WARN)
             .with_target("h2", Level::WARN)
             .with_target("tower", Level::WARN)
+            .with_target("tonic", Level::WARN)
             .with_target("isahc", Level::WARN)
-            .with_target("console_subscriber", Level::WARN);
+            .with_target("console_subscriber", Level::WARN)
+            .with_target("reqwest", Level::WARN);
 
         // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
         // needed.
@@ -133,32 +122,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         fmt_layer.with_filter(filter)
     };
 
-    let opentelemetry_layer = if settings.enable_jaeger_tracing {
-        // With Jaeger tracing enabled, we should configure opentelemetry endpoints.
-
-        opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
-
-        let tracer = opentelemetry_jaeger::new_pipeline()
-            // TODO: use UDP tracing in production environment
-            .with_collector_endpoint("http://127.0.0.1:14268/api/traces")
-            // TODO: change service name to compute-{port}
-            .with_service_name("compute")
-            // disable proxy
-            .with_http_client(isahc::HttpClient::builder().proxy(None).build().unwrap())
-            .install_batch(trace_runtime::RwTokio)
-            .unwrap();
-
-        let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-
-        // Configure RisingWave's own crates to log at TRACE level, and ignore all third-party
-        // crates
-        let filter = filter::Targets::new();
-        let filter = configure_risingwave_targets_jaeger(filter);
-
-        Some(opentelemetry_layer.with_filter(filter))
-    } else {
-        None
-    };
+    if settings.enable_jaeger_tracing {
+        todo!("jaeger tracing is not supported for now, and it will be replaced with minitrace jaeger tracing. Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4120");
+    }
 
     let tokio_console_layer = if settings.enable_tokio_console {
         let (console_layer, server) = console_subscriber::ConsoleLayer::builder()
@@ -174,23 +140,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         None
     };
 
-    match (opentelemetry_layer, tokio_console_layer) {
-        (Some(_), Some(_)) => {
-            // tracing_subscriber::registry()
-            //     .with(fmt_layer)
-            //     .with(opentelemetry_layer)
-            //     .with(tokio_console_layer)
-            //     .init();
-            // Strange compiler bug is preventing us from enabling both of them...
-            panic!("cannot enable opentelemetry layer and tokio console layer at the same time");
-        }
-        (Some(opentelemetry_layer), None) => {
-            tracing_subscriber::registry()
-                .with(fmt_layer)
-                .with(opentelemetry_layer)
-                .init();
-        }
-        (None, Some((tokio_console_layer, server))) => {
+    match tokio_console_layer {
+        Some((tokio_console_layer, server)) => {
             tracing_subscriber::registry()
                 .with(fmt_layer)
                 .with(tokio_console_layer)
@@ -206,7 +157,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                     });
             });
         }
-        (None, None) => {
+        None => {
             tracing_subscriber::registry().with(fmt_layer).init();
         }
     }
@@ -271,17 +222,18 @@ fn spawn_prof_thread(profile_path: String) -> std::thread::JoinHandle<()> {
 /// Currently, the following env variables will be read:
 ///
 /// * `RW_WORKER_THREADS`: number of tokio worker threads. If not set, it will use tokio's default
-///   config (equivalent to CPU cores).
+///   config (equivalent to CPU cores). Note: This will not effect the dedicated runtimes for each
+///   service which are controlled by their own configurations, like streaming actors, compactions,
+///   etc.
 /// * `RW_DEADLOCK_DETECTION`: whether to enable deadlock detection. If not set, will enable in
 ///   debug mode, and disable in release mode.
 /// * `RW_PROFILE_PATH`: the path to generate flamegraph. If set, then profiling is automatically
 ///   enabled.
-#[cfg(not(madsim))]
 pub fn main_okk<F>(f: F) -> F::Output
 where
     F: Future + Send + 'static,
 {
-    set_panic_abort();
+    set_panic_hook();
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
 
@@ -292,7 +244,9 @@ where
     }
 
     if let Ok(enable_deadlock_detection) = std::env::var("RW_DEADLOCK_DETECTION") {
-        let enable_deadlock_detection = enable_deadlock_detection.parse().unwrap();
+        let enable_deadlock_detection = enable_deadlock_detection
+            .parse()
+            .expect("Failed to parse RW_DEADLOCK_DETECTION");
         if enable_deadlock_detection {
             enable_parking_lot_deadlock_detection();
         }
@@ -307,16 +261,10 @@ where
         spawn_prof_thread(profile_path);
     }
 
-    builder.enable_all().build().unwrap().block_on(f)
-}
-
-#[cfg(madsim)]
-pub fn init_risingwave_logger(_settings: LoggerSettings) {}
-
-#[cfg(madsim)]
-pub fn main_okk<F>(f: F) -> F::Output
-where
-    F: Future + Send + 'static,
-{
-    panic!("not yet supported in simulation");
+    builder
+        .thread_name("risingwave-main")
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(f)
 }

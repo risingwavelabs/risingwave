@@ -18,6 +18,10 @@ mod condition;
 pub use condition::*;
 mod connected_components;
 pub(crate) use connected_components::*;
+mod stream_graph_formatter;
+pub use stream_graph_formatter::*;
+mod with_options;
+pub use with_options::*;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 

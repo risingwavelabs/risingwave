@@ -41,11 +41,10 @@ impl ConfigExpander {
         section: &str,
         extra_info: HashMap<String, String>,
     ) -> Result<Yaml> {
-        let mut config = YamlLoader::load_from_str(config)?;
-        if config.len() != 1 {
-            return Err(anyhow!("expect yaml config to have only one section"));
-        }
-        let config = config.remove(0);
+        let [config]: [_; 1] = YamlLoader::load_from_str(config)?
+            .try_into()
+            .map_err(|_| anyhow!("expect yaml config to have only one section"))?;
+
         let global_config = config
             .as_hash()
             .ok_or_else(|| anyhow!("expect config to be a hashmap"))?;
@@ -113,7 +112,7 @@ impl ConfigExpander {
                 let result = match use_type.as_str() {
                     "minio" => ServiceConfig::Minio(serde_yaml::from_str(&out_str)?),
                     "etcd" => ServiceConfig::Etcd(serde_yaml::from_str(&out_str)?),
-                    "frontend" => ServiceConfig::FrontendV2(serde_yaml::from_str(&out_str)?),
+                    "frontend" => ServiceConfig::Frontend(serde_yaml::from_str(&out_str)?),
                     "compactor" => ServiceConfig::Compactor(serde_yaml::from_str(&out_str)?),
                     "compute-node" => ServiceConfig::ComputeNode(serde_yaml::from_str(&out_str)?),
                     "meta-node" => ServiceConfig::MetaNode(serde_yaml::from_str(&out_str)?),

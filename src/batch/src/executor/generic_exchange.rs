@@ -22,6 +22,7 @@ use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;
+use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::exchange_source::ExchangeSourceImpl;
 use crate::execution::grpc_exchange::GrpcExchangeSource;
@@ -30,6 +31,7 @@ use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<C>;
+use super::BatchTaskMetricsWithTaskLabels;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
 pub struct GenericExchangeExecutor<C> {
     sources: Vec<ExchangeSourceImpl>,
@@ -38,6 +40,10 @@ pub struct GenericExchangeExecutor<C> {
     schema: Schema,
     task_id: TaskId,
     identity: String,
+
+    /// Batch metrics.
+    /// None: Local mode don't record mertics.
+    metrics: Option<BatchTaskMetricsWithTaskLabels>,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -51,7 +57,15 @@ pub trait CreateSource: Send {
 }
 
 #[derive(Clone)]
-pub struct DefaultCreateSource {}
+pub struct DefaultCreateSource {
+    client_pool: ComputeClientPoolRef,
+}
+
+impl DefaultCreateSource {
+    pub fn new(client_pool: ComputeClientPoolRef) -> Self {
+        Self { client_pool }
+    }
+}
 
 #[async_trait::async_trait]
 impl CreateSource for DefaultCreateSource {
@@ -64,7 +78,7 @@ impl CreateSource for DefaultCreateSource {
         let task_output_id = prost_source.get_task_output_id()?;
         let task_id = TaskId::from(task_output_id.get_task_id()?);
 
-        if context.is_local_addr(&peer_addr) {
+        if context.is_local_addr(&peer_addr) && prost_source.local_execute_plan.is_none() {
             trace!("Exchange locally [{:?}]", task_output_id);
 
             Ok(ExchangeSourceImpl::Local(LocalExchangeSource::create(
@@ -80,7 +94,12 @@ impl CreateSource for DefaultCreateSource {
             );
 
             Ok(ExchangeSourceImpl::Grpc(
-                GrpcExchangeSource::create(prost_source.clone()).await?,
+                GrpcExchangeSource::create(
+                    self.client_pool.get_by_addr(peer_addr).await?,
+                    task_output_id.clone(),
+                    prost_source.local_execute_plan.clone(),
+                )
+                .await?,
             ))
         }
     }
@@ -91,7 +110,7 @@ pub struct GenericExchangeExecutorBuilder {}
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(
@@ -105,7 +124,8 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
 
         ensure!(!node.get_sources().is_empty());
         let prost_sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
-        let source_creators = vec![DefaultCreateSource {}; prost_sources.len()];
+        let source_creators =
+            vec![DefaultCreateSource::new(source.context().client_pool()); prost_sources.len()];
         let mut sources: Vec<ExchangeSourceImpl> = vec![];
 
         for (prost_source, source_creator) in prost_sources.iter().zip_eq(source_creators) {
@@ -123,6 +143,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
             schema: Schema { fields },
             task_id: source.task_id.clone(),
             identity: source.plan_node().get_identity().clone(),
+            metrics: source.context().task_metrics(),
         }))
     }
 }
@@ -147,7 +168,9 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
         let mut stream = select_all(
             self.sources
                 .into_iter()
-                .map(data_chunk_stream)
+                .map(|source| {
+                    data_chunk_stream(source, self.metrics.clone(), self.identity.clone())
+                })
                 .collect_vec(),
         )
         .boxed();
@@ -160,12 +183,45 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
 }
 
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
-async fn data_chunk_stream(mut source: ExchangeSourceImpl) {
+async fn data_chunk_stream(
+    mut source: ExchangeSourceImpl,
+    metrics: Option<BatchTaskMetricsWithTaskLabels>,
+    identity: String,
+) {
+    // create the collector
+    let source_id = source.get_task_id();
+    let counter = if let Some(ref metrics) = metrics {
+        let mut labels = metrics.task_labels();
+        let source_stage_id = source_id.stage_id.to_string();
+        let source_task_id = source_id.stage_id.to_string();
+        labels.extend_from_slice(&[
+            identity.as_str(),
+            source_id.query_id.as_str(),
+            source_stage_id.as_str(),
+            source_task_id.as_str(),
+        ]);
+
+        Some(
+            metrics
+                .metrics
+                .task_exchange_recv_row_number
+                .with_label_values(&labels[..]),
+        )
+    } else {
+        // no metrics to collect, no counter
+        None
+    };
+
     loop {
         if let Some(res) = source.take_data().await? {
             if res.cardinality() == 0 {
                 debug!("Exchange source {:?} output empty chunk.", source);
             }
+
+            if let Some(ref counter) = counter {
+                counter.inc_by(res.cardinality().try_into().unwrap());
+            }
+
             yield res;
             continue;
         }
@@ -175,11 +231,9 @@ async fn data_chunk_stream(mut source: ExchangeSourceImpl) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use rand::Rng;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::{DataChunk, I32Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::types::DataType;
@@ -189,17 +243,12 @@ mod tests {
     use crate::task::ComputeNodeContext;
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
-        let context = ComputeNodeContext::new_for_test();
+        let context = ComputeNodeContext::for_test();
         let mut sources = vec![];
         for _ in 0..2 {
             let mut rng = rand::thread_rng();
             let i = rng.gen_range(1..=100000);
-            let chunk = DataChunk::new(
-                vec![Column::new(Arc::new(
-                    array_nonnull! { I32Array, [i] }.into(),
-                ))],
-                1,
-            );
+            let chunk = DataChunk::new(vec![array_nonnull! { I32Array, [i] }.into()], 1);
             let chunks = vec![Some(chunk); 100];
             let fake_exchange_source = FakeExchangeSource::new(chunks);
             let fake_create_source = FakeCreateSource::new(fake_exchange_source);
@@ -211,6 +260,7 @@ mod tests {
         }
 
         let executor = Box::new(GenericExchangeExecutor::<ComputeNodeContext> {
+            metrics: None,
             sources,
             context,
             schema: Schema {

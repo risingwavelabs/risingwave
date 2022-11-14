@@ -14,10 +14,9 @@
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
-use std::time::Duration;
+use std::future::Future;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use futures::{Future, TryFutureExt};
 use itertools::Itertools;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
@@ -29,7 +28,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
-use tokio::task;
+use tracing::warn;
 
 use super::{Sink, SinkError};
 use crate::sink::Result;
@@ -49,13 +48,12 @@ pub struct KafkaConfig {
     // partition number. The partition number should set by meta.
     pub partition: Option<i32>,
 
-    #[serde(rename = "sink.type")]
-    pub sink_type: String, // accept "append_only" or "debezium"
+    pub format: String, // accept "append_only" or "debezium"
 
     pub identifier: String,
 
     pub timeout: Duration,
-    pub max_retry_num: i32,
+    pub max_retry_num: u32,
     pub retry_interval: Duration,
 }
 
@@ -67,10 +65,10 @@ impl KafkaConfig {
         let identifier = values
             .get("identifier")
             .expect("kafka.identifier must be set");
-        let sink_type = values.get("sink.type").expect("sink.type must be set");
-        if sink_type != "append_only" && sink_type != "debezium" {
+        let format = values.get("format").expect("format must be set");
+        if format != "append_only" && format != "debezium" {
             return Err(SinkError::Config(
-                "sink.type must be set to \"append_only\" or \"debezium\"".to_string(),
+                "format must be set to \"append_only\" or \"debezium\"".to_string(),
             ));
         }
 
@@ -84,7 +82,7 @@ impl KafkaConfig {
             timeout: Duration::from_secs(5), // default timeout is 5 seconds
             max_retry_num: 3,                // default max retry num is 3
             retry_interval: Duration::from_millis(100), // default retry interval is 100ms
-            sink_type: sink_type.to_string(),
+            format: format.to_string(),
         })
     }
 }
@@ -100,41 +98,37 @@ pub struct KafkaSink {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
     state: KafkaSinkState,
+    schema: Schema,
     in_transaction_epoch: Option<u64>,
 }
 
 impl KafkaSink {
-    pub fn new(config: KafkaConfig) -> Result<Self> {
+    pub async fn new(config: KafkaConfig, schema: Schema) -> Result<Self> {
         Ok(KafkaSink {
             config: config.clone(),
-            conductor: KafkaTransactionConductor::new(config)?,
+            conductor: KafkaTransactionConductor::new(config).await?,
             in_transaction_epoch: None,
             state: KafkaSinkState::Init,
+            schema,
         })
     }
 
     // any error should report to upper level and requires revert to previous epoch.
-    pub async fn do_with_retry<F, FutKR, T>(&self, f: F) -> KafkaResult<T>
+    pub async fn do_with_retry<'a, F, FutKR, T>(&'a self, f: F) -> KafkaResult<T>
     where
-        F: Fn(KafkaTransactionConductor) -> FutKR,
-        FutKR: Future<Output = KafkaResult<T>>,
+        F: Fn(&'a KafkaTransactionConductor) -> FutKR,
+        FutKR: Future<Output = KafkaResult<T>> + 'a,
     {
-        let conductor = self.conductor.clone();
-        let mut err_placeholder = KafkaError::Canceled;
+        let mut err = KafkaError::Canceled;
         for _ in 0..self.config.max_retry_num {
-            match f(conductor.clone()).await {
-                Ok(res) => {
-                    return Ok(res);
-                }
-                Err(e) => {
-                    err_placeholder = e;
-                }
+            match f(&self.conductor).await {
+                Ok(res) => return Ok(res),
+                Err(e) => err = e,
             }
             // a back off policy
             tokio::time::sleep(self.config.retry_interval).await;
         }
-
-        Err(err_placeholder)
+        Err(err)
     }
 
     async fn send<'a, K, P>(&'a self, mut record: BaseRecord<'a, K, P>) -> KafkaResult<()>
@@ -142,29 +136,25 @@ impl KafkaSink {
         K: ToBytes + ?Sized,
         P: ToBytes + ?Sized,
     {
-        let mut err_placeholder = KafkaError::Canceled;
+        let mut err = KafkaError::Canceled;
 
         for _ in 0..self.config.max_retry_num {
             match self.conductor.send(record).await {
-                Ok(()) => {
-                    return Ok(());
-                }
+                Ok(()) => return Ok(()),
                 Err((e, rec)) => {
-                    err_placeholder = e;
+                    err = e;
                     record = rec;
-                    if let KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) =
-                        err_placeholder
-                    {
-                        // if the queue is full, we need to wait for some time and retry.
-                        tokio::time::sleep(self.config.retry_interval).await;
-                        continue;
-                    } else {
-                        return Err(err_placeholder);
-                    }
                 }
             }
+            if let KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) = err {
+                // if the queue is full, we need to wait for some time and retry.
+                tokio::time::sleep(self.config.retry_interval).await;
+                continue;
+            } else {
+                return Err(err);
+            }
         }
-        Err(err_placeholder)
+        Err(err)
     }
 
     fn gen_message_key(&self) -> String {
@@ -173,6 +163,64 @@ impl KafkaSink {
             self.config.identifier,
             self.in_transaction_epoch.unwrap()
         )
+    }
+
+    async fn debezium_update(&self, chunk: StreamChunk, schema: &Schema, ts_ms: u64) -> Result<()> {
+        let mut update_cache: Option<Map<String, Value>> = None;
+        for (op, row) in chunk.rows() {
+            let event_object = match op {
+                Op::Insert => Some(json!({
+                    "schema": schema_to_json(schema),
+                    "payload": {
+                        "before": null,
+                        "after": record_to_json(row.clone(), schema.fields.clone())?,
+                        "op": "c",
+                        "ts_ms": ts_ms,
+                    }
+                })),
+                Op::Delete => Some(json!({
+                    "schema": schema_to_json(schema),
+                    "payload": {
+                        "before": record_to_json(row.clone(), schema.fields.clone())?,
+                        "after": null,
+                        "op": "d",
+                        "ts_ms": ts_ms,
+                    }
+                })),
+                Op::UpdateDelete => {
+                    update_cache = Some(record_to_json(row.clone(), schema.fields.clone())?);
+                    continue;
+                }
+                Op::UpdateInsert => {
+                    if let Some(before) = update_cache.take() {
+                        Some(json!({
+                            "schema": schema_to_json(schema),
+                            "payload": {
+                                "before": before,
+                                "after": record_to_json(row.clone(), schema.fields.clone())?,
+                                "op": "u",
+                                "ts_ms": ts_ms,
+                            }
+                        }))
+                    } else {
+                        warn!(
+                            "not found UpdateDelete in prev row, skipping, row_id {:?}",
+                            row.index()
+                        );
+                        continue;
+                    }
+                }
+            };
+            if let Some(obj) = event_object {
+                self.send(
+                    BaseRecord::to(self.config.topic.as_str())
+                        .key(self.gen_message_key().as_bytes())
+                        .payload(obj.to_string().as_bytes()),
+                )
+                .await?;
+            }
+        }
+        Ok(())
     }
 
     async fn append_only(&self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
@@ -193,17 +241,28 @@ impl KafkaSink {
 
 #[async_trait::async_trait]
 impl Sink for KafkaSink {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         // when sinking the snapshot, it is required to begin epoch 0 for transaction
-        if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state, &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {
-            return Ok(())
-        }
-        if self.config.sink_type.as_str() == "append_only" {
-            self.append_only(chunk, schema).await
-        } else if self.config.sink_type.as_str() == "debezium" {
-            todo!()
-        } else {
-            unreachable!()
+        // if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state,
+        // &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {     return Ok(())
+        // }
+
+        println!("sink chunk {:?}", chunk);
+
+        match self.config.format.as_str() {
+            "append_only" => self.append_only(chunk, &self.schema).await,
+            "debezium" => {
+                self.debezium_update(
+                    chunk,
+                    &self.schema,
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64,
+                )
+                .await
+            }
+            _ => unreachable!(),
         }
     }
 
@@ -211,28 +270,18 @@ impl Sink for KafkaSink {
     // transaction.
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
-        if self.state == KafkaSinkState::Init {
-            self.do_with_retry(|conductor| conductor.init_transaction())
-                .await
-                .map_err(SinkError::Kafka)?;
-            tracing::debug!("init transaction");
-        }
-
         self.do_with_retry(|conductor| conductor.start_transaction())
-            .await
-            .map_err(SinkError::Kafka)?;
+            .await?;
         tracing::debug!("begin epoch {:?}", epoch);
         Ok(())
     }
 
     async fn commit(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.flush()) // flush before commit
-            .await
-            .map_err(SinkError::Kafka)?;
+            .await?;
 
         self.do_with_retry(|conductor| conductor.commit_transaction())
-            .await
-            .map_err(SinkError::Kafka)?;
+            .await?;
         if let Some(epoch) = self.in_transaction_epoch.take() {
             self.state = KafkaSinkState::Running(epoch);
         } else {
@@ -248,8 +297,7 @@ impl Sink for KafkaSink {
 
     async fn abort(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.abort_transaction())
-            .await
-            .map_err(SinkError::Kafka)?;
+            .await?;
         tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
         self.in_transaction_epoch = None;
         Ok(())
@@ -262,7 +310,7 @@ impl Debug for KafkaSink {
     }
 }
 
-fn datum_to_json_object(field: &Field, datum: DatumRef) -> ArrayResult<Value> {
+fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value> {
     let scalar_ref = match datum {
         None => return Ok(Value::Null),
         Some(datum) => datum,
@@ -329,7 +377,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef) -> ArrayResult<Value> {
     Ok(value)
 }
 
-fn record_to_json(row: RowRef, schema: Vec<Field>) -> Result<Map<String, Value>> {
+fn record_to_json(row: RowRef<'_>, schema: Vec<Field>) -> Result<Map<String, Value>> {
     let mut mappings = Map::with_capacity(schema.len());
     for (field, datum_ref) in schema.iter().zip_eq(row.values()) {
         let key = field.name.clone();
@@ -350,63 +398,79 @@ pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>>
     Ok(records)
 }
 
+fn fields_to_json(fields: &[Field]) -> Value {
+    let mut res = Vec::new();
+    fields.iter().for_each(|field| {
+        res.push(json!({
+            "field": field.name,
+            "optional": true,
+            "type": field.type_name,
+        }))
+    });
+
+    json!(res)
+}
+
+fn schema_to_json(schema: &Schema) -> Value {
+    let mut schema_fields = Vec::new();
+    schema_fields.push(json!({
+        "type": "struct",
+        "fields": fields_to_json(&schema.fields),
+        "optional": true,
+        "field": "before",
+    }));
+    schema_fields.push(json!({
+        "type": "struct",
+        "fields": fields_to_json(&schema.fields),
+        "optional": true,
+        "field": "after",
+    }));
+    json!({
+        "type": "struct",
+        "fields": schema_fields,
+        "optional": false,
+    })
+}
+
 /// the struct conducts all transactions with Kafka
-#[derive(Clone)]
 pub struct KafkaTransactionConductor {
-    pub properties: KafkaConfig,
-    pub inner: Arc<ThreadedProducer<DefaultProducerContext>>,
-    in_transaction: bool,
+    properties: KafkaConfig,
+    inner: ThreadedProducer<DefaultProducerContext>,
 }
 
 impl KafkaTransactionConductor {
-    fn new(config: KafkaConfig) -> Result<Self> {
-        let inner = ClientConfig::new()
-            .set("bootstrap.servers", config.brokers.as_str())
+    async fn new(config: KafkaConfig) -> Result<Self> {
+        let inner: ThreadedProducer<DefaultProducerContext> = ClientConfig::new()
+            .set("bootstrap.servers", &config.brokers)
             .set("message.timeout.ms", "5000")
-            .set("transactional.id", config.identifier.as_str()) // required by kafka transaction
-            .create_with_context(DefaultProducerContext)
-            .expect("Producer creation error");
+            .set("transactional.id", &config.identifier) // required by kafka transaction
+            .create()
+            .await?;
+
+        inner.init_transactions(config.timeout).await?;
 
         Ok(KafkaTransactionConductor {
             properties: config,
-            inner: Arc::new(inner),
-            in_transaction: false,
+            inner,
         })
     }
 
-    fn init_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
-        let inner = self.inner.clone();
-        let timeout = self.properties.timeout;
-        task::spawn_blocking(move || inner.init_transactions(timeout))
-            .unwrap_or_else(|_| Err(KafkaError::Canceled))
+    #[expect(clippy::unused_async)]
+    async fn start_transaction(&self) -> KafkaResult<()> {
+        self.inner.begin_transaction()
     }
 
-    fn start_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
-        let inner = Arc::clone(&self.inner);
-        task::spawn_blocking(move || inner.begin_transaction())
-            .unwrap_or_else(|_| Err(KafkaError::Canceled))
+    async fn commit_transaction(&self) -> KafkaResult<()> {
+        self.inner.commit_transaction(self.properties.timeout).await
     }
 
-    fn commit_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
-        let inner = Arc::clone(&self.inner);
-        let timeout = self.properties.timeout;
-        task::spawn_blocking(move || inner.commit_transaction(timeout))
-            .unwrap_or_else(|_| Err(KafkaError::Canceled))
+    async fn abort_transaction(&self) -> KafkaResult<()> {
+        self.inner.abort_transaction(self.properties.timeout).await
     }
 
-    fn abort_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
-        let inner = Arc::clone(&self.inner);
-        let timeout = self.properties.timeout;
-        task::spawn_blocking(move || inner.abort_transaction(timeout))
-            .unwrap_or_else(|_| Err(KafkaError::Canceled))
-    }
-
-    fn flush(&self) -> impl Future<Output = KafkaResult<()>> {
-        let inner = Arc::clone(&self.inner);
-        let timeout = self.properties.timeout;
-        task::spawn_blocking(move || inner.flush(timeout))
-            .map_ok(|_| KafkaResult::Ok(()))
-            .unwrap_or_else(|_| Err(KafkaError::Canceled))
+    async fn flush(&self) -> KafkaResult<()> {
+        self.inner.flush(self.properties.timeout).await;
+        Ok(())
     }
 
     #[expect(clippy::unused_async)]
@@ -422,21 +486,11 @@ impl KafkaTransactionConductor {
     }
 }
 
+#[cfg(test)]
 mod test {
-    #[allow(unused_imports)]
     use maplit::hashmap;
-    #[allow(unused_imports)]
-    use risingwave_common::types::OrderedF32;
-    #[allow(unused_imports)]
-    use risingwave_common::{
-        array,
-        array::{
-            column::Column, ArrayBuilder, ArrayImpl, F32Array, F32ArrayBuilder, I32Array,
-            I32ArrayBuilder, StructArray,
-        },
-    };
+    use risingwave_common::test_prelude::StreamChunkTestExt;
 
-    #[allow(unused_imports)]
     use super::*;
 
     #[ignore]
@@ -448,8 +502,22 @@ mod test {
             "sink.type".to_string() => "append_only".to_string(),
             "kafka.topic".to_string() => "test_topic".to_string(),
         };
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".into(),
+                sub_fields: vec![],
+                type_name: "".into(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "v2".into(),
+                sub_fields: vec![],
+                type_name: "".into(),
+            },
+        ]);
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSink::new(kafka_config.clone()).unwrap();
+        let mut sink = KafkaSink::new(kafka_config.clone(), schema).await.unwrap();
 
         for i in 0..10 {
             let mut fail_flag = false;
@@ -482,48 +550,19 @@ mod test {
 
     #[test]
     fn test_chunk_to_json() -> Result<()> {
-        let mut column_i32_builder = I32ArrayBuilder::new(10);
-        for i in 0..10 {
-            column_i32_builder.append(Some(i)).unwrap();
-        }
-        let column_i32 = Column::new(Arc::new(ArrayImpl::from(
-            column_i32_builder.finish().unwrap(),
-        )));
-        let mut column_f32_builder = F32ArrayBuilder::new(10);
-        for i in 0..10 {
-            column_f32_builder
-                .append(Some(OrderedF32::from(i as f32)))
-                .unwrap();
-        }
-        let column_f32 = Column::new(Arc::new(ArrayImpl::from(
-            column_f32_builder.finish().unwrap(),
-        )));
-
-        let column_struct = Column::new(Arc::new(ArrayImpl::from(
-            StructArray::from_slices(
-                &[true, true, true, true, true, true, true, true, true, true],
-                vec![
-                    array! { I32Array, [Some(1), Some(2), Some(3), Some(4), Some(5), Some(6), Some(7), Some(8), Some(9), Some(10)] }.into(),
-                    array! { F32Array, [Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0), Some(6.0), Some(7.0), Some(8.0), Some(9.0),Some(10.0)] }.into(),
-                ],
-                vec![DataType::Int32, DataType::Float32],
-            )
-            .unwrap(),
-        )));
-        let ops = vec![
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-            Op::Insert,
-        ];
-
-        let chunk = StreamChunk::new(ops, vec![column_i32, column_f32, column_struct], None);
+        let chunk = StreamChunk::from_pretty(
+            " i   f   {i,f}
+            + 0 0.0 {0,0.0}
+            + 1 1.0 {1,1.0}
+            + 2 2.0 {2,2.0}
+            + 3 3.0 {3,3.0}
+            + 4 4.0 {4,4.0}
+            + 5 5.0 {5,5.0}
+            + 6 6.0 {6,6.0}
+            + 7 7.0 {7,7.0}
+            + 8 8.0 {8,8.0}
+            + 9 9.0 {9,9.0}",
+        );
 
         let schema = Schema::new(vec![
             Field {
@@ -539,9 +578,10 @@ mod test {
                 type_name: "".into(),
             },
             Field {
-                data_type: DataType::Struct {
-                    fields: Arc::new([DataType::Int32, DataType::Float32]),
-                },
+                data_type: DataType::new_struct(
+                    vec![DataType::Int32, DataType::Float32],
+                    vec!["v4".to_string(), "v5".to_string()],
+                ),
                 name: "v3".into(),
                 sub_fields: vec![
                     Field {
@@ -562,9 +602,11 @@ mod test {
         ]);
 
         let json_chunk = chunk_to_json(chunk, &schema).unwrap();
+        let schema_json = schema_to_json(&schema);
+        assert_eq!(schema_json.to_string(), "{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"\"}],\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"\"}],\"optional\":true,\"type\":\"struct\"}],\"optional\":false,\"type\":\"struct\"}");
         assert_eq!(
             json_chunk[0].as_str(),
-            "{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":1,\"v5\":1.0}}"
+            "{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":0,\"v5\":0.0}}"
         );
 
         Ok(())

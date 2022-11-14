@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The solver for delta join, whic determines lookup order of a join plan.
+//! The solver for delta join, which determines lookup order of a join plan.
 //! All collection types in this module should be `BTree` to ensure determinism between runs.
 //!
 //! # Representation of Multi-Way Join

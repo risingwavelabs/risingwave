@@ -34,105 +34,10 @@ use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::md5::md5;
 use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
+use crate::vector_op::timestampz::f64_sec_to_timestampz;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
-use crate::{ExprError, Result};
-
-/// This macro helps to create cast expression.
-/// It receives all the combinations of `gen_cast` and generates corresponding match cases
-/// In `[]`, the parameters are for constructing new expression
-/// * `$child`: child expression
-/// * `$ret`: return expression
-///
-/// In `()*`, the parameters are for generating match cases
-/// * `$input`: input type
-/// * `$cast`: The cast type in that the operation will calculate
-/// * `$func`: The scalar function for expression, it's a generic function and specialized by the
-///   type of `$input, $cast`
-macro_rules! gen_cast_impl {
-    ([$child:expr, $ret:expr], $( { $input:ident, $cast:ident, $func:expr } ),*) => {
-        match ($child.return_type(), $ret.clone()) {
-            $(
-                ($input! { type_match_pattern }, $cast! { type_match_pattern }) => Box::new(
-                    UnaryExpression::< $input! { type_array }, $cast! { type_array }, _>::new(
-                        $child,
-                        $ret.clone(),
-                        $func
-                    )
-                ),
-            )*
-            _ => {
-                return Err(ExprError::Cast2($child.return_type(), $ret));
-            }
-        }
-    };
-}
-
-macro_rules! gen_cast {
-    ($($x:tt, )* ) => {
-        gen_cast_impl! {
-            [$($x),*],
-
-            { varchar, date, str_to_date },
-            { varchar, time, str_to_time },
-            { varchar, timestamp, str_to_timestamp },
-            { varchar, timestampz, str_to_timestampz },
-            { varchar, int16, str_parse },
-            { varchar, int32, str_parse },
-            { varchar, int64, str_parse },
-            { varchar, float32, str_parse },
-            { varchar, float64, str_parse },
-            { varchar, decimal, str_parse },
-            { varchar, boolean, str_to_bool },
-
-            { boolean, varchar, general_to_string },
-            { int16, varchar, general_to_string },
-            { int32, varchar, general_to_string },
-            { int64, varchar, general_to_string },
-            { float32, varchar, general_to_string },
-            { float64, varchar, general_to_string },
-            { decimal, varchar, general_to_string },
-
-            { boolean, int32, general_cast },
-            { int32, boolean, int32_to_bool },
-
-            { int16, int32, general_cast },
-            { int16, int64, general_cast },
-            { int16, float32, general_cast },
-            { int16, float64, general_cast },
-            { int16, decimal, general_cast },
-            { int32, int16, general_cast },
-            { int32, int64, general_cast },
-            { int32, float32, to_f32 }, // lossy
-            { int32, float64, general_cast },
-            { int32, decimal, general_cast },
-            { int64, int16, general_cast },
-            { int64, int32, general_cast },
-            { int64, float32, to_f32 }, // lossy
-            { int64, float64, to_f64 }, // lossy
-            { int64, decimal, general_cast },
-
-            { float32, float64, general_cast },
-            { float32, decimal, general_cast },
-            { float32, int16, to_i16 },
-            { float32, int32, to_i32 },
-            { float32, int64, to_i64 },
-            { float64, decimal, general_cast },
-            { float64, int16, to_i16 },
-            { float64, int32, to_i32 },
-            { float64, int64, to_i64 },
-            { float64, float32, to_f32 }, // lossy
-
-            { decimal, int16, dec_to_i16 },
-            { decimal, int32, dec_to_i32 },
-            { decimal, int64, dec_to_i64 },
-            { decimal, float32, to_f32 },
-            { decimal, float64, to_f64 },
-
-            { date, timestamp, date_to_timestamp }
-        }
-    };
-}
+use crate::{for_all_cast_variants, ExprError, Result};
 
 /// This macro helps to create unary expression.
 /// In [], the parameters are for constructing new expression
@@ -210,7 +115,52 @@ pub fn new_unary_expr(
     use crate::expr::data_types::*;
 
     let expr: BoxedExpression = match (expr_type, return_type.clone(), child_expr.return_type()) {
-        (ProstType::Cast, _, _) => gen_cast! { child_expr, return_type, },
+        (
+            ProstType::Cast,
+            DataType::List {
+                datatype: target_elem_type,
+            },
+            DataType::Varchar,
+        ) => Box::new(UnaryExpression::<Utf8Array, ListArray, _>::new(
+            child_expr,
+            return_type,
+            move |input| str_to_list(input, &target_elem_type),
+        )),
+        (
+            ProstType::Cast,
+            DataType::List {
+                datatype: target_elem_type,
+            },
+            DataType::List {
+                datatype: source_elem_type,
+            },
+        ) => Box::new(UnaryExpression::<ListArray, ListArray, _>::new(
+            child_expr,
+            return_type,
+            move |input| list_cast(input, &source_elem_type, &target_elem_type),
+        )),
+        (ProstType::Cast, _, _) => {
+            macro_rules! gen_cast_impl {
+                ($( { $input:ident, $cast:ident, $func:expr } ),*) => {
+                    match (child_expr.return_type(), return_type.clone()) {
+                        $(
+                            ($input! { type_match_pattern }, $cast! { type_match_pattern }) => Box::new(
+                                UnaryExpression::< $input! { type_array }, $cast! { type_array }, _>::new(
+                                    child_expr,
+                                    return_type.clone(),
+                                    $func
+                                )
+                            ),
+                        )*
+                        _ => {
+                            return Err(ExprError::Cast2(child_expr.return_type(), return_type));
+                        }
+                    }
+                };
+            }
+
+            for_all_cast_variants! { gen_cast_impl }
+        }
         (ProstType::BoolOut, _, DataType::Boolean) => {
             Box::new(UnaryExpression::<BoolArray, Utf8Array, _>::new(
                 child_expr,
@@ -322,6 +272,13 @@ pub fn new_unary_expr(
         (ProstType::Round, _, _) => {
             gen_round_expr! {"Ceil", child_expr, return_type, round_f64, round_decimal}
         }
+        (ProstType::ToTimestamp, DataType::Timestampz, DataType::Float64) => {
+            Box::new(UnaryExpression::<F64Array, I64Array, _>::new(
+                child_expr,
+                return_type,
+                f64_sec_to_timestampz,
+            ))
+        }
         (expr, ret, child) => {
             return Err(ExprError::UnsupportedFunction(format!(
                 "{:?}({:?}) -> {:?}",
@@ -369,7 +326,6 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> Boxed
 mod tests {
     use chrono::NaiveDate;
     use itertools::Itertools;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
     use risingwave_common::types::{NaiveDateWrapper, Scalar};
     use risingwave_pb::data::data_type::TypeName;
@@ -379,12 +335,12 @@ mod tests {
 
     use super::super::*;
     use crate::expr::test_utils::{make_expression, make_input_ref};
-    use crate::vector_op::cast::{date_to_timestamp, str_parse};
+    use crate::vector_op::cast::{general_cast, str_parse};
 
     #[test]
     fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, Type::Not);
-        test_unary_date::<NaiveDateTimeArray, _>(|x| date_to_timestamp(x).unwrap(), Type::Cast);
+        test_unary_date::<NaiveDateTimeArray, _>(|x| general_cast(x).unwrap(), Type::Cast);
         test_str_to_int16::<I16Array, _>(|x| str_parse(x).unwrap());
     }
 
@@ -395,17 +351,13 @@ mod tests {
         for i in 0..100i16 {
             if i % 2 == 0 {
                 target.push(Some(i as i32));
-                input.push(Some(i as i16));
+                input.push(Some(i));
             } else {
                 input.push(None);
                 target.push(None);
             }
         }
-        let col1 = Column::new(
-            I16Array::from_slice(&input)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1 = I16Array::from_slice(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
         let return_type = DataType {
             type_name: TypeName::Int32 as i32,
@@ -448,11 +400,7 @@ mod tests {
         target.push(Some(0));
         target.push(Some(1));
 
-        let col1 = Column::new(
-            I32Array::from_slice(&input)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1 = I32Array::from_slice(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 3);
         let return_type = DataType {
             type_name: TypeName::Int32 as i32,
@@ -501,11 +449,8 @@ mod tests {
                 target.push(None);
             }
         }
-        let col1 = Column::new(
-            Utf8Array::from_slice(&input.iter().map(|x| x.as_ref().map(|x| &**x)).collect_vec())
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1_data = &input.iter().map(|x| x.as_ref().map(|x| &**x)).collect_vec();
+        let col1 = Utf8Array::from_slice(col1_data).into();
         let data_chunk = DataChunk::new(vec![col1], 1);
         let return_type = DataType {
             type_name: TypeName::Int16 as i32,
@@ -560,11 +505,7 @@ mod tests {
             }
         }
 
-        let col1 = Column::new(
-            BoolArray::from_slice(&input)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1 = BoolArray::from_slice(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = make_expression(kind, &[TypeName::Boolean], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -603,11 +544,7 @@ mod tests {
             }
         }
 
-        let col1 = Column::new(
-            NaiveDateArray::from_slice(&input)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1 = NaiveDateArray::from_slice(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = make_expression(kind, &[TypeName::Date], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();

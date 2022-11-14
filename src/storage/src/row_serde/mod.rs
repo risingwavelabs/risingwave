@@ -12,143 +12,50 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, VirtualNode};
-use risingwave_common::util::ordered::OrderedRowSerializer;
 
-use self::cell_based_row_deserializer::CellBasedRowDeserializer;
-use self::cell_based_row_serializer::CellBasedRowSerializer;
-use self::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use self::row_based_deserializer::RowBasedDeserializer;
-use self::row_based_serializer::RowBasedSerializer;
+pub mod row_serde_util;
 
-pub mod cell_based_encoding_util;
-pub mod cell_based_row_deserializer;
-pub mod cell_based_row_serializer;
-pub mod dedup_pk_cell_based_row_deserializer;
-pub mod dedup_pk_cell_based_row_serializer;
-pub mod row_based_deserializer;
-pub mod row_based_serializer;
-
-#[derive(Clone)]
-pub struct CellBasedRowSerde;
-
-impl RowSerde for CellBasedRowSerde {
-    type Deserializer = CellBasedRowDeserializer;
-    type Serializer = CellBasedRowSerializer;
+/// Find out the [`ColumnDesc`] by a list of [`ColumnId`].
+///
+/// # Returns
+///
+/// A pair of columns and their indexes in input columns
+pub fn find_columns_by_ids(
+    table_columns: &[ColumnDesc],
+    column_ids: &[ColumnId],
+) -> (Vec<ColumnDesc>, Vec<usize>) {
+    use std::collections::HashMap;
+    let mut table_columns = table_columns
+        .iter()
+        .enumerate()
+        .map(|(index, c)| (c.column_id, (c.clone(), index)))
+        .collect::<HashMap<_, _>>();
+    column_ids
+        .iter()
+        .map(|id| table_columns.remove(id).unwrap())
+        .unzip()
 }
 
 #[derive(Clone)]
-pub struct DedupPkCellBasedRowSerde;
-
-impl RowSerde for DedupPkCellBasedRowSerde {
-    // FIXME: should use `DedupPkCellBasedRowDeserializer` here.
-    type Deserializer = CellBasedRowDeserializer;
-    type Serializer = DedupPkCellBasedRowSerializer;
+pub struct ColumnMapping {
+    output_indices: Vec<usize>,
 }
 
-#[derive(Clone)]
-pub struct RowBasedSerde;
-
-impl RowSerde for RowBasedSerde {
-    type Deserializer = RowBasedDeserializer;
-    type Serializer = RowBasedSerializer;
-}
-
-pub type KeyBytes = Vec<u8>;
-pub type ValueBytes = Vec<u8>;
-
-/// `Encoding` defines an interface for encoding a key row into kv storage.
-pub trait RowSerialize: Clone {
-    /// Constructs a new serializer.
-    fn create_row_serializer(
-        pk_indices: &[usize],
-        column_descs: &[ColumnDesc],
-        column_ids: &[ColumnId],
-    ) -> Self;
-
-    /// Serialize key and value.
-    fn serialize(
-        &mut self,
-        vnode: VirtualNode,
-        pk: &[u8],
-        row: Row,
-    ) -> Result<Vec<(KeyBytes, ValueBytes)>>;
-
-    /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
-    /// doesn't correspond to a cell, the position will be None. Aparts from user-specified
-    /// `column_ids`, there will also be a `SENTINEL_CELL_ID` at the end.
-    fn serialize_for_update(
-        &mut self,
-        vnode: VirtualNode,
-        pk: &[u8],
-        row: Row,
-    ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>>;
-
-    fn serialize_sentinel_cell(pk_buf: &[u8], col_id: &ColumnId) -> Result<Option<Vec<u8>>>;
-}
-
-/// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
-#[derive(Clone)]
-pub struct ColumnDescMapping {
-    /// output_columns are some of the columns that to be partialy scan.
-    pub output_columns: Vec<ColumnDesc>,
-
-    /// The output column's column index in output row, which is used in cell-based deserialize.
-    pub output_id_to_index: HashMap<ColumnId, usize>,
-
-    /// The full row data types, which is used in row-based deserialize.
-    pub all_data_types: Vec<DataType>,
-
-    /// The output column's column index in full row, which is used in row-based deserialize.
-    pub output_index: Vec<usize>,
-}
-
-/// `Decoding` defines an interface for decoding a key row from kv storage.
-pub trait RowDeserialize {
-    /// Constructs a new serializer.
-    // TODO: more parameters might be required for pk dedup.
-    fn create_row_deserializer(column_mapping: Arc<ColumnDescMapping>) -> Self;
-
-    /// When we encounter a new key, we can be sure that the previous row has been fully
-    /// deserialized. Then we return the key and the value of the previous row.
-    fn deserialize(
-        &mut self,
-        raw_key: impl AsRef<[u8]>,
-        value: impl AsRef<[u8]>,
-    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>>;
-
-    /// Take the remaining data out of the deserializer.
-    fn take(&mut self) -> Option<(VirtualNode, Vec<u8>, Row)>;
-}
-
-/// `RowSerde` provides the ability to convert between Row and KV entry.
-pub trait RowSerde: Send + Sync + Clone {
-    type Serializer: RowSerialize + Send;
-    type Deserializer: RowDeserialize + Send;
-
-    /// `create_serializer` will create a row serializer to convert row into KV pairs.
-    fn create_serializer(
-        pk_indices: &[usize],
-        column_descs: &[ColumnDesc],
-        column_ids: &[ColumnId],
-    ) -> Self::Serializer {
-        RowSerialize::create_row_serializer(pk_indices, column_descs, column_ids)
+#[allow(clippy::len_without_is_empty)]
+impl ColumnMapping {
+    /// Create a mapping with given `table_columns` projected on the `column_ids`.
+    pub fn new(output_indices: Vec<usize>) -> Self {
+        Self { output_indices }
     }
 
-    /// `create_deserializer` will create a row deserializer to convert KV pairs into row.
-    fn create_deserializer(column_mapping: Arc<ColumnDescMapping>) -> Self::Deserializer {
-        RowDeserialize::create_row_deserializer(column_mapping)
+    /// Project a row with this mapping
+    pub fn project(&self, mut origin_row: Row) -> Row {
+        let mut output_row = Vec::with_capacity(self.output_indices.len());
+        for col_idx in &self.output_indices {
+            output_row.push(origin_row.0[*col_idx].take());
+        }
+        Row(output_row)
     }
-}
-
-pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
-    let mut result = vec![];
-    serializer.serialize(pk, &mut result);
-    result
 }

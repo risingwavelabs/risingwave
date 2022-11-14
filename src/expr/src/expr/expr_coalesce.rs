@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
+use std::ops::BitAnd;
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk, Row};
+use risingwave_common::array::{ArrayRef, DataChunk, Row, Vis, VisRef};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -35,44 +36,46 @@ impl Expression for CoalesceExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let children_array = self
-            .children
-            .iter()
-            .map(|c| c.eval_checked(input))
-            .collect::<Result<Vec<_>>>()?;
-
-        let len = children_array[0].len();
-        let mut builder = self.return_type.create_array_builder(len);
-        let vis = input.vis();
-
-        for i in 0..len {
-            let mut data = None;
-            if vis.is_set(i) {
-                for array in &children_array {
-                    let datum = array.datum_at(i);
-                    if datum.is_some() {
-                        data = datum;
-                        break;
-                    }
-                }
-            }
-            builder.append_datum(&data)?;
+        let init_vis = input.vis();
+        let mut input = input.clone();
+        let len = input.capacity();
+        let mut selection: Vec<Option<usize>> = vec![None; len];
+        let mut children_array = Vec::with_capacity(self.children.len());
+        for (child_idx, child) in self.children.iter().enumerate() {
+            let res = child.eval_checked(&input)?;
+            let res_bitmap = res.null_bitmap();
+            let orig_vis = input.vis();
+            let res_bitmap_ref: VisRef<'_> = res_bitmap.into();
+            orig_vis
+                .as_ref()
+                .bitand(res_bitmap_ref)
+                .ones()
+                .for_each(|pos| {
+                    selection[pos] = Some(child_idx);
+                });
+            let res_vis: Vis = (!res_bitmap).into();
+            let new_vis = orig_vis & res_vis;
+            input.set_vis(new_vis);
+            children_array.push(res);
         }
-        Ok(Arc::new(builder.finish()?))
+        let mut builder = self.return_type.create_array_builder(len);
+        for (i, sel) in selection.iter().enumerate() {
+            if init_vis.is_set(i) && let Some(child_idx) = sel {
+                builder.append_datum_ref(children_array[*child_idx].value_at(i));
+            } else {
+                builder.append_null()
+            }
+        }
+        Ok(Arc::new(builder.finish()))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
-        let children_array = self
-            .children
-            .iter()
-            .map(|c| c.eval_row(input))
-            .collect::<Result<Vec<_>>>()?;
-        for datum in children_array {
+        for child in &self.children {
+            let datum = child.eval_row(input)?;
             if datum.is_some() {
                 return Ok(datum);
             }
         }
-
         Ok(None)
     }
 }
@@ -90,7 +93,7 @@ impl<'a> TryFrom<&'a ExprNode> for CoalesceExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::Coalesce,);
+        ensure!(prost.get_expr_type().unwrap() == Type::Coalesce);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {

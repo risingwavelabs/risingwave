@@ -58,6 +58,8 @@ pub struct NestedLoopJoinExecutor {
     right_child: BoxedExecutor,
     /// Identity string of the executor
     identity: String,
+    /// The maximum size of the chunk produced by executor at a time.
+    chunk_size: usize,
 }
 
 impl Executor for NestedLoopJoinExecutor {
@@ -80,7 +82,7 @@ impl NestedLoopJoinExecutor {
         let left_data_types = self.left_child.schema().data_types();
         let data_types = self.original_schema.data_types();
 
-        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types);
+        let mut chunk_builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
         // Cache the outputs of left child
         let left = self.left_child.execute().try_collect().await?;
@@ -109,7 +111,7 @@ impl NestedLoopJoinExecutor {
         }
 
         // Handle remaining chunk
-        if let Some(chunk) = chunk_builder.consume_all()? {
+        if let Some(chunk) = chunk_builder.consume_all() {
             yield chunk.reorder_columns(&self.output_indices)
         }
     }
@@ -121,7 +123,7 @@ impl NestedLoopJoinExecutor {
     fn concatenate_and_eval(
         expr: &dyn Expression,
         left_row_types: &[DataType],
-        left_row: RowRef,
+        left_row: RowRef<'_>,
         right_chunk: &DataChunk,
     ) -> Result<DataChunk> {
         let left_chunk = convert_row_to_chunk(&left_row, right_chunk.capacity(), left_row_types)?;
@@ -134,13 +136,10 @@ impl NestedLoopJoinExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        source: &ExecutorBuilder<'_, C>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(
-            inputs.len() == 2,
-            "NestedLoopJoinExecutor should have 2 children!"
-        );
+        let [left_child, right_child]: [_; 2] = inputs.try_into().unwrap();
 
         let nested_loop_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -149,9 +148,6 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
 
         let join_type = JoinType::from_prost(nested_loop_join_node.get_join_type()?);
         let join_expr = expr_build_from_prost(nested_loop_join_node.get_join_cond()?)?;
-
-        let left_child = inputs.remove(0);
-        let right_child = inputs.remove(0);
 
         let output_indices = nested_loop_join_node
             .output_indices
@@ -165,7 +161,8 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             output_indices,
             left_child,
             right_child,
-            "NestedLoopExecutor".into(),
+            source.plan_node().get_identity().clone(),
+            source.context.get_config().developer.batch_chunk_size,
         )))
     }
 }
@@ -178,6 +175,7 @@ impl NestedLoopJoinExecutor {
         left_child: BoxedExecutor,
         right_child: BoxedExecutor,
         identity: String,
+        chunk_size: usize,
     ) -> Self {
         // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
         let original_schema = match join_type {
@@ -206,6 +204,7 @@ impl NestedLoopJoinExecutor {
             left_child,
             right_child,
             identity,
+            chunk_size,
         }
     }
 }
@@ -237,7 +236,7 @@ impl NestedLoopJoinExecutor {
                 if chunk.cardinality() > 0 {
                     #[for_await]
                     for spilled in chunk_builder.trunc_data_chunk(chunk) {
-                        yield spilled?
+                        yield spilled
                     }
                 }
             }
@@ -270,7 +269,7 @@ impl NestedLoopJoinExecutor {
                     matched.set(left_row_idx, true);
                     #[for_await]
                     for spilled in chunk_builder.trunc_data_chunk(chunk) {
-                        yield spilled?
+                        yield spilled
                     }
                 }
             }
@@ -285,7 +284,7 @@ impl NestedLoopJoinExecutor {
             let datum_refs = left_row
                 .values()
                 .chain(repeat_n(None, right_data_types.len()));
-            if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+            if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs) {
                 yield chunk
             }
         }
@@ -324,7 +323,7 @@ impl NestedLoopJoinExecutor {
             .zip_eq(matched.finish().iter())
             .filter(|(_, matched)| if ANTI_JOIN { !*matched } else { *matched })
         {
-            if let Some(chunk) = chunk_builder.append_one_row_ref(left_row)? {
+            if let Some(chunk) = chunk_builder.append_one_row_ref(left_row) {
                 yield chunk
             }
         }
@@ -355,7 +354,7 @@ impl NestedLoopJoinExecutor {
                     matched = &matched | chunk.visibility().unwrap();
                     #[for_await]
                     for spilled in chunk_builder.trunc_data_chunk(chunk) {
-                        yield spilled?
+                        yield spilled
                     }
                 }
             }
@@ -365,7 +364,7 @@ impl NestedLoopJoinExecutor {
                 .filter(|(_, matched)| !*matched)
             {
                 let datum_refs = repeat_n(None, left_data_types.len()).chain(right_row.values());
-                if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+                if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs) {
                     yield chunk
                 }
             }
@@ -403,7 +402,7 @@ impl NestedLoopJoinExecutor {
             if right_chunk.cardinality() > 0 {
                 #[for_await]
                 for spilled in chunk_builder.trunc_data_chunk(right_chunk) {
-                    yield spilled?
+                    yield spilled
                 }
             }
         }
@@ -436,7 +435,7 @@ impl NestedLoopJoinExecutor {
                     right_matched = &right_matched | chunk.visibility().unwrap();
                     #[for_await]
                     for spilled in chunk_builder.trunc_data_chunk(chunk) {
-                        yield spilled?
+                        yield spilled
                     }
                 }
             }
@@ -447,7 +446,7 @@ impl NestedLoopJoinExecutor {
                 .filter(|(_, matched)| !*matched)
             {
                 let datum_refs = repeat_n(None, left_data_types.len()).chain(right_row.values());
-                if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+                if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs) {
                     yield chunk
                 }
             }
@@ -462,7 +461,7 @@ impl NestedLoopJoinExecutor {
             let datum_refs = left_row
                 .values()
                 .chain(repeat_n(None, right_data_types.len()));
-            if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+            if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs) {
                 yield chunk
             }
         }
@@ -481,6 +480,8 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
+
+    const CHUNK_SIZE: usize = 1024;
 
     struct TestFixture {
         left_types: Vec<DataType>,
@@ -594,12 +595,14 @@ mod tests {
                     DataType::Boolean,
                     Box::new(InputRefExpression::new(DataType::Int32, 0)),
                     Box::new(InputRefExpression::new(DataType::Int32, 2)),
-                ),
+                )
+                .unwrap(),
                 join_type,
                 output_indices,
                 left_child,
                 right_child,
                 "NestedLoopJoinExecutor".into(),
+                CHUNK_SIZE,
             ))
         }
 

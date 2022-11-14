@@ -15,9 +15,9 @@
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("io error: {0}")]
-    IoError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
     #[error("nix error: {0}")]
-    NixError(#[from] nix::errno::Errno),
+    Nix(#[from] nix::errno::Errno),
     #[error("unsupported file system, super block magic: {0}")]
     UnsupportedFilesystem(i64),
     #[error("invalid slot: {0}")]

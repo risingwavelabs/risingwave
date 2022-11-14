@@ -1,0 +1,58 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation 
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (v1 integer, v2 struct<a struct<a1 integer, a2 integer>, b int[]>)
+
+statement ok
+insert into t values (1, ROW(ROW(3, 7), ARRAY[1, 2, 3])), (2, NULL), (3, ROW(NULL, ARRAY[4, 5, NULL]));
+
+# cross product
+query IIII
+SELECT * FROM t AS v, t AS w ORDER BY v.v1, w.v1;
+----
+1	((3,7),{1,2,3})	    1	((3,7),{1,2,3})
+1	((3,7),{1,2,3})	    2	NULL
+1	((3,7),{1,2,3})	    3	(NULL,{4,5,NULL})
+2	NULL	            1	((3,7),{1,2,3})
+2	NULL	            2	NULL
+2	NULL	            3	(NULL,{4,5,NULL})
+3	(NULL,{4,5,NULL})	1	((3,7),{1,2,3})
+3	(NULL,{4,5,NULL})	2	NULL
+3	(NULL,{4,5,NULL})	3	(NULL,{4,5,NULL})
+
+query IIII
+SELECT * FROM t v, t w WHERE v.v1 >= w.v1 ORDER BY v.v1, w.v1;
+----
+1	((3,7),{1,2,3})	    1	((3,7),{1,2,3})
+2	NULL	            1	((3,7),{1,2,3})
+2	NULL	            2	NULL
+3	(NULL,{4,5,NULL})	1	((3,7),{1,2,3})
+3	(NULL,{4,5,NULL})	2	NULL
+3	(NULL,{4,5,NULL})	3	(NULL,{4,5,NULL})
+
+query IIII
+SELECT * FROM t v, t w WHERE v.v1 <> w.v1 ORDER BY v.v1, w.v1;
+----
+1	((3,7),{1,2,3})	    2	NULL
+1	((3,7),{1,2,3})	    3	(NULL,{4,5,NULL})
+2	NULL	            1	((3,7),{1,2,3})
+2	NULL	            3	(NULL,{4,5,NULL})
+3	(NULL,{4,5,NULL})	1	((3,7),{1,2,3})
+3	(NULL,{4,5,NULL})	2	NULL
+
+query IIII
+SELECT * FROM t v, t w WHERE v.v1 <> w.v1 OR v.v1 > w.v1 ORDER BY v.v1, w.v1;
+----
+1	((3,7),{1,2,3})	    2	NULL
+1	((3,7),{1,2,3})  	3	(NULL,{4,5,NULL})
+2	NULL	            1	((3,7),{1,2,3})
+2	NULL	            3	(NULL,{4,5,NULL})
+3	(NULL,{4,5,NULL})	1	((3,7),{1,2,3})
+3	(NULL,{4,5,NULL})	2	NULL
+
+statement ok
+drop table t;

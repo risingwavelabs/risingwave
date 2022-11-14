@@ -17,6 +17,7 @@ use std::convert::TryFrom;
 use anyhow::anyhow;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, Row};
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -74,28 +75,25 @@ impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
         let children = func_call_node.children.to_vec();
         // Field `func_call_node` have 2 child nodes, the first is Field `FuncCall` or
         // `InputRef`, the second is i32 `Literal`.
-        ensure!(children.len() == 2);
-        let input = expr_build_from_prost(&children[0])?;
-        let RexNode::Constant(value) = children[1].get_rex_node().unwrap() else {
+        let [first, second]: [_; 2] = children.try_into().unwrap();
+        let input = expr_build_from_prost(&first)?;
+        let RexNode::Constant(value) = second.get_rex_node().unwrap() else {
             bail!("Expected Constant as 1st argument");
         };
-        let index = i32::from_be_bytes(
-            value
-                .body
-                .clone()
-                .try_into()
-                .map_err(|e| anyhow!("Failed to deserialize i32, reason: {:?}", e))?,
-        );
+        let index = deserialize_datum(value.body.as_slice(), &DataType::Int32)
+            .map_err(|e| anyhow!("Failed to deserialize i32, reason: {:?}", e))?
+            .unwrap()
+            .as_int32()
+            .to_owned();
+
         Ok(FieldExpression::new(ret_type, input, index as usize))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use risingwave_common::array;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::{DataChunk, F32Array, I32Array, StructArray};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;
@@ -120,12 +118,9 @@ mod tests {
                 array! { F32Array, [Some(2.0)] }.into(),
             ],
             vec![DataType::Int32, DataType::Float32],
-        )
-        .map(|x| Arc::new(x.into()))
-        .unwrap();
+        );
 
-        let column = Column::new(array);
-        let data_chunk = DataChunk::new(vec![column], 1);
+        let data_chunk = DataChunk::new(vec![array.into()], 1);
         let res = field_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Int32(1)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Int32(2)));
@@ -153,8 +148,7 @@ mod tests {
                 array! { F32Array, [Some(1.0),Some(2.0),Some(3.0),Some(4.0),Some(5.0)] }.into(),
             ],
             vec![DataType::Int32, DataType::Float32],
-        )
-        .unwrap();
+        );
         let array = StructArray::from_slices(
             &[true],
             vec![
@@ -162,12 +156,9 @@ mod tests {
                 array! { F32Array, [Some(2.0),Some(2.0),Some(2.0),Some(2.0),Some(2.0)] }.into(),
             ],
             vec![DataType::Int32, DataType::Float32],
-        )
-        .map(|x| Arc::new(x.into()))
-        .unwrap();
+        );
 
-        let column = Column::new(array);
-        let data_chunk = DataChunk::new(vec![column], 1);
+        let data_chunk = DataChunk::new(vec![array.into()], 1);
         let res = field_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Float32(1.0.into())));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Float32(2.0.into())));

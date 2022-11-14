@@ -27,16 +27,12 @@ impl Rule for ProjectJoinRule {
         let project = plan.as_logical_project()?;
         let input = project.input();
         let join = input.as_logical_join()?;
-        if project.exprs().iter().all(|e| e.as_input_ref().is_some()) {
-            let out_indices = project
-                .exprs()
-                .iter()
-                .map(|e| e.as_input_ref().unwrap().index());
-            let mapping = join.o2i_col_mapping();
-            let new_output_indices = out_indices.map(|idx| mapping.map(idx)).collect();
-            Some(join.clone_with_output_indices(new_output_indices).into())
-        } else {
-            None
-        }
+        let outer_output_indices = project.try_as_projection()?;
+        let inner_output_indices = join.output_indices();
+        let output_indices: Vec<usize> = outer_output_indices
+            .into_iter()
+            .map(|i| inner_output_indices[i])
+            .collect();
+        Some(join.clone_with_output_indices(output_indices).into())
     }
 }

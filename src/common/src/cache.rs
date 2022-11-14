@@ -320,7 +320,7 @@ impl<K: LruKey, T: LruValue> LruHandleTable<K, T> {
     }
 }
 
-type RequestQueue<K, T> = Vec<Sender<CachableEntry<K, T>>>;
+type RequestQueue<K, T> = Vec<Sender<CacheableEntry<K, T>>>;
 pub struct LruCacheShard<K: LruKey, T: LruValue> {
     /// The dummy header node of a ring linked list. The linked list is a LRU list, holding the
     /// cache handles that are not used externally.
@@ -338,12 +338,12 @@ unsafe impl<K: LruKey, T: LruValue> Send for LruCacheShard<K, T> {}
 
 impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     fn new(capacity: usize, object_capacity: usize) -> Self {
-        let mut lru = Box::new(LruHandle::default());
+        let mut lru = Box::<LruHandle<K, T>>::default();
         lru.prev = lru.as_mut();
         lru.next = lru.as_mut();
         let mut object_pool = Vec::with_capacity(object_capacity);
         for _ in 0..object_capacity {
-            object_pool.push(Box::new(LruHandle::default()));
+            object_pool.push(Box::default());
         }
         Self {
             capacity,
@@ -536,7 +536,7 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     unsafe fn clear(&mut self) {
         while !std::ptr::eq(self.lru.next, self.lru.as_mut()) {
             let handle = self.lru.next;
-            // `listener` should not be trigged here, for it doesn't listen to `clear`.
+            // `listener` should not be triggered here, for it doesn't listen to `clear`.
             self.erase((*handle).hash, (*handle).get_key());
         }
     }
@@ -620,14 +620,14 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         }
     }
 
-    pub fn lookup(self: &Arc<Self>, hash: u64, key: &K) -> Option<CachableEntry<K, T>> {
+    pub fn lookup(self: &Arc<Self>, hash: u64, key: &K) -> Option<CacheableEntry<K, T>> {
         let mut shard = self.shards[self.shard(hash)].lock();
         unsafe {
             let ptr = shard.lookup(hash, key);
             if ptr.is_null() {
                 return None;
             }
-            let entry = CachableEntry {
+            let entry = CacheableEntry {
                 cache: self.clone(),
                 handle: ptr,
             };
@@ -640,7 +640,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         unsafe {
             let ptr = shard.lookup(hash, &key);
             if !ptr.is_null() {
-                return LookupResult::Cached(CachableEntry {
+                return LookupResult::Cached(CacheableEntry {
                     cache: self.clone(),
                     handle: ptr,
                 });
@@ -673,8 +673,10 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         hash: u64,
         charge: usize,
         value: T,
-    ) -> CachableEntry<K, T> {
+    ) -> CacheableEntry<K, T> {
         let mut to_delete = vec![];
+        // Drop the entries outside lock to avoid deadlock.
+        let mut errs = vec![];
         let handle = unsafe {
             let mut shard = self.shards[self.shard(hash)].lock();
             let pending_request = shard.write_request.remove(&key);
@@ -683,13 +685,15 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             if let Some(que) = pending_request {
                 for sender in que {
                     (*ptr).add_ref();
-                    let _ = sender.send(CachableEntry {
+                    if let Err(e) = sender.send(CacheableEntry {
                         cache: self.clone(),
                         handle: ptr,
-                    });
+                    }) {
+                        errs.push(e);
+                    }
                 }
             }
-            CachableEntry {
+            CacheableEntry {
                 cache: self.clone(),
                 handle: ptr,
             }
@@ -767,6 +771,21 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
     }
 }
 
+pub struct CleanCacheGuard<'a, K: LruKey + Clone + 'static, T: LruValue + 'static> {
+    cache: &'a Arc<LruCache<K, T>>,
+    key: K,
+    hash: u64,
+    success: bool,
+}
+
+impl<'a, K: LruKey + Clone + 'static, T: LruValue + 'static> Drop for CleanCacheGuard<'a, K, T> {
+    fn drop(&mut self) {
+        if !self.success {
+            self.cache.clear_pending_request(&self.key, self.hash);
+        }
+    }
+}
+
 /// Only implement `lookup_with_request_dedup` for static values, as they can be sent across tokio
 /// spawned futures.
 impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
@@ -775,7 +794,7 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
         hash: u64,
         key: K,
         fetch_value: F,
-    ) -> Result<Result<CachableEntry<K, T>, E>, RecvError>
+    ) -> Result<Result<CacheableEntry<K, T>, E>, RecvError>
     where
         F: FnOnce() -> VC,
         E: Error + Send + 'static,
@@ -790,46 +809,54 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
             LookupResult::Miss => {
                 let this = self.clone();
                 let fetch_value = fetch_value();
-                tokio::spawn(async move {
+                let key2 = key.clone();
+                let mut guard = CleanCacheGuard {
+                    cache: self,
+                    key,
+                    hash,
+                    success: false,
+                };
+                let ret = tokio::spawn(async move {
                     match fetch_value.await {
                         Ok((value, charge)) => {
-                            let entry = this.insert(key, hash, charge, value);
+                            let entry = this.insert(key2, hash, charge, value);
                             Ok(Ok(entry))
                         }
-                        Err(e) => {
-                            this.clear_pending_request(&key, hash);
-                            Ok(Err(e))
-                        }
+                        Err(e) => Ok(Err(e)),
                     }
                 })
                 .await
-                .unwrap()
+                .unwrap();
+                if let Ok(Ok(_)) = ret.as_ref() {
+                    guard.success = true;
+                }
+                ret
             }
         }
     }
 }
 
-pub struct CachableEntry<K: LruKey, T: LruValue> {
+pub struct CacheableEntry<K: LruKey, T: LruValue> {
     cache: Arc<LruCache<K, T>>,
     handle: *mut LruHandle<K, T>,
 }
 
 pub enum LookupResult<K: LruKey, T: LruValue> {
-    Cached(CachableEntry<K, T>),
+    Cached(CacheableEntry<K, T>),
     Miss,
-    WaitPendingRequest(Receiver<CachableEntry<K, T>>),
+    WaitPendingRequest(Receiver<CacheableEntry<K, T>>),
 }
 
-unsafe impl<K: LruKey, T: LruValue> Send for CachableEntry<K, T> {}
-unsafe impl<K: LruKey, T: LruValue> Sync for CachableEntry<K, T> {}
+unsafe impl<K: LruKey, T: LruValue> Send for CacheableEntry<K, T> {}
+unsafe impl<K: LruKey, T: LruValue> Sync for CacheableEntry<K, T> {}
 
-impl<K: LruKey, T: LruValue> CachableEntry<K, T> {
+impl<K: LruKey, T: LruValue> CacheableEntry<K, T> {
     pub fn value(&self) -> &T {
         unsafe { (*self.handle).get_value() }
     }
 }
 
-impl<K: LruKey, T: LruValue> Drop for CachableEntry<K, T> {
+impl<K: LruKey, T: LruValue> Drop for CacheableEntry<K, T> {
     fn drop(&mut self) {
         unsafe {
             self.cache.release(self.handle);
@@ -841,9 +868,13 @@ impl<K: LruKey, T: LruValue> Drop for CachableEntry<K, T> {
 mod tests {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
+    use std::pin::Pin;
+    use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::Relaxed;
     use std::sync::Arc;
+    use std::task::{Context, Poll};
 
+    use futures::FutureExt;
     use rand::rngs::SmallRng;
     use rand::{RngCore, SeedableRng};
     use tokio::sync::oneshot::error::TryRecvError;
@@ -1234,5 +1265,53 @@ mod tests {
         // assert listener won't listen clear
         drop(cache);
         assert!(listener.released.lock().is_empty());
+    }
+
+    pub struct SyncPointFuture<F: Future> {
+        inner: F,
+        polled: Arc<AtomicBool>,
+    }
+
+    impl<F: Future + Unpin> Future for SyncPointFuture<F> {
+        type Output = ();
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            if self.polled.load(Ordering::Acquire) {
+                return Poll::Ready(());
+            }
+            self.inner.poll_unpin(cx).map(|_| ())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_future_cancel() {
+        let cache: Arc<LruCache<u64, u64>> = Arc::new(LruCache::new(0, 5));
+        // do not need sender because this receiver will be cancelled.
+        let (_, recv) = channel::<()>();
+        let polled = Arc::new(AtomicBool::new(false));
+        let cache2 = cache.clone();
+        let polled2 = polled.clone();
+        let f = Box::pin(async move {
+            cache2
+                .lookup_with_request_dedup(1, 2, || async move {
+                    polled2.store(true, Ordering::Release);
+                    recv.await.map(|_| (1, 1))
+                })
+                .await
+                .unwrap()
+                .unwrap();
+        });
+        let wrapper = SyncPointFuture {
+            inner: f,
+            polled: polled.clone(),
+        };
+        {
+            let handle = tokio::spawn(wrapper);
+            while !polled.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+            handle.await.unwrap();
+        }
+        assert!(cache.shards[0].lock().write_request.is_empty());
     }
 }

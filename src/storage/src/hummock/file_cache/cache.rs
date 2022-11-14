@@ -14,7 +14,6 @@
 
 use std::collections::hash_map::RandomState;
 use std::sync::Arc;
-use std::u8;
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -22,19 +21,20 @@ use risingwave_common::cache::LruCache;
 use tokio::sync::Notify;
 
 use super::buffer::TwoLevelBuffer;
-use super::coding::{CacheKey, HashBuilder};
 use super::error::Result;
-use super::filter::Filter;
 use super::meta::SlotId;
-use super::store::{Store, StoreOptions, StoreRef};
+use super::metrics::FileCacheMetricsRef;
+use super::store::{FsType, Store, StoreOptions, StoreRef};
 use super::{utils, LRU_SHARD_BITS};
+use crate::hummock::{HashBuilder, TieredCacheEntryHolder, TieredCacheKey, TieredCacheValue};
 
 pub struct FileCacheOptions {
     pub dir: String,
     pub capacity: usize,
     pub total_buffer_capacity: usize,
     pub cache_file_fallocate_unit: usize,
-    pub filters: Vec<Arc<dyn Filter>>,
+    pub cache_meta_fallocate_unit: usize,
+    pub cache_file_max_write_size: usize,
 
     pub flush_buffer_hooks: Vec<Arc<dyn FlushBufferHook>>,
 }
@@ -50,13 +50,14 @@ pub trait FlushBufferHook: Send + Sync + 'static {
     }
 }
 
-struct BufferFlusher<K, S>
+struct BufferFlusher<K, V, S>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
+    V: TieredCacheValue,
     S: HashBuilder,
 {
-    buffer: TwoLevelBuffer<K>,
-    store: StoreRef<K>,
+    buffer: TwoLevelBuffer<K, V>,
+    store: StoreRef<K, V>,
     indices: Arc<LruCache<K, SlotId>>,
     notifier: Arc<Notify>,
 
@@ -65,9 +66,10 @@ where
     hooks: Vec<Arc<dyn FlushBufferHook>>,
 }
 
-impl<K, S> BufferFlusher<K, S>
+impl<K, V, S> BufferFlusher<K, V, S>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
+    V: TieredCacheValue,
     S: HashBuilder,
 {
     async fn run(&self) -> Result<()> {
@@ -80,28 +82,37 @@ where
 
             let frozen = self.buffer.frozen();
 
-            let mut batch = Vec::new();
-            // TODO(MrCroxx): Avoid clone here?
-            frozen.for_all(|key, value| batch.push((key.clone(), value.clone())));
+            let mut encoded_value_lens = Vec::with_capacity(64);
+            let mut batch = self.store.start_batch_writer(64);
+
+            frozen.for_all(|key, value| {
+                batch.append(key.clone(), value);
+                encoded_value_lens.push(value.encoded_len());
+            });
 
             let mut bytes = 0;
             if batch.is_empty() {
                 // Avoid allocate a new buffer.
                 self.buffer.swap();
+                // Trigger clear free list.
+                batch.finish().await?;
             } else {
-                let slots = self.store.insert(&batch).await?;
+                let (keys, slots) = batch.finish().await?;
 
-                for ((key, value), slot) in batch.into_iter().zip_eq(slots.into_iter()) {
+                for ((key, encoded_value_len), slot) in keys
+                    .into_iter()
+                    .zip_eq(encoded_value_lens.into_iter())
+                    .zip_eq(slots.into_iter())
+                {
                     let hash = self.hash_builder.hash_one(&key);
                     self.indices.insert(
                         key,
                         hash,
-                        utils::align_up(self.store.block_size(), value.len()),
+                        utils::align_up(self.store.block_size(), encoded_value_len),
                         slot,
                     );
-                    bytes += value.len();
+                    bytes += utils::align_up(self.store.block_size(), encoded_value_len);
                 }
-
                 self.buffer.rotate();
             }
 
@@ -112,40 +123,64 @@ where
     }
 }
 
-#[derive(Clone)]
-pub struct FileCache<K, S = RandomState>
+pub struct FileCache<K, V, S = RandomState>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
+    V: TieredCacheValue,
     S: HashBuilder,
 {
     hash_builder: S,
 
-    _filters: Vec<Arc<dyn Filter>>,
-
     indices: Arc<LruCache<K, SlotId>>,
 
-    store: StoreRef<K>,
+    store: StoreRef<K, V>,
 
-    buffer: TwoLevelBuffer<K>,
+    buffer: TwoLevelBuffer<K, V>,
     buffer_flusher_notifier: Arc<Notify>,
+
+    metrics: FileCacheMetricsRef,
 }
 
-impl<K> FileCache<K, RandomState>
+impl<K, V, S> Clone for FileCache<K, V, S>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
+    V: TieredCacheValue,
+    S: HashBuilder,
 {
-    pub async fn open(options: FileCacheOptions) -> Result<Self> {
-        let hash_builder = RandomState::new();
-        Self::open_with_hasher(options, hash_builder).await
+    fn clone(&self) -> Self {
+        Self {
+            hash_builder: self.hash_builder.clone(),
+            indices: self.indices.clone(),
+            store: self.store.clone(),
+            buffer: self.buffer.clone(),
+            buffer_flusher_notifier: self.buffer_flusher_notifier.clone(),
+            metrics: self.metrics.clone(),
+        }
     }
 }
 
-impl<K, S> FileCache<K, S>
+impl<K, V> FileCache<K, V, RandomState>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
+    V: TieredCacheValue,
+{
+    pub async fn open(options: FileCacheOptions, metrics: FileCacheMetricsRef) -> Result<Self> {
+        let hash_builder = RandomState::new();
+        Self::open_with_hasher(options, hash_builder, metrics).await
+    }
+}
+
+impl<K, V, S> FileCache<K, V, S>
+where
+    K: TieredCacheKey,
+    V: TieredCacheValue,
     S: HashBuilder,
 {
-    pub async fn open_with_hasher(options: FileCacheOptions, hash_builder: S) -> Result<Self> {
+    pub async fn open_with_hasher(
+        options: FileCacheOptions,
+        hash_builder: S,
+        metrics: FileCacheMetricsRef,
+    ) -> Result<Self> {
         let buffer_capacity = options.total_buffer_capacity / 2;
 
         let store = Store::open(StoreOptions {
@@ -153,6 +188,9 @@ where
             capacity: options.capacity,
             buffer_capacity,
             cache_file_fallocate_unit: options.cache_file_fallocate_unit,
+            cache_meta_fallocate_unit: options.cache_meta_fallocate_unit,
+            cache_file_max_write_size: options.cache_file_max_write_size,
+            metrics: metrics.clone(),
         })
         .await?;
         let store = Arc::new(store);
@@ -162,7 +200,7 @@ where
             options.capacity,
             store.clone(),
         ));
-        store.restore(&indices, &hash_builder)?;
+        store.restore(&indices, &hash_builder).await?;
 
         let buffer = TwoLevelBuffer::new(buffer_capacity);
         let buffer_flusher_notifier = Arc::new(Notify::new());
@@ -187,41 +225,59 @@ where
         Ok(Self {
             hash_builder,
 
-            _filters: options.filters,
-
             indices,
 
             store,
 
             buffer,
             buffer_flusher_notifier,
+
+            metrics,
         })
     }
 
-    pub fn insert(&self, key: K, value: Vec<u8>) -> Result<()> {
+    pub fn insert(&self, key: K, value: V) -> Result<()> {
+        let timer = self.metrics.insert_latency.start_timer();
+
         let hash = self.hash_builder.hash_one(&key);
         self.buffer.insert(hash, key, value.len(), value);
 
         self.buffer_flusher_notifier.notify_one();
+
+        timer.observe_duration();
+
         Ok(())
     }
 
-    pub async fn get(&self, key: &K) -> Result<Option<Vec<u8>>> {
+    #[tracing::instrument(skip(self))]
+    pub async fn get(&self, key: &K) -> Result<Option<TieredCacheEntryHolder<K, V>>> {
+        let timer = self.metrics.get_latency.start_timer();
+
         let hash = self.hash_builder.hash_one(key);
-        if let Some(value) = self.buffer.get(hash, key) {
-            return Ok(Some(value));
+        if let Some(holder) = self.buffer.get(hash, key) {
+            timer.observe_duration();
+            return Ok(Some(holder));
         }
 
         if let Some(entry) = self.indices.lookup(hash, key) {
             let slot = *entry.value();
-            let value = self.store.get(slot).await?;
-            return Ok(Some(value));
+            let raw = self.store.get(slot).await?;
+            let value = V::decode(raw);
+
+            timer.observe_duration();
+
+            return Ok(Some(TieredCacheEntryHolder::from_owned_value(value)));
         }
+
+        timer.observe_duration();
+        self.metrics.cache_miss.inc();
 
         Ok(None)
     }
 
     pub fn erase(&self, key: &K) -> Result<()> {
+        let timer = self.metrics.erase_latency.start_timer();
+
         let hash = self.hash_builder.hash_one(key);
         self.buffer.erase(hash, key);
 
@@ -231,7 +287,13 @@ where
             self.store.erase(slot).unwrap();
         }
 
+        timer.observe_duration();
+
         Ok(())
+    }
+
+    pub fn fs_type(&self) -> FsType {
+        self.store.fs_type()
     }
 }
 
@@ -241,10 +303,13 @@ mod tests {
     use std::collections::HashMap;
     use std::path::Path;
 
-    use super::super::test_utils::{key, TestCacheKey};
+    use prometheus::Registry;
+
+    use super::super::test_utils::{datasize, key, FlushHolder, ModuloHasherBuilder, TestCacheKey};
     use super::super::utils;
     use super::*;
-    use crate::hummock::file_cache::test_utils::{datasize, FlushHolder, ModuloHasherBuilder};
+    use crate::hummock::file_cache::metrics::FileCacheMetrics;
+    use crate::hummock::file_cache::test_utils::TestCacheValue;
 
     const SHARDS: usize = 1 << LRU_SHARD_BITS;
     const SHARDSU8: u8 = SHARDS as u8;
@@ -261,7 +326,7 @@ mod tests {
 
     #[test]
     fn ensure_send_sync_clone() {
-        is_send_sync_clone::<FileCache<TestCacheKey>>();
+        is_send_sync_clone::<FileCache<TestCacheKey, Vec<u8>>>();
     }
 
     fn tempdir() -> tempfile::TempDir {
@@ -280,19 +345,24 @@ mod tests {
     async fn create_file_cache_manager_for_test(
         dir: impl AsRef<Path>,
         flush_buffer_hooks: Vec<Arc<dyn FlushBufferHook>>,
-    ) -> FileCache<TestCacheKey, ModuloHasherBuilder<SHARDSU8>> {
+    ) -> FileCache<TestCacheKey, TestCacheValue, ModuloHasherBuilder<SHARDSU8>> {
         let options = FileCacheOptions {
             dir: dir.as_ref().to_str().unwrap().to_string(),
             capacity: CAPACITY,
             total_buffer_capacity: 2 * BUFFER_CAPACITY,
             cache_file_fallocate_unit: FALLOCATE_UNIT,
-            filters: vec![],
+            cache_meta_fallocate_unit: 1024 * 1024, // 1 MiB
+            cache_file_max_write_size: 4 * 1024 * 1024, // 4 MiB
 
             flush_buffer_hooks,
         };
-        FileCache::open_with_hasher(options, ModuloHasherBuilder)
-            .await
-            .unwrap()
+        FileCache::open_with_hasher(
+            options,
+            ModuloHasherBuilder,
+            Arc::new(FileCacheMetrics::new(Registry::new())),
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
@@ -305,19 +375,30 @@ mod tests {
         cache.insert(key(1), vec![b'1'; 1234]).unwrap();
 
         // active
-        assert_eq!(cache.get(&key(1)).await.unwrap(), Some(vec![b'1'; 1234]));
+        assert_eq!(
+            cache.get(&key(1)).await.unwrap().as_deref(),
+            Some(&vec![b'1'; 1234])
+        );
+
         // frozen
         holder.trigger();
         holder.wait().await;
-        assert_eq!(cache.get(&key(1)).await.unwrap(), Some(vec![b'1'; 1234]));
+        assert_eq!(
+            cache.get(&key(1)).await.unwrap().as_deref(),
+            Some(&vec![b'1'; 1234])
+        );
+
         // cache file
         cache.buffer_flusher_notifier.notify_one();
         holder.trigger();
         holder.wait().await;
-        assert_eq!(cache.get(&key(1)).await.unwrap(), Some(vec![b'1'; 1234]));
+        assert_eq!(
+            cache.get(&key(1)).await.unwrap().as_deref(),
+            Some(&vec![b'1'; 1234])
+        );
 
         cache.erase(&key(1)).unwrap();
-        assert_eq!(cache.get(&key(1)).await.unwrap(), None);
+        assert_eq!(cache.get(&key(1)).await.unwrap().as_deref(), None);
     }
 
     #[tokio::test]
@@ -329,16 +410,24 @@ mod tests {
 
         for i in 0..SHARDSU64 * 2 {
             cache.insert(key(i), vec![b'x'; BS]).unwrap();
-            assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
+            assert_eq!(
+                cache.get(&key(i)).await.unwrap().as_deref(),
+                Some(&vec![b'x'; BS])
+            );
         }
 
         for i in 0..SHARDSU64 {
-            assert_eq!(cache.get(&key(i)).await.unwrap(), None, "i: {}", i);
+            assert_eq!(
+                cache.get(&key(i)).await.unwrap().as_deref(),
+                None,
+                "i: {}",
+                i
+            );
         }
         for i in SHARDSU64..SHARDSU64 * 2 {
             assert_eq!(
-                cache.get(&key(i)).await.unwrap(),
-                Some(vec![b'x'; BS]),
+                cache.get(&key(i)).await.unwrap().as_deref(),
+                Some(&vec![b'x'; BS]),
                 "i: {}",
                 i
             );
@@ -359,16 +448,22 @@ mod tests {
         );
 
         for i in 0..SHARDSU64 {
-            assert_eq!(cache.get(&key(i)).await.unwrap(), None);
+            assert_eq!(cache.get(&key(i)).await.unwrap().as_deref(), None);
         }
         for i in SHARDSU64..SHARDSU64 * 2 {
-            assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
+            assert_eq!(
+                cache.get(&key(i)).await.unwrap().as_deref(),
+                Some(&vec![b'x'; BS])
+            );
         }
 
         for l in 0..LOOPS as u64 {
             for i in (l + 2) * SHARDSU64..(l + 3) * SHARDSU64 {
                 cache.insert(key(i), vec![b'x'; BS]).unwrap();
-                assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
+                assert_eq!(
+                    cache.get(&key(i)).await.unwrap().as_deref(),
+                    Some(&vec![b'x'; BS])
+                );
             }
             holder.trigger();
             holder.wait().await;
@@ -376,6 +471,11 @@ mod tests {
             holder.trigger();
             holder.wait().await;
         }
+
+        // Trigger free last free list.
+        cache.buffer_flusher_notifier.notify_one();
+        holder.trigger();
+        holder.wait().await;
 
         assert_eq!(cache.store.cache_file_len(), 9 * SHARDS * BS);
         assert_eq!(
@@ -388,13 +488,21 @@ mod tests {
 
         for l in 0..2 + LOOPS as u64 - 4 {
             for i in l * SHARDSU64..(l + 1) * SHARDSU64 {
-                assert_eq!(cache.get(&key(i)).await.unwrap(), None, "i: {}", i);
+                assert_eq!(
+                    cache.get(&key(i)).await.unwrap().as_deref(),
+                    None,
+                    "i: {}",
+                    i
+                );
             }
         }
 
         for l in 2 + LOOPS as u64 - 4..2 + LOOPS as u64 {
             for i in l * SHARDSU64..(l + 1) * SHARDSU64 {
-                assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
+                assert_eq!(
+                    cache.get(&key(i)).await.unwrap().as_deref(),
+                    Some(&vec![b'x'; BS])
+                );
             }
         }
     }
@@ -409,7 +517,10 @@ mod tests {
         for l in 0..LOOPS as u64 {
             for i in l * SHARDSU64..(l + 1) * SHARDSU64 {
                 cache.insert(key(i), vec![b'x'; BS]).unwrap();
-                assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
+                assert_eq!(
+                    cache.get(&key(i)).await.unwrap().as_deref(),
+                    Some(&vec![b'x'; BS])
+                );
             }
             holder.trigger();
             holder.wait().await;
@@ -429,7 +540,7 @@ mod tests {
 
         let cache = create_file_cache_manager_for_test(dir.path(), vec![holder.clone()]).await;
         for (key, slot) in map {
-            assert_eq!(cache.get(&key).await.unwrap(), slot);
+            assert_eq!(cache.get(&key).await.unwrap().as_deref(), slot.as_deref());
         }
     }
 }

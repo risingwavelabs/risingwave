@@ -14,6 +14,7 @@
 
 pub mod cluster_service;
 pub mod ddl_service;
+pub mod health_service;
 pub mod heartbeat_service;
 pub mod hummock_service;
 pub mod notification_service;

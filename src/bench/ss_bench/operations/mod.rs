@@ -52,7 +52,7 @@ impl Operations {
     pub(crate) async fn run(
         store: impl StateStore,
         meta_service: Arc<MockHummockMetaClient>,
-        context: Option<(Arc<CompactorContext>, Arc<LocalVersionManager>)>,
+        context: Option<(Arc<CompactorContext>, LocalVersionManagerRef)>,
         opts: &Opts,
     ) {
         let mut stat_display = DisplayStats::default();

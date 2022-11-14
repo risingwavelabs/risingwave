@@ -18,7 +18,7 @@ use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder, Row,
 };
 use risingwave_common::types::{DataType, Datum};
-use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -69,19 +69,19 @@ impl Expression for VnodeExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let hash_values = input.get_hash_values(&self.dist_key_indices, CRC32FastBuilder {})?;
+        let hash_values = input.get_hash_values(&self.dist_key_indices, Crc32FastBuilder {});
         let mut builder = I16ArrayBuilder::new(input.capacity());
         hash_values
             .into_iter()
-            .try_for_each(|h| builder.append(Some(h.to_vnode() as i16)))?;
-        Ok(Arc::new(ArrayImpl::from(builder.finish()?)))
+            .for_each(|h| builder.append(Some(h.to_vnode() as i16)));
+        Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
         let dist_key_row = input.by_indices(&self.dist_key_indices);
         // FIXME: currently the implementation of the hash function in Row::hash_row differs from
         // Array::hash_at, so their result might be different. #3457
-        let vnode = dist_key_row.hash_row(&CRC32FastBuilder {}).to_vnode() as i16;
+        let vnode = dist_key_row.hash_row(&Crc32FastBuilder {}).to_vnode() as i16;
         Ok(Some(vnode.into()))
     }
 }

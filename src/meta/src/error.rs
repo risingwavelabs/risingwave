@@ -19,6 +19,7 @@ use risingwave_pb::ProstFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
 use crate::hummock::error::Error as HummockError;
+use crate::manager::WorkerId;
 use crate::model::MetadataModelError;
 use crate::storage::MetaStoreError;
 
@@ -40,6 +41,16 @@ enum MetaErrorInner {
 
     #[error("PermissionDenied: {0}")]
     PermissionDenied(String),
+
+    #[error("Invalid worker: {0}")]
+    InvalidWorker(WorkerId),
+
+    // Used for catalog errors.
+    #[error("{0} id not found: {1}")]
+    CatalogIdNotFound(&'static str, u32),
+
+    #[error("{0} with name {1} exists")]
+    Duplicated(&'static str, String),
 
     #[error(transparent)]
     Internal(anyhow::Error),
@@ -67,7 +78,7 @@ impl std::fmt::Debug for MetaError {
 
         write!(f, "{}", self.inner)?;
         writeln!(f)?;
-        if let Some(backtrace) = self.inner.backtrace() {
+        if let Some(backtrace) = (&self.inner as &dyn Error).request_ref::<Backtrace>() {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(f, "  backtrace of `MetaError`:\n{}", self.backtrace)?;
@@ -80,6 +91,23 @@ impl MetaError {
     /// Permission denied error.
     pub fn permission_denied(s: String) -> Self {
         MetaErrorInner::PermissionDenied(s).into()
+    }
+
+    pub fn invalid_worker(worker_id: WorkerId) -> Self {
+        MetaErrorInner::InvalidWorker(worker_id).into()
+    }
+
+    pub fn is_invalid_worker(&self) -> bool {
+        use std::borrow::Borrow;
+        std::matches!(self.inner.borrow(), &MetaErrorInner::InvalidWorker(_))
+    }
+
+    pub fn catalog_id_not_found<T: Into<u32>>(relation: &'static str, id: T) -> Self {
+        MetaErrorInner::CatalogIdNotFound(relation, id.into()).into()
+    }
+
+    pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
+        MetaErrorInner::Duplicated(relation, name.into()).into()
     }
 }
 
@@ -113,20 +141,11 @@ impl From<MetaError> for tonic::Status {
             MetaErrorInner::PermissionDenied(_) => {
                 tonic::Status::permission_denied(err.to_string())
             }
+            MetaErrorInner::CatalogIdNotFound(_, _) => tonic::Status::not_found(err.to_string()),
+            MetaErrorInner::Duplicated(_, _) => tonic::Status::already_exists(err.to_string()),
             _ => tonic::Status::internal(err.to_string()),
         }
     }
-}
-
-impl From<tonic::Status> for MetaError {
-    fn from(status: tonic::Status) -> Self {
-        RpcError::from(status).into()
-    }
-}
-
-/// Convert `MetaError` into `tonic::Status`. Generally used in `map_err`.
-pub fn meta_error_to_tonic(err: impl Into<MetaError>) -> tonic::Status {
-    err.into().into()
 }
 
 impl From<ProstFieldNotFound> for MetaError {

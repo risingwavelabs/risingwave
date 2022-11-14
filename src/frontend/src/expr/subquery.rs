@@ -18,7 +18,7 @@ use risingwave_common::types::DataType;
 
 use super::{Expr, ExprImpl, ExprType};
 use crate::binder::BoundQuery;
-use crate::expr::CorrelatedId;
+use crate::expr::{CorrelatedId, Depth};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SubqueryKind {
@@ -52,11 +52,12 @@ impl Subquery {
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         let mut correlated_indices = self
             .query
-            .collect_correlated_indices_by_depth_and_assign_id(correlated_id);
+            .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id);
         correlated_indices.sort();
         correlated_indices.dedup();
         correlated_indices

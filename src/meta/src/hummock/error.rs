@@ -26,11 +26,9 @@ pub enum Error {
     #[error("invalid hummock context {0}")]
     InvalidContext(HummockContextId),
     #[error(transparent)]
-    MetaStoreError(anyhow::Error),
+    MetaStore(anyhow::Error),
     #[error("compactor {0} is disconnected")]
     CompactorUnreachable(HummockContextId),
-    #[error("compactor {0} is busy")]
-    CompactorBusy(HummockContextId),
     #[error("compaction task {0} already assigned to compactor {1}")]
     CompactionTaskAlreadyAssigned(u64, HummockContextId),
     #[error("compaction group {0} not found")]
@@ -39,20 +37,20 @@ pub enum Error {
     InvalidCompactionGroupMember(StateTableId),
     #[error("SST {0} is invalid")]
     InvalidSst(HummockSstableId),
-    #[error("internal error: {0}")]
-    InternalError(String),
+    #[error(transparent)]
+    Internal(anyhow::Error),
 }
 
 impl Error {
     pub fn retryable(&self) -> bool {
-        matches!(self, Error::MetaStoreError(_))
+        matches!(self, Error::MetaStore(_))
     }
 }
 
 impl From<MetaStoreError> for Error {
     fn from(error: MetaStoreError) -> Self {
         match error {
-            MetaStoreError::ItemNotFound(err) => Error::InternalError(err),
+            MetaStoreError::ItemNotFound(err) => anyhow::anyhow!(err).into(),
             MetaStoreError::TransactionAbort() => {
                 // TODO: need more concrete error from meta store.
                 Error::InvalidContext(0)
@@ -60,7 +58,7 @@ impl From<MetaStoreError> for Error {
             // TODO: Currently MetaStoreError::Internal is equivalent to EtcdError, which
             // includes both retryable and non-retryable. Need to expand MetaStoreError::Internal
             // to more detail meta_store errors.
-            MetaStoreError::Internal(err) => Error::MetaStoreError(err),
+            MetaStoreError::Internal(err) => Error::MetaStore(err),
         }
     }
 }
@@ -69,7 +67,19 @@ impl From<MetadataModelError> for Error {
     fn from(err: MetadataModelError) -> Self {
         match err {
             MetadataModelError::MetaStoreError(e) => e.into(),
-            e => Error::InternalError(e.to_string()),
+            e => anyhow::anyhow!(e).into(),
         }
+    }
+}
+
+impl From<Error> for tonic::Status {
+    fn from(err: Error) -> Self {
+        tonic::Status::new(tonic::Code::Internal, format!("{}", err))
+    }
+}
+
+impl From<anyhow::Error> for Error {
+    fn from(e: anyhow::Error) -> Self {
+        Error::Internal(e)
     }
 }

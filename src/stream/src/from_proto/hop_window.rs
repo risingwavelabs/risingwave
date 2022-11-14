@@ -21,14 +21,16 @@ use crate::executor::HopWindowExecutor;
 
 pub struct HopWindowExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for HopWindowExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let ExecutorParams {
+            actor_context,
             input,
             pk_indices,
             executor_id,
@@ -45,14 +47,18 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             .iter()
             .map(|&x| x as usize)
             .collect_vec();
+
+        let time_col = node.get_time_col()?.column_idx as usize;
+        let time_col_data_type = input.schema().fields()[time_col].data_type();
+        let output_type = DataType::window_of(&time_col_data_type).unwrap();
         let original_schema: Schema = input
             .schema()
             .clone()
             .into_fields()
             .into_iter()
             .chain([
-                Field::with_name(DataType::Timestamp, "window_start"),
-                Field::with_name(DataType::Timestamp, "window_end"),
+                Field::with_name(output_type.clone(), "window_start"),
+                Field::with_name(output_type, "window_end"),
             ])
             .collect();
         let actual_schema: Schema = output_indices
@@ -64,11 +70,11 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             identity: format!("HopWindowExecutor {:X}", executor_id),
             pk_indices,
         };
-        let time_col = node.get_time_col()?.column_idx as usize;
         let window_slide = node.get_window_slide()?.into();
         let window_size = node.get_window_size()?.into();
 
         Ok(HopWindowExecutor::new(
+            actor_context,
             input,
             info,
             time_col,

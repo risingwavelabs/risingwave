@@ -70,8 +70,8 @@ impl RandValue for IntervalUnit {
 
 impl RandValue for NaiveDateWrapper {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        let max_day = chrono::MAX_DATE.num_days_from_ce();
-        let min_day = chrono::MIN_DATE.num_days_from_ce();
+        let max_day = chrono::Date::<chrono::Utc>::MAX_UTC.num_days_from_ce();
+        let min_day = chrono::Date::<chrono::Utc>::MIN_UTC.num_days_from_ce();
         let days = rand.gen_range(min_day..=max_day);
         NaiveDateWrapper::with_days(days).unwrap()
     }
@@ -125,14 +125,14 @@ where
     for _ in 0..size {
         let is_null = rand.gen::<bool>();
         if is_null {
-            builder.append_null().unwrap();
+            builder.append_null();
         } else {
             let value = A::OwnedItem::rand_value(rand);
-            builder.append(Some(value.as_scalar_ref())).unwrap();
+            builder.append(Some(value.as_scalar_ref()));
         }
     }
 
-    builder.finish().unwrap()
+    builder.finish()
 }
 
 pub fn seed_rand_array<A>(size: usize, seed: u64) -> A
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn test_create_array() {
         macro_rules! gen_rand_array {
-            ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+            ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
             $(
                 {
                     let array = seed_rand_array::<$array>(10, 1024);

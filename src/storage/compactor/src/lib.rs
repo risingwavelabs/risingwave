@@ -12,31 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
-#![deny(rustdoc::broken_intra_doc_links)]
-#![feature(let_else)]
-
 mod compactor_observer;
 mod rpc;
 mod server;
 
-use std::fs;
-use std::path::PathBuf;
-
 use clap::Parser;
 use risingwave_common::config::{ServerConfig, StorageConfig};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
 use serde::{Deserialize, Serialize};
 
 use crate::server::compactor_serve;
@@ -71,6 +52,13 @@ pub struct CompactorOpts {
     /// No given `config_path` means to use default config.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    /// It's a hint used by meta node.
+    #[clap(long, default_value = "16")]
+    pub max_concurrent_task_number: u64,
+
+    #[clap(long)]
+    pub compaction_worker_threads_number: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -82,21 +70,6 @@ pub struct CompactorConfig {
     // Below for Hummock.
     #[serde(default)]
     pub storage: StorageConfig,
-}
-
-impl CompactorConfig {
-    pub fn init(path: PathBuf) -> Result<CompactorConfig> {
-        let config_str = fs::read_to_string(path.clone()).map_err(|e| {
-            RwError::from(InternalError(format!(
-                "failed to open config file '{}': {}",
-                path.to_string_lossy(),
-                e
-            )))
-        })?;
-        let config: CompactorConfig = toml::from_str(config_str.as_str())
-            .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
-        Ok(config)
-    }
 }
 
 use std::future::Future;
@@ -114,7 +87,10 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let client_address = opts
             .client_address
             .as_ref()
-            .unwrap_or(&opts.host)
+            .unwrap_or_else(|| {
+                tracing::warn!("Client address is not specified, defaulting to host address");
+                &opts.host
+            })
             .parse()
             .unwrap();
         tracing::info!("Client address is {}", client_address);

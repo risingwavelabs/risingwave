@@ -5,7 +5,9 @@ CREATE TABLE person (
     credit_card VARCHAR,
     city VARCHAR,
     state VARCHAR,
-    date_time TIMESTAMP
+    date_time TIMESTAMP,
+    extra VARCHAR,
+    PRIMARY KEY (id)
 );
 
 CREATE TABLE auction (
@@ -17,12 +19,17 @@ CREATE TABLE auction (
     date_time TIMESTAMP,
     expires TIMESTAMP,
     seller BIGINT,
-    category BIGINT
+    category BIGINT,
+    extra VARCHAR,
+    PRIMARY KEY (id)
 );
 
 CREATE TABLE bid (
     auction BIGINT,
     bidder BIGINT,
     price BIGINT,
-    date_time TIMESTAMP
+    channel VARCHAR,
+    url VARCHAR,
+    date_time TIMESTAMP,
+    extra VARCHAR
 );

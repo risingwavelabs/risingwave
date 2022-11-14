@@ -22,10 +22,12 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::future::try_join_all;
-use risingwave_common::cache::{CachableEntry, LruCache};
-use tokio::io::AsyncWriteExt;
+use risingwave_common::cache::{CacheableEntry, LruCache};
+use tokio::io::{AsyncRead, AsyncWriteExt};
 
-use crate::object::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore};
+use super::{
+    BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+};
 
 pub(super) mod utils {
     use std::fs::Metadata;
@@ -33,7 +35,6 @@ pub(super) mod utils {
     use std::time::{Duration, SystemTime};
 
     use tokio::fs::{create_dir_all, OpenOptions};
-    use tokio::task::spawn_blocking;
 
     use super::OpenReadFileHolder;
     use crate::object::{ObjectError, ObjectResult};
@@ -71,7 +72,8 @@ pub(super) mod utils {
         T: Send + 'static,
         F: FnOnce() -> ObjectResult<T> + Send + 'static,
     {
-        spawn_blocking(f).await.map_err(|e| {
+        #[cfg_attr(madsim, expect(deprecated))]
+        tokio::task::spawn_blocking(f).await.map_err(|e| {
             ObjectError::internal(format!("Fail to join a blocking-spawned task: {}", e))
         })?
     }
@@ -104,7 +106,7 @@ pub(super) mod utils {
     }
 }
 
-pub type OpenReadFileHolder = Arc<CachableEntry<PathBuf, File>>;
+pub type OpenReadFileHolder = Arc<CacheableEntry<PathBuf, File>>;
 
 pub struct DiskObjectStore {
     path_prefix: String,
@@ -172,16 +174,28 @@ impl DiskObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for DiskObjectStore {
+    fn get_object_prefix(&self, _obj_id: u64) -> String {
+        String::default()
+    }
+
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        let mut file =
-            utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
-        file.write_all(&obj)
-            .await
-            .map_err(|e| ObjectError::disk(format!("failed to write {}", path), e))?;
-        file.flush()
-            .await
-            .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
-        Ok(())
+        if obj.is_empty() {
+            Err(ObjectError::internal("upload empty object"))
+        } else {
+            let mut file =
+                utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
+            file.write_all(&obj)
+                .await
+                .map_err(|e| ObjectError::disk(format!("failed to write {}", path), e))?;
+            file.flush()
+                .await
+                .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
+            Ok(())
+        }
+    }
+
+    fn streaming_upload(&self, _path: &str) -> ObjectResult<BoxedStreamingUploader> {
+        unimplemented!("streaming upload is not implemented for disk object store");
     }
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -233,7 +247,7 @@ impl ObjectStore for DiskObjectStore {
             let path_owned = path.to_owned();
             let block_loc = *block_loc_ref;
             let future = utils::asyncify(move || {
-                let mut buf = vec![0; block_loc.size as usize];
+                let mut buf = vec![0; block_loc.size];
                 file_holder
                     .value()
                     .read_exact_at(&mut buf, block_loc.offset as u64)
@@ -254,6 +268,19 @@ impl ObjectStore for DiskObjectStore {
         try_join_all(ret).await
     }
 
+    /// **Currently not implemented!**
+    ///
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
+    async fn streaming_read(
+        &self,
+        _path: &str,
+        _start_pos: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        unimplemented!()
+    }
+
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         let file_holder = self.get_read_file(path).await?;
         let metadata = utils::get_metadata(file_holder).await?;
@@ -266,9 +293,27 @@ impl ObjectStore for DiskObjectStore {
     }
 
     async fn delete(&self, path: &str) -> ObjectResult<()> {
-        tokio::fs::remove_file(self.new_file_path(path)?.as_path())
-            .await
-            .map_err(|e| ObjectError::disk(format!("failed to delete {}", path), e))?;
+        let result = tokio::fs::remove_file(self.new_file_path(path)?.as_path()).await;
+
+        // Note that S3 storage considers deleting successful if the `path` does not refer to an
+        // existing object. We therefore ignore if a file does not exist to ensures that
+        // `DiskObjectStore::delete()` behaves the same way as `S3ObjectStore::delete()`.
+        if let Err(e) = &result && e.kind() == ErrorKind::NotFound {
+            Ok(())
+        }
+        else {
+            result.map_err(|e| ObjectError::disk(format!("failed to delete {}", path), e))
+        }
+    }
+
+    /// Deletes the objects with the given paths permanently from the storage. If an object
+    /// specified in the request is not found, it will be considered as successfully deleted.
+    ///
+    /// Calling this function is equivalent to calling `delete` individually for each given path.
+    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
+        for path in paths {
+            self.delete(path).await?
+        }
         Ok(())
     }
 
@@ -327,6 +372,10 @@ impl ObjectStore for DiskObjectStore {
         list_result.sort_by(|a, b| Ord::cmp(&a.key, &b.key));
         Ok(list_result)
     }
+
+    fn store_media_type(&self) -> &'static str {
+        "disk"
+    }
 }
 
 #[cfg(test)]
@@ -359,6 +408,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_simple_upload() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -377,6 +427,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_multi_level_dir_upload() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -395,6 +446,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_all() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -411,6 +463,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_partial() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -436,6 +489,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_multi_block() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -468,6 +522,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_delete() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -485,6 +540,53 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
+    async fn test_delete_objects() {
+        let test_dir = TempDir::new().unwrap();
+        let test_root_path = test_dir.path().to_str().unwrap();
+        let store = DiskObjectStore::new(test_root_path);
+        let payload = gen_test_payload();
+
+        // The number of files that will be created and uploaded to storage.
+        const REAL_COUNT: usize = 2;
+
+        // The number of files that we do not create but still try to delete.
+        const FAKE_COUNT: usize = 2;
+
+        let mut name_list = vec![];
+        let mut path_list = vec![];
+
+        for i in 0..(REAL_COUNT + FAKE_COUNT) {
+            let file_name = format!("test{}.obj", i);
+            name_list.push(file_name.clone());
+
+            let mut path = PathBuf::from(test_root_path);
+            path.push(file_name);
+            path_list.push(path);
+        }
+
+        // Upload data.
+        for file_name in name_list.iter().take(REAL_COUNT) {
+            store
+                .upload(file_name.as_str(), Bytes::from(payload.clone()))
+                .await
+                .unwrap();
+        }
+
+        // Verify that files do or do not exist.
+        for (i, path) in path_list.iter().enumerate() {
+            assert!((i < REAL_COUNT) == path.exists());
+        }
+
+        store.delete_objects(&name_list).await.unwrap();
+
+        for path in path_list {
+            assert!(!path.exists());
+        }
+    }
+
+    #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_not_exists() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -494,6 +596,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_out_of_range() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -556,6 +659,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_list() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();

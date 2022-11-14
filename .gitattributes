@@ -1,4 +1,8 @@
-# regression test target file
-*.data linguist-generated=true
-*.source linguist-generated=true
-*.sql linguist-generated=true
+# regression test data
+src/tests/regress/data/** linguist-vendored
+# source test data
+scripts/source/test_data/** linguist-vendored
+# generated proto for dashboard
+dashboard/proto/gen/** linguist-generated
+# generated grafana dashboard
+grafana/risingwave-dashboard.json linguist-generated

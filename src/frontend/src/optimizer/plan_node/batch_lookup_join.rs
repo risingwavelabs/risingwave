@@ -15,9 +15,9 @@
 use std::fmt;
 
 use risingwave_common::catalog::{ColumnId, Schema, TableDesc};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::LookupJoinNode;
+use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
 use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -42,6 +42,10 @@ pub struct BatchLookupJoin {
 
     /// Output column ids of the right side table
     right_output_column_ids: Vec<ColumnId>,
+
+    /// If `distributed_lookup` is true, it will generate `DistributedLookupJoinNode` for
+    /// `ToBatchProst`. Otherwise, it will generate `LookupJoinNode`.
+    distributed_lookup: bool,
 }
 
 impl BatchLookupJoin {
@@ -50,6 +54,7 @@ impl BatchLookupJoin {
         eq_join_predicate: EqJoinPredicate,
         right_table_desc: TableDesc,
         right_output_column_ids: Vec<ColumnId>,
+        distributed_lookup: bool,
     ) -> Self {
         let ctx = logical.base.ctx.clone();
         let dist = Self::derive_dist(logical.left().distribution());
@@ -60,23 +65,31 @@ impl BatchLookupJoin {
             eq_join_predicate,
             right_table_desc,
             right_output_column_ids,
+            distributed_lookup,
         }
     }
 
     fn derive_dist(left: &Distribution) -> Distribution {
-        match left {
-            Distribution::Single => Distribution::Single,
-            _ => unreachable!(),
-        }
+        left.clone()
     }
 
     fn eq_join_predicate(&self) -> &EqJoinPredicate {
         &self.eq_join_predicate
     }
+
+    pub fn right_table_desc(&self) -> &TableDesc {
+        &self.right_table_desc
+    }
+
+    fn clone_with_distributed_lookup(&self, input: PlanRef, distributed_lookup: bool) -> Self {
+        let mut batch_lookup_join = self.clone_with_input(input);
+        batch_lookup_join.distributed_lookup = distributed_lookup;
+        batch_lookup_join
+    }
 }
 
 impl fmt::Display for BatchLookupJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("BatchLookupJoin");
         builder.field("type", &format_args!("{:?}", self.logical.join_type()));
@@ -135,6 +148,7 @@ impl PlanTreeNodeUnary for BatchLookupJoin {
             self.eq_join_predicate.clone(),
             self.right_table_desc.clone(),
             self.right_output_column_ids.clone(),
+            self.distributed_lookup,
         )
     }
 }
@@ -143,45 +157,78 @@ impl_plan_tree_node_for_unary! { BatchLookupJoin }
 
 impl ToDistributedBatch for BatchLookupJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
-        Err(ErrorCode::NotImplemented("Lookup Join in MPP mode".to_string(), None.into()).into())
+        let input = self.input().to_distributed_with_required(
+            &Order::any(),
+            &RequiredDist::PhysicalDist(Distribution::UpstreamHashShard(
+                self.eq_join_predicate.left_eq_indexes(),
+                self.right_table_desc.table_id,
+            )),
+        )?;
+        Ok(self.clone_with_distributed_lookup(input, true).into())
     }
 }
 
 impl ToBatchProst for BatchLookupJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
-        NodeBody::LookupJoin(LookupJoinNode {
-            join_type: self.logical.join_type() as i32,
-            condition: self
-                .eq_join_predicate
-                .other_cond()
-                .as_expr_unless_true()
-                .map(|x| x.to_expr_proto()),
-            build_side_key: self
-                .eq_join_predicate
-                .left_eq_indexes()
-                .into_iter()
-                .map(|a| a as _)
-                .collect(),
-            probe_side_table_desc: Some(self.right_table_desc.to_protobuf()),
-            probe_side_vnode_mapping: self
-                .right_table_desc
-                .vnode_mapping
-                .as_ref()
-                .unwrap_or(&vec![])
-                .clone(),
-            probe_side_column_ids: self
-                .right_output_column_ids
-                .iter()
-                .map(ColumnId::get_id)
-                .collect(),
-            output_indices: self
-                .logical
-                .output_indices()
-                .iter()
-                .map(|&x| x as u32)
-                .collect(),
-            worker_nodes: vec![], // To be filled in at local.rs
-        })
+        if self.distributed_lookup {
+            NodeBody::DistributedLookupJoin(DistributedLookupJoinNode {
+                join_type: self.logical.join_type() as i32,
+                condition: self
+                    .eq_join_predicate
+                    .other_cond()
+                    .as_expr_unless_true()
+                    .map(|x| x.to_expr_proto()),
+                outer_side_key: self
+                    .eq_join_predicate
+                    .left_eq_indexes()
+                    .into_iter()
+                    .map(|a| a as _)
+                    .collect(),
+                inner_side_table_desc: Some(self.right_table_desc.to_protobuf()),
+                inner_side_column_ids: self
+                    .right_output_column_ids
+                    .iter()
+                    .map(ColumnId::get_id)
+                    .collect(),
+                output_indices: self
+                    .logical
+                    .output_indices()
+                    .iter()
+                    .map(|&x| x as u32)
+                    .collect(),
+                null_safe: self.eq_join_predicate.null_safes(),
+            })
+        } else {
+            NodeBody::LocalLookupJoin(LocalLookupJoinNode {
+                join_type: self.logical.join_type() as i32,
+                condition: self
+                    .eq_join_predicate
+                    .other_cond()
+                    .as_expr_unless_true()
+                    .map(|x| x.to_expr_proto()),
+                outer_side_key: self
+                    .eq_join_predicate
+                    .left_eq_indexes()
+                    .into_iter()
+                    .map(|a| a as _)
+                    .collect(),
+                inner_side_table_desc: Some(self.right_table_desc.to_protobuf()),
+                inner_side_vnode_mapping: vec![], // To be filled in at local.rs
+                inner_side_column_ids: self
+                    .right_output_column_ids
+                    .iter()
+                    .map(ColumnId::get_id)
+                    .collect(),
+                output_indices: self
+                    .logical
+                    .output_indices()
+                    .iter()
+                    .map(|&x| x as u32)
+                    .collect(),
+                worker_nodes: vec![], // To be filled in at local.rs
+                null_safe: self.eq_join_predicate.null_safes(),
+            })
+        }
     }
 }
 
@@ -190,6 +237,6 @@ impl ToLocalBatch for BatchLookupJoin {
         let input = RequiredDist::single()
             .enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
 
-        Ok(self.clone_with_input(input).into())
+        Ok(self.clone_with_distributed_lookup(input, false).into())
     }
 }

@@ -15,16 +15,19 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Duration;
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::VIRTUAL_NODE_SIZE;
-use risingwave_common::util::ordered::OrderedRowDeserializer;
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
 use tokio::sync::Notify;
 
 use crate::key::{get_table_id, TABLE_PREFIX_LEN};
+
+const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// `FilterKeyExtractor` generally used to extract key which will store in BloomFilter
 pub trait FilterKeyExtractor: Send + Sync {
@@ -36,10 +39,37 @@ pub enum FilterKeyExtractorImpl {
     FullKey(FullKeyFilterKeyExtractor),
     Dummy(DummyFilterKeyExtractor),
     Multi(MultiFilterKeyExtractor),
+    FixedLength(FixedLengthFilterKeyExtractor),
+}
+
+impl FilterKeyExtractorImpl {
+    pub fn from_table(table_catalog: &Table) -> Self {
+        let dist_key_indices: Vec<usize> = table_catalog
+            .distribution_key
+            .iter()
+            .map(|dist_index| *dist_index as usize)
+            .collect();
+
+        let pk_indices: Vec<usize> = table_catalog
+            .pk
+            .iter()
+            .map(|col_order| col_order.index as usize)
+            .collect();
+
+        let match_read_pattern =
+            !dist_key_indices.is_empty() && pk_indices.starts_with(&dist_key_indices);
+        if !match_read_pattern {
+            // for now frontend had not infer the table_id_to_filter_key_extractor, so we
+            // use FullKeyFilterKeyExtractor
+            FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default())
+        } else {
+            FilterKeyExtractorImpl::Schema(SchemaFilterKeyExtractor::new(table_catalog))
+        }
+    }
 }
 
 macro_rules! impl_filter_key_extractor {
-    ([], $( { $variant_name:ident } ),*) => {
+    ($( { $variant_name:ident } ),*) => {
         impl FilterKeyExtractorImpl {
             pub fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8]{
                 match self {
@@ -51,13 +81,13 @@ macro_rules! impl_filter_key_extractor {
 }
 
 macro_rules! for_all_filter_key_extractor_variants {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x), *],
             { Schema },
             { FullKey },
             { Dummy },
-            { Multi }
+            { Multi },
+            { FixedLength }
         }
     };
 }
@@ -81,34 +111,51 @@ impl FilterKeyExtractor for DummyFilterKeyExtractor {
     }
 }
 
-/// [`SchemaFilterKeyExtractor`] build from table_catalog and extract a `full_key` to prefix for
-/// prefix_bloom_filter
+/// [`SchemaFilterKeyExtractor`] build from `table_catalog` and extract a `full_key` to prefix for
+#[derive(Default)]
+pub struct FixedLengthFilterKeyExtractor {
+    fixed_length: usize,
+}
+
+impl FilterKeyExtractor for FixedLengthFilterKeyExtractor {
+    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
+        &full_key[0..self.fixed_length]
+    }
+}
+
+impl FixedLengthFilterKeyExtractor {
+    pub fn new(fixed_length: usize) -> Self {
+        Self { fixed_length }
+    }
+}
+
+/// [`SchemaFilterKeyExtractor`] build from `table_catalog` and transform a `full_key` to prefix for
+/// `prefix_bloom_filter`
 pub struct SchemaFilterKeyExtractor {
     /// Each stateful operator has its own read pattern, partly using prefix scan.
-    /// Perfix key length can be decoded through its `DataType` and `OrderType` which obtained from
+    /// Prefix key length can be decoded through its `DataType` and `OrderType` which obtained from
     /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
     /// from storage key.
-    read_pattern_prefix_column: u32,
-    deserializer: OrderedRowDeserializer,
+    read_pattern_prefix_column: usize,
+    deserializer: OrderedRowSerde,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
     // prefix_key)
 }
 
 impl FilterKeyExtractor for SchemaFilterKeyExtractor {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        debug_assert!(full_key.len() >= TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
+        if full_key.len() < TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE {
+            return full_key;
+        }
 
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
         let (_vnode_prefix, pk) = key.split_at(VIRTUAL_NODE_SIZE);
 
-        // if the key with table_id deserializer fail from schema, that shoud panic here for early
+        // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection
         let pk_prefix_len = self
             .deserializer
-            .deserialize_prefix_len_with_column_indices(
-                pk,
-                0..self.read_pattern_prefix_column as usize,
-            )
+            .deserialize_prefix_len_with_column_indices(pk, 0..self.read_pattern_prefix_column)
             .unwrap();
 
         let prefix_len = TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + pk_prefix_len;
@@ -118,11 +165,12 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
 impl SchemaFilterKeyExtractor {
     pub fn new(table_catalog: &Table) -> Self {
-        assert_ne!(0, table_catalog.read_pattern_prefix_column);
+        let read_pattern_prefix_column = table_catalog.distribution_key.len();
+        assert_ne!(0, read_pattern_prefix_column);
 
         // column_index in pk
         let pk_indices: Vec<usize> = table_catalog
-            .order_key
+            .pk
             .iter()
             .map(|col_order| col_order.index as usize)
             .collect();
@@ -134,7 +182,7 @@ impl SchemaFilterKeyExtractor {
             .collect();
 
         let order_types: Vec<OrderType> = table_catalog
-            .order_key
+            .pk
             .iter()
             .map(|col_order| {
                 OrderType::from_prost(
@@ -144,8 +192,8 @@ impl SchemaFilterKeyExtractor {
             .collect();
 
         Self {
-            read_pattern_prefix_column: table_catalog.read_pattern_prefix_column,
-            deserializer: OrderedRowDeserializer::new(data_types, order_types),
+            read_pattern_prefix_column,
+            deserializer: OrderedRowSerde::new(data_types, order_types),
         }
     }
 }
@@ -153,9 +201,8 @@ impl SchemaFilterKeyExtractor {
 #[derive(Default)]
 pub struct MultiFilterKeyExtractor {
     id_to_filter_key_extractor: HashMap<u32, Arc<FilterKeyExtractorImpl>>,
-
     // cached state
-    last_filter_key_extractor_state: Mutex<Option<(u32, Arc<FilterKeyExtractorImpl>)>>,
+    // last_filter_key_extractor_state: Mutex<Option<(u32, Arc<FilterKeyExtractorImpl>)>>,
 }
 
 impl MultiFilterKeyExtractor {
@@ -167,14 +214,6 @@ impl MultiFilterKeyExtractor {
     pub fn size(&self) -> usize {
         self.id_to_filter_key_extractor.len()
     }
-
-    #[cfg(test)]
-    fn last_filter_key_extractor_state(&self) -> Option<(u32, Arc<FilterKeyExtractorImpl>)> {
-        self.last_filter_key_extractor_state
-            .try_lock()
-            .unwrap()
-            .clone()
-    }
 }
 
 impl Debug for MultiFilterKeyExtractor {
@@ -185,36 +224,15 @@ impl Debug for MultiFilterKeyExtractor {
 
 impl FilterKeyExtractor for MultiFilterKeyExtractor {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        assert!(full_key.len() > TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
-
-        let table_id = get_table_id(full_key).unwrap();
-        let mut last_state = self.last_filter_key_extractor_state.try_lock().unwrap();
-
-        match last_state.as_ref() {
-            Some(last_filter_key_extractor_state) => {
-                if table_id != last_filter_key_extractor_state.0 {
-                    last_state.replace((
-                        table_id,
-                        self.id_to_filter_key_extractor
-                            .get(&table_id)
-                            .unwrap()
-                            .clone(),
-                    ));
-                }
-            }
-
-            None => {
-                last_state.replace((
-                    table_id,
-                    self.id_to_filter_key_extractor
-                        .get(&table_id)
-                        .unwrap()
-                        .clone(),
-                ));
-            }
+        if full_key.len() < TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE {
+            return full_key;
         }
 
-        last_state.as_ref().unwrap().1.extract(full_key)
+        let table_id = get_table_id(full_key);
+        self.id_to_filter_key_extractor
+            .get(&table_id)
+            .unwrap()
+            .extract(full_key)
     }
 }
 
@@ -233,6 +251,13 @@ impl FilterKeyExtractorManagerInner {
         self.notify.notify_waiters();
     }
 
+    fn sync(&self, filter_key_extractor_map: HashMap<u32, Arc<FilterKeyExtractorImpl>>) {
+        let mut guard = self.table_id_to_filter_key_extractor.write();
+        guard.clear();
+        guard.extend(filter_key_extractor_map);
+        self.notify.notify_waiters();
+    }
+
     fn remove(&self, table_id: u32) {
         self.table_id_to_filter_key_extractor
             .write()
@@ -241,9 +266,24 @@ impl FilterKeyExtractorManagerInner {
         self.notify.notify_waiters();
     }
 
-    async fn acquire(&self, mut table_id_set: HashSet<u32>) -> MultiFilterKeyExtractor {
-        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
+    async fn acquire(&self, mut table_id_set: HashSet<u32>) -> FilterKeyExtractorImpl {
+        if table_id_set.is_empty() {
+            // table_id_set is empty
+            // the table in sst has been deleted
 
+            // use full key as default
+            return FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default());
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            // for some unit-test not config table_id_set
+            if table_id_set.iter().any(|table_id| *table_id == 0) {
+                return FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default());
+            }
+        }
+
+        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         while !table_id_set.is_empty() {
             let notified = self.notify.notified();
 
@@ -260,16 +300,24 @@ impl FilterKeyExtractorManagerInner {
                 });
             }
 
-            if !table_id_set.is_empty() {
-                notified.await;
+            if !table_id_set.is_empty()
+                && tokio::time::timeout(ACQUIRE_TIMEOUT, notified)
+                    .await
+                    .is_err()
+            {
+                tracing::warn!(
+                    "filter_key_extractor acquire timeout missing {} table_catalog table_id_set {:?}",
+                    table_id_set.len(),
+                    table_id_set
+                );
             }
         }
 
-        multi_filter_key_extractor
+        FilterKeyExtractorImpl::Multi(multi_filter_key_extractor)
     }
 }
 
-/// FilterKeyExtractorManager is a wrapper for inner, and provide a protected read and write
+/// `FilterKeyExtractorManager` is a wrapper for inner, and provide a protected read and write
 /// interface, its thread safe
 #[derive(Default)]
 pub struct FilterKeyExtractorManager {
@@ -282,15 +330,20 @@ impl FilterKeyExtractorManager {
         self.inner.update(table_id, filter_key_extractor);
     }
 
-    /// Remove a mapping by table_id
+    /// Remove a mapping by `table_id`
     pub fn remove(&self, table_id: u32) {
         self.inner.remove(table_id);
     }
 
+    /// Sync all filter key extractors by snapshot
+    pub fn sync(&self, filter_key_extractor_map: HashMap<u32, Arc<FilterKeyExtractorImpl>>) {
+        self.inner.sync(filter_key_extractor_map)
+    }
+
     /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
     /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
-    /// table_id does not util version update (notify), and retry to get
-    pub async fn acquire(&self, table_id_set: HashSet<u32>) -> MultiFilterKeyExtractor {
+    /// `table_id` does not util version update (notify), and retry to get
+    pub async fn acquire(&self, table_id_set: HashSet<u32>) -> FilterKeyExtractorImpl {
         self.inner.acquire(table_id_set).await
     }
 }
@@ -305,11 +358,13 @@ mod tests {
     use std::time::Duration;
 
     use bytes::{BufMut, BytesMut};
+    use itertools::Itertools;
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::types::{DataType, VIRTUAL_NODE_SIZE};
-    use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
+    use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
@@ -339,7 +394,6 @@ mod tests {
     fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
         ProstTable {
             is_index: false,
-            index_on_id: 0,
             id: 0,
             schema_id: 0,
             database_id: 0,
@@ -398,7 +452,7 @@ mod tests {
                     is_hidden: false,
                 },
             ],
-            order_key: vec![
+            pk: vec![
                 ColumnOrder {
                     order_type: 1, // Ascending
                     index: 1,
@@ -408,15 +462,20 @@ mod tests {
                     index: 3,
                 },
             ],
-            pk: vec![0],
+            stream_key: vec![0],
             dependent_relations: vec![],
-            distribution_key: vec![],
+            distribution_key: (0..column_count as i32).collect_vec(),
             optional_associated_source_id: None,
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            mapping: None,
-            properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
-            read_pattern_prefix_column: column_count, // 1 column
+            properties: HashMap::from([(
+                String::from(PROPERTIES_RETENTION_SECOND_KEY),
+                String::from("300"),
+            )]),
+            fragment_id: 0,
+            vnode_col_idx: None,
+            value_indices: vec![0],
+            definition: "".into(),
         }
     }
 
@@ -426,8 +485,8 @@ mod tests {
         let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
 
         let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
-
-        let serializer = OrderedRowSerializer::new(order_types);
+        let schema = vec![DataType::Int64, DataType::Varchar];
+        let serializer = OrderedRowSerde::new(schema, order_types);
         let row = Row(vec![
             Some(ScalarImpl::Int64(100)),
             Some(ScalarImpl::Utf8("abc".to_string())),
@@ -437,7 +496,6 @@ mod tests {
 
         let table_prefix = {
             let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-            buf.put_u8(b't');
             buf.put_u32(1);
             buf.to_vec()
         };
@@ -456,9 +514,6 @@ mod tests {
     #[test]
     fn test_multi_filter_key_extractor() {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
-        let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
-        assert!(last_state.is_none());
-
         {
             // test table_id 1
             let prost_table = build_table_with_prefix_column_num(1);
@@ -468,8 +523,8 @@ mod tests {
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
-
-            let serializer = OrderedRowSerializer::new(order_types);
+            let schema = vec![DataType::Int64, DataType::Varchar];
+            let serializer = OrderedRowSerde::new(schema, order_types);
             let row = Row(vec![
                 Some(ScalarImpl::Int64(100)),
                 Some(ScalarImpl::Utf8("abc".to_string())),
@@ -479,7 +534,6 @@ mod tests {
 
             let table_prefix = {
                 let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-                buf.put_u8(b't');
                 buf.put_u32(1);
                 buf.to_vec()
             };
@@ -492,7 +546,7 @@ mod tests {
 
             let data_types = vec![DataType::Int64];
             let order_types = vec![OrderType::Ascending];
-            let deserializer = OrderedRowDeserializer::new(data_types, order_types);
+            let deserializer = OrderedRowSerde::new(data_types, order_types);
 
             let pk_prefix_len = deserializer
                 .deserialize_prefix_len_with_column_indices(&row_bytes, 0..=0)
@@ -501,10 +555,6 @@ mod tests {
                 TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + pk_prefix_len,
                 output_key.len()
             );
-
-            let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
-            assert!(last_state.is_some());
-            assert_eq!(1, last_state.as_ref().unwrap().0);
         }
 
         {
@@ -516,8 +566,8 @@ mod tests {
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
-
-            let serializer = OrderedRowSerializer::new(order_types);
+            let schema = vec![DataType::Int64, DataType::Varchar];
+            let serializer = OrderedRowSerde::new(schema, order_types);
             let row = Row(vec![
                 Some(ScalarImpl::Int64(100)),
                 Some(ScalarImpl::Utf8("abc".to_string())),
@@ -527,7 +577,6 @@ mod tests {
 
             let table_prefix = {
                 let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-                buf.put_u8(b't');
                 buf.put_u32(2);
                 buf.to_vec()
             };
@@ -540,7 +589,7 @@ mod tests {
 
             let data_types = vec![DataType::Int64, DataType::Varchar];
             let order_types = vec![OrderType::Ascending, OrderType::Ascending];
-            let deserializer = OrderedRowDeserializer::new(data_types, order_types);
+            let deserializer = OrderedRowSerde::new(data_types, order_types);
 
             let pk_prefix_len = deserializer
                 .deserialize_prefix_len_with_column_indices(&row_bytes, 0..=1)
@@ -550,10 +599,6 @@ mod tests {
                 TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + pk_prefix_len,
                 output_key.len()
             );
-
-            let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
-            assert!(last_state.is_some());
-            assert_eq!(2, last_state.as_ref().unwrap().0);
         }
 
         {
@@ -567,7 +612,6 @@ mod tests {
 
             let table_prefix = {
                 let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-                buf.put_u8(b't');
                 buf.put_u32(3);
                 buf.to_vec()
             };
@@ -583,14 +627,10 @@ mod tests {
                 TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + row_bytes.len(),
                 output_key.len()
             );
-
-            let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
-            assert!(last_state.is_some());
-            assert_eq!(3, last_state.as_ref().unwrap().0);
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_filter_key_extractor_manager() {
         let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let filter_key_extractor_manager_ref = filter_key_extractor_manager.clone();
@@ -611,6 +651,14 @@ mod tests {
             .acquire(remaining_table_id_set)
             .await;
 
-        assert_eq!(1, multi_filter_key_extractor.size());
+        match multi_filter_key_extractor {
+            FilterKeyExtractorImpl::Multi(multi_filter_key_extractor) => {
+                assert_eq!(1, multi_filter_key_extractor.size());
+            }
+
+            _ => {
+                unreachable!()
+            }
+        }
     }
 }

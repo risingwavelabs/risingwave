@@ -20,7 +20,7 @@ use nix::sys::stat::stat;
 
 /// Given a normal file path, returns the containing block device static file path (of the
 /// partition).
-pub fn dev_stat_path(path: impl AsRef<Path>) -> PathBuf {
+pub fn file_stat_path(path: impl AsRef<Path>) -> PathBuf {
     let st_dev = stat(path.as_ref()).unwrap().st_dev;
 
     let major = unsafe { libc::major(st_dev) };
@@ -30,8 +30,11 @@ pub fn dev_stat_path(path: impl AsRef<Path>) -> PathBuf {
 
     let linkname = readlink(&dev).unwrap();
     let devname = Path::new(linkname.as_os_str()).file_name().unwrap();
+    dev_stat_path(devname.to_str().unwrap())
+}
 
-    let classpath = Path::new("/sys/class/block").join(&devname);
+pub fn dev_stat_path(devname: &str) -> PathBuf {
+    let classpath = Path::new("/sys/class/block").join(devname);
     let devclass = readlink(&classpath).unwrap();
 
     let devpath = Path::new(&devclass);

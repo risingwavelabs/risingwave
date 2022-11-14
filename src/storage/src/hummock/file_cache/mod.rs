@@ -15,11 +15,10 @@
 pub mod alloc;
 pub mod buffer;
 pub mod cache;
-pub mod coding;
 pub mod error;
 pub mod file;
-pub mod filter;
 pub mod meta;
+pub mod metrics;
 pub mod store;
 pub mod utils;
 

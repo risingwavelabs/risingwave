@@ -18,7 +18,7 @@ use thiserror::Error;
 pub enum ValueEncodingError {
     #[error("Invalid bool value encoding: {0}")]
     InvalidBoolEncoding(u8),
-    #[error("Invalid UTF8 value encofing: {0}")]
+    #[error("Invalid UTF8 value encoding: {0}")]
     InvalidUtf8(#[from] std::string::FromUtf8Error),
     #[error("Invalid NaiveDate value encoding: days: {0}")]
     InvalidNaiveDateEncoding(i32),
@@ -28,4 +28,8 @@ pub enum ValueEncodingError {
     InvalidNaiveTimeEncoding(u32, u32),
     #[error("Invalid null tag value encoding: {0}")]
     InvalidTagEncoding(u8),
+    #[error("Invalid struct encoding: {0}")]
+    InvalidStructEncoding(crate::array::ArrayError),
+    #[error("Invalid list encoding: {0}")]
+    InvalidListEncoding(crate::array::ArrayError),
 }

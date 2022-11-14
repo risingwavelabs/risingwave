@@ -34,15 +34,18 @@ pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
-
-mod compact_concat_iterator;
-pub use compact_concat_iterator::ConcatSstableIterator;
+use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
-use crate::hummock::SstableIterator;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
+use crate::hummock::shared_buffer::SharedBufferIteratorType;
+use crate::hummock::{BackwardSstableIterator, SstableIterator, SstableIteratorType};
 
+mod delete_range_iterator;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
+pub use delete_range_iterator::DeleteRangeIterator;
 
 use crate::monitor::StoreLocalStatistic;
 
@@ -85,7 +88,7 @@ pub trait HummockIterator: Send + Sync + 'static {
     /// # Panics
     /// This function will panic if the iterator is invalid.
     // TODO: Add lifetime
-    fn key(&self) -> &[u8];
+    fn key(&self) -> FullKey<&[u8]>;
 
     /// Retrieves the current value, decoded as [`HummockValue`].
     ///
@@ -121,10 +124,10 @@ pub trait HummockIterator: Send + Sync + 'static {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a>;
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a>;
 
     /// take local statistic info from iterator to report metrics.
-    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);
 }
 
 /// This is a placeholder trait used in `HummockIteratorUnion`
@@ -143,7 +146,7 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
         async { unreachable!() }
     }
 
-    fn key(&self) -> &[u8] {
+    fn key(&self) -> FullKey<&[u8]> {
         unreachable!()
     }
 
@@ -159,9 +162,11 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
         async { unreachable!() }
     }
 
-    fn seek<'a>(&'a mut self, _key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, _key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async { unreachable!() }
     }
+
+    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
 }
 
 /// The `HummockIteratorUnion` acts like a wrapper over multiple types of `HummockIterator`, so that
@@ -214,7 +219,7 @@ impl<
         }
     }
 
-    fn key(&self) -> &[u8] {
+    fn key(&self) -> FullKey<&[u8]> {
         match self {
             First(iter) => iter.key(),
             Second(iter) => iter.key(),
@@ -252,7 +257,7 @@ impl<
         }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             match self {
                 First(iter) => iter.seek(key).await,
@@ -260,6 +265,15 @@ impl<
                 Third(iter) => iter.seek(key).await,
                 Fourth(iter) => iter.seek(key).await,
             }
+        }
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        match self {
+            First(iter) => iter.collect_local_statistic(stats),
+            Second(iter) => iter.collect_local_statistic(stats),
+            Third(iter) => iter.collect_local_statistic(stats),
+            Fourth(iter) => iter.collect_local_statistic(stats),
         }
     }
 }
@@ -275,7 +289,7 @@ impl<I: HummockIterator> HummockIterator for Box<I> {
         (*self).deref_mut().next()
     }
 
-    fn key(&self) -> &[u8] {
+    fn key(&self) -> FullKey<&[u8]> {
         (*self).deref().key()
     }
 
@@ -291,8 +305,12 @@ impl<I: HummockIterator> HummockIterator for Box<I> {
         (*self).deref_mut().rewind()
     }
 
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         (*self).deref_mut().seek(key)
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        (*self).deref().collect_local_statistic(stats);
     }
 }
 
@@ -324,3 +342,96 @@ impl HummockIteratorDirection for Backward {
 
 pub type MultiSstIterator =
     UnorderedMergeIteratorInner<HummockIteratorUnion<Forward, ConcatIterator, SstableIterator>>;
+
+#[allow(type_alias_bounds)]
+pub type UserIteratorPayloadType<
+    D: HummockIteratorDirection,
+    I: SstableIteratorType<Direction = D>,
+> = HummockIteratorUnion<
+    D,
+    SharedBufferBatchIterator<D>,
+    SharedBufferIteratorType<D, I>,
+    ConcatIteratorInner<I>,
+    I,
+>;
+
+pub type ForwardUserIteratorType =
+    UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>;
+pub type BackwardUserIteratorType =
+    UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>;
+
+pub enum DirectedUserIterator {
+    Forward(UserIterator<ForwardUserIteratorType>),
+    Backward(BackwardUserIterator<BackwardUserIteratorType>),
+}
+
+pub trait DirectedUserIteratorBuilder: 'static {
+    type Direction: HummockIteratorDirection;
+    type SstableIteratorType: SstableIteratorType<Direction = Self::Direction>;
+    /// Initialize an `DirectedUserIterator`.
+    /// The `key_range` should be from smaller key to larger key.
+    fn create(
+        iterator_iter: Vec<UserIteratorPayloadType<Self::Direction, Self::SstableIteratorType>>,
+        key_range: UserKeyRange,
+        read_epoch: u64,
+        min_epoch: u64,
+        version: Option<PinnedVersion>,
+    ) -> DirectedUserIterator;
+}
+
+impl DirectedUserIterator {
+    #[inline(always)]
+    pub async fn next(&mut self) -> HummockResult<()> {
+        match self {
+            Self::Forward(ref mut iter) => iter.next().await,
+            Self::Backward(ref mut iter) => iter.next().await,
+        }
+    }
+
+    #[inline(always)]
+    pub fn key(&self) -> &FullKey<Vec<u8>> {
+        match self {
+            Self::Forward(iter) => iter.key(),
+            Self::Backward(iter) => iter.key(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn value(&self) -> &[u8] {
+        match self {
+            Self::Forward(iter) => iter.value(),
+            Self::Backward(iter) => iter.value(),
+        }
+    }
+
+    #[inline(always)]
+    pub async fn rewind(&mut self) -> HummockResult<()> {
+        match self {
+            Self::Forward(ref mut iter) => iter.rewind().await,
+            Self::Backward(ref mut iter) => iter.rewind().await,
+        }
+    }
+
+    #[inline(always)]
+    pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
+        match self {
+            Self::Forward(ref mut iter) => iter.seek(user_key).await,
+            Self::Backward(ref mut iter) => iter.seek(user_key).await,
+        }
+    }
+
+    #[inline(always)]
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::Forward(iter) => iter.is_valid(),
+            Self::Backward(iter) => iter.is_valid(),
+        }
+    }
+
+    pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        match self {
+            DirectedUserIterator::Forward(iter) => iter.collect_local_statistic(stats),
+            DirectedUserIterator::Backward(iter) => iter.collect_local_statistic(stats),
+        }
+    }
+}

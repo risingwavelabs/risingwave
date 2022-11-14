@@ -16,12 +16,13 @@ use std::cmp::Ordering::{Equal, Less};
 use std::future::Future;
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::KeyComparator;
 
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::{BlockHolder, BlockIterator, SstableStoreRef, TableHolder};
+use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 pub trait SstableIteratorType: HummockIterator + 'static {
@@ -79,18 +80,15 @@ impl SstableIterator {
         if idx >= self.sst.value().block_count() {
             self.block_iter = None;
         } else {
-            let block = if idx < self.sst.value().blocks.len() {
-                BlockHolder::from_ref_block(self.sst.value().blocks[idx].clone())
-            } else {
-                self.sstable_store
-                    .get(
-                        self.sst.value(),
-                        idx as u64,
-                        crate::hummock::CachePolicy::Fill,
-                        &mut self.stats,
-                    )
-                    .await?
-            };
+            let block = self
+                .sstable_store
+                .get(
+                    self.sst.value(),
+                    idx as u64,
+                    crate::hummock::CachePolicy::Fill,
+                    &mut self.stats,
+                )
+                .await?;
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
                 block_iter.seek(key);
@@ -104,30 +102,6 @@ impl SstableIterator {
 
         Ok(())
     }
-
-    // Only for compaction because it would not load block from sstablestore.
-    pub fn next_for_compact(&mut self) -> HummockResult<()> {
-        self.stats.scan_key_count += 1;
-        let block_iter = self.block_iter.as_mut().expect("no block iter");
-        block_iter.next();
-        if block_iter.is_valid() {
-            Ok(())
-        } else {
-            // seek to next block
-            if self.cur_idx + 1 >= self.sst.value().block_count() {
-                self.block_iter = None;
-            } else {
-                debug_assert!(!self.sst.value().blocks.is_empty());
-                let block =
-                    BlockHolder::from_ref_block(self.sst.value().blocks[self.cur_idx + 1].clone());
-                let mut block_iter = BlockIterator::new(block);
-                block_iter.seek_to_first();
-                self.block_iter = Some(block_iter);
-                self.cur_idx += 1;
-            }
-            Ok(())
-        }
-    }
 }
 
 impl HummockIterator for SstableIterator {
@@ -138,12 +112,10 @@ impl HummockIterator for SstableIterator {
     type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
+        self.stats.total_key_count += 1;
         async move {
-            self.stats.scan_key_count += 1;
             let block_iter = self.block_iter.as_mut().expect("no block iter");
-            block_iter.next();
-
-            if block_iter.is_valid() {
+            if block_iter.try_next() {
                 Ok(())
             } else {
                 // seek to next block
@@ -152,8 +124,8 @@ impl HummockIterator for SstableIterator {
         }
     }
 
-    fn key(&self) -> &[u8] {
-        self.block_iter.as_ref().expect("no block iter").key()
+    fn key(&self) -> FullKey<&[u8]> {
+        FullKey::decode(self.block_iter.as_ref().expect("no block iter").key())
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -170,8 +142,9 @@ impl HummockIterator for SstableIterator {
         async move { self.seek_idx(0, None).await }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
+            let encoded_key = key.encode();
             let block_idx = self
                 .sst
                 .value()
@@ -181,13 +154,16 @@ impl HummockIterator for SstableIterator {
                     // compare by version comparator
                     // Note: we are comparing against the `smallest_key` of the `block`, thus the
                     // partition point should be `prev(<=)` instead of `<`.
-                    let ord =
-                        VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
+                    let ord = KeyComparator::compare_encoded_full_key(
+                        block_meta.smallest_key.as_slice(),
+                        encoded_key.as_slice(),
+                    );
                     ord == Less || ord == Equal
                 })
                 .saturating_sub(1); // considering the boundary of 0
 
-            self.seek_idx(block_idx, Some(key)).await?;
+            self.seek_idx(block_idx, Some(encoded_key.as_slice()))
+                .await?;
             if !self.is_valid() {
                 // seek to next block
                 self.seek_idx(block_idx + 1, None).await?;
@@ -216,16 +192,15 @@ impl SstableIteratorType for SstableIterator {
 mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
-    use risingwave_hummock_sdk::key::key_with_epoch;
+    use risingwave_common::catalog::TableId;
 
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
         create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
-        gen_test_sstable_data, test_key_of, test_value_of, TEST_KEYS_COUNT,
+        gen_test_sstable, test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
-    use crate::hummock::{CachePolicy, Sstable};
 
     async fn inner_test_forward_iterator(sstable_store: SstableStoreRef, handle: TableHolder) {
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
@@ -241,7 +216,7 @@ mod tests {
         while sstable_iter.is_valid() {
             let key = sstable_iter.key();
             let value = sstable_iter.value();
-            assert_bytes_eq!(key, test_key_of(cnt));
+            assert_eq!(key, test_key_of(cnt).to_ref());
             assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
             cnt += 1;
             sstable_iter.next().await.unwrap();
@@ -264,13 +239,6 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(sstable));
         inner_test_forward_iterator(sstable_store.clone(), handle).await;
-
-        let kv_iter =
-            (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-        let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
-        let sstable = Sstable::new_with_data(0, meta, data).unwrap();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
-        inner_test_forward_iterator(sstable_store, handle).await;
     }
 
     #[tokio::test]
@@ -296,30 +264,38 @@ mod tests {
 
         // We seek and access all the keys in random order
         for i in all_key_to_test {
-            sstable_iter.seek(&test_key_of(i)).await.unwrap();
+            sstable_iter.seek(test_key_of(i).to_ref()).await.unwrap();
             // sstable_iter.next().await.unwrap();
             let key = sstable_iter.key();
-            assert_bytes_eq!(key, test_key_of(i));
+            assert_eq!(key, test_key_of(i).to_ref());
         }
 
         // Seek to key #500 and start iterating.
-        sstable_iter.seek(&test_key_of(500)).await.unwrap();
+        sstable_iter.seek(test_key_of(500).to_ref()).await.unwrap();
         for i in 500..TEST_KEYS_COUNT {
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(i));
+            assert_eq!(key, test_key_of(i).to_ref());
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
 
         // Seek to < first key
-        let smallest_key = key_with_epoch(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
-        sstable_iter.seek(smallest_key.as_slice()).await.unwrap();
+        let smallest_key = FullKey::for_test(
+            TableId::default(),
+            format!("key_aaaa_{:05}", 0).as_bytes().to_vec(),
+            233,
+        );
+        sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
         let key = sstable_iter.key();
-        assert_eq!(key, test_key_of(0));
+        assert_eq!(key, test_key_of(0).to_ref());
 
         // Seek to > last key
-        let largest_key = key_with_epoch(format!("key_zzzz_{:05}", 0).as_bytes().to_vec(), 233);
-        sstable_iter.seek(largest_key.as_slice()).await.unwrap();
+        let largest_key = FullKey::for_test(
+            TableId::default(),
+            format!("key_zzzz_{:05}", 0).as_bytes().to_vec(),
+            233,
+        );
+        sstable_iter.seek(largest_key.to_ref()).await.unwrap();
         assert!(!sstable_iter.is_valid());
 
         // Seek to non-existing key
@@ -330,17 +306,18 @@ mod tests {
             // (will produce `key_test_00004`).
             sstable_iter
                 .seek(
-                    key_with_epoch(
+                    FullKey::for_test(
+                        TableId::default(),
                         format!("key_test_{:05}", idx * 2 - 1).as_bytes().to_vec(),
                         0,
                     )
-                    .as_slice(),
+                    .to_ref(),
                 )
                 .await
                 .unwrap();
 
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(idx));
+            assert_eq!(key, test_key_of(idx).to_ref());
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
@@ -352,20 +329,20 @@ mod tests {
         // when upload data is successful, but upload meta is fail and delete is fail
         let kv_iter =
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-        let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
-        let sstable = Sstable {
-            id: 0,
-            meta,
-            blocks: vec![],
-        };
-        sstable_store
-            .put(sstable, data, CachePolicy::NotFill)
-            .await
-            .unwrap();
+        let table = gen_test_sstable(
+            default_builder_opt_for_test(),
+            0,
+            kv_iter,
+            sstable_store.clone(),
+        )
+        .await;
 
         let mut stats = StoreLocalStatistic::default();
         let mut sstable_iter = SstableIterator::create(
-            sstable_store.sstable(0, &mut stats).await.unwrap(),
+            sstable_store
+                .sstable(&table.get_sstable_info(), &mut stats)
+                .await
+                .unwrap(),
             sstable_store,
             Arc::new(SstableIteratorReadOptions { prefetch: true }),
         );
@@ -374,7 +351,7 @@ mod tests {
         while sstable_iter.is_valid() {
             let key = sstable_iter.key();
             let value = sstable_iter.value();
-            assert_bytes_eq!(key, test_key_of(cnt));
+            assert_eq!(key, test_key_of(cnt).to_ref());
             assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
             cnt += 1;
             sstable_iter.next().await.unwrap();

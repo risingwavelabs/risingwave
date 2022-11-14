@@ -14,14 +14,16 @@
 
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
-use risingwave_common::error::{tonic_err, Result as RwResult};
-use risingwave_pb::catalog::Source;
+use risingwave_common::error::tonic_err;
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_stream::executor::{Barrier, Epoch};
+use risingwave_storage::dispatch_state_store;
+use risingwave_stream::error::StreamError;
+use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
@@ -45,7 +47,10 @@ impl StreamService for StreamServiceImpl {
         request: Request<UpdateActorsRequest>,
     ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
         let req = request.into_inner();
-        let res = self.mgr.update_actors(&req.actors, &req.hanging_channels);
+        let res = self
+            .mgr
+            .update_actors(&req.actors, &req.hanging_channels)
+            .await;
         match res {
             Err(e) => {
                 error!("failed to update stream actor {}", e);
@@ -63,7 +68,10 @@ impl StreamService for StreamServiceImpl {
         let req = request.into_inner();
 
         let actor_id = req.actor_id;
-        let res = self.mgr.build_actors(actor_id.as_slice(), self.env.clone());
+        let res = self
+            .mgr
+            .build_actors(actor_id.as_slice(), self.env.clone())
+            .await;
         match res {
             Err(e) => {
                 error!("failed to build actors {}", e);
@@ -81,9 +89,9 @@ impl StreamService for StreamServiceImpl {
         &self,
         request: Request<BroadcastActorInfoTableRequest>,
     ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
-        let table = request.into_inner();
+        let req = request.into_inner();
 
-        let res = self.mgr.update_actor_info(table);
+        let res = self.mgr.update_actor_info(&req.info).await;
         match res {
             Err(e) => {
                 error!("failed to update actor info table actor {}", e);
@@ -102,7 +110,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<DropActorsResponse>, Status> {
         let req = request.into_inner();
         let actors = req.actor_ids;
-        self.mgr.drop_actor(&actors)?;
+        self.mgr.drop_actor(&actors).await?;
         Ok(Response::new(DropActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -115,13 +123,8 @@ impl StreamService for StreamServiceImpl {
         request: Request<ForceStopActorsRequest>,
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
-        let epoch = req.epoch.unwrap();
-        self.mgr
-            .stop_all_actors(Epoch {
-                curr: epoch.curr,
-                prev: epoch.prev,
-            })
-            .await?;
+        self.mgr.stop_all_actors().await?;
+        self.env.source_manager().clear_sources();
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -135,7 +138,7 @@ impl StreamService for StreamServiceImpl {
     ) -> Result<Response<InjectBarrierResponse>, Status> {
         let req = request.into_inner();
         let barrier =
-            Barrier::from_protobuf(req.get_barrier().map_err(tonic_err)?).map_err(tonic_err)?;
+            Barrier::from_protobuf(req.get_barrier().unwrap()).map_err(StreamError::from)?;
 
         self.mgr
             .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
@@ -152,10 +155,21 @@ impl StreamService for StreamServiceImpl {
         request: Request<BarrierCompleteRequest>,
     ) -> Result<Response<BarrierCompleteResponse>, Status> {
         let req = request.into_inner();
-        let collect_result = self.mgr.collect_barrier(req.prev_epoch).await;
-        // Must finish syncing data written in the epoch before respond back to ensure persistency
+        let (collect_result, checkpoint) = self
+            .mgr
+            .collect_barrier(req.prev_epoch)
+            .stack_trace(format!("collect_barrier (epoch {})", req.prev_epoch))
+            .await?;
+        // Must finish syncing data written in the epoch before respond back to ensure persistence
         // of the state.
-        let synced_sstables = self.mgr.sync_epoch(req.prev_epoch).await;
+        let synced_sstables = if checkpoint {
+            self.mgr
+                .sync_epoch(req.prev_epoch)
+                .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
+                .await?
+        } else {
+            vec![]
+        };
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
@@ -163,90 +177,39 @@ impl StreamService for StreamServiceImpl {
             create_mview_progress: collect_result.create_mview_progress,
             synced_sstables: synced_sstables
                 .into_iter()
-                .map(|(compaction_group_id, sst)| GroupedSstableInfo {
-                    compaction_group_id,
-                    sst: Some(sst),
-                })
+                .map(
+                    |LocalSstableInfo {
+                         compaction_group_id,
+                         sst_info,
+                         ..
+                     }| GroupedSstableInfo {
+                        compaction_group_id,
+                        sst: Some(sst_info),
+                    },
+                )
                 .collect_vec(),
             worker_id: self.env.worker_id(),
         }))
     }
 
     #[cfg_attr(coverage, no_coverage)]
-    async fn create_source(
+    async fn wait_epoch_commit(
         &self,
-        request: Request<CreateSourceRequest>,
-    ) -> Result<Response<CreateSourceResponse>, Status> {
-        let source = request.into_inner().source.unwrap();
-        self.create_source_inner(&source).await.map_err(tonic_err)?;
-        tracing::debug!(id = %source.id, "create table source");
+        request: Request<WaitEpochCommitRequest>,
+    ) -> Result<Response<WaitEpochCommitResponse>, Status> {
+        let epoch = request.into_inner().epoch;
 
-        Ok(Response::new(CreateSourceResponse { status: None }))
-    }
+        dispatch_state_store!(self.env.state_store(), store, {
+            use risingwave_hummock_sdk::HummockReadEpoch;
+            use risingwave_storage::StateStore;
 
-    #[cfg_attr(coverage, no_coverage)]
-    async fn sync_sources(
-        &self,
-        request: Request<SyncSourcesRequest>,
-    ) -> Result<Response<SyncSourcesResponse>, Status> {
-        let sources = request.into_inner().sources;
-        self.env
-            .source_manager()
-            .clear_sources()
-            .map_err(tonic_err)?;
-        for source in sources {
-            self.create_source_inner(&source).await.map_err(tonic_err)?
-        }
+            store
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch))
+                .stack_trace(format!("wait_epoch_commit (epoch {})", epoch))
+                .await
+                .map_err(tonic_err)?;
+        });
 
-        Ok(Response::new(SyncSourcesResponse { status: None }))
-    }
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn drop_source(
-        &self,
-        request: Request<DropSourceRequest>,
-    ) -> Result<Response<DropSourceResponse>, Status> {
-        let id = request.into_inner().source_id;
-        let id = TableId::new(id); // TODO: use SourceId instead
-
-        self.env
-            .source_manager()
-            .drop_source(&id)
-            .map_err(tonic_err)?;
-
-        tracing::debug!(id = %id, "drop source");
-
-        Ok(Response::new(DropSourceResponse { status: None }))
-    }
-}
-
-impl StreamServiceImpl {
-    async fn create_source_inner(&self, source: &Source) -> RwResult<()> {
-        use risingwave_pb::catalog::source::Info;
-
-        let id = TableId::new(source.id); // TODO: use SourceId instead
-
-        match &source.get_info()? {
-            Info::StreamSource(info) => {
-                self.env
-                    .source_manager()
-                    .create_source(&id, info.to_owned())
-                    .await?;
-            }
-            Info::TableSource(info) => {
-                let columns = info
-                    .columns
-                    .iter()
-                    .cloned()
-                    .map(|c| c.column_desc.unwrap().into())
-                    .collect_vec();
-
-                self.env
-                    .source_manager()
-                    .create_table_source(&id, columns)?;
-            }
-        };
-
-        Ok(())
+        Ok(Response::new(WaitEpochCommitResponse { status: None }))
     }
 }

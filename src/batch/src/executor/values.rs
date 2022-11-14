@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::vec;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -86,14 +83,14 @@ impl ValuesExecutor {
                 for row in self.rows.by_ref().take(chunk_size) {
                     for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
                         let out = expr.eval(&one_row_chunk)?;
-                        builder.append_array(&out)?;
+                        builder.append_array(&out);
                     }
                 }
 
-                let columns = array_builders
+                let columns: Vec<_> = array_builders
                     .into_iter()
-                    .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-                    .try_collect()?;
+                    .map(|b| b.finish().into())
+                    .collect();
 
                 let chunk = DataChunk::new(columns, chunk_size);
 
@@ -106,7 +103,7 @@ impl ValuesExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for ValuesExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(inputs.is_empty(), "ValuesExecutor should have no child!");
@@ -131,7 +128,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             rows: rows.into_iter(),
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
-            chunk_size: DEFAULT_CHUNK_BUFFER_SIZE,
+            chunk_size: source.context.get_config().developer.batch_chunk_size,
         }))
     }
 }
@@ -150,6 +147,8 @@ mod tests {
 
     use crate::executor::{Executor, ValuesExecutor};
 
+    const CHUNK_SIZE: usize = 1024;
+
     #[tokio::test]
     async fn test_values_executor() {
         let value = StructValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
@@ -167,9 +166,10 @@ mod tests {
                 Some(ScalarImpl::Int64(3)),
             )),
             Box::new(LiteralExpression::new(
-                DataType::Struct {
-                    fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into(),
-                },
+                DataType::new_struct(
+                    vec![DataType::Int32, DataType::Int32, DataType::Int32],
+                    vec![],
+                ),
                 Some(ScalarImpl::Struct(value)),
             )) as BoxedExpression,
         ];
@@ -183,7 +183,7 @@ mod tests {
             rows: vec![exprs].into_iter(),
             schema: Schema { fields },
             identity: "ValuesExecutor2".to_string(),
-            chunk_size: 1024,
+            chunk_size: CHUNK_SIZE,
         });
 
         let fields = &values_executor.schema().fields;
@@ -192,9 +192,10 @@ mod tests {
         assert_eq!(fields[2].data_type, DataType::Int64);
         assert_eq!(
             fields[3].data_type,
-            DataType::Struct {
-                fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into()
-            }
+            DataType::new_struct(
+                vec![DataType::Int32, DataType::Int32, DataType::Int32],
+                vec![],
+            )
         );
 
         let mut stream = values_executor.execute();
@@ -208,7 +209,6 @@ mod tests {
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
-        .unwrap()
         .into();
 
         if let Ok(result) = result {
@@ -273,7 +273,7 @@ mod tests {
             vec![vec![]],
             Schema::default(),
             "ValuesExecutor2".to_string(),
-            1024,
+            CHUNK_SIZE,
         ));
         let mut stream = values_executor.execute();
 

@@ -17,12 +17,12 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
-use itertools::Itertools;
 use prost::Message;
 use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
+use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
@@ -32,19 +32,18 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServ
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
+use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
-use crate::barrier::GlobalBarrierManager;
-use crate::cluster::ClusterManager;
-use crate::dashboard::DashboardService;
-use crate::hummock::compaction_group::manager::CompactionGroupManager;
-use crate::hummock::CompactionScheduler;
-use crate::manager::{CatalogManager, IdleManager, MetaOpts, MetaSrvEnv, UserManager};
+use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
+use crate::hummock::{CompactionScheduler, HummockManager};
+use crate::manager::{
+    CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -53,7 +52,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, MetaStoreError, Transaction};
-use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
+use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::{hummock, MetaResult};
 
 #[derive(Debug)]
@@ -117,7 +116,7 @@ pub async fn rpc_serve(
             .await
         }
         MetaStoreBackend::Mem => {
-            let meta_store = Arc::new(MemStore::default());
+            let meta_store = Arc::new(MemStore::new());
             rpc_serve_with_store(
                 meta_store,
                 address_info,
@@ -298,6 +297,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, Sender<()>)> {
+    // Initialize managers.
     let (info, lease_handle, lease_shutdown) = register_leader_for_meta(
         address_info.addr.clone(),
         meta_store.clone(),
@@ -305,12 +305,15 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     )
     .await?;
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
-    let compaction_group_manager =
-        Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
-    monitor_process(meta_metrics.registry()).unwrap();
-    let compactor_manager = Arc::new(hummock::CompactorManager::new());
+    let registry = meta_metrics.registry();
+    monitor_process(registry).unwrap();
+    let compactor_manager = Arc::new(
+        hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
+            .await
+            .unwrap(),
+    );
 
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
@@ -322,15 +325,15 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             env.clone(),
             cluster_manager.clone(),
             meta_metrics.clone(),
-            compaction_group_manager.clone(),
             compactor_manager.clone(),
         )
         .await
         .unwrap(),
     );
 
+    #[cfg(not(madsim))]
     if let Some(dashboard_addr) = address_info.dashboard_addr.take() {
-        let dashboard_service = DashboardService {
+        let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr,
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
@@ -341,29 +344,30 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     }
 
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
-    let user_manager = Arc::new(UserManager::new(env.clone()).await.unwrap());
+
+    let (barrier_scheduler, scheduled_barriers) =
+        BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
+
+    let source_manager = Arc::new(
+        SourceManager::new(
+            barrier_scheduler.clone(),
+            catalog_manager.clone(),
+            fragment_manager.clone(),
+        )
+        .await
+        .unwrap(),
+    );
 
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
+        scheduled_barriers,
         env.clone(),
         cluster_manager.clone(),
         catalog_manager.clone(),
         fragment_manager.clone(),
         hummock_manager.clone(),
+        source_manager.clone(),
         meta_metrics.clone(),
     ));
-
-    let source_manager = Arc::new(
-        SourceManager::new(
-            env.clone(),
-            cluster_manager.clone(),
-            barrier_manager.clone(),
-            catalog_manager.clone(),
-            fragment_manager.clone(),
-            compaction_group_manager.clone(),
-        )
-        .await
-        .unwrap(),
-    );
 
     {
         let source_manager = source_manager.clone();
@@ -376,73 +380,62 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         GlobalStreamManager::new(
             env.clone(),
             fragment_manager.clone(),
-            barrier_manager.clone(),
+            barrier_scheduler.clone(),
             cluster_manager.clone(),
             source_manager.clone(),
-            compaction_group_manager.clone(),
+            hummock_manager.clone(),
         )
         .unwrap(),
     );
 
-    compaction_group_manager
-        .purge_stale_members(
+    hummock_manager
+        .purge_stale(
             &fragment_manager
                 .list_table_fragments()
                 .await
                 .expect("list_table_fragments"),
-            &catalog_manager
-                .get_catalog_core_guard()
-                .await
-                .list_sources()
-                .await
-                .expect("list_sources")
-                .into_iter()
-                .map(|source| source.id)
-                .collect_vec(),
-            &source_manager.get_source_ids_in_fragments().await,
         )
         .await
         .unwrap();
-    let compaction_scheduler = Arc::new(CompactionScheduler::new(
+
+    // Initialize services.
+    let vacuum_trigger = Arc::new(hummock::VacuumManager::new(
+        env.clone(),
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
-    let vacuum_trigger = Arc::new(hummock::VacuumTrigger::new(
-        hummock_manager.clone(),
-        compactor_manager.clone(),
-    ));
-    let ddl_lock = Arc::new(RwLock::new(()));
 
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
         catalog_manager.clone(),
-        stream_manager,
-        source_manager,
+        stream_manager.clone(),
+        source_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
-        ddl_lock.clone(),
     );
 
-    let user_srv =
-        UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone(), user_manager.clone());
+    let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
+
     let scale_srv = ScaleServiceImpl::<S>::new(
-        barrier_manager.clone(),
+        barrier_scheduler.clone(),
         fragment_manager.clone(),
         cluster_manager.clone(),
-        ddl_lock,
+        source_manager,
+        catalog_manager.clone(),
+        stream_manager.clone(),
     );
+
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
-        barrier_manager.clone(),
+        barrier_scheduler.clone(),
         fragment_manager.clone(),
     );
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
         vacuum_trigger.clone(),
-        compaction_group_manager.clone(),
         fragment_manager.clone(),
     );
     let notification_manager = env.notification_manager_ref();
@@ -450,31 +443,47 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         env.clone(),
         catalog_manager,
         cluster_manager.clone(),
-        user_manager,
+        hummock_manager.clone(),
+        fragment_manager.clone(),
     );
+    let health_srv = HealthServiceImpl::new();
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
             prometheus_addr.to_string(),
-            Arc::new(meta_metrics.registry().clone()),
+            meta_metrics.registry().clone(),
         )
     }
 
+    // Initialize sub-tasks.
+    let compaction_scheduler = Arc::new(CompactionScheduler::new(
+        env.clone(),
+        hummock_manager.clone(),
+        compactor_manager.clone(),
+    ));
     let mut sub_tasks = hummock::start_hummock_workers(
-        hummock_manager,
+        hummock_manager.clone(),
         compactor_manager,
         vacuum_trigger,
         notification_manager,
         compaction_scheduler,
+        &env.opts,
     )
     .await;
+    sub_tasks.push(
+        ClusterManager::start_worker_num_monitor(
+            cluster_manager.clone(),
+            Duration::from_secs(env.opts.node_num_monitor_interval_sec),
+            meta_metrics.clone(),
+        )
+        .await,
+    );
+    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
     sub_tasks.push((lease_handle, lease_shutdown));
-    #[cfg(not(test))]
-    {
+    if cfg!(not(test)) {
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
         );
-
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
 
@@ -496,6 +505,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         }
     };
 
+    // Start services.
     tokio::spawn(async move {
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
@@ -507,6 +517,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(DdlServiceServer::new(ddl_srv))
             .add_service(UserServiceServer::new(user_srv))
             .add_service(ScaleServiceServer::new(scale_srv))
+            .add_service(HealthServer::new(health_srv))
             .serve(address_info.listen_addr)
             .await
             .unwrap();
@@ -536,7 +547,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_leader_lease() {
         let info = AddressInfo {
             addr: "node1".to_string(),

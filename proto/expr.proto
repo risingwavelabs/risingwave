@@ -40,6 +40,8 @@ message ExprNode {
     // date functions
     EXTRACT = 101;
     TUMBLE_START = 103;
+    TO_TIMESTAMP = 104;
+    AT_TIME_ZONE = 105;
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -86,6 +88,7 @@ message ExprNode {
     IS_NULL = 305;
     IS_NOT_NULL = 306;
     IS_DISTINCT_FROM = 307;
+    IS_NOT_DISTINCT_FROM = 308;
     // Unary operators
     NEG = 401;
     // Nested selection operators
@@ -94,6 +97,10 @@ message ExprNode {
     ARRAY = 521;
     ARRAY_ACCESS = 522;
     ROW = 523;
+    // Array functions
+    ARRAY_CAT = 531;
+    ARRAY_APPEND = 532;
+    ARRAY_PREPEND = 533;
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;
@@ -104,7 +111,7 @@ message ExprNode {
   data.DataType return_type = 3;
   oneof rex_node {
     InputRefExpr input_ref = 4;
-    ConstantValue constant = 5;
+    data.Datum constant = 5;
     FunctionCall func_call = 6;
   }
 }
@@ -158,24 +165,6 @@ message ProjectSetSelectItem {
   }
 }
 
-message ConstantValue {
-  // bool array/bitmap: one byte, 0 for false (null), non-zero for true (non-null)
-  // integer, float,  double: big-endianness
-  // interval: encoded to (months, days, milliseconds), big-endianness
-  // varchar: encoded accorded to encoding, currently only utf8 is supported.
-  bytes body = 1;
-}
-
-// For serializing struct value to vec<bytes>.
-message StructValue {
-  repeated bytes fields = 1;
-}
-
-// For serializing list value to vec<bytes>.
-message ListValue {
-  repeated bytes fields = 1;
-}
-
 message FunctionCall {
   repeated ExprNode children = 1;
 }
@@ -190,8 +179,10 @@ message AggCall {
     COUNT = 4;
     AVG = 5;
     STRING_AGG = 6;
-    SINGLE_VALUE = 7;
-    APPROX_COUNT_DISTINCT = 8;
+    APPROX_COUNT_DISTINCT = 7;
+    ARRAY_AGG = 8;
+    FIRST_VALUE = 9;
+    SUM0 = 10;
   }
   message Arg {
     InputRefExpr input = 1;

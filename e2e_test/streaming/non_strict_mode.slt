@@ -1,0 +1,64 @@
+# Test compute errors are replaced with NULLs.
+# See also <https://github.com/risingwavelabs/risingwave/issues/4625>
+
+statement ok
+create table t(x int);
+
+statement ok
+insert into t values (0),(1),(2),(NULL);
+
+statement ok
+create materialized view mv_proj as select 10/x as v from t;
+
+statement ok
+create materialized view mv_proj_is_null as select 10/x is null as v from t;
+
+query I rowsort
+select * from mv_proj;
+----
+NULL
+NULL
+5
+10
+
+# result for 0 is NULL, instead of true
+query B rowsort
+select * from mv_proj_is_null;
+----
+NULL
+f
+f
+t
+
+statement ok
+create materialized view mv_filter as select * from t where 10/x > 0;
+
+statement ok
+create materialized view mv_filter_is_null as select * from t where 10/x > 0 is null;
+
+query I rowsort
+select * from mv_filter;
+----
+1
+2
+
+# result for 0 is not included
+query I rowsort
+select * from mv_filter_is_null;
+----
+NULL
+
+statement ok
+drop materialized view mv_proj;
+
+statement ok
+drop materialized view mv_proj_is_null;
+
+statement ok
+drop materialized view mv_filter;
+
+statement ok
+drop materialized view mv_filter_is_null;
+
+statement ok
+drop table t;

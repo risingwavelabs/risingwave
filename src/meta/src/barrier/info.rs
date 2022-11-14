@@ -16,9 +16,8 @@ use std::collections::HashMap;
 
 use risingwave_pb::common::WorkerNode;
 
-use crate::cluster::WorkerId;
+use crate::manager::{ActorInfos, WorkerId};
 use crate::model::ActorId;
-use crate::stream::ActorInfos;
 
 /// [`BarrierActorInfo`] resolves the actor info read from meta store for
 /// [`crate::barrier::GlobalBarrierManager`].

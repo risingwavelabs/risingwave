@@ -18,7 +18,7 @@ use risingwave_common::types::{Scalar, ToOwnedDatum};
 use crate::Result;
 
 #[inline(always)]
-pub fn array_access<T: Scalar>(l: Option<ListRef>, r: Option<i32>) -> Result<Option<T>> {
+pub fn array_access<T: Scalar>(l: Option<ListRef<'_>>, r: Option<i32>) -> Result<Option<T>> {
     match (l, r) {
         // index must be greater than 0 following a one-based numbering convention for arrays
         (Some(list), Some(index)) if index > 0 => {

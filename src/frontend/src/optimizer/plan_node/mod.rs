@@ -38,8 +38,11 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
+use serde::Serialize;
 
-use super::property::{Distribution, Order};
+use self::generic::GenericPlanRef;
+use self::stream::StreamPlanRef;
+use super::property::{Distribution, FunctionalDependencySet, Order};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
@@ -67,7 +70,7 @@ pub trait PlanNode:
 impl_downcast!(PlanNode);
 pub type PlanRef = Rc<dyn PlanNode>;
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Serialize)]
 pub struct PlanNodeId(pub i32);
 
 #[derive(Debug, PartialEq)]
@@ -77,12 +80,64 @@ pub enum Convention {
     Stream,
 }
 
+impl StreamPlanRef for PlanRef {
+    fn distribution(&self) -> &Distribution {
+        &self.plan_base().dist
+    }
+
+    fn append_only(&self) -> bool {
+        self.plan_base().append_only
+    }
+}
+
+impl GenericPlanRef for PlanRef {
+    fn schema(&self) -> &Schema {
+        &self.plan_base().schema
+    }
+
+    fn logical_pk(&self) -> &[usize] {
+        &self.plan_base().logical_pk
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.plan_base().ctx()
+    }
+}
+
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
-    pub fn explain(&self, level: usize, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        writeln!(f, "{}{}", " ".repeat(level * 2), self)?;
-        for input in self.inputs() {
-            input.explain(level + 1, f)?;
+    pub fn explain(
+        &self,
+        is_last: &mut Vec<bool>,
+        level: usize,
+        f: &mut impl std::fmt::Write,
+    ) -> std::fmt::Result {
+        if level > 0 {
+            let mut last_iter = is_last.iter().peekable();
+            while let Some(last) = last_iter.next() {
+                // We are at the current level
+                if last_iter.peek().is_none() {
+                    if *last {
+                        writeln!(f, "└─{}", self)?;
+                    } else {
+                        writeln!(f, "├─{}", self)?;
+                    }
+                } else if *last {
+                    write!(f, "  ")?;
+                } else {
+                    write!(f, "| ")?;
+                }
+            }
+        } else {
+            writeln!(f, "{}", self)?;
+        }
+        let inputs = self.inputs();
+        let mut inputs_iter = inputs.iter().peekable();
+        while let Some(input) = inputs_iter.next() {
+            let last = inputs_iter.peek().is_none();
+            is_last.push(last);
+            input.explain(is_last, level + 1, f)?;
+            is_last.pop();
         }
         Ok(())
     }
@@ -90,7 +145,7 @@ impl dyn PlanNode {
     /// Explain the plan node and return a string.
     pub fn explain_to_string(&self) -> Result<String> {
         let mut output = String::new();
-        self.explain(0, &mut output)
+        self.explain(&mut vec![], 0, &mut output)
             .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
         Ok(output)
     }
@@ -107,8 +162,8 @@ impl dyn PlanNode {
         &self.plan_base().schema
     }
 
-    pub fn pk_indices(&self) -> &[usize] {
-        &self.plan_base().pk_indices
+    pub fn logical_pk(&self) -> &[usize] {
+        &self.plan_base().logical_pk
     }
 
     pub fn order(&self) -> &Order {
@@ -121,6 +176,40 @@ impl dyn PlanNode {
 
     pub fn append_only(&self) -> bool {
         self.plan_base().append_only
+    }
+
+    pub fn functional_dependency(&self) -> &FunctionalDependencySet {
+        &self.plan_base().functional_dependency
+    }
+
+    /// Serialize the plan node and its children to a stream plan proto.
+    ///
+    /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
+    /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
+    pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanProst {
+        if let Some(stream_table_scan) = self.as_stream_table_scan() {
+            return stream_table_scan.adhoc_to_stream_prost();
+        }
+        if let Some(stream_index_scan) = self.as_stream_index_scan() {
+            return stream_index_scan.adhoc_to_stream_prost();
+        }
+
+        let node = Some(self.to_stream_prost_body(state));
+        let input = self
+            .inputs()
+            .into_iter()
+            .map(|plan| plan.to_stream_prost(state))
+            .collect();
+        // TODO: support pk_indices and operator_id
+        StreamPlanProst {
+            input,
+            identity: format!("{}", self),
+            node_body: node,
+            operator_id: self.id().0 as _,
+            stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
+            fields: self.schema().to_prost(),
+            append_only: self.append_only(),
+        }
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
@@ -147,49 +236,11 @@ impl dyn PlanNode {
             node_body,
         }
     }
-
-    /// Serialize the plan node and its children to a stream plan proto.
-    ///
-    /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
-    /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
-    pub fn to_stream_prost(&self) -> StreamPlanProst {
-        self.to_stream_prost_auto_fields(true)
-    }
-
-    /// Serialize the plan node and its children to a stream plan proto without identity and without
-    /// operator id (for testing).
-    pub fn to_stream_prost_auto_fields(&self, auto_fields: bool) -> StreamPlanProst {
-        if let Some(stream_table_scan) = self.as_stream_table_scan() {
-            return stream_table_scan.adhoc_to_stream_prost(auto_fields);
-        }
-        if let Some(stream_index_scan) = self.as_stream_index_scan() {
-            return stream_index_scan.adhoc_to_stream_prost(auto_fields);
-        }
-
-        let node = Some(self.to_stream_prost_body());
-        let input = self
-            .inputs()
-            .into_iter()
-            .map(|plan| plan.to_stream_prost_auto_fields(auto_fields))
-            .collect();
-        // TODO: support pk_indices and operator_id
-        StreamPlanProst {
-            input,
-            identity: if auto_fields {
-                format!("{}", self)
-            } else {
-                "".into()
-            },
-            node_body: node,
-            operator_id: if auto_fields { self.id().0 as u64 } else { 0 },
-            pk_indices: self.pk_indices().iter().map(|x| *x as u32).collect(),
-            fields: self.schema().to_prost(),
-            append_only: self.append_only(),
-        }
-    }
 }
 
 mod plan_base;
+#[macro_use]
+mod plan_tree_node_v2;
 pub use plan_base::*;
 #[macro_use]
 mod plan_tree_node;
@@ -205,10 +256,18 @@ pub use to_prost::*;
 mod predicate_pushdown;
 pub use predicate_pushdown::*;
 
+pub mod generic;
+pub mod generic_derive;
+pub mod stream;
+pub mod stream_derive;
+
+pub use generic::{PlanAggCall, PlanAggCallDisplay};
+
 mod batch_delete;
 mod batch_exchange;
 mod batch_expand;
 mod batch_filter;
+mod batch_group_topn;
 mod batch_hash_agg;
 mod batch_hash_join;
 mod batch_hop_window;
@@ -221,8 +280,10 @@ mod batch_project_set;
 mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
+mod batch_sort_agg;
 mod batch_table_function;
 mod batch_topn;
+mod batch_union;
 mod batch_update;
 mod batch_values;
 mod logical_agg;
@@ -235,12 +296,14 @@ mod logical_insert;
 mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
+mod logical_over_agg;
 mod logical_project;
 mod logical_project_set;
 mod logical_scan;
 mod logical_source;
 mod logical_table_function;
 mod logical_topn;
+mod logical_union;
 mod logical_update;
 mod logical_values;
 mod stream_delta_join;
@@ -249,6 +312,7 @@ mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
 mod stream_global_simple_agg;
+mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
@@ -268,6 +332,7 @@ pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_expand::BatchExpand;
 pub use batch_filter::BatchFilter;
+pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_hop_window::BatchHopWindow;
@@ -280,11 +345,13 @@ pub use batch_project_set::BatchProjectSet;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
+pub use batch_sort_agg::BatchSortAgg;
 pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
+pub use batch_union::BatchUnion;
 pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
-pub use logical_agg::{LogicalAgg, PlanAggCall, PlanAggCallDisplay};
+pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
 pub use logical_expand::LogicalExpand;
@@ -294,12 +361,14 @@ pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
+pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
 pub use logical_project::{LogicalProject, LogicalProjectBuilder};
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
 pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
+pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
 pub use stream_delta_join::StreamDeltaJoin;
@@ -308,6 +377,7 @@ pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
 pub use stream_global_simple_agg::StreamGlobalSimpleAgg;
+pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
@@ -322,6 +392,7 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 
 use crate::session::OptimizerContextRef;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
@@ -330,17 +401,16 @@ use crate::session::OptimizerContextRef;
 /// You can use it as follows
 /// ```rust
 /// macro_rules! use_plan {
-///     ([], $({ $convention:ident, $name:ident }),*) => {};
+///     ($({ $convention:ident, $name:ident }),*) => {};
 /// }
 /// risingwave_frontend::for_all_plan_nodes! { use_plan }
 /// ```
 /// See the following implementations for example.
 #[macro_export]
 macro_rules! for_all_plan_nodes {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*]
-            , { Logical, Agg }
+              { Logical, Agg }
             , { Logical, Apply }
             , { Logical, Filter }
             , { Logical, Project }
@@ -358,9 +428,12 @@ macro_rules! for_all_plan_nodes {
             , { Logical, MultiJoin }
             , { Logical, Expand }
             , { Logical, ProjectSet }
+            , { Logical, Union }
+            , { Logical, OverAgg }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
+            , { Batch, SortAgg }
             , { Batch, Project }
             , { Batch, Filter }
             , { Batch, Insert }
@@ -379,6 +452,8 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Expand }
             , { Batch, LookupJoin }
             , { Batch, ProjectSet }
+            , { Batch, Union }
+            , { Batch, GroupTopN }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -397,6 +472,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
+            , { Stream, GroupTopN }
         }
     };
 }
@@ -404,10 +480,9 @@ macro_rules! for_all_plan_nodes {
 /// `for_logical_plan_nodes` includes all plan nodes with logical convention.
 #[macro_export]
 macro_rules! for_logical_plan_nodes {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*]
-            , { Logical, Agg }
+              { Logical, Agg }
             , { Logical, Apply }
             , { Logical, Filter }
             , { Logical, Project }
@@ -425,8 +500,10 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, MultiJoin }
             , { Logical, Expand }
             , { Logical, ProjectSet }
+            , { Logical, Union }
+            , { Logical, OverAgg }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
-            // if we dont support that, we don't need LogicalSort, just require the Order at the top of query
+            // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }
     };
 }
@@ -434,11 +511,11 @@ macro_rules! for_logical_plan_nodes {
 /// `for_batch_plan_nodes` includes all plan nodes with batch convention.
 #[macro_export]
 macro_rules! for_batch_plan_nodes {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*]
-            , { Batch, SimpleAgg }
+              { Batch, SimpleAgg }
             , { Batch, HashAgg }
+            , { Batch, SortAgg }
             , { Batch, Project }
             , { Batch, Filter }
             , { Batch, SeqScan }
@@ -457,6 +534,8 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Expand }
             , { Batch, LookupJoin }
             , { Batch, ProjectSet }
+            , { Batch, Union }
+            , { Batch, GroupTopN }
         }
     };
 }
@@ -464,10 +543,9 @@ macro_rules! for_batch_plan_nodes {
 /// `for_stream_plan_nodes` includes all plan nodes with stream convention.
 #[macro_export]
 macro_rules! for_stream_plan_nodes {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*]
-            , { Stream, Project }
+              { Stream, Project }
             , { Stream, Filter }
             , { Stream, HashJoin }
             , { Stream, Exchange }
@@ -485,16 +563,17 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
+            , { Stream, GroupTopN }
         }
     };
 }
 
 /// impl [`PlanNodeType`] fn for each node.
 macro_rules! enum_plan_node_type {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
-            #[derive(Copy, Clone, PartialEq, Debug)]
+            #[derive(Copy, Clone, PartialEq, Debug, Hash, Eq, Serialize)]
             pub enum PlanNodeType {
                 $( [<$convention $name>] ),*
             }
@@ -518,7 +597,7 @@ for_all_plan_nodes! { enum_plan_node_type }
 
 /// impl fn `plan_ref` for each node.
 macro_rules! impl_plan_ref {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl From<[<$convention $name>]> for PlanRef {
                 fn from(plan: [<$convention $name>]) -> Self {
@@ -533,7 +612,7 @@ for_all_plan_nodes! { impl_plan_ref }
 
 /// impl plan node downcast fn for each node.
 macro_rules! impl_down_cast_fn {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             impl dyn PlanNode {
                 $( pub fn [< as_$convention:snake _ $name:snake>](&self) -> Option<&[<$convention $name>]> {
