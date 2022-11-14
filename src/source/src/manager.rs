@@ -388,9 +388,7 @@ mod tests {
         let pk_column_ids = vec![0];
         let info = StreamSourceInfo {
             row_format: 0,
-            row_schema_location: "".to_string(),
-            use_schema_registry: false,
-            proto_message_name: "".to_owned(),
+            ..Default::default()
         };
         let source_id = TableId::default();
 

@@ -119,22 +119,31 @@ pub async fn handle_create_source(
 
     let with_properties = context.with_options.inner().clone();
     const UPSTREAM_SOURCE_KEY: &str = "connector";
+    // confluent schema registry must be used with kafka
+    let is_kafka = with_properties
+        .get("connector")
+        .unwrap_or(&"".to_string())
+        .to_lowercase()
+        .eq("kafka");
+    if !is_kafka
+        && matches!(
+            &stmt.source_schema,
+            SourceSchema::Protobuf(ProtobufSchema {
+                use_schema_registry: true,
+                ..
+            }) | SourceSchema::Avro(AvroSchema {
+                use_schema_registry: true,
+                ..
+            })
+        )
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "The {} must be kafka when schema registry is used",
+            UPSTREAM_SOURCE_KEY
+        ))));
+    }
     let (columns, source_info) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            // confluent schema registry must be used with kafka
-            if protobuf_schema.use_schema_registry
-                && !with_properties
-                    .get(UPSTREAM_SOURCE_KEY)
-                    .unwrap_or(&"".to_string())
-                    .to_lowercase()
-                    .eq("kafka")
-            {
-                return Err(RwError::from(ProtocolError(format!(
-                    "The {} must be kafka when schema registry is used",
-                    UPSTREAM_SOURCE_KEY
-                ))));
-            }
-
             assert_eq!(columns.len(), 1);
             assert_eq!(pk_column_ids, vec![0.into()]);
             assert_eq!(row_id_index, Some(0));
@@ -154,20 +163,6 @@ pub async fn handle_create_source(
             )
         }
         SourceSchema::Avro(avro_schema) => {
-            // confluent schema registry must be used with kafka
-            if avro_schema.use_schema_registry
-                && !with_properties
-                    .get(UPSTREAM_SOURCE_KEY)
-                    .unwrap_or(&"".to_owned())
-                    .to_lowercase()
-                    .eq("kafka")
-            {
-                return Err(RwError::from(ProtocolError(format!(
-                    "The {} must be kafka when schema registry is used",
-                    UPSTREAM_SOURCE_KEY
-                ))));
-            }
-
             assert_eq!(columns.len(), 1);
             assert_eq!(pk_column_ids, vec![0.into()]);
             assert_eq!(row_id_index, Some(0));
@@ -186,9 +181,7 @@ pub async fn handle_create_source(
             columns,
             StreamSourceInfo {
                 row_format: RowFormatType::Json as i32,
-                row_schema_location: "".to_string(),
-                use_schema_registry: false,
-                proto_message_name: "".to_owned(),
+                ..Default::default()
             },
         ),
         SourceSchema::Maxwell => {
@@ -203,9 +196,7 @@ pub async fn handle_create_source(
                 columns,
                 StreamSourceInfo {
                     row_format: RowFormatType::Maxwell as i32,
-                    row_schema_location: "".to_string(),
-                    use_schema_registry: false,
-                    proto_message_name: "".to_owned(),
+                    ..Default::default()
                 },
             )
         }
@@ -222,9 +213,7 @@ pub async fn handle_create_source(
                 columns,
                 StreamSourceInfo {
                     row_format: RowFormatType::DebeziumJson as i32,
-                    row_schema_location: "".to_string(),
-                    use_schema_registry: false,
-                    proto_message_name: "".to_owned(),
+                    ..Default::default()
                 },
             )
         }

@@ -49,7 +49,7 @@ fn get_kafka_topic(props: &HashMap<String, String>) -> Result<&String> {
     }
 
     Err(RwError::from(ProtocolError(format!(
-        "Must specify '{}/{}'",
+        "Must specify '{}' or '{}'",
         KAFKA_TOPIC_KEY1, KAFKA_TOPIC_KEY2,
     ))))
 }

@@ -38,10 +38,10 @@ risedev:
 
     # If you want to create source from Kafka, uncomment the following lines
     # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.
-    - use: zookeeper
-      persist-data: false
-    - use: kafka
-      persist-data: false
+    # - use: zookeeper
+    #   persist-data: true
+    # - use: kafka
+    #   persist-data: true
 
   default-v6:
     - use: meta-node
