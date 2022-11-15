@@ -1,0 +1,33 @@
+FROM ubuntu:22.04 as builder
+
+ENV LANG en_US.utf8
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl pkg-config bash lld
+
+SHELL ["/bin/bash", "-c"]
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
+
+RUN mkdir -p /risingwave
+
+WORKDIR /risingwave
+
+COPY ./ /risingwave
+
+ENV PATH /root/.cargo/bin/:$PATH
+
+# We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
+RUN rustup self update \
+    && rustup set profile minimal \
+    && rustup default $(cat "/risingwave/rust-toolchain") \
+    && rustup component add rustfmt
+
+RUN cargo fetch
+RUN mkdir -p /risingwave/bin
+
+ARG simd_disabled=false
+
+RUN if [ "$simd_disabled" == "true" ]; then \
+    echo "Disabling SIMD build flags for risingwave" && \
+    . scripts/cargo-config-disable-simd.sh; \
+    fi

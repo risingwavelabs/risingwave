@@ -39,6 +39,8 @@ src/prost/src/sim/*.rs
 src/log/
 # srcy-tags
 **/srcy-tags.vi
+docker_target/
+docker_bin/
 
 # ctags
 **/tags
