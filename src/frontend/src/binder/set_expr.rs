@@ -109,12 +109,14 @@ impl Binder {
                 match op {
                     SetOperator::Union => {
                         let left = Box::new(self.bind_set_expr(*left)?);
-                        let mut new_context = BindContext::default();
-                        // Swap context for the right side.
-                        std::mem::swap(&mut self.context, &mut new_context);
+                        // Reset context for right side.
+                        self.context = BindContext::default();
                         let right = Box::new(self.bind_set_expr(*right)?);
-                        // Swap context back to the left side.
-                        std::mem::swap(&mut self.context, &mut new_context);
+                        // Reset context for the set operation.
+                        // Consider this case:
+                        // select a from t2 union all select b from t2 order by a+1; should throw an
+                        // error.
+                        self.context = BindContext::default();
                         Ok(BoundSetExpr::SetOperation {
                             op: BoundSetOperation::Union,
                             all,

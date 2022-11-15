@@ -24,6 +24,16 @@ select * from t1 union all select * from t2
 1 2
 1 2
 
+query II
+select * from t1 union all select * from t2 order by v1
+----
+1 2
+1 2
+
+statement error
+select * from t1 union all select * from t2 order by v1 + 1
+
+
 query I
 select 1 union select 1
 ----
@@ -31,6 +41,15 @@ select 1 union select 1
 
 query I
 select 1 union all select 1
+----
+1
+1
+
+statement error
+select 1 as a union all select 1 as b order by a + 1;
+
+query I
+select 1 as a union all select 1 as b order by a;
 ----
 1
 1
