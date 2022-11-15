@@ -94,7 +94,7 @@ impl Binder {
             Some(types) => {
                 bound = bound
                     .into_iter()
-                    .map(|vec| Self::cast_on_insert(types.clone(), vec))
+                    .map(|vec| Self::cast_on_insert(&types.clone(), vec))
                     .try_collect()?;
 
                 types
