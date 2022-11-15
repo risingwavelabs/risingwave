@@ -1,4 +1,3 @@
-use itertools::Itertools;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,32 +30,6 @@ impl Planner {
             BoundSetOperation::Union => {
                 let left = self.plan_set_expr(left, vec![])?;
                 let right = self.plan_set_expr(right, vec![])?;
-
-                if left.schema().fields.len() != right.schema().fields.len() {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "each UNION query must have the same number of columns".to_string(),
-                    )
-                    .into());
-                }
-
-                for (a, b) in left
-                    .schema()
-                    .fields
-                    .iter()
-                    .zip_eq(right.schema().fields.iter())
-                {
-                    if a.data_type != b.data_type {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "UNION types {} of column {} is different from types {} of column {}",
-                            a.data_type.prost_type_name().as_str_name(),
-                            a.name,
-                            b.data_type.prost_type_name().as_str_name(),
-                            b.name,
-                        ))
-                        .into());
-                    }
-                }
-
                 Ok(LogicalUnion::create(all, vec![left, right]))
             }
             BoundSetOperation::Except | BoundSetOperation::Intersect => {

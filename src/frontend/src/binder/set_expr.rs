@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{SetExpr, SetOperator};
@@ -112,6 +113,32 @@ impl Binder {
                         // Reset context for right side.
                         self.context = BindContext::default();
                         let right = Box::new(self.bind_set_expr(*right)?);
+
+                        if left.schema().fields.len() != right.schema().fields.len() {
+                            return Err(ErrorCode::InvalidInputSyntax(
+                                "each UNION query must have the same number of columns".to_string(),
+                            )
+                            .into());
+                        }
+
+                        for (a, b) in left
+                            .schema()
+                            .fields
+                            .iter()
+                            .zip_eq(right.schema().fields.iter())
+                        {
+                            if a.data_type != b.data_type {
+                                return Err(ErrorCode::InvalidInputSyntax(format!(
+                                    "UNION types {} of column {} is different from types {} of column {}",
+                                    a.data_type.prost_type_name().as_str_name(),
+                                    a.name,
+                                    b.data_type.prost_type_name().as_str_name(),
+                                    b.name,
+                                ))
+                                    .into());
+                            }
+                        }
+
                         // Reset context for the set operation.
                         // Consider this case:
                         // select a from t2 union all select b from t2 order by a+1; should throw an
