@@ -71,10 +71,16 @@ impl ToDistributedBatch for BatchInsert {
 
 impl ToBatchProst for BatchInsert {
     fn to_batch_prost_body(&self) -> NodeBody {
+        let c_idxs = self
+            .logical
+            .column_idxs()
+            .iter()
+            .map(|&i| i as u32)
+            .collect();
         NodeBody::Insert(InsertNode {
             table_source_id: self.logical.source_id().table_id(),
             associated_mview_id: self.logical.associated_mview_id().table_id(),
-            column_ids: vec![], // unused
+            column_idxs: c_idxs,
         })
     }
 }
