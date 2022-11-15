@@ -28,7 +28,7 @@ impl Planner {
         right: BoundSetExpr,
     ) -> Result<PlanRef> {
         match op {
-            BoundSetOperation::UNION => {
+            BoundSetOperation::Union => {
                 let left = self.plan_set_expr(left, vec![])?;
                 let right = self.plan_set_expr(right, vec![])?;
 

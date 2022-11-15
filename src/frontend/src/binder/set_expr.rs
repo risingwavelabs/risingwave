@@ -37,7 +37,7 @@ pub enum BoundSetExpr {
 
 #[derive(Debug, Clone)]
 pub enum BoundSetOperation {
-    UNION,
+    Union,
     Except,
     Intersect,
 }
@@ -116,10 +116,10 @@ impl Binder {
                         // Swap context back to the left side.
                         std::mem::swap(&mut self.context, &mut new_context);
                         Ok(BoundSetExpr::SetOperation {
-                            op: BoundSetOperation::UNION,
-                            all: all,
-                            left: left,
-                            right: right,
+                            op: BoundSetOperation::Union,
+                            all,
+                            left,
+                            right,
                         })
                     }
                     SetOperator::Intersect | SetOperator::Except => Err(ErrorCode::NotImplemented(

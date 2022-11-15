@@ -124,11 +124,11 @@ impl ToBatch for LogicalUnion {
 
 impl ToStream for LogicalUnion {
     fn to_stream(&self) -> Result<PlanRef> {
-        Err(ErrorCode::NotImplemented(format!("Union for streaming query"), 2911.into()).into())
+        Err(ErrorCode::NotImplemented("Union for streaming query".to_string(), 2911.into()).into())
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        Err(ErrorCode::NotImplemented(format!("Union for streaming query"), 2911.into()).into())
+        Err(ErrorCode::NotImplemented("Union for streaming query".to_string(), 2911.into()).into())
     }
 }
 

@@ -310,8 +310,8 @@ impl ExprImpl {
                         has = self.visit_bound_set_expr(&query.body);
                     }
                     BoundSetExpr::SetOperation { left, right, .. } => {
-                        has |= self.visit_bound_set_expr(&left);
-                        has |= self.visit_bound_set_expr(&right);
+                        has |= self.visit_bound_set_expr(left);
+                        has |= self.visit_bound_set_expr(right);
                     }
                 };
                 has
@@ -359,7 +359,7 @@ impl ExprImpl {
                         .unwrap_or_default(),
                     BoundSetExpr::Query(query) => self.visit_bound_set_expr(&query.body),
                     BoundSetExpr::SetOperation { left, right, .. } => {
-                        self.visit_bound_set_expr(&left) | self.visit_bound_set_expr(&right)
+                        self.visit_bound_set_expr(left) | self.visit_bound_set_expr(right)
                     }
                 }
             }
