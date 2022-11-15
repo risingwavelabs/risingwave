@@ -421,45 +421,15 @@ const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
     pub async fn get_row<'a>(&'a self, pk: &'a Row) -> StorageResult<Option<Row>> {
-        let serialized_pk =
-            serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
-        let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
-
-        match mem_table_res {
-            Some(row_op) => match row_op {
-                RowOp::Insert(row_bytes) => {
-                    let row = self.row_deserializer.deserialize(row_bytes.as_ref())?;
-                    Ok(Some(row))
-                }
-                RowOp::Delete(_) => Ok(None),
-                RowOp::Update((_, row_bytes)) => {
-                    let row = self.row_deserializer.deserialize(row_bytes.as_ref())?;
-                    Ok(Some(row))
-                }
-            },
-            None => {
-                assert!(pk.size() <= self.pk_indices.len());
-                let key_indices = (0..pk.size())
-                    .into_iter()
-                    .map(|index| self.pk_indices[index])
-                    .collect_vec();
-                let read_options = ReadOptions {
-                    prefix_hint: None,
-                    check_bloom_filter: self.dist_key_indices == key_indices,
-                    retention_seconds: self.table_option.retention_seconds,
-                    table_id: self.keyspace.table_id(),
-                };
-                if let Some(storage_row_bytes) = self
-                    .keyspace
-                    .get(&serialized_pk, self.epoch(), read_options)
-                    .await?
-                {
-                    let row = self.row_deserializer.deserialize(storage_row_bytes)?;
-                    Ok(Some(row))
-                } else {
-                    Ok(None)
-                }
+        let compacted_row: Option<CompactedRow> = self.get_compacted_row(pk).await?;
+        match compacted_row {
+            Some(compacted_row) => {
+                let row = self
+                    .row_deserializer
+                    .deserialize(compacted_row.row.as_ref())?;
+                Ok(Some(row))
             }
+            None => Ok(None),
         }
     }
 
@@ -474,15 +444,9 @@ impl<S: StateStore> StateTable<S> {
 
         match mem_table_res {
             Some(row_op) => match row_op {
-                RowOp::Insert(row_bytes) => {
-                    let row = self.row_deserializer.deserialize(row_bytes.as_ref())?;
-                    Ok(Some((&row).into()))
-                }
+                RowOp::Insert(row_bytes) => Ok(Some(CompactedRow::new(row_bytes.to_vec()))),
                 RowOp::Delete(_) => Ok(None),
-                RowOp::Update((_, row_bytes)) => {
-                    let row = self.row_deserializer.deserialize(row_bytes.as_ref())?;
-                    Ok(Some((&row).into()))
-                }
+                RowOp::Update((_, row_bytes)) => Ok(Some(CompactedRow::new(row_bytes.to_vec()))),
             },
             None => {
                 assert!(pk.size() <= self.pk_indices.len());
@@ -501,8 +465,7 @@ impl<S: StateStore> StateTable<S> {
                     .get(&serialized_pk, self.epoch(), read_options)
                     .await?
                 {
-                    let row = self.row_deserializer.deserialize(storage_row_bytes)?;
-                    Ok(Some((&row).into()))
+                    Ok(Some(CompactedRow::new(storage_row_bytes.to_vec())))
                 } else {
                     Ok(None)
                 }
