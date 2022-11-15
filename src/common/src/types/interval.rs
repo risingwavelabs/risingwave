@@ -481,7 +481,7 @@ impl Display for IntervalUnit {
         } else if days != 0 {
             v.push(format!("{days} days"));
         }
-        if self.ms != 0 {
+        if self.ms != 0 || self.months == 0 && self.days == 0 {
             let hours = self.ms / 1000 / 3600;
             let minutes = (self.ms / 1000 / 60) % 60;
             let seconds = self.ms % 60000 / 1000;
@@ -902,9 +902,16 @@ mod tests {
 
     #[test]
     fn test_to_string() {
-        let interval =
-            IntervalUnit::new(-14, 3, 11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233);
-        assert_eq!(interval.to_string(), "-1 years -2 mons 3 days 11:45:14.233");
+        assert_eq!(
+            IntervalUnit::new(-14, 3, 11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233)
+                .to_string(),
+            "-1 years -2 mons 3 days 11:45:14.233"
+        );
+        assert_eq!(
+            IntervalUnit::new(-14, 3, 0).to_string(),
+            "-1 years -2 mons 3 days"
+        );
+        assert_eq!(IntervalUnit::default().to_string(), "00:00:00");
     }
 
     #[test]
