@@ -28,8 +28,6 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
-use risingwave_storage::row_serde::row_serde_util::deserialize_pk_with_vnode;
-use risingwave_storage::table::compute_chunk_vnode;
 use risingwave_storage::table::streaming_table::mem_table::RowOp;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -171,10 +169,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
                             let buffer = MaterializeBuffer::fill_buffer_from_chunk(
                                 chunk,
                                 self.state_table.value_indices(),
-                                self.state_table.dist_key_indices(),
                                 self.state_table.pk_indices(),
                                 self.state_table.pk_serde(),
-                                self.state_table.vnodes(),
                             );
 
                             if buffer.is_empty() {
@@ -185,11 +181,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 for key in buffer.get_keys() {
                                     if self.materialize_cache.get(key).is_none() {
                                         // cache miss
-                                        let (_, key_row) = deserialize_pk_with_vnode(
-                                            key,
-                                            self.state_table.pk_serde(),
-                                        )
-                                        .unwrap();
+                                        let key_row =
+                                            self.state_table.pk_serde().deserialize(key).unwrap();
                                         if let Some(storage_value) =
                                             self.state_table.get_compacted_row(&key_row).await?
                                         {
@@ -359,10 +352,8 @@ impl MaterializeBuffer {
     fn fill_buffer_from_chunk(
         stream_chunk: StreamChunk,
         value_indices: &Option<Vec<usize>>,
-        dist_key_indices: &[usize],
         pk_indices: &[usize],
         pk_serde: &OrderedRowSerde,
-        vnodes: &Bitmap,
     ) -> Self {
         let (data_chunk, ops) = stream_chunk.into_parts();
 
@@ -374,10 +365,6 @@ impl MaterializeBuffer {
         let values = value_chunk.serialize();
 
         let mut pks = vec![vec![]; data_chunk.capacity()];
-        compute_chunk_vnode(&data_chunk, dist_key_indices, vnodes)
-            .into_iter()
-            .zip_eq(pks.iter_mut())
-            .for_each(|(vnode, vnode_and_pk)| vnode_and_pk.extend(vnode.to_be_bytes()));
         let key_chunk = data_chunk.reorder_columns(pk_indices);
         key_chunk
             .rows_with_holes()
