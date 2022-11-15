@@ -197,7 +197,6 @@ message MetaSnapshot {
   hummock.HummockVersion hummock_version = 9;
   repeated common.ParallelUnitMapping parallel_unit_mappings = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
-  repeated hummock.CompactionGroup compaction_groups = 12;
   repeated catalog.View views = 13;
 }
 
