@@ -3,7 +3,7 @@
 
 # Set this to true, if you want to test the build pipeline
 test=false
-if [[ $test ]]; then 
+if [[ $test == true ]]; then 
   echo -e "#!/bin/bash \necho \"hi risingwave\"" > /risingwave/bin/risingwave ; chmod +x /risingwave/bin/risingwave
   echo -e  "#!/bin/bash \necho \"hi frontend\"" > /risingwave/bin/frontend  ; chmod +x /risingwave/bin/frontend 
   echo -e  "#!/bin/bash \necho \"hi compute-node\"" > /risingwave/bin/compute-node  ; chmod +x /risingwave/bin/compute-node 
