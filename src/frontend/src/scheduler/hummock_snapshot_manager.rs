@@ -225,25 +225,22 @@ impl HummockSnapshotManager {
         let need_align = snapshot.need_align;
         let query_hummock_snapshot = QueryHummockSnapshot::from(snapshot);
         if !need_align {
-            if self.align_epoch_snapshot_map.read().unwrap().is_empty() {
-                self.update_snapshot_epoch(query_hummock_snapshot);
-            } else if let Some(mut entry) =
-                self.align_epoch_snapshot_map.write().unwrap().last_entry()
-            {
-                *entry.get_mut() = query_hummock_snapshot;
+            match self.align_epoch_snapshot_map.write().unwrap().last_entry() {
+                Some(mut entry) => *entry.get_mut() = query_hummock_snapshot,
+                None => self.update_snapshot_epoch(query_hummock_snapshot),
             }
         } else if self
             .align_epoch
             .read()
             .unwrap()
-            .gt(&query_hummock_snapshot.committed_epoch)
+            .ge(&query_hummock_snapshot.committed_epoch)
         {
             self.update_snapshot_epoch(query_hummock_snapshot);
         } else {
-            self.align_epoch_snapshot_map
-                .write()
-                .unwrap()
-                .insert(*self.align_epoch.read().unwrap(), query_hummock_snapshot);
+            self.align_epoch_snapshot_map.write().unwrap().insert(
+                query_hummock_snapshot.committed_epoch,
+                query_hummock_snapshot,
+            );
         }
     }
 
@@ -410,5 +407,162 @@ impl HummockSnapshotManagerCore {
                 Err(e) => error!("Request meta to unpin snapshot failed {:?}!", e),
             }
         });
+    }
+}
+#[cfg(test)]
+pub(crate) mod tests {
+    use std::sync::Arc;
+
+    use risingwave_pb::hummock::HummockSnapshot;
+
+    use crate::scheduler::distributed::tests::create_query;
+    use crate::scheduler::HummockSnapshotManager;
+    use crate::test_utils::MockFrontendMetaClient;
+
+    #[tokio::test]
+    async fn test_update_align_epoch_before_snapshot() {
+        let hummock_snapshot_manager =
+            HummockSnapshotManager::new(Arc::new(MockFrontendMetaClient {}));
+        let align_snapshot1 = HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 0,
+            need_align: true,
+        };
+        let non_align_snapshot1 = HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 1,
+            need_align: false,
+        };
+        let non_align_snapshot2 = HummockSnapshot {
+            committed_epoch: 2,
+            current_epoch: 2,
+            need_align: false,
+        };
+        // The vnode mapping is updated before the snapshot
+        hummock_snapshot_manager.update_align_epoch(0);
+        hummock_snapshot_manager.update_snapshot(align_snapshot1);
+        let query = create_query().await;
+        let query_id = query.query_id().clone();
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 0);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 0);
+        hummock_snapshot_manager.update_snapshot(non_align_snapshot1);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 1);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 0);
+        hummock_snapshot_manager.update_snapshot(non_align_snapshot2);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 2);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 2);
+        hummock_snapshot_manager.update_align_epoch(3);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 3);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_update_align_epoch_after_snapshot() {
+        let hummock_snapshot_manager =
+            HummockSnapshotManager::new(Arc::new(MockFrontendMetaClient {}));
+        let align_snapshot1 = HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 0,
+            need_align: true,
+        };
+        let align_snapshot2 = HummockSnapshot {
+            committed_epoch: 1,
+            current_epoch: 1,
+            need_align: true,
+        };
+
+        let query = create_query().await;
+        let query_id = query.query_id().clone();
+
+        hummock_snapshot_manager.update_align_epoch(0);
+        hummock_snapshot_manager.update_snapshot(align_snapshot1);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 0);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 0);
+
+        hummock_snapshot_manager.update_snapshot(align_snapshot2);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 0);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 0);
+
+        hummock_snapshot_manager.update_align_epoch(1);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 1);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_update_align_epoch_after_many_snapshot() {
+        let hummock_snapshot_manager =
+            HummockSnapshotManager::new(Arc::new(MockFrontendMetaClient {}));
+        let align_snapshot1 = HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 0,
+            need_align: true,
+        };
+        let align_snapshot2 = HummockSnapshot {
+            committed_epoch: 1,
+            current_epoch: 1,
+            need_align: true,
+        };
+        let non_align_snapshot1 = HummockSnapshot {
+            committed_epoch: 1,
+            current_epoch: 2,
+            need_align: false,
+        };
+        let align_snapshot3 = HummockSnapshot {
+            committed_epoch: 3,
+            current_epoch: 3,
+            need_align: true,
+        };
+
+        let non_align_snapshot2 = HummockSnapshot {
+            committed_epoch: 3,
+            current_epoch: 4,
+            need_align: false,
+        };
+
+        let query = create_query().await;
+        let query_id = query.query_id().clone();
+
+        hummock_snapshot_manager.update_align_epoch(0);
+        hummock_snapshot_manager.update_snapshot(align_snapshot1);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 0);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 0);
+
+        hummock_snapshot_manager.update_snapshot(align_snapshot2);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 0);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 0);
+
+        hummock_snapshot_manager.update_snapshot(non_align_snapshot1);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 0);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 0);
+
+        hummock_snapshot_manager.update_snapshot(align_snapshot3);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 0);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 0);
+
+        hummock_snapshot_manager.update_align_epoch(1);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 2);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 1);
+
+        hummock_snapshot_manager.update_align_epoch(3);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 3);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 3);
+
+        hummock_snapshot_manager.update_snapshot(non_align_snapshot2);
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        assert_eq!(pinned_snapshot.get_current_epoch(), 4);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 3);
     }
 }
