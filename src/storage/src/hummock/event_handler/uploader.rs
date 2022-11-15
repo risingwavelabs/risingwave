@@ -38,11 +38,9 @@ use crate::hummock::store::version::StagingSstableInfo;
 use crate::hummock::{HummockError, HummockResult};
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
-pub trait UploadOutputFuture = Future<Output = HummockResult<Vec<LocalSstableInfo>>> + Send;
-pub trait UploadFn<Fut: UploadOutputFuture> =
-    Fn(UploadTaskPayload, UploadTaskInfo) -> Fut + Send + Sync + 'static;
+pub type UploadTaskOutput = Vec<LocalSstableInfo>;
 pub type SpawnUploadTask = Arc<
-    dyn Fn(UploadTaskPayload, UploadTaskInfo) -> JoinHandle<HummockResult<StagingSstableInfo>>
+    dyn Fn(UploadTaskPayload, UploadTaskInfo) -> JoinHandle<HummockResult<UploadTaskOutput>>
         + Send
         + Sync
         + 'static,
@@ -60,7 +58,7 @@ pub struct UploadTaskInfo {
 /// stored so that when the task fails, it can be re-tried.
 struct UploadingTask {
     payload: UploadTaskPayload,
-    join_handle: JoinHandle<HummockResult<StagingSstableInfo>>,
+    join_handle: JoinHandle<HummockResult<UploadTaskOutput>>,
     task_info: UploadTaskInfo,
     spawn_upload_task: SpawnUploadTask,
     task_size_guard: Arc<AtomicUsize>,
@@ -117,15 +115,20 @@ impl UploadingTask {
 
     /// Poll the result of the uploading task
     fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<HummockResult<StagingSstableInfo>> {
-        self.join_handle
-            .poll_unpin(cx)
-            .map(|join_result| match join_result {
-                Ok(task_result) => task_result,
-                Err(err) => Err(HummockError::other(format!(
-                    "fail to join upload join handle: {:?}",
-                    err
-                ))),
-            })
+        Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
+            Ok(task_result) => task_result.map(|ssts| {
+                StagingSstableInfo::new(
+                    ssts,
+                    self.task_info.epochs.clone(),
+                    self.task_info.imm_ids.clone(),
+                    self.task_info.task_size,
+                )
+            }),
+            Err(err) => Err(HummockError::other(format!(
+                "fail to join upload join handle: {:?}",
+                err
+            ))),
+        })
     }
 
     /// Poll the uploading task until it succeeds. If it fails, we will retry it.
@@ -155,7 +158,7 @@ impl Future for UploadingTask {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 /// Manage the spilled data. Task and uploaded data at the front is newer data. Task data are
 /// always newer than uploaded data. Task holding oldest data is always collected first.
 struct SpilledData {
@@ -197,7 +200,7 @@ impl SpilledData {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct UnsealedEpochData {
     // newer data at the front
     imms: VecDeque<ImmutableMemtable>,
@@ -318,32 +321,14 @@ struct UploaderContext {
 }
 
 impl UploaderContext {
-    fn new<F, Fut>(
+    fn new(
         pinned_version: PinnedVersion,
-        upload_fn: F,
+        spawn_upload_task: SpawnUploadTask,
         buffer_tracker: BufferTracker,
-    ) -> Self
-    where
-        Fut: UploadOutputFuture,
-        F: UploadFn<Fut>,
-    {
-        let upload_fn = Arc::new(upload_fn);
+    ) -> Self {
         UploaderContext {
             pinned_version,
-            spawn_upload_task: Arc::new(move |task_payload, task_info| {
-                let upload_fn = upload_fn.clone();
-                tokio::spawn(async move {
-                    match upload_fn(task_payload, task_info.clone()).await {
-                        Ok(sstable_infos) => Ok(StagingSstableInfo::new(
-                            sstable_infos,
-                            task_info.epochs,
-                            task_info.imm_ids,
-                            task_info.task_size,
-                        )),
-                        Err(e) => Err(e),
-                    }
-                })
-            }),
+            spawn_upload_task,
             buffer_tracker,
         }
     }
@@ -390,15 +375,11 @@ pub struct HummockUploader {
 }
 
 impl HummockUploader {
-    pub(crate) fn new<F, Fut>(
+    pub(crate) fn new(
         pinned_version: PinnedVersion,
-        upload_fn: F,
+        spawn_upload_task: SpawnUploadTask,
         buffer_tracker: BufferTracker,
-    ) -> Self
-    where
-        Fut: UploadOutputFuture,
-        F: UploadFn<Fut>,
-    {
+    ) -> Self {
         let initial_epoch = pinned_version.version().max_committed_epoch;
         Self {
             max_sealed_epoch: initial_epoch,
@@ -408,7 +389,7 @@ impl HummockUploader {
             sealed_data: Default::default(),
             syncing_data: Default::default(),
             synced_data: Default::default(),
-            context: UploaderContext::new(pinned_version, upload_fn, buffer_tracker),
+            context: UploaderContext::new(pinned_version, spawn_upload_task, buffer_tracker),
         }
     }
 
@@ -680,7 +661,7 @@ impl<'a> Future for NextUploaderEvent<'a> {
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
-    use std::future::poll_fn;
+    use std::future::{poll_fn, Future};
     use std::ops::Deref;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering::SeqCst;
@@ -695,14 +676,15 @@ mod tests {
     use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
     use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
     use spin::Mutex;
+    use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::sync::oneshot;
     use tokio::task::yield_now;
 
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
     use crate::hummock::event_handler::uploader::{
-        HummockUploader, UploadFn, UploadOutputFuture, UploadTaskInfo, UploadTaskPayload,
-        UploaderContext, UploaderEvent, UploadingTask,
+        HummockUploader, UploadTaskInfo, UploadTaskOutput, UploadTaskPayload, UploaderContext,
+        UploaderEvent, UploadingTask,
     };
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -712,6 +694,11 @@ mod tests {
 
     const INITIAL_EPOCH: HummockEpoch = 5;
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+
+    pub trait UploadOutputFuture =
+        Future<Output = HummockResult<UploadTaskOutput>> + Send + 'static;
+    pub trait UploadFn<Fut: UploadOutputFuture> =
+        Fn(UploadTaskPayload, UploadTaskInfo) -> Fut + Send + Sync + 'static;
 
     fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
         HummockVersion {
@@ -775,9 +762,13 @@ mod tests {
         Fut: UploadOutputFuture,
         F: UploadFn<Fut>,
     {
+        let upload_fn = Arc::new(upload_fn);
         UploaderContext::new(
             initial_pinned_version(),
-            upload_fn,
+            Arc::new(move |payload, task_info| {
+                let upload_fn = upload_fn.clone();
+                spawn(upload_fn(payload, task_info))
+            }),
             BufferTracker::for_test(),
         )
     }
@@ -787,9 +778,13 @@ mod tests {
         Fut: UploadOutputFuture,
         F: UploadFn<Fut>,
     {
+        let upload_fn = Arc::new(upload_fn);
         HummockUploader::new(
             initial_pinned_version(),
-            upload_fn,
+            Arc::new(move |payload, task_info| {
+                let upload_fn = upload_fn.clone();
+                spawn(upload_fn(payload, task_info))
+            }),
             BufferTracker::for_test(),
         )
     }
@@ -1010,21 +1005,21 @@ mod tests {
         };
         let uploader = HummockUploader::new(
             initial_pinned_version(),
-            {
+            Arc::new({
                 move |_: UploadTaskPayload, task_info: UploadTaskInfo| {
                     let task_notifier_holder = task_notifier_holder.clone();
-                    async move {
-                        let (start_tx, finish_rx) = task_notifier_holder.lock().pop_back().unwrap();
-                        let start_epoch = *task_info.epochs.last().unwrap();
-                        let end_epoch = *task_info.epochs.first().unwrap();
-                        assert!(end_epoch >= start_epoch);
+                    let (start_tx, finish_rx) = task_notifier_holder.lock().pop_back().unwrap();
+                    let start_epoch = *task_info.epochs.last().unwrap();
+                    let end_epoch = *task_info.epochs.first().unwrap();
+                    assert!(end_epoch >= start_epoch);
+                    spawn(async move {
                         let ret = gen_sstable_info(start_epoch, end_epoch);
                         start_tx.send(task_info).unwrap();
                         finish_rx.await.unwrap();
                         Ok(ret)
-                    }
+                    })
                 }
-            },
+            }),
             buffer_tracker.clone(),
         );
         (buffer_tracker, uploader, new_task_notifier)

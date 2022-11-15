@@ -24,6 +24,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::pin_version_response::Payload;
+use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
@@ -146,7 +147,9 @@ impl HummockEventHandler {
         let write_conflict_detector = ConflictDetector::new_from_config(&compactor_context.options);
         let uploader = HummockUploader::new(
             pinned_version.clone(),
-            move |payload, task_info| flush_imms(payload, task_info, compactor_context.clone()),
+            Arc::new(move |payload, task_info| {
+                spawn(flush_imms(payload, task_info, compactor_context.clone()))
+            }),
             buffer_tracker,
         );
         Self {
