@@ -39,7 +39,7 @@ use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{GeneratorConfig, CHANNEL_NUMBER};
-use crate::utils::{milli_ts_to_timestamp_string, NexmarkRng};
+use crate::utils::NexmarkRng;
 
 type Id = usize;
 
@@ -113,7 +113,7 @@ pub struct Person {
     /// One of several US states as a two-letter string.
     pub state: String,
     /// A millisecond timestamp for the event origin.
-    pub date_time: String,
+    pub date_time: u64,
     /// Extra information
     pub extra: String,
 }
@@ -128,10 +128,13 @@ impl Person {
             cfg.last_names.choose(rng).unwrap(),
         );
         let email_address = format!("{}@{}.com", rng.gen_string(7), rng.gen_string(5));
-        let credit_card = (0..4)
-            .map(|_| format!("{:04}", rng.gen_range(0..10000)))
-            .collect::<Vec<String>>()
-            .join(" ");
+        let credit_card = format!(
+            "{:04} {:04} {:04} {:04}",
+            rng.gen_range(0..10000),
+            rng.gen_range(0..10000),
+            rng.gen_range(0..10000),
+            rng.gen_range(0..10000)
+        );
         let city = cfg.us_cities.choose(rng).unwrap().clone();
         let state = cfg.us_states.choose(rng).unwrap().clone();
 
@@ -146,7 +149,7 @@ impl Person {
             credit_card,
             city,
             state,
-            date_time: milli_ts_to_timestamp_string(time),
+            date_time: time,
             extra,
         }
     }
@@ -182,9 +185,9 @@ pub struct Auction {
     /// The minimum price for the auction to succeed.
     pub reserve: usize,
     /// A millisecond timestamp for the event origin.
-    pub date_time: String,
+    pub date_time: u64,
     /// A UNIX epoch timestamp for the expiration date of the auction.
-    pub expires: String,
+    pub expires: u64,
     /// The ID of the person that created this auction.
     pub seller: Id,
     /// The ID of the category this auction belongs to.
@@ -207,9 +210,7 @@ impl Auction {
         let initial_bid = rng.gen_price();
 
         let reserve = initial_bid + rng.gen_price();
-        let date_time = milli_ts_to_timestamp_string(time);
-        let expires =
-            milli_ts_to_timestamp_string(time + Self::next_length(events_so_far, rng, time, cfg));
+        let expires = time + Self::next_length(events_so_far, rng, time, cfg);
         let mut seller = if rng.gen_range(0..cfg.hot_seller_ratio) > 0 {
             (Person::last_id(id, cfg) / cfg.hot_seller_ratio_2) * cfg.hot_seller_ratio_2
         } else {
@@ -227,7 +228,7 @@ impl Auction {
             description,
             initial_bid,
             reserve,
-            date_time,
+            date_time: time,
             expires,
             seller,
             category,
@@ -290,7 +291,7 @@ pub struct Bid {
     /// The url of this bid
     pub url: String,
     /// A millisecond timestamp for the event origin.
-    pub date_time: String,
+    pub date_time: u64,
     /// Extra information
     pub extra: String,
 }
@@ -327,7 +328,7 @@ impl Bid {
             auction: auction + nex.first_auction_id,
             bidder: bidder + nex.first_person_id,
             price,
-            date_time: milli_ts_to_timestamp_string(time),
+            date_time: time,
             channel,
             url,
             extra,
@@ -360,12 +361,12 @@ mod tests {
             Event::Person(Person {
                 id: 1000,
                 name: "vicky noris".into(),
-                email_address: "vzbhp@wxv.com".into(),
-                credit_card: "4355 0142 3460 9324".into(),
-                city: "boise".into(),
-                state: "ca".into(),
-                date_time: "2015-07-15 00:00:00".into(),
-                extra: "cllnesmssnthtljklifqbqcyhcjwiuoaudxxwcnnwgmsmwgqelplzyckqzuoaitfpxubgpkjtqjhktelmbskvjkxrhziyowxibbgnqneuaiazqduhkynvgeisbxtknbxmqmzbgnptlrcyigjginataks".into(),
+                email_address: "yplkvgz@qbxfg.com".into(),
+                credit_card: "7878 5821 1864 2539".into(),
+                city: "cheyenne".into(),
+                state: "az".into(),
+                date_time: 1436918400000,
+                extra: "lwaiyhjhrkaruidlsjilvqccyedttedeynpqmackqbwvklwuyypztnkengzgtwtjivjgrxurskpcldfohdzuwnefqymyncrksxyfaecwsbswjumzxudgoznyhakxrudomnxtmqtgshecfjgspxzpludz".into(),
             })
         );
     }

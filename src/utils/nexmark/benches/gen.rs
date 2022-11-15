@@ -12,10 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod bench;
-pub mod compute;
-pub mod hummock;
-pub mod meta;
-pub mod profile;
-pub mod table;
-pub mod trace;
+use criterion::{criterion_group, criterion_main, Criterion};
+use nexmark::EventGenerator;
+
+criterion_group!(benches, nexmark_generator);
+criterion_main!(benches);
+
+fn nexmark_generator(c: &mut Criterion) {
+    c.bench_function("nexmark_generate_event", |bencher| {
+        let mut gen = EventGenerator::default();
+        bencher.iter(|| gen.next())
+    });
+}
