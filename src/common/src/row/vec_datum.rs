@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! An owned row type with a `Vec<Datum>`.
+
 use std::hash::{BuildHasher, Hasher};
 use std::{cmp, ops};
 
