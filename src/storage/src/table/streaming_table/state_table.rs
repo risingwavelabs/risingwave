@@ -27,6 +27,7 @@ use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
+use risingwave_common::row::CompactedRow;
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -455,6 +456,53 @@ impl<S: StateStore> StateTable<S> {
                 {
                     let row = self.row_deserializer.deserialize(storage_row_bytes)?;
                     Ok(Some(row))
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+
+    /// Get a compacted row from state table.
+    pub async fn get_compacted_row<'a>(
+        &'a self,
+        pk: &'a Row,
+    ) -> StorageResult<Option<CompactedRow>> {
+        let serialized_pk =
+            serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
+        let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
+
+        match mem_table_res {
+            Some(row_op) => match row_op {
+                RowOp::Insert(row_bytes) => {
+                    let row = self.row_deserializer.deserialize(row_bytes.as_ref())?;
+                    Ok(Some((&row).into()))
+                }
+                RowOp::Delete(_) => Ok(None),
+                RowOp::Update((_, row_bytes)) => {
+                    let row = self.row_deserializer.deserialize(row_bytes.as_ref())?;
+                    Ok(Some((&row).into()))
+                }
+            },
+            None => {
+                assert!(pk.size() <= self.pk_indices.len());
+                let key_indices = (0..pk.size())
+                    .into_iter()
+                    .map(|index| self.pk_indices[index])
+                    .collect_vec();
+                let read_options = ReadOptions {
+                    prefix_hint: None,
+                    check_bloom_filter: self.dist_key_indices == key_indices,
+                    retention_seconds: self.table_option.retention_seconds,
+                    table_id: self.keyspace.table_id(),
+                };
+                if let Some(storage_row_bytes) = self
+                    .keyspace
+                    .get(&serialized_pk, self.epoch(), read_options)
+                    .await?
+                {
+                    let row = self.row_deserializer.deserialize(storage_row_bytes)?;
+                    Ok(Some((&row).into()))
                 } else {
                     Ok(None)
                 }

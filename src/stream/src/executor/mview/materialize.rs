@@ -22,11 +22,13 @@ use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, RowDeserializer, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+use risingwave_common::row::CompactedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
+use risingwave_storage::row_serde::row_serde_util::deserialize_pk_with_vnode;
 use risingwave_storage::table::compute_chunk_vnode;
 use risingwave_storage::table::streaming_table::mem_table::RowOp;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -183,18 +185,16 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 for key in buffer.get_keys() {
                                     if self.materialize_cache.get(key).is_none() {
                                         // cache miss
-                                        if let Some(storage_value) = self
-                                            .state_table
-                                            .keyspace()
-                                            .get(
-                                                &key,
-                                                self.state_table.epoch(),
-                                                self.state_table.get_read_option(),
-                                            )
-                                            .await?
+                                        let (_, key_row) = deserialize_pk_with_vnode(
+                                            key,
+                                            self.state_table.pk_serde(),
+                                        )
+                                        .unwrap();
+                                        if let Some(storage_value) =
+                                            self.state_table.get_compacted_row(&key_row).await?
                                         {
                                             self.materialize_cache
-                                                .insert(key.clone(), Some(storage_value.to_vec()));
+                                                .insert(key.clone(), Some(storage_value));
                                         } else {
                                             self.materialize_cache.insert(key.clone(), None);
                                         }
@@ -213,23 +213,24 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                 output.insert(
                                                     key.clone(),
                                                     RowOp::Update((
-                                                        cache_row.to_vec(),
+                                                        cache_row.row.clone(),
                                                         row.clone(),
                                                     )),
                                                 );
                                             }
 
-                                            self.materialize_cache.insert(key, Some(row.clone()));
+                                            self.materialize_cache
+                                                .insert(key, Some(CompactedRow::new(row)));
                                         }
                                         RowOp::Delete(old_row) => {
                                             if let Some(cache_row) =
                                                 self.materialize_cache.get(&key).unwrap()
                                             {
-                                                if cache_row != &old_row {
+                                                if cache_row.row != old_row {
                                                     // delete a nonexistent value
                                                     output.insert(
                                                         key.clone(),
-                                                        RowOp::Delete(cache_row.to_vec()),
+                                                        RowOp::Delete(cache_row.row.clone()),
                                                     );
                                                 }
 
@@ -243,24 +244,26 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                             if let Some(cache_row) =
                                                 self.materialize_cache.get(&key).unwrap()
                                             {
-                                                if cache_row != &old_row {
+                                                if cache_row.row != old_row {
                                                     // update a nonexistent old value
                                                     output.insert(
                                                         key.clone(),
                                                         RowOp::Update((
-                                                            cache_row.to_vec(),
+                                                            cache_row.row.clone(),
                                                             new_row.clone(),
                                                         )),
                                                     );
                                                 }
-                                                self.materialize_cache.insert(key, Some(new_row));
+                                                self.materialize_cache
+                                                    .insert(key, Some(CompactedRow::new(new_row)));
                                             } else {
                                                 // update a nonexistent pk
                                                 output.insert(
                                                     key.clone(),
                                                     RowOp::Insert(new_row.clone()),
                                                 );
-                                                self.materialize_cache.insert(key, Some(new_row));
+                                                self.materialize_cache
+                                                    .insert(key, Some(CompactedRow::new(new_row)));
                                             }
                                         }
                                     }
@@ -487,7 +490,7 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
 
 /// A cache for materialize executors.
 pub struct MaterializeCache {
-    data: ExecutorCache<Vec<u8>, Option<Vec<u8>>>,
+    data: ExecutorCache<Vec<u8>, Option<CompactedRow>>,
 }
 
 impl MaterializeCache {
@@ -500,11 +503,11 @@ impl MaterializeCache {
         Self { data: cache }
     }
 
-    pub fn get(&mut self, key: &[u8]) -> Option<&Option<Vec<u8>>> {
+    pub fn get(&mut self, key: &[u8]) -> Option<&Option<CompactedRow>> {
         self.data.get(key)
     }
 
-    pub fn insert(&mut self, key: Vec<u8>, value: Option<Vec<u8>>) {
+    pub fn insert(&mut self, key: Vec<u8>, value: Option<CompactedRow>) {
         self.data.push(key, value);
     }
 }
@@ -648,8 +651,14 @@ mod tests {
             + 3 6",
         );
 
-        // test delete wrong value, delete inexistent pk
         let chunk2 = StreamChunk::from_pretty(
+            " i i
+            + 1 3
+            + 2 6",
+        );
+
+        // test delete wrong value, delete inexistent pk
+        let chunk3 = StreamChunk::from_pretty(
             " i i
             + 1 4",
         );
@@ -661,8 +670,9 @@ mod tests {
             vec![
                 Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(chunk1),
-                Message::Barrier(Barrier::new_test_barrier(2)),
                 Message::Chunk(chunk2),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Chunk(chunk3),
                 Message::Barrier(Barrier::new_test_barrier(3)),
             ],
         );
@@ -699,6 +709,7 @@ mod tests {
         materialize_executor.next().await.transpose().unwrap();
 
         materialize_executor.next().await.transpose().unwrap();
+        materialize_executor.next().await.transpose().unwrap();
 
         // First stream chunk. We check the existence of (3) -> (3,6)
         match materialize_executor.next().await.transpose().unwrap() {
@@ -719,7 +730,16 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                assert_eq!(row, Some(Row(vec![Some(1_i32.into()), Some(4_i32.into())])));
+                assert_eq!(row, Some(Row(vec![Some(1_i32.into()), Some(3_i32.into())])));
+
+                let row = table
+                    .get_row(
+                        &Row(vec![Some(2_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, Some(Row(vec![Some(2_i32.into()), Some(6_i32.into())])));
             }
             _ => unreachable!(),
         }
