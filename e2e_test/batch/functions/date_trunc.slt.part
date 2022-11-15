@@ -70,13 +70,13 @@ milliseconds    2333 years 4 mons 5 days 02:47:33.123
 second          2333 years 4 mons 5 days 02:47:33
 minute          2333 years 4 mons 5 days 02:47:00
 hour            2333 years 4 mons 5 days 02:00:00
-day             2333 years 4 mons 5 days 00:00:00
-month           2333 years 4 mons 00:00:00
-quarter         2333 years 3 mons 00:00:00
-year            2333 years 00:00:00
-decade          2330 years 00:00:00
-century         2300 years 00:00:00
-millennium      2000 years 00:00:00
+day             2333 years 4 mons 5 days
+month           2333 years 4 mons
+quarter         2333 years 3 mons
+year            2333 years
+decade          2330 years
+century         2300 years
+millennium      2000 years
 
 # truncate 'week' is not supported for interval
 statement error
