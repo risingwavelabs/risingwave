@@ -218,3 +218,73 @@ impl RowDeserializer {
         &self.data_types
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{DataType as Ty, IntervalUnit, ScalarImpl};
+    use crate::util::hash_util::Crc32FastBuilder;
+
+    #[test]
+    fn row_value_encode_decode() {
+        let row = Row(vec![
+            Some(ScalarImpl::Utf8("string".into())),
+            Some(ScalarImpl::Bool(true)),
+            Some(ScalarImpl::Int16(1)),
+            Some(ScalarImpl::Int32(2)),
+            Some(ScalarImpl::Int64(3)),
+            Some(ScalarImpl::Float32(4.0.into())),
+            Some(ScalarImpl::Float64(5.0.into())),
+            Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
+            Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
+        ]);
+        let value_indices = (0..9).collect_vec();
+        let bytes = row.serialize(&Some(value_indices));
+        assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 16 + 16 + 9);
+        let de = RowDeserializer::new(vec![
+            Ty::Varchar,
+            Ty::Boolean,
+            Ty::Int16,
+            Ty::Int32,
+            Ty::Int64,
+            Ty::Float32,
+            Ty::Float64,
+            Ty::Decimal,
+            Ty::Interval,
+        ]);
+        let row1 = de.deserialize(bytes.as_ref()).unwrap();
+        assert_eq!(row, row1);
+    }
+
+    #[test]
+    fn test_hash_row() {
+        let hash_builder = Crc32FastBuilder {};
+
+        let row1 = Row(vec![
+            Some(ScalarImpl::Utf8("string".into())),
+            Some(ScalarImpl::Bool(true)),
+            Some(ScalarImpl::Int16(1)),
+            Some(ScalarImpl::Int32(2)),
+            Some(ScalarImpl::Int64(3)),
+            Some(ScalarImpl::Float32(4.0.into())),
+            Some(ScalarImpl::Float64(5.0.into())),
+            Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
+            Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
+        ]);
+        let row2 = Row(vec![
+            Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
+            Some(ScalarImpl::Utf8("string".into())),
+            Some(ScalarImpl::Bool(true)),
+            Some(ScalarImpl::Int16(1)),
+            Some(ScalarImpl::Int32(2)),
+            Some(ScalarImpl::Int64(3)),
+            Some(ScalarImpl::Float32(4.0.into())),
+            Some(ScalarImpl::Float64(5.0.into())),
+            Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
+        ]);
+        assert_ne!(row1.hash_row(&hash_builder), row2.hash_row(&hash_builder));
+
+        let row_default = Row::default();
+        assert_eq!(row_default.hash_row(&hash_builder).0, 0);
+    }
+}
