@@ -389,10 +389,6 @@ impl<S: StateStore> StateTable<S> {
         &self.vnodes
     }
 
-    pub fn keyspace(&self) -> &Keyspace<S::Local> {
-        &self.keyspace
-    }
-
     pub fn value_indices(&self) -> &Option<Vec<usize>> {
         &self.value_indices
     }
@@ -407,6 +403,7 @@ impl<S: StateStore> StateTable<S> {
             table_id: self.table_id(),
             retention_seconds: self.table_option.retention_seconds,
             check_bloom_filter: false,
+            ignore_range_tombstone: false,
         }
     }
 
@@ -444,9 +441,13 @@ impl<S: StateStore> StateTable<S> {
 
         match mem_table_res {
             Some(row_op) => match row_op {
-                RowOp::Insert(row_bytes) => Ok(Some(CompactedRow::new(row_bytes.to_vec()))),
+                RowOp::Insert(row_bytes) => Ok(Some(CompactedRow {
+                    row: row_bytes.to_vec(),
+                })),
                 RowOp::Delete(_) => Ok(None),
-                RowOp::Update((_, row_bytes)) => Ok(Some(CompactedRow::new(row_bytes.to_vec()))),
+                RowOp::Update((_, row_bytes)) => Ok(Some(CompactedRow {
+                    row: row_bytes.to_vec(),
+                })),
             },
             None => {
                 assert!(pk.size() <= self.pk_indices.len());
@@ -466,7 +467,9 @@ impl<S: StateStore> StateTable<S> {
                     .get(&serialized_pk, self.epoch(), read_options)
                     .await?
                 {
-                    Ok(Some(CompactedRow::new(storage_row_bytes.to_vec())))
+                    Ok(Some(CompactedRow {
+                        row: storage_row_bytes.to_vec(),
+                    }))
                 } else {
                     Ok(None)
                 }

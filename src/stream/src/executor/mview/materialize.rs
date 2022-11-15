@@ -179,7 +179,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                             } else {
                                 // fill cache
                                 for key_bytes in buffer.get_keys() {
-                                    if self.materialize_cache.get(key).is_none() {
+                                    if self.materialize_cache.get(key_bytes).is_none() {
                                         // cache miss
 
                                         // computing vnode and get bloom filter's hint should random
@@ -194,7 +194,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                             self.state_table.get_compacted_row(&key).await?
                                         {
                                             self.materialize_cache
-                                                .insert(key.clone(), Some(storage_value));
+                                                .insert(key_bytes.to_vec(), Some(storage_value));
                                         } else {
                                             self.materialize_cache.insert(key_bytes.clone(), None);
                                         }
@@ -220,7 +220,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                             }
 
                                             self.materialize_cache
-                                                .insert(key, Some(CompactedRow::new(row)));
+                                                .insert(key, Some(CompactedRow { row }));
                                         }
                                         RowOp::Delete(old_row) => {
                                             if let Some(cache_row) =
@@ -254,16 +254,20 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                                         )),
                                                     );
                                                 }
-                                                self.materialize_cache
-                                                    .insert(key, Some(CompactedRow::new(new_row)));
+                                                self.materialize_cache.insert(
+                                                    key,
+                                                    Some(CompactedRow { row: new_row }),
+                                                );
                                             } else {
                                                 // update a nonexistent pk
                                                 output.insert(
                                                     key.clone(),
                                                     RowOp::Insert(new_row.clone()),
                                                 );
-                                                self.materialize_cache
-                                                    .insert(key, Some(CompactedRow::new(new_row)));
+                                                self.materialize_cache.insert(
+                                                    key,
+                                                    Some(CompactedRow { row: new_row }),
+                                                );
                                             }
                                         }
                                     }
