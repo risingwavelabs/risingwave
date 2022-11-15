@@ -33,6 +33,7 @@ pub async fn list_kv(epoch: u64, table_id: u32) -> anyhow::Result<()> {
                 epoch,
                 None,
                 ReadOptions {
+                    ignore_range_tombstone: false,
                     prefix_hint: None,
                     table_id: TableId { table_id },
                     retention_seconds: None,
