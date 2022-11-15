@@ -96,9 +96,11 @@ impl Expression for BinaryShortCircuitExpression {
             let res_bool = res.as_bool();
             let orig_vis = input.vis();
             let res_vis: Vis = match self.expr_type {
-                // If res of left part is not null and is true, we do not want to calculate right
-                // part because the result must be true.
+                // For `Or` operator, if res of left part is not null and is true, we do not want to
+                // calculate right part because the result must be true.
                 Type::Or => (!(res_bool.to_bitmap())).into(),
+                // For `And` operator, If res of left part is not null and is false, we do not want
+                // to calculate right part because the result must be false.
                 Type::And => (res_bool.to_bitmap() | !res_bool.null_bitmap()).into(),
                 _ => unimplemented!(),
             };
