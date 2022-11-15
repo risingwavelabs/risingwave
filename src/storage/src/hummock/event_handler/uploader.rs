@@ -523,7 +523,10 @@ impl HummockUploader {
     }
 
     pub(crate) fn update_pinned_version(&mut self, pinned_version: PinnedVersion) {
-        assert!(pinned_version.version().id > self.context.pinned_version.version().id);
+        assert!(
+            pinned_version.max_committed_epoch()
+                >= self.context.pinned_version.max_committed_epoch()
+        );
         assert!(self.max_synced_epoch >= pinned_version.max_committed_epoch());
         self.synced_data
             .retain(|epoch, _| *epoch > pinned_version.max_committed_epoch());
