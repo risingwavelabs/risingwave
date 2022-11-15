@@ -24,6 +24,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(generators)]
 #![feature(iterator_try_collect)]
+#![feature(exclusive_range_pattern)]
 
 pub mod error;
 pub mod expr;
