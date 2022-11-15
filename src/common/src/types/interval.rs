@@ -377,10 +377,7 @@ impl IntervalUnit {
     /// ```
     /// # use risingwave_common::types::IntervalUnit;
     /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
-    /// assert_eq!(
-    ///     interval.truncate_day().to_string(),
-    ///     "5 years 1 mon 25 days 00:00:00"
-    /// );
+    /// assert_eq!(interval.truncate_day().to_string(), "5 years 1 mon 25 days");
     /// ```
     pub const fn truncate_day(self) -> Self {
         IntervalUnit {
@@ -396,10 +393,7 @@ impl IntervalUnit {
     /// ```
     /// # use risingwave_common::types::IntervalUnit;
     /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
-    /// assert_eq!(
-    ///     interval.truncate_month().to_string(),
-    ///     "5 years 1 mon 00:00:00"
-    /// );
+    /// assert_eq!(interval.truncate_month().to_string(), "5 years 1 mon");
     /// ```
     pub const fn truncate_month(self) -> Self {
         IntervalUnit {
@@ -415,7 +409,7 @@ impl IntervalUnit {
     /// ```
     /// # use risingwave_common::types::IntervalUnit;
     /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
-    /// assert_eq!(interval.truncate_quarter().to_string(), "5 years 00:00:00");
+    /// assert_eq!(interval.truncate_quarter().to_string(), "5 years");
     /// ```
     pub const fn truncate_quarter(self) -> Self {
         IntervalUnit {
@@ -431,7 +425,7 @@ impl IntervalUnit {
     /// ```
     /// # use risingwave_common::types::IntervalUnit;
     /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
-    /// assert_eq!(interval.truncate_year().to_string(), "5 years 00:00:00");
+    /// assert_eq!(interval.truncate_year().to_string(), "5 years");
     /// ```
     pub const fn truncate_year(self) -> Self {
         IntervalUnit {
@@ -447,7 +441,7 @@ impl IntervalUnit {
     /// ```
     /// # use risingwave_common::types::IntervalUnit;
     /// let interval: IntervalUnit = "15 years 1 mon 25 days 23:22:57.123".parse().unwrap();
-    /// assert_eq!(interval.truncate_decade().to_string(), "10 years 00:00:00");
+    /// assert_eq!(interval.truncate_decade().to_string(), "10 years");
     /// ```
     pub const fn truncate_decade(self) -> Self {
         IntervalUnit {
@@ -463,10 +457,7 @@ impl IntervalUnit {
     /// ```
     /// # use risingwave_common::types::IntervalUnit;
     /// let interval: IntervalUnit = "115 years 1 mon 25 days 23:22:57.123".parse().unwrap();
-    /// assert_eq!(
-    ///     interval.truncate_century().to_string(),
-    ///     "100 years 00:00:00"
-    /// );
+    /// assert_eq!(interval.truncate_century().to_string(), "100 years");
     /// ```
     pub const fn truncate_century(self) -> Self {
         IntervalUnit {
@@ -482,10 +473,7 @@ impl IntervalUnit {
     /// ```
     /// # use risingwave_common::types::IntervalUnit;
     /// let interval: IntervalUnit = "1115 years 1 mon 25 days 23:22:57.123".parse().unwrap();
-    /// assert_eq!(
-    ///     interval.truncate_millennium().to_string(),
-    ///     "1000 years 00:00:00"
-    /// );
+    /// assert_eq!(interval.truncate_millennium().to_string(), "1000 years");
     /// ```
     pub const fn truncate_millennium(self) -> Self {
         IntervalUnit {
