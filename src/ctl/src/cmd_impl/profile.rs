@@ -15,7 +15,6 @@
 use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
 use chrono::prelude::Local;
 use futures::future::join_all;
@@ -35,7 +34,7 @@ pub async fn profile(sleep_s: u64) -> anyhow::Result<()> {
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = Arc::new(Mutex::new(ComputeClientPool::default()));
+    let clients = ComputeClientPool::default();
 
     let profile_root_path = PathBuf::from(&std::env::var("PREFIX_PROFILING")?);
     let dir_name = Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
@@ -47,8 +46,7 @@ pub async fn profile(sleep_s: u64) -> anyhow::Result<()> {
     // FIXME: the compute node may not be accessible directly from risectl, we may let the meta
     // service collect the reports from all compute nodes in the future.
     for cn in compute_nodes {
-        let client_pool = clients.lock().unwrap().clone();
-        let client = client_pool.get(&cn).await?;
+        let client = clients.get(&cn).await?;
 
         let dir_path_ref = &dir_path;
 
