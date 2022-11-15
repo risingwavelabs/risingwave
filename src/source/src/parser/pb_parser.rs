@@ -63,7 +63,7 @@ impl ProtobufParser {
                 Self::local_read_to_bytes(&path)
             }
             "s3" => load_bytes_from_s3(&url, props).await,
-            "https" => load_bytes_from_https(&url).await,
+            "https" | "http" => load_bytes_from_https(&url).await,
             scheme => Err(RwError::from(ProtocolError(format!(
                 "path scheme {} is not supported",
                 scheme
