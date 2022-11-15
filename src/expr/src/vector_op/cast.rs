@@ -36,6 +36,7 @@ const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes
 const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
+const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
 const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
 const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
@@ -116,9 +117,28 @@ pub fn str_to_timestampz(elem: &str) -> Result<i64> {
         .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))
 }
 
+/// Converts UNIX epoch time to timestamp in microseconds.
+///
+/// The input UNIX epoch time is interpreted as follows:
+///
+/// - [0, 1e11) are assumed to be in seconds.
+/// - [1e11, 1e14) are assumed to be in milliseconds.
+/// - [1e14, 1e17) are assumed to be in microseconds.
+/// - [1e17, upper) are assumed to be in nanoseconds.
+///
+/// This would cause no problem for timestamp in [1973-03-03 09:46:40, 5138-11-16 09:46:40).
 #[inline]
-pub fn i64_to_timestampz(ms: i64) -> Result<i64> {
-    Ok(ms * 1000)
+pub fn i64_to_timestampz(t: i64) -> Result<i64> {
+    const E11: i64 = 100_000_000_000;
+    const E14: i64 = 100_000_000_000_000;
+    const E17: i64 = 100_000_000_000_000_000;
+    match t {
+        0..E11 => Ok(t * 1_000_000), // s
+        E11..E14 => Ok(t * 1_000),   // ms
+        E14..E17 => Ok(t),           // us
+        E17.. => Ok(t / 1_000),      // ns
+        _ => Err(ExprError::Parse(ERROR_INT_TO_TIMESTAMP)),
+    }
 }
 
 #[inline(always)]
