@@ -2,7 +2,7 @@
 #!/bin/bash 
 
 # Set this to true, if you want to test the build pipeline
-test=true
+test=false
 if [[ $test ]]; then 
   echo -e "#!/bin/bash \necho \"hi risingwave\"" > /risingwave/bin/risingwave ; chmod +x /risingwave/bin/risingwave
   echo -e  "#!/bin/bash \necho \"hi frontend\"" > /risingwave/bin/frontend  ; chmod +x /risingwave/bin/frontend 
