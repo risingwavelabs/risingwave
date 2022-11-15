@@ -93,11 +93,15 @@ impl Expression for BinaryShortCircuitExpression {
         let mut children_array = Vec::with_capacity(2);
         for child in [&self.expr_ia1, &self.expr_ia2] {
             let res = child.eval_checked(&input)?;
+            let res_bool = res.as_bool();
             let orig_vis = input.vis();
             let res_vis: Vis = match self.expr_type {
-                // If res of left part is not null and is true, we do not want to calculate right
-                // part because the result must be true.
-                Type::Or => (!(res.as_bool().to_bitmap())).into(),
+                // For `Or` operator, if res of left part is not null and is true, we do not want to
+                // calculate right part because the result must be true.
+                Type::Or => (!(res_bool.to_bitmap())).into(),
+                // For `And` operator, If res of left part is not null and is false, we do not want
+                // to calculate right part because the result must be false.
+                Type::And => (res_bool.to_bitmap() | !res_bool.null_bitmap()).into(),
                 _ => unimplemented!(),
             };
             let new_vis = orig_vis & res_vis;
@@ -126,6 +130,25 @@ impl Expression for BinaryShortCircuitExpression {
                     }
                 }
             }
+            Type::And => {
+                for (((v_ia1, v_ia2), init_visible), final_visible) in multizip((
+                    children_array[0].as_bool().iter(),
+                    children_array[1].as_bool().iter(),
+                ))
+                .zip_eq(init_vis.iter())
+                .zip_eq(input.vis().iter())
+                {
+                    if init_visible {
+                        builder.append(if final_visible {
+                            and(v_ia1, v_ia2)?
+                        } else {
+                            Some(false)
+                        });
+                    } else {
+                        builder.append_null()
+                    }
+                }
+            }
             _ => unimplemented!(),
         }
         Ok(Arc::new(builder.finish().into()))
@@ -139,11 +162,17 @@ impl Expression for BinaryShortCircuitExpression {
                     return Ok(Some(true.to_scalar_value()));
                 }
             }
+            Type::And => {
+                if ret_ia1 == Some(false) {
+                    return Ok(Some(false.to_scalar_value()));
+                }
+            }
             _ => unimplemented!(),
         }
         let ret_ia2 = self.expr_ia2.eval_row(input)?.map(|x| x.into_bool());
         match self.expr_type {
             Type::Or => Ok(or(ret_ia1, ret_ia2)?.map(|x| x.to_scalar_value())),
+            Type::And => Ok(and(ret_ia1, ret_ia2)?.map(|x| x.to_scalar_value())),
             _ => unimplemented!(),
         }
     }
@@ -167,9 +196,7 @@ pub fn new_nullable_binary_expr(
 ) -> Result<BoxedExpression> {
     let expr = match expr_type {
         Type::ArrayAccess => build_array_access_expr(ret, l, r),
-        Type::And => Box::new(
-            BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _>::new(l, r, ret, and),
-        ),
+        Type::And => Box::new(BinaryShortCircuitExpression::new(l, r, expr_type)),
         Type::Or => Box::new(BinaryShortCircuitExpression::new(l, r, expr_type)),
         Type::IsDistinctFrom => new_distinct_from_expr(l, r, ret)?,
         Type::IsNotDistinctFrom => new_not_distinct_from_expr(l, r, ret)?,
