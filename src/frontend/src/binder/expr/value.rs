@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, DateTimeField, Decimal, IntervalUnit, ScalarImpl};
 use risingwave_expr::vector_op::cast::str_parse;
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
@@ -25,6 +25,10 @@ impl Binder {
     pub fn bind_value(&mut self, value: Value) -> Result<Literal> {
         match value {
             Value::Number(s) => self.bind_number(s),
+            Value::ScientificNumber {
+                coefficient,
+                exponent,
+            } => self.bind_scientific_number(coefficient, exponent),
             Value::SingleQuotedString(s) => self.bind_string(s),
             Value::Boolean(b) => self.bind_bool(b),
             // Both null and string literal will be treated as `unknown` during type inference.
@@ -61,6 +65,20 @@ impl Binder {
             (Some(ScalarImpl::Decimal(decimal)), DataType::Decimal)
         };
         Ok(Literal::new(data, data_type))
+    }
+
+    fn bind_scientific_number(&mut self, value: String, exponent: String) -> Result<Literal> {
+        let exponent = exponent
+            .parse::<i32>()
+            .map_err(|e| RwError::from(ErrorCode::InternalError(e.to_string())))?;
+        let coefficient = value
+            .parse::<f64>()
+            .map_err(|e| RwError::from(ErrorCode::InternalError(e.to_string())))?;
+
+        let base: f64 = 10.0;
+        let result: f64 = coefficient * base.powi(exponent);
+
+        self.bind_number(result.to_string())
     }
 
     fn bind_interval(
@@ -178,6 +196,7 @@ impl Binder {
 mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
+    use risingwave_sqlparser::ast::Value::ScientificNumber;
 
     use crate::binder::test_utils::mock_binder;
     use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall};
@@ -220,6 +239,49 @@ mod tests {
 
         for i in 0..values.len() {
             let value = Value::Number(String::from(values[i]));
+            let res = binder.bind_value(value).unwrap();
+            let ans = Literal::new(data[i].clone(), data_type[i].clone());
+            assert_eq!(res, ans);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bind_scientific_number() {
+        use std::str::FromStr;
+
+        use super::*;
+
+        let mut binder = mock_binder();
+        let values = vec![
+            ("1", "6"),
+            ("1.25", "6"),
+            ("1.25", "1"),
+            ("1", "-2"),
+            ("1.25", "-2"),
+            ("1", "15"),
+        ];
+        let data = vec![
+            Some(ScalarImpl::Int32(1000000)),
+            Some(ScalarImpl::Int32(1250000)),
+            Some(ScalarImpl::Decimal(Decimal::from_str("12.5").unwrap())),
+            Some(ScalarImpl::Decimal(Decimal::from_str("0.01").unwrap())),
+            Some(ScalarImpl::Decimal(Decimal::from_str("0.0125").unwrap())),
+            Some(ScalarImpl::Int64(1000000000000000)),
+        ];
+        let data_type = vec![
+            DataType::Int32,
+            DataType::Int32,
+            DataType::Decimal,
+            DataType::Decimal,
+            DataType::Decimal,
+            DataType::Int64,
+        ];
+
+        for i in 0..values.len() {
+            let value = ScientificNumber {
+                coefficient: values[i].0.to_string(),
+                exponent: values[i].1.to_string(),
+            };
             let res = binder.bind_value(value).unwrap();
             let ans = Literal::new(data[i].clone(), data_type[i].clone());
             assert_eq!(res, ans);

@@ -44,7 +44,10 @@ pub enum Token {
     /// An unsigned numeric literal
     Number(String),
     /// An unsigned scientific  numeric literal
-    ScientificNumber { value: String, exponent: String },
+    ScientificNumber {
+        coefficient: String,
+        exponent: String,
+    },
     /// A character that could not be tokenized
     Char(char),
     /// Single quoted string: i.e: 'string'
@@ -148,7 +151,10 @@ impl fmt::Display for Token {
             Token::EOF => f.write_str("EOF"),
             Token::Word(ref w) => write!(f, "{}", w),
             Token::Number(ref n) => write!(f, "{}", n),
-            Token::ScientificNumber { value, exponent } => write!(f, "{}e{}", value, exponent),
+            Token::ScientificNumber {
+                coefficient: value,
+                exponent,
+            } => write!(f, "{}e{}", value, exponent),
             Token::Char(ref c) => write!(f, "{}", c),
             Token::SingleQuotedString(ref s) => write!(f, "'{}'", s),
             Token::NationalStringLiteral(ref s) => write!(f, "N'{}'", s),
@@ -465,7 +471,10 @@ impl<'a> Tokenizer<'a> {
                                 chars.next();
                             }
                             exponent += &peeking_take_while(chars, |ch| matches!(ch, '0'..='9'));
-                            return Ok(Some(Token::ScientificNumber { value: s, exponent }));
+                            return Ok(Some(Token::ScientificNumber {
+                                coefficient: s,
+                                exponent,
+                            }));
                         }
                         // Not a scientific number
                         _ => {}

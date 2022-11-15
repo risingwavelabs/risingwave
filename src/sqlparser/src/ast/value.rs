@@ -25,7 +25,7 @@ pub enum Value {
     Number(String),
     /// Scientific numeric literal
     ScientificNumber {
-        value: String,
+        coefficient: String,
         exponent: String,
     },
     /// 'string value'
@@ -65,7 +65,10 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Number(v) => write!(f, "{}", v),
-            Value::ScientificNumber { value, exponent } => write!(f, "{}e{}", value, exponent),
+            Value::ScientificNumber {
+                coefficient,
+                exponent,
+            } => write!(f, "{}e{}", coefficient, exponent),
             Value::DoubleQuotedString(v) => write!(f, "\"{}\"", v),
             Value::SingleQuotedString(v) => write!(f, "'{}'", escape_single_quote_string(v)),
             Value::NationalStringLiteral(v) => write!(f, "N'{}'", v),
