@@ -28,7 +28,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, user_key, FullKey, TableKey, TableKeyRange, UserKey,
 };
-use risingwave_hummock_sdk::{can_concat, HummockEpoch};
+use risingwave_hummock_sdk::{can_concat, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 
 use super::memtable::{ImmId, ImmutableMemtable};
@@ -42,9 +42,7 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::store::state_store::HummockStorageIterator;
-use crate::hummock::utils::{
-    check_subset_preserve_order, filter_single_sst, prune_ssts, range_overlap, search_sst_idx,
-};
+use crate::hummock::utils::{filter_single_sst, prune_ssts, range_overlap, search_sst_idx};
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, DeleteRangeAggregator,
     SstableDeleteRangeIterator, SstableIterator,
@@ -62,21 +60,20 @@ pub type CommittedVersion = PinnedVersion;
 /// - Uncommitted SST: data that has been uploaded to persistent storage but not committed to
 ///   hummock version.
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StagingSstableInfo {
     // newer data comes first
-    sstable_infos: Vec<SstableInfo>,
+    sstable_infos: Vec<LocalSstableInfo>,
     /// Epochs whose data are included in the Sstable. The newer epoch comes first.
     /// The field must not be empty.
     epochs: Vec<HummockEpoch>,
-    #[allow(dead_code)]
     imm_ids: Vec<ImmId>,
     imm_size: usize,
 }
 
 impl StagingSstableInfo {
     pub fn new(
-        sstable_infos: Vec<SstableInfo>,
+        sstable_infos: Vec<LocalSstableInfo>,
         epochs: Vec<HummockEpoch>,
         imm_ids: Vec<ImmId>,
         imm_size: usize,
@@ -91,12 +88,20 @@ impl StagingSstableInfo {
         }
     }
 
-    pub fn sstable_infos(&self) -> &Vec<SstableInfo> {
+    pub fn sstable_infos(&self) -> &Vec<LocalSstableInfo> {
         &self.sstable_infos
     }
 
     pub fn imm_size(&self) -> usize {
         self.imm_size
+    }
+
+    pub fn epochs(&self) -> &Vec<HummockEpoch> {
+        &self.epochs
+    }
+
+    pub fn imm_ids(&self) -> &Vec<ImmId> {
+        &self.imm_ids
     }
 }
 
@@ -162,6 +167,7 @@ impl StagingVersion {
                 staging_sst
                     .sstable_infos
                     .iter()
+                    .map(|sstable| &sstable.sst_info)
                     .filter(move |sstable| filter_single_sst(sstable, table_id, table_key_range))
             });
         (overlapped_imms, overlapped_ssts)
@@ -245,7 +251,7 @@ impl HummockReadVersion {
                         .sorted()
                         .collect();
                     let intersection =
-                        staging_imm_ids_from_sst.intersection(&staging_imm_ids_from_imms);
+                        staging_imm_ids_from_imms.intersection(&staging_imm_ids_from_sst);
 
                     if intersection.count() > 0 {
                         let imm_id_set: HashSet<ImmId> =

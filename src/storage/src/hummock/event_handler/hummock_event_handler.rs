@@ -19,13 +19,11 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use futures::future::{select, Either};
 use futures::FutureExt;
-use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::pin_version_response::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
@@ -34,11 +32,10 @@ use tracing::{error, info};
 use crate::hummock::compactor::{compact, Context};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, TaskInfo, TaskPayload, UploaderEvent,
+    HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::UncommittedData;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::hummock::store::version::{
@@ -59,6 +56,11 @@ impl BufferTracker {
     pub fn from_storage_config(config: &StorageConfig) -> Self {
         let capacity = config.shared_buffer_capacity_mb as usize * (1 << 20);
         let flush_threshold = capacity * 4 / 5;
+        Self::new(capacity, flush_threshold)
+    }
+
+    pub fn new(capacity: usize, flush_threshold: usize) -> Self {
+        assert!(capacity >= flush_threshold);
         Self {
             flush_threshold,
             global_buffer: Arc::new(MemoryLimiter::new(capacity as u64)),
@@ -568,12 +570,6 @@ fn to_sync_result(
                 uncommitted_ssts: staging_sstable_infos
                     .iter()
                     .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
-                    .map(|sstable_info| {
-                        (
-                            StaticCompactionGroupId::StateDefault as CompactionGroupId,
-                            sstable_info,
-                        )
-                    })
                     .collect(),
             })
         }

@@ -168,61 +168,6 @@ pub async fn compute_node_serve(
                 Compactor::start_compactor(compactor_context, hummock_meta_client);
             sub_tasks.push((handle, shutdown_sender));
         }
-        let memory_limiter = storage.inner().get_memory_limiter();
-        let memory_collector = Arc::new(HummockMemoryCollector::new(
-            storage.sstable_store(),
-            memory_limiter,
-        ));
-        monitor_cache(memory_collector, &registry).unwrap();
-    } else if let StateStoreImpl::HummockStateStoreV1(storage) = &state_store {
-        extra_info_sources.push(storage.sstable_id_manager());
-        // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
-        // compactor along with compute node.
-        if opts.state_store == "hummock+memory"
-            || opts.state_store.starts_with("hummock+disk")
-            || storage_config.disable_remote_compactor
-        {
-            tracing::info!("start embedded compactor");
-            let read_memory_limiter = Arc::new(MemoryLimiter::new(
-                storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
-            ));
-            // todo: set shutdown_sender in HummockStorage.
-            let write_memory_limit =
-                storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2;
-            let context = Arc::new(Context {
-                options: storage_config,
-                hummock_meta_client: hummock_meta_client.clone(),
-                sstable_store: storage.sstable_store(),
-                stats: state_store_metrics.clone(),
-                is_share_buffer_compact: false,
-                compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-                filter_key_extractor_manager: storage
-                    .inner()
-                    .filter_key_extractor_manager()
-                    .clone(),
-                read_memory_limiter,
-                sstable_id_manager: storage.sstable_id_manager(),
-                task_progress_manager: Default::default(),
-                #[cfg(not(madsim))]
-                tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
-            });
-            // TODO: use normal sstable store for single-process mode.
-            let compactor_sstable_store = CompactorSstableStore::new(
-                storage.sstable_store(),
-                Arc::new(MemoryLimiter::new(write_memory_limit)),
-            );
-            let compactor_context = Arc::new(CompactorContext::with_config(
-                context,
-                Arc::new(compactor_sstable_store),
-                CompactorRuntimeConfig {
-                    max_concurrent_task_number: 1,
-                },
-            ));
-
-            let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client);
-            sub_tasks.push((handle, shutdown_sender));
-        }
         let memory_limiter = storage.get_memory_limiter();
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),

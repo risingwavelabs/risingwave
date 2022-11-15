@@ -38,6 +38,7 @@ use crate::storage_value::StorageValue;
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 pub type SharedBufferBatchId = u64;
 
+#[derive(Debug)]
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     range_tombstone_list: Vec<DeleteRangeTombstone>,
@@ -86,16 +87,6 @@ impl Deref for SharedBufferBatchInner {
 
     fn deref(&self) -> &Self::Target {
         self.payload.as_slice()
-    }
-}
-
-impl Debug for SharedBufferBatchInner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "SharedBufferBatchInner {{ payload: {:?}, size: {} }}",
-            self.payload, self.size
-        )
     }
 }
 

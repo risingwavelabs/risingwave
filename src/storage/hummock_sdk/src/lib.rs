@@ -72,6 +72,14 @@ impl LocalSstableInfo {
         }
     }
 
+    pub fn for_test(sst_info: SstableInfo) -> Self {
+        Self {
+            compaction_group_id: StaticCompactionGroupId::StateDefault as CompactionGroupId,
+            sst_info,
+            table_stats: Default::default(),
+        }
+    }
+
     pub fn with_stats(sstable_info: SstableInfo, table_stats: HashMap<u32, TableStats>) -> Self {
         Self {
             compaction_group_id: StaticCompactionGroupId::StateDefault as CompactionGroupId,

@@ -176,6 +176,7 @@ impl LocalVersionManager {
     /// Return:
     ///   - Some(task join handle) when there is new upload task
     ///   - None when there is no new task
+    #[expect(dead_code)]
     pub(in crate::hummock) fn flush_shared_buffer(
         self: Arc<Self>,
     ) -> Option<(HummockEpoch, JoinHandle<()>)> {
@@ -294,6 +295,7 @@ impl LocalVersionManager {
         }
     }
 
+    #[expect(dead_code)]
     async fn run_flush_upload_task(
         &self,
         order_index: OrderIndex,
