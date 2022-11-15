@@ -25,7 +25,7 @@ use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
+use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
@@ -46,6 +46,7 @@ use risingwave_stream::executor::{
     ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
+use risingwave_common::row::Row;
 
 struct SingleChunkExecutor {
     chunk: Option<DataChunk>,

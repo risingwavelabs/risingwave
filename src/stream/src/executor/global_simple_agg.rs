@@ -14,17 +14,18 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Row, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{
-    agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage,
+    agg_call_filter_res, AggChangesInfo, AggStateStorage, iter_table_storage,
 };
 use super::*;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup};
+use crate::executor::aggregation::{AggCall, AggGroup, generate_agg_schema};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
 

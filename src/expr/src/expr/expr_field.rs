@@ -15,13 +15,14 @@
 use std::convert::TryFrom;
 
 use anyhow::anyhow;
-use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, Row};
+use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
-use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
+use crate::expr::{BoxedExpression, build_from_prost as expr_build_from_prost, Expression};
 use crate::{bail, ensure, ExprError, Result};
 
 /// `FieldExpression` access a field from a struct.

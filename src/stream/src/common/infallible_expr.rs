@@ -14,11 +14,12 @@
 
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk, Row};
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::Expression;
 use risingwave_expr::ExprError;
 use static_assertions::const_assert;
+use risingwave_common::row::Row;
 
 pub trait InfallibleExpression: Expression {
     fn eval_infallible(&self, input: &DataChunk, on_err: impl Fn(ExprError)) -> ArrayRef {

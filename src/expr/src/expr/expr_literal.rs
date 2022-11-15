@@ -15,9 +15,10 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk, Row};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::for_all_variants;
-use risingwave_common::types::{literal_type_match, DataType, Datum, Scalar, ScalarImpl};
+use risingwave_common::row::Row;
+use risingwave_common::types::{DataType, Datum, literal_type_match, Scalar, ScalarImpl};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;

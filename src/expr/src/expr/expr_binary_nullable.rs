@@ -175,7 +175,7 @@ pub fn new_not_distinct_from_expr(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::Row;
+    use risingwave_common::row::Row;
     use risingwave_common::types::Scalar;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type;

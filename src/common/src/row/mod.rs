@@ -12,9 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod vec_datum;
+
+pub use vec_datum::{Row, RowDeserializer};
+
 /// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
 /// Executors need to serialize Row into `CompactedRow` before writing into cache.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct CompactedRow {
     pub row: Vec<u8>,
+}
+
+impl From<&Row> for CompactedRow {
+    fn from(row: &Row) -> Self {
+        Self {
+            row: row.serialize(&None),
+        }
+    }
 }

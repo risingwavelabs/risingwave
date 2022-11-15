@@ -16,11 +16,12 @@ use std::borrow::Cow;
 
 use itertools::Itertools;
 
-use crate::array::{Row, RowRef};
+use crate::array::RowRef;
 use crate::error::Result;
+use crate::row::Row;
 use crate::types::{
-    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
-    DatumRef,
+    DataType, Datum, DatumRef, deserialize_datum_from, serialize_datum_into,
+    serialize_datum_ref_into,
 };
 use crate::util::sort_util::OrderType;
 /// `OrderedRowSerde` is responsible for serializing and deserializing Ordered Row.

@@ -22,7 +22,6 @@ use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::types::{Datum, VirtualNode};
@@ -31,6 +30,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
+use risingwave_common::row::{Row, RowDeserializer};
 
 use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
@@ -38,7 +38,7 @@ use crate::keyspace::ExtractTableKeyIterator;
 use crate::row_serde::row_serde_util::{
     parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
-use crate::row_serde::{find_columns_by_ids, ColumnMapping};
+use crate::row_serde::{ColumnMapping, find_columns_by_ids};
 use crate::store::ReadOptions;
 use crate::table::{compute_vnode, Distribution, TableIter};
 use crate::{Keyspace, StateStore, StateStoreIter};

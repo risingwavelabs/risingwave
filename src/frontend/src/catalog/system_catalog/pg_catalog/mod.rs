@@ -40,7 +40,7 @@ pub use pg_operator::*;
 pub use pg_type::*;
 pub use pg_user::*;
 pub use pg_views::*;
-use risingwave_common::array::Row;
+use risingwave_common::row::Row;
 use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
 use risingwave_pb::user::grant_privilege::{Action, Object};

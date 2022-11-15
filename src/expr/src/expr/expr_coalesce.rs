@@ -16,12 +16,13 @@ use std::convert::TryFrom;
 use std::ops::BitAnd;
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk, Row, Vis, VisRef};
+use risingwave_common::array::{ArrayRef, DataChunk, Vis, VisRef};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
-use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
+use crate::expr::{BoxedExpression, build_from_prost as expr_build_from_prost, Expression};
 use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
@@ -112,7 +113,8 @@ impl<'a> TryFrom<&'a ExprNode> for CoalesceExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{DataChunk, Row};
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{Scalar, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;

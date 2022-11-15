@@ -15,10 +15,10 @@
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use paste::paste;
-use risingwave_common::array::{ListValue, Row};
+use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, Scalar};
-use risingwave_expr::expr::{build_from_prost, AggKind};
+use risingwave_expr::expr::{AggKind, build_from_prost};
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 
 mod agg_call;
@@ -54,8 +54,8 @@ pub use expr_mutator::ExprMutator;
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
 pub use type_inference::{
-    agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_type,
-    least_restrictive, AggFuncSig, CastContext, CastSig, FuncSign,
+    agg_func_sigs, AggFuncSig, align_types, cast_map_array, cast_ok, cast_sigs, CastContext,
+    CastSig, func_sigs, FuncSign, infer_type, least_restrictive,
 };
 pub use utils::*;
 
@@ -734,6 +734,7 @@ macro_rules! assert_eq_input_ref {
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
 
 use crate::utils::Condition;
 

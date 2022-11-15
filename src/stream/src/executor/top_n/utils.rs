@@ -18,10 +18,10 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::CompactedRow;
+use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
@@ -31,7 +31,7 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use super::top_n_cache::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, expect_first_barrier, Message,
     PkIndices, PkIndicesRef,
 };
 

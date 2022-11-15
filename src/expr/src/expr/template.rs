@@ -17,13 +17,14 @@
 use std::fmt;
 use std::sync::Arc;
 
-use itertools::{multizip, Itertools};
+use itertools::{Itertools, multizip};
 use paste::paste;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk, Row, Utf8Array,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk, Utf8Array,
     Utf8ArrayBuilder,
 };
-use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
+use risingwave_common::row::Row;
+use risingwave_common::types::{DataType, Datum, option_as_scalar_ref, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
 

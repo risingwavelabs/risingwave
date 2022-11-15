@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use itertools::Itertools;
-use risingwave_common::array::Row;
+use risingwave_common::row::Row;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, Result};
