@@ -745,10 +745,10 @@ export const ExprNode = {
       rexNode: isSet(object.inputRef)
         ? { $case: "inputRef", inputRef: InputRefExpr.fromJSON(object.inputRef) }
         : isSet(object.constant)
-          ? { $case: "constant", constant: Datum.fromJSON(object.constant) }
-          : isSet(object.funcCall)
-            ? { $case: "funcCall", funcCall: FunctionCall.fromJSON(object.funcCall) }
-            : undefined,
+        ? { $case: "constant", constant: Datum.fromJSON(object.constant) }
+        : isSet(object.funcCall)
+        ? { $case: "funcCall", funcCall: FunctionCall.fromJSON(object.funcCall) }
+        : undefined,
     };
   },
 
@@ -870,8 +870,8 @@ export const ProjectSetSelectItem = {
       selectItem: isSet(object.expr)
         ? { $case: "expr", expr: ExprNode.fromJSON(object.expr) }
         : isSet(object.tableFunction)
-          ? { $case: "tableFunction", tableFunction: TableFunction.fromJSON(object.tableFunction) }
-          : undefined,
+        ? { $case: "tableFunction", tableFunction: TableFunction.fromJSON(object.tableFunction) }
+        : undefined,
     };
   },
 
