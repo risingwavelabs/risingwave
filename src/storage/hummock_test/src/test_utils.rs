@@ -107,8 +107,8 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
         let (hummock_version, hummock_version_version) = {
             let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
             let hummock_version = hummock_manager_guard.current_version.clone();
-            let notification_verison = self.notification_manager.current_version().await;
-            (hummock_version, notification_verison)
+            let notification_version = self.notification_manager.current_version().await;
+            (hummock_version, notification_version)
         };
         let meta_snapshot = MetaSnapshot {
             hummock_version: Some(hummock_version),
