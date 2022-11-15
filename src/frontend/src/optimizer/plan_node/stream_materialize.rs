@@ -84,6 +84,7 @@ impl StreamMaterialize {
         out_names: Vec<String>,
         is_index: bool,
         definition: String,
+        handle_pk_conflict: bool,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
@@ -184,7 +185,7 @@ impl StreamMaterialize {
             vnode_col_idx: None,
             value_indices,
             definition,
-            handle_pk_conflict: false,
+            handle_pk_conflict,
         };
 
         Ok(Self { base, input, table })
