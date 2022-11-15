@@ -183,6 +183,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         source_manager.clone(),
         insert_inner,
         "InsertExecutor".to_string(),
+        vec![], // ignore insertion order
     ));
 
     tokio::spawn(async move {

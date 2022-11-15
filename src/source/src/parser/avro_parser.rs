@@ -18,8 +18,6 @@ use std::path::Path;
 use apache_avro::types::Value;
 use apache_avro::{Reader, Schema};
 use chrono::{Datelike, NaiveDate};
-use hyper::http::uri::InvalidUri;
-use hyper_tls::HttpsConnector;
 use itertools::Itertools;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{
@@ -311,22 +309,25 @@ pub fn read_schema_from_local(path: impl AsRef<Path>) -> Result<String> {
 
 /// Read avro schema file from local file.For common usage.
 async fn read_schema_from_https(location: &Url) -> Result<String> {
-    let client = hyper::Client::builder().build::<_, hyper::Body>(HttpsConnector::new());
-    let res = client
-        .get(
-            location
-                .to_string()
-                .parse()
-                .map_err(|e: InvalidUri| InvalidParameterValue(e.to_string()))?,
-        )
-        .await
-        .map_err(|e| {
-            InvalidParameterValue(format!("failed to read from URL {}: {}", location, e))
-        })?;
-    let buf = hyper::body::to_bytes(res)
+    let res = reqwest::get(location.clone()).await.map_err(|e| {
+        InvalidParameterValue(format!(
+            "failed to make request to URL: {}, err: {}",
+            location, e
+        ))
+    })?;
+    if !res.status().is_success() {
+        return Err(RwError::from(InvalidParameterValue(format!(
+            "Http request err, URL: {}, status code: {}",
+            location,
+            res.status()
+        ))));
+    }
+    let body = res
+        .bytes()
         .await
         .map_err(|e| InvalidParameterValue(format!("failed to read HTTP body: {}", e)))?;
-    String::from_utf8(buf.into()).map_err(|e| {
+
+    String::from_utf8(body.into()).map_err(|e| {
         RwError::from(InternalError(format!(
             "read schema string from https failed {}",
             e

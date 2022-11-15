@@ -28,6 +28,7 @@ use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
 use smallvec::SmallVec;
 
 use super::ops::IsNegative;
+use super::to_binary::ToBinary;
 use super::*;
 use crate::error::{ErrorCode, Result, RwError};
 
@@ -464,10 +465,6 @@ impl Display for IntervalUnit {
         let years = self.months / 12;
         let months = self.months % 12;
         let days = self.days;
-        let hours = self.ms / 1000 / 3600;
-        let minutes = (self.ms / 1000 / 60) % 60;
-        let seconds = self.ms % 60000 / 1000;
-        let mut secs_fract = self.ms % 1000;
         let mut v = SmallVec::<[String; 4]>::new();
         if years == 1 {
             v.push(format!("{years} year"));
@@ -484,15 +481,20 @@ impl Display for IntervalUnit {
         } else if days != 0 {
             v.push(format!("{days} days"));
         }
-        let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
-        if secs_fract != 0 {
-            write!(format_time, ".{:03}", secs_fract)?;
-            while secs_fract % 10 == 0 {
-                secs_fract /= 10;
-                format_time.pop();
+        if self.ms != 0 || self.months == 0 && self.days == 0 {
+            let hours = self.ms / 1000 / 3600;
+            let minutes = (self.ms / 1000 / 60) % 60;
+            let seconds = self.ms % 60000 / 1000;
+            let secs_fract = self.ms % 1000;
+            let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
+            if secs_fract != 0 {
+                write!(format_time, ".{:03}", secs_fract)?;
+                while format_time.ends_with('0') {
+                    format_time.pop();
+                }
             }
+            v.push(format_time);
         }
-        v.push(format_time);
         Display::fmt(&v.join(" "), f)
     }
 }
@@ -532,6 +534,14 @@ impl<'a> FromSql<'a> for IntervalUnit {
 
     fn accepts(ty: &Type) -> bool {
         matches!(*ty, Type::INTERVAL)
+    }
+}
+
+impl ToBinary for IntervalUnit {
+    fn to_binary(&self) -> Option<Bytes> {
+        let mut output = BytesMut::new();
+        self.to_sql(&Type::ANY, &mut output).unwrap();
+        Some(output.freeze())
     }
 }
 
@@ -892,9 +902,16 @@ mod tests {
 
     #[test]
     fn test_to_string() {
-        let interval =
-            IntervalUnit::new(-14, 3, 11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233);
-        assert_eq!(interval.to_string(), "-1 years -2 mons 3 days 11:45:14.233");
+        assert_eq!(
+            IntervalUnit::new(-14, 3, 11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233)
+                .to_string(),
+            "-1 years -2 mons 3 days 11:45:14.233"
+        );
+        assert_eq!(
+            IntervalUnit::new(-14, 3, 0).to_string(),
+            "-1 years -2 mons 3 days"
+        );
+        assert_eq!(IntervalUnit::default().to_string(), "00:00:00");
     }
 
     #[test]

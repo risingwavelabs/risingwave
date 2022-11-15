@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use bytes::Bytes;
+use nexmark::event::Event;
 
-use crate::source::nexmark::source::event::Event;
 use crate::source::{SourceMessage, SplitId};
 
 #[derive(Clone, Debug)]
@@ -39,7 +39,13 @@ impl NexmarkMessage {
         NexmarkMessage {
             split_id,
             sequence_number: offset.to_string(),
-            payload: event.to_json().into(),
+            payload: match &event {
+                Event::Person(p) => serde_json::to_string(p),
+                Event::Auction(a) => serde_json::to_string(a),
+                Event::Bid(b) => serde_json::to_string(b),
+            }
+            .unwrap()
+            .into(),
         }
     }
 }
