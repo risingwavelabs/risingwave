@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use bytes::{Buf, Bytes};
 use itertools::Itertools;
-use risingwave_common::array::RowDeserializer;
+use risingwave_common::row::RowDeserializer;
 use risingwave_common::types::to_datum_ref;
 use risingwave_common::types::to_text::ToText;
 use risingwave_frontend::TableCatalog;
