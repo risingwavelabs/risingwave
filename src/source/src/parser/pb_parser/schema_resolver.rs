@@ -67,7 +67,7 @@ pub(super) async fn load_file_descriptor_from_s3(
     Ok(body.into_bytes().to_vec())
 }
 
-pub(super) async fn load_file_descriptor_from_https(location: &Url) -> Result<Vec<u8>> {
+pub(super) async fn load_file_descriptor_from_http(location: &Url) -> Result<Vec<u8>> {
     let res = reqwest::get(location.clone()).await.map_err(|e| {
         InvalidParameterValue(format!(
             "failed to make request to URL: {}, err: {}",

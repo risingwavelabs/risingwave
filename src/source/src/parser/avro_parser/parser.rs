@@ -31,27 +31,11 @@ use url::Url;
 
 use super::schema_resolver::*;
 use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::util::get_kafka_topic;
 use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 fn unix_epoch_days() -> i32 {
     NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()
-}
-
-fn get_kafka_topic(props: &HashMap<String, String>) -> Result<&String> {
-    const KAFKA_TOPIC_KEY1: &str = "kafka.topic";
-    const KAFKA_TOPIC_KEY2: &str = "topic";
-
-    if let Some(topic) = props.get(KAFKA_TOPIC_KEY1) {
-        return Ok(topic);
-    }
-    if let Some(topic) = props.get(KAFKA_TOPIC_KEY2) {
-        return Ok(topic);
-    }
-
-    Err(RwError::from(ProtocolError(format!(
-        "Must specify '{}' or '{}'",
-        KAFKA_TOPIC_KEY1, KAFKA_TOPIC_KEY2,
-    ))))
 }
 
 #[derive(Debug)]
@@ -80,7 +64,7 @@ impl AvroParser {
             let schema_content = match url.scheme() {
                 "file" => read_schema_from_local(url.path()),
                 "s3" => read_schema_from_s3(&url, props).await,
-                "https" => read_schema_from_https(&url).await,
+                "https" | "http" => read_schema_from_http(&url).await,
                 scheme => Err(RwError::from(ProtocolError(format!(
                     "path scheme {} is not supported",
                     scheme
@@ -284,7 +268,7 @@ impl SourceParser for AvroParser {
         let avro_value = if let Some(resolver) = &self.schema_resolver {
             let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
             let writer_schema = resolver.get(schema_id).await?;
-            from_avro_datum(writer_schema.value(), &mut raw_payload, Some(&self.schema))
+            from_avro_datum(writer_schema.as_ref(), &mut raw_payload, Some(&self.schema))
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
         } else {
             let mut reader = Reader::with_schema(&self.schema, payload)
@@ -338,7 +322,7 @@ mod test {
     use url::Url;
 
     use super::{
-        read_schema_from_https, read_schema_from_local, read_schema_from_s3, unix_epoch_days,
+        read_schema_from_http, read_schema_from_local, read_schema_from_s3, unix_epoch_days,
         AvroParser,
     };
     use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
@@ -385,7 +369,7 @@ mod test {
         let schema_location =
             "https://mingchao-schemas.s3.ap-southeast-1.amazonaws.com/complex-schema.avsc";
         let url = Url::parse(schema_location).unwrap();
-        let schema_content = read_schema_from_https(&url).await;
+        let schema_content = read_schema_from_http(&url).await;
         assert!(schema_content.is_ok());
         let schema = Schema::parse_str(&schema_content.unwrap());
         assert!(schema.is_ok());

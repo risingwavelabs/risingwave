@@ -29,6 +29,7 @@ use url::Url;
 
 use super::schema_resolver::*;
 use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::util::get_kafka_topic;
 use crate::{SourceParser, WriteGuard};
 
 #[derive(Debug, Clone)]
@@ -48,8 +49,13 @@ impl ProtobufParser {
             .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
 
         let schema_bytes = if use_schema_registry {
+            let kafka_topic = get_kafka_topic(&props)?;
             let client = Client::new(url)?;
-            compile_file_descriptor_from_schema_registry("proto_c_bin-value", &client).await?
+            compile_file_descriptor_from_schema_registry(
+                format!("{}-value", kafka_topic).as_str(),
+                &client,
+            )
+            .await?
         } else {
             match url.scheme() {
                 // TODO(Tao): support local file only when it's compiled in debug mode.
@@ -66,7 +72,7 @@ impl ProtobufParser {
                     Self::local_read_to_bytes(&path)
                 }
                 "s3" => load_file_descriptor_from_s3(&url, props).await,
-                "https" => load_file_descriptor_from_https(&url).await,
+                "https" | "http" => load_file_descriptor_from_http(&url).await,
                 scheme => Err(RwError::from(ProtocolError(format!(
                     "path scheme {} is not supported",
                     scheme

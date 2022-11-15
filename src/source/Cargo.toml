@@ -14,7 +14,6 @@ byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 crc32fast = "1"
-crossbeam-skiplist = { git = "https://github.com/crossbeam-rs/crossbeam", rev = "f00bae195cf606fa268a0a5800f08c7e5359fc8a" }
 enum-as-inner = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -22,6 +21,7 @@ futures-async-stream = "0.2"
 itertools = "0.10"
 maplit = "1"
 memcomparable = { path = "../utils/memcomparable" }
+moka = { version = "0.9", features = ["future"] }
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"

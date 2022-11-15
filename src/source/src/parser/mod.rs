@@ -36,6 +36,7 @@ mod json_parser;
 mod maxwell;
 mod pb_parser;
 mod schema_registry;
+mod util;
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,

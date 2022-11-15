@@ -14,10 +14,10 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use apache_avro::Schema;
-use crossbeam_skiplist::map::Entry;
-use crossbeam_skiplist::SkipMap;
+use moka::future::Cache;
 use risingwave_common::error::ErrorCode::{
     InternalError, InvalidConfigValue, InvalidParameterValue, ProtocolError,
 };
@@ -72,7 +72,7 @@ pub(super) fn read_schema_from_local(path: impl AsRef<Path>) -> Result<String> {
 }
 
 /// Read avro schema file from local file.For common usage.
-pub(super) async fn read_schema_from_https(location: &Url) -> Result<String> {
+pub(super) async fn read_schema_from_http(location: &Url) -> Result<String> {
     let res = reqwest::get(location.clone()).await.map_err(|e| {
         InvalidParameterValue(format!(
             "failed to make request to URL: {}, err: {}",
@@ -101,7 +101,7 @@ pub(super) async fn read_schema_from_https(location: &Url) -> Result<String> {
 
 #[derive(Debug)]
 pub struct ConfluentSchemaResolver {
-    writer_schemas: SkipMap<i32, Schema>,
+    writer_schemas: Cache<i32, Arc<Schema>>,
     confluent_client: Client,
 }
 
@@ -112,24 +112,31 @@ impl ConfluentSchemaResolver {
         let schema = Schema::parse_str(&cf_schema.raw)
             .map_err(|e| RwError::from(ProtocolError(format!("Avro schema parse error {}", e))))?;
         let resolver = ConfluentSchemaResolver {
-            writer_schemas: SkipMap::new(),
+            writer_schemas: Cache::new(u64::MAX),
             confluent_client: client,
         };
-        resolver.writer_schemas.insert(cf_schema.id, schema.clone());
+        resolver
+            .writer_schemas
+            .insert(cf_schema.id, Arc::new(schema.clone()))
+            .await;
         Ok((schema, resolver))
     }
 
     // get the writer schema by id
-    pub async fn get(&self, schema_id: i32) -> Result<Entry<'_, i32, Schema>> {
-        if let Some(entry) = self.writer_schemas.get(&schema_id) {
-            Ok(entry)
+    pub async fn get(&self, schema_id: i32) -> Result<Arc<Schema>> {
+        if let Some(schema) = self.writer_schemas.get(&schema_id) {
+            Ok(schema)
         } else {
             let cf_schema = self.confluent_client.get_schema_by_id(schema_id).await?;
 
             let schema = Schema::parse_str(&cf_schema.raw).map_err(|e| {
                 RwError::from(ProtocolError(format!("Avro schema parse error {}", e)))
             })?;
-            Ok(self.writer_schemas.get_or_insert(schema_id, schema))
+            let schema = Arc::new(schema);
+            self.writer_schemas
+                .insert(schema_id, Arc::clone(&schema))
+                .await;
+            Ok(schema)
         }
     }
 }
