@@ -15,8 +15,11 @@
 use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use chrono::prelude::Local;
+use futures::future::join_all;
+use risingwave_common::error::RwError;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::ProfilingResponse;
 use risingwave_rpc_client::ComputeClientPool;
@@ -32,35 +35,47 @@ pub async fn profile(sleep_s: u64) -> anyhow::Result<()> {
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = ComputeClientPool::default();
+    let clients = Arc::new(Mutex::new(ComputeClientPool::default()));
 
     let profile_root_path = PathBuf::from(&std::env::var("PREFIX_PROFILING")?);
     let dir_name = Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
     let dir_path = profile_root_path.join(dir_name);
     create_dir_all(&dir_path)?;
 
+    let mut profile_futs = vec![];
+
     // FIXME: the compute node may not be accessible directly from risectl, we may let the meta
     // service collect the reports from all compute nodes in the future.
     for cn in compute_nodes {
-        let client = clients.get(&cn).await?;
-        let response = client.profile(sleep_s).await;
-        let host_addr = cn.get_host().expect("Should have host address");
-        let node_name = format!(
-            "compute-node-{}-{}",
-            host_addr.get_host().replace('.', "-"),
-            host_addr.get_port()
-        );
-        let svg_file_name = format!("{}.svg", node_name);
-        match response {
-            Ok(ProfilingResponse { result }) => {
-                let mut file = File::create(dir_path.join(svg_file_name))?;
-                file.write_all(&result)?;
+        let client_pool = clients.lock().unwrap().clone();
+        let client = client_pool.get(&cn).await?;
+
+        let dir_path_ref = &dir_path;
+
+        let fut = async move {
+            let response = client.profile(sleep_s).await;
+            let host_addr = cn.get_host().expect("Should have host address");
+            let node_name = format!(
+                "compute-node-{}-{}",
+                host_addr.get_host().replace('.', "-"),
+                host_addr.get_port()
+            );
+            let svg_file_name = format!("{}.svg", node_name);
+            match response {
+                Ok(ProfilingResponse { result }) => {
+                    let mut file = File::create(dir_path_ref.join(svg_file_name))?;
+                    file.write_all(&result)?;
+                }
+                Err(err) => {
+                    tracing::error! {"Failed to get profiling result from {} with error {}", node_name, err.to_string()};
+                }
             }
-            Err(err) => {
-                tracing::error! {"Failed to get profiling result from {} with error {}", node_name, err.to_string()};
-            }
-        }
+            Ok::<_, RwError>(())
+        };
+        profile_futs.push(fut);
     }
+
+    let _ = join_all(profile_futs).await;
 
     println!("Profiling results are saved at {}", dir_path.display());
 
