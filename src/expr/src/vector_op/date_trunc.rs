@@ -37,14 +37,6 @@ pub fn date_trunc_timestamp(field: &str, ts: NaiveDateTimeWrapper) -> Result<Nai
 }
 
 #[inline]
-pub fn date_trunc_timestampz(
-    field: &str,
-    ts: NaiveDateTimeWrapper,
-) -> Result<NaiveDateTimeWrapper> {
-    date_trunc_timestamp(field, ts)
-}
-
-#[inline]
 pub fn date_trunc_interval(field: &str, interval: IntervalUnit) -> Result<IntervalUnit> {
     Ok(match field {
         "microseconds" => interval,

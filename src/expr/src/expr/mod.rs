@@ -106,7 +106,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
         | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
-        | ConcatOp | AtTimeZone | DateTrunc => build_binary_expr_prost(prost),
+        | ConcatOp | AtTimeZone => build_binary_expr_prost(prost),
         And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess => {
             build_nullable_binary_expr_prost(prost)
         }
@@ -124,6 +124,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
+        DateTrunc => build_date_trunc_expr(prost),
 
         // Dedicated types
         In => InExpression::try_from(prost).map(Expression::boxed),

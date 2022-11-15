@@ -41,17 +41,22 @@ millennium      2001-01-01 00:00:00
 statement error
 SELECT date_trunc('s', TIMESTAMP '2202-02-16 20:38:40.123456');
 
-# FIXME: support timezone
-
-# query T
-# SELECT date_trunc('day', TIMESTAMP WITH TIME ZONE '2001-02-16 20:38:40+00');
-# ----
-# 2001-02-16 00:00:00-05
-
-# query T
-# SELECT date_trunc('day', TIMESTAMP WITH TIME ZONE '2001-02-16 20:38:40+00', 'Australia/Sydney');
-# ----
-# 2001-02-16 08:00:00-05
+query T rowsort
+SELECT field, date_trunc(field, TIMESTAMP WITH TIME ZONE '2202-02-16 20:38:40.123456Z', 'Australia/Sydney') FROM t;
+----
+microseconds    2202-02-16 20:38:40.123456+00:00
+milliseconds    2202-02-16 20:38:40.123+00:00
+second          2202-02-16 20:38:40+00:00
+minute          2202-02-16 20:38:00+00:00
+hour            2202-02-16 20:00:00+00:00
+day             2202-02-16 13:00:00+00:00
+week            2202-02-14 13:00:00+00:00
+month           2202-01-31 13:00:00+00:00
+quarter         2201-12-31 13:00:00+00:00
+year            2201-12-31 13:00:00+00:00
+decade          2199-12-31 13:00:00+00:00
+century         2200-12-31 13:00:00+00:00
+millennium      2000-12-31 13:00:00+00:00
 
 statement ok
 DELETE FROM t WHERE field = 'week';
