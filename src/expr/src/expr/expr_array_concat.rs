@@ -17,11 +17,11 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, DataChunk, ListValue};
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, Datum, DatumRef, ScalarRefImpl, to_datum_ref};
+use risingwave_common::types::{to_datum_ref, DataType, Datum, DatumRef, ScalarRefImpl};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
-use crate::expr::{BoxedExpression, build_from_prost as expr_build_from_prost, Expression};
+use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
 use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug, Copy, Clone)]

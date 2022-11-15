@@ -18,13 +18,13 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::{bail, ensure};
-use risingwave_common::row::Row;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
-use crate::expr::{BoxedExpression, build_from_prost, Expression};
+use crate::expr::{build_from_prost, BoxedExpression, Expression};
 use crate::{ExprError, Result};
 
 #[derive(Debug)]

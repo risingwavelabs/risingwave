@@ -31,7 +31,7 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use super::top_n_cache::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, expect_first_barrier, Message,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
     PkIndices, PkIndicesRef,
 };
 

@@ -21,11 +21,11 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{
-    agg_call_filter_res, AggChangesInfo, AggStateStorage, iter_table_storage,
+    agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage,
 };
 use super::*;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{AggCall, AggGroup, generate_agg_schema};
+use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
 

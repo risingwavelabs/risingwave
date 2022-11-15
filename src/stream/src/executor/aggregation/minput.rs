@@ -21,6 +21,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
 use risingwave_common::types::{Datum, DatumRef, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -28,7 +29,6 @@ use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 use smallvec::SmallVec;
-use risingwave_common::row::Row;
 
 use super::state_cache::array_agg::ArrayAgg;
 use super::state_cache::extreme::ExtremeAgg;

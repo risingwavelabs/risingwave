@@ -39,7 +39,7 @@ use crate::collection::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VIRTUAL_NODE_COUNT, VirtualNode,
+    OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode, VIRTUAL_NODE_COUNT,
 };
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};

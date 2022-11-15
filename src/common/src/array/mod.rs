@@ -60,8 +60,7 @@ pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
 use crate::buffer::Bitmap;
-pub use crate::row::Row;
-pub use crate::row::RowDeserializer;
+pub use crate::row::{Row, RowDeserializer};
 use crate::types::*;
 pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 

@@ -189,8 +189,8 @@ mod tests {
 
     use futures::stream::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::row::Row;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
+    use risingwave_common::row::Row;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_hummock_sdk::HummockReadEpoch;

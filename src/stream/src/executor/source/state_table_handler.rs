@@ -15,9 +15,9 @@
 use std::ops::Deref;
 
 use bytes::Bytes;
-use risingwave_common::row::Row;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
+use risingwave_common::row::Row;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};

@@ -21,9 +21,8 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
-use risingwave_common::row::Row;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::row::CompactedRow;
+use risingwave_common::row::{CompactedRow, Row};
 use risingwave_common::types::{ScalarImpl, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::table::streaming_table::state_table::{

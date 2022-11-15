@@ -23,10 +23,11 @@ use std::sync::Arc;
 use async_stack_trace::StackTrace;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::{Itertools, izip};
+use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
+use risingwave_common::row::{Row, RowDeserializer};
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -36,7 +37,6 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_pb::catalog::Table;
 use tracing::trace;
-use risingwave_common::row::{Row, RowDeserializer};
 
 use super::mem_table::{MemTable, MemTableIter, RowOp};
 use crate::error::{StorageError, StorageResult};

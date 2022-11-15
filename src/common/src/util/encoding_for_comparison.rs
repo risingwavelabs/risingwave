@@ -17,7 +17,7 @@ use itertools::Itertools;
 use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::row::Row;
-use crate::types::{DataType, ScalarRefImpl, serialize_datum_ref_into};
+use crate::types::{serialize_datum_ref_into, DataType, ScalarRefImpl};
 use crate::util::sort_util::{OrderPair, OrderType};
 
 /// This function is used to check whether we can perform encoding on this type.

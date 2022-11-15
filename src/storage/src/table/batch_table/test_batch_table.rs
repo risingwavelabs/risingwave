@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use futures::pin_mut;
-use risingwave_common::row::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
+use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
