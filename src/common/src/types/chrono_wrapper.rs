@@ -434,12 +434,12 @@ impl NaiveDateTimeWrapper {
     /// let ts = "3202-05-16T20:38:40.123456789".parse().unwrap();
     /// assert_eq!(
     ///     NaiveDateTimeWrapper::new(ts).truncate_century().to_string(),
-    ///     "3200-01-01 00:00:00"
+    ///     "3201-01-01 00:00:00"
     /// );
     /// ```
     pub fn truncate_century(self) -> Self {
         NaiveDateTimeWrapper::new(
-            NaiveDate::from_ymd(self.0.year() / 100 * 100, 1, 1).and_hms(0, 0, 0),
+            NaiveDate::from_ymd((self.0.year() - 1) / 100 * 100 + 1, 1, 1).and_hms(0, 0, 0),
         )
     }
 
@@ -453,12 +453,12 @@ impl NaiveDateTimeWrapper {
     ///     NaiveDateTimeWrapper::new(ts)
     ///         .truncate_millennium()
     ///         .to_string(),
-    ///     "3000-01-01 00:00:00"
+    ///     "3001-01-01 00:00:00"
     /// );
     /// ```
     pub fn truncate_millennium(self) -> Self {
         NaiveDateTimeWrapper::new(
-            NaiveDate::from_ymd(self.0.year() / 1000 * 1000, 1, 1).and_hms(0, 0, 0),
+            NaiveDate::from_ymd((self.0.year() - 1) / 1000 * 1000 + 1, 1, 1).and_hms(0, 0, 0),
         )
     }
 }
