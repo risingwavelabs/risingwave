@@ -3461,7 +3461,7 @@ dependencies = [
 name = "nexmark"
 version = "0.1.0"
 dependencies = [
- "chrono",
+ "criterion 0.4.0",
  "rand 0.8.5",
  "serde",
 ]
@@ -5191,6 +5191,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
+ "serde_json",
  "size",
  "tracing",
  "workspace-hack",

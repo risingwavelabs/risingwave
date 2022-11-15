@@ -212,6 +212,12 @@ pub(crate) struct GeneratorConfig {
     pub inter_event_delays: Vec<f32>,
 }
 
+impl Default for GeneratorConfig {
+    fn default() -> Self {
+        NexmarkConfig::default().into()
+    }
+}
+
 impl Deref for GeneratorConfig {
     type Target = NexmarkConfig;
 

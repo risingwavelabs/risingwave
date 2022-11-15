@@ -12,8 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod config_service;
-pub mod exchange_metrics;
-pub mod exchange_service;
-pub mod monitor_service;
-pub mod stream_service;
+use criterion::{criterion_group, criterion_main, Criterion};
+use nexmark::EventGenerator;
+
+criterion_group!(benches, nexmark_generator);
+criterion_main!(benches);
+
+fn nexmark_generator(c: &mut Criterion) {
+    c.bench_function("nexmark_generate_event", |bencher| {
+        let mut gen = EventGenerator::default();
+        bencher.iter(|| gen.next())
+    });
+}
