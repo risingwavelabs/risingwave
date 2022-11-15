@@ -465,10 +465,6 @@ impl Display for IntervalUnit {
         let years = self.months / 12;
         let months = self.months % 12;
         let days = self.days;
-        let hours = self.ms / 1000 / 3600;
-        let minutes = (self.ms / 1000 / 60) % 60;
-        let seconds = self.ms % 60000 / 1000;
-        let mut secs_fract = self.ms % 1000;
         let mut v = SmallVec::<[String; 4]>::new();
         if years == 1 {
             v.push(format!("{years} year"));
@@ -485,15 +481,20 @@ impl Display for IntervalUnit {
         } else if days != 0 {
             v.push(format!("{days} days"));
         }
-        let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
-        if secs_fract != 0 {
-            write!(format_time, ".{:03}", secs_fract)?;
-            while secs_fract % 10 == 0 {
-                secs_fract /= 10;
-                format_time.pop();
+        if self.ms != 0 {
+            let hours = self.ms / 1000 / 3600;
+            let minutes = (self.ms / 1000 / 60) % 60;
+            let seconds = self.ms % 60000 / 1000;
+            let secs_fract = self.ms % 1000;
+            let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
+            if secs_fract != 0 {
+                write!(format_time, ".{:03}", secs_fract)?;
+                while format_time.ends_with('0') {
+                    format_time.pop();
+                }
             }
+            v.push(format_time);
         }
-        v.push(format_time);
         Display::fmt(&v.join(" "), f)
     }
 }
