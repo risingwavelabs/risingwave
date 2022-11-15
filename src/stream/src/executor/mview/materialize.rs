@@ -178,18 +178,25 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 continue;
                             } else {
                                 // fill cache
-                                for key in buffer.get_keys() {
+                                for key_bytes in buffer.get_keys() {
                                     if self.materialize_cache.get(key).is_none() {
                                         // cache miss
-                                        let key_row =
-                                            self.state_table.pk_serde().deserialize(key).unwrap();
+
+                                        // computing vnode and get bloom filter's hint should random
+                                        // access the row, so before we find a better way, we should
+                                        // expose this logic.
+                                        let key = self
+                                            .state_table
+                                            .pk_serde()
+                                            .deserialize(key_bytes)
+                                            .unwrap();
                                         if let Some(storage_value) =
-                                            self.state_table.get_compacted_row(&key_row).await?
+                                            self.state_table.get_compacted_row(&key).await?
                                         {
                                             self.materialize_cache
                                                 .insert(key.clone(), Some(storage_value));
                                         } else {
-                                            self.materialize_cache.insert(key.clone(), None);
+                                            self.materialize_cache.insert(key_bytes.clone(), None);
                                         }
                                     }
                                 }
