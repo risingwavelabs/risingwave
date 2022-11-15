@@ -13,34 +13,35 @@ build-docker:
 	docker run -v ${PWD}/src:/risingwave/src -v ${PWD}/docker_bin:/risingwave/bin -v ${PWD}/docker_target:/risingwave/target -v ${PWD}/k8s_workflow:/risingwave/k8s_workflow --workdir /risingwave rwk8scont /bin/bash -c "./k8s_workflow/compile.sh"
 	./k8s_workflow/build.sh
 
-k8s-frontend-node: 
-	bash -c "docker save frontend-node | docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io images import --all-platforms -"
-	k -n rw-2-mytenant set image deployment/risingwave-compactor
-	kubectl -n rwc-2-mytenant delete --force -l risingwave/component=frontend
+k8s-frontend-node: build-docker
+	bash -c "docker save risingwave | docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io images import --all-platforms -"
+	k -n rwc-2-mytenant set image deployment/risingwave-frontend frontend=risingwave
+	kubectl -n rwc-2-mytenant delete pod --force -l risingwave/component=frontend
 	kubectl -n rwc-2-mytenant wait --for=condition=ready pod -l risingwave/component=frontend
 
-k8s-compactor-node: 
-	bash -c "docker save compactor-node | docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io images import --all-platforms -"
-	kubectl -n rwc-2-mytenant delete --force -l risingwave/component=compactor
+k8s-compactor-node: build-docker
+	bash -c "docker save risingwave | docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io images import --all-platforms -"
+	k -n rwc-2-mytenant set image deployment/risingwave-compactor compactor=risingwave
+	kubectl -n rwc-2-mytenant delete pod --force -l risingwave/component=compactor
 	kubectl -n rwc-2-mytenant wait --for=condition=ready pod -l risingwave/component=compactor
 
-k8s-meta-node:
-	bash -c "docker save meta-node | docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io images import --all-platforms -"
-	kubectl -n rwc-2-mytenant delete --force -l risingwave/component=meta
+k8s-meta-node: build-docker
+	bash -c "docker save risingwave | docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io images import --all-platforms -"
+	k -n rwc-2-mytenant set image deployment/risingwave-meta meta=risingwave
+	kubectl -n rwc-2-mytenant delete pod --force -l risingwave/component=meta
 	kubectl -n rwc-2-mytenant wait --for=condition=ready pod -l risingwave/component=meta
 
-k8s-compute-node:
-	bash -c "docker save compute-node | docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io images import --all-platforms -"
-	kubectl -n rwc-2-mytenant delete --force -l risingwave/component=compute
+# compute does not use deployment
+k8s-compute-node: build-docker
+	exit 1
+	bash -c "docker save risingwave | docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io images import --all-platforms -"
+	k -n rwc-2-mytenant set image pod/risingwave-compactor-o compute=risingwave
+	kubectl -n rwc-2-mytenant delete pod --force -l risingwave/component=compute
 	kubectl -n rwc-2-mytenant wait --for=condition=ready pod -l risingwave/component=compute
 
-# Is this the image for everything?
-k8s-risingwave:
-	exit 1
-
 # update all rw components and wait for ready status
-k8s-all: build-docker
-	
+# does not update k8s-compute-node
+k8s-all: k8s-meta-node k8s-compactor-node k8s-frontend-node
 
 # run this in case you run into "docker: no more space on device"
 prune: 
