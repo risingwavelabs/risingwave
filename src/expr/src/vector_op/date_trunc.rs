@@ -40,7 +40,7 @@ pub fn date_trunc_timestamp(field: &str, ts: NaiveDateTimeWrapper) -> Result<Nai
 pub fn date_trunc_interval(field: &str, interval: IntervalUnit) -> Result<IntervalUnit> {
     Ok(match field {
         "microseconds" => interval,
-        "milliseconds" => interval,
+        "milliseconds" => interval.truncate_millis(),
         "second" => interval.truncate_second(),
         "minute" => interval.truncate_minute(),
         "hour" => interval.truncate_hour(),

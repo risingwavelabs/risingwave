@@ -292,6 +292,28 @@ impl IntervalUnit {
         self > &Self::new(0, 0, 0)
     }
 
+    /// Truncate the interval to the precision of milliseconds.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::IntervalUnit;
+    /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
+    /// assert_eq!(
+    ///     interval.truncate_millis().to_string(),
+    ///     "5 years 1 mon 25 days 23:22:57.123"
+    /// );
+    /// ```
+    pub const fn truncate_millis(self) -> Self {
+        // for now it's just an identity function.
+        // it will take effect once microseconds precision is supported.
+        // https://github.com/risingwavelabs/risingwave/issues/4514
+        IntervalUnit {
+            months: self.months,
+            days: self.days,
+            ms: self.ms,
+        }
+    }
+
     /// Truncate the interval to the precision of seconds.
     ///
     /// # Example
