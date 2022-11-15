@@ -537,11 +537,16 @@ impl Compactor {
     where
         F: TableBuilderFactory,
     {
+        let del_iter = sst_builder.del_agg.iter();
+        let mut del_agg = DeleteRangeAggregator::new(del_iter, task_config.watermark);
+
         if !task_config.key_range.left.is_empty() {
-            iter.seek(FullKey::decode(&task_config.key_range.left))
-                .await?;
+            let full_key = FullKey::decode(&task_config.key_range.left);
+            iter.seek(full_key).await?;
+            del_agg.seek(full_key.user_key);
         } else {
             iter.rewind().await?;
+            del_agg.rewind();
         }
 
         let max_key = if task_config.key_range.right.is_empty() {
@@ -554,8 +559,6 @@ impl Compactor {
         let mut last_key = FullKey::default();
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
-        let del_iter = sst_builder.del_agg.iter();
-        let mut del_agg = DeleteRangeAggregator::new(del_iter, task_config.watermark);
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -588,7 +591,7 @@ impl Compactor {
             if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
                 || (epoch < task_config.watermark
                     && (watermark_can_see_last_key
-                        || del_agg.should_delete(iter_key.user_key, epoch)))
+                        || del_agg.should_delete(&iter_key.user_key, epoch)))
             {
                 drop = true;
             }

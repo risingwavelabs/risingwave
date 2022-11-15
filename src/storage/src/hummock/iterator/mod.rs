@@ -40,12 +40,14 @@ use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Thir
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::shared_buffer::SharedBufferIteratorType;
-use crate::hummock::{BackwardSstableIterator, SstableIterator, SstableIteratorType};
+use crate::hummock::{
+    BackwardSstableIterator, DeleteRangeAggregator, SstableIterator, SstableIteratorType,
+};
 
 mod delete_range_iterator;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
-pub use delete_range_iterator::DeleteRangeIterator;
+pub use delete_range_iterator::{DeleteRangeIterator, ForwardMergeRangeIterator};
 
 use crate::monitor::StoreLocalStatistic;
 
@@ -376,6 +378,7 @@ pub trait DirectedUserIteratorBuilder: 'static {
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
+        delete_range_agg: DeleteRangeAggregator<ForwardMergeRangeIterator>,
     ) -> DirectedUserIterator;
 }
 

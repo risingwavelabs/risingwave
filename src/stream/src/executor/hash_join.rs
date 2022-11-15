@@ -741,7 +741,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         if !key.null_bitmap().is_subset(ht.null_matched()) {
             Ok(None)
         } else {
-            ht.remove_state(key).await.map(Some)
+            ht.take_state(key).await.map(Some)
         }
     }
 
@@ -861,7 +861,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             yield Message::Chunk(chunk);
                         }
                         // Insert back the state taken from ht.
-                        side_match.ht.insert_state(key, matched_rows);
+                        side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
                         hashjoin_chunk_builder.forward_if_not_matched(op, &row)?
                     {
@@ -913,7 +913,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             yield Message::Chunk(chunk);
                         }
                         // Insert back the state taken from ht.
-                        side_match.ht.insert_state(key, matched_rows);
+                        side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
                         hashjoin_chunk_builder.forward_if_not_matched(op, &row)?
                     {
