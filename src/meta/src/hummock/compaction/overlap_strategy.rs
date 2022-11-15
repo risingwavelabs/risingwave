@@ -122,5 +122,5 @@ impl OverlapStrategy for RangeOverlapStrategy {
 
 fn check_table_overlap(key_range: &KeyRange, table: &SstableInfo) -> bool {
     let other = table.key_range.as_ref().unwrap();
-    key_range.full_key_overlap(other)
+    key_range.user_key_overlap(other)
 }
