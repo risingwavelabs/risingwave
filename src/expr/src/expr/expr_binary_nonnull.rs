@@ -25,6 +25,9 @@ use crate::expr::BoxedExpression;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
+use crate::vector_op::date_trunc::{
+    date_trunc_interval, date_trunc_timestamp, date_trunc_timestampz,
+};
 use crate::vector_op::extract::{
     extract_from_date, extract_from_timestamp, extract_from_timestampz,
 };
@@ -383,6 +386,40 @@ fn build_at_time_zone_expr(
     Ok(expr)
 }
 
+fn build_date_trunc_expr(
+    ret: DataType,
+    l: BoxedExpression,
+    r: BoxedExpression,
+) -> Result<BoxedExpression> {
+    let expr: BoxedExpression = match r.return_type() {
+        DataType::Timestamp => Box::new(BinaryExpression::<
+            Utf8Array,
+            NaiveDateTimeArray,
+            NaiveDateTimeArray,
+            _,
+        >::new(l, r, ret, date_trunc_timestamp)),
+        DataType::Timestampz => Box::new(BinaryExpression::<
+            Utf8Array,
+            NaiveDateTimeArray,
+            NaiveDateTimeArray,
+            _,
+        >::new(l, r, ret, date_trunc_timestampz)),
+        DataType::Interval => Box::new(BinaryExpression::<
+            Utf8Array,
+            IntervalArray,
+            IntervalArray,
+            _,
+        >::new(l, r, ret, date_trunc_interval)),
+        _ => {
+            return Err(ExprError::UnsupportedFunction(format!(
+                "date_trunc({:?}) is not supported yet!",
+                r.return_type()
+            )))
+        }
+    };
+    Ok(expr)
+}
+
 pub fn new_binary_expr(
     expr_type: Type,
     ret: DataType,
@@ -545,6 +582,7 @@ pub fn new_binary_expr(
         }
         Type::Extract => build_extract_expr(ret, l, r)?,
         Type::AtTimeZone => build_at_time_zone_expr(ret, l, r)?,
+        Type::DateTrunc => build_date_trunc_expr(ret, l, r)?,
         Type::RoundDigit => Box::new(
             BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
                 l,

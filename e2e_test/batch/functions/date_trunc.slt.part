@@ -1,0 +1,89 @@
+query T
+SELECT date_trunc('microseconds', TIMESTAMP '2001-02-16 20:38:40.123456');
+----
+2001-02-16 20:38:40.123456
+
+query T
+SELECT date_trunc('milliseconds', TIMESTAMP '2001-02-16 20:38:40.123456');
+----
+2001-02-16 20:38:40.123
+
+query T
+SELECT date_trunc('second', TIMESTAMP '2001-02-16 20:38:40.123456');
+----
+2001-02-16 20:38:40
+
+query T
+SELECT date_trunc('minute', TIMESTAMP '2001-02-16 20:38:40.123456');
+----
+2001-02-16 20:38:00
+
+query T
+SELECT date_trunc('hour', TIMESTAMP '2001-02-16 20:38:40.123456');
+----
+2001-02-16 20:00:00
+
+query T
+SELECT date_trunc('day', TIMESTAMP '2001-02-16 20:38:40.123456');
+----
+2001-02-16 00:00:00
+
+query T
+SELECT date_trunc('week', TIMESTAMP '2001-02-16 20:38:40.123456');
+----
+2001-02-12 00:00:00
+
+query T
+SELECT date_trunc('month', TIMESTAMP '2001-02-16 20:38:40.123456');
+----
+2001-02-01 00:00:00
+
+query T
+SELECT date_trunc('quarter', TIMESTAMP '2001-02-16 20:38:40.123456');
+----
+2001-01-01 00:00:00
+
+query T
+SELECT date_trunc('year', TIMESTAMP '2001-02-16 20:38:40.123456');
+----
+2001-01-01 00:00:00
+
+query T
+SELECT date_trunc('decade', TIMESTAMP '2001-02-16 20:38:40.123456');
+----
+2000-01-01 00:00:00
+
+query T
+SELECT date_trunc('century', TIMESTAMP '2202-02-16 20:38:40.123456');
+----
+2200-01-01 00:00:00
+
+query T
+SELECT date_trunc('millennium', TIMESTAMP '2202-02-16 20:38:40.123456');
+----
+2000-01-01 00:00:00
+
+# invalid field
+statement error
+SELECT date_trunc('s', TIMESTAMP '2202-02-16 20:38:40.123456');
+
+# FIXME: support timezone
+
+# query T
+# SELECT date_trunc('day', TIMESTAMP WITH TIME ZONE '2001-02-16 20:38:40+00');
+# ----
+# 2001-02-16 00:00:00-05
+
+# query T
+# SELECT date_trunc('day', TIMESTAMP WITH TIME ZONE '2001-02-16 20:38:40+00', 'Australia/Sydney');
+# ----
+# 2001-02-16 08:00:00-05
+
+query T
+SELECT date_trunc('hour', INTERVAL '3 days 02:47:33');
+----
+3 days 02:00:00
+
+# truncate 'week' is not supported for interval
+statement error
+SELECT date_trunc('week', INTERVAL '3 days 02:47:33');
