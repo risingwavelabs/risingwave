@@ -498,7 +498,10 @@ impl MaterializeCache {
     }
 
     pub fn force_get(&mut self, key: &[u8]) -> &Option<CompactedRow> {
-        self.data.get(key).unwrap()
+        self.data.get(key).expect(&format!(
+            "the key {:?} has not been fetched in the materialize executor's cache ",
+            key
+        ))
     }
 
     pub fn insert(&mut self, key: Vec<u8>, value: Option<CompactedRow>) {
