@@ -186,8 +186,7 @@ message SubscribeRequest {
 }
 
 message MetaSnapshot {
-  message SnapshotVersion 
-  {
+  message SnapshotVersion {
     uint64 catalog_version = 1;
     uint64 parallel_unit_mapping_version = 2;
     uint64 worker_node_version = 3;
