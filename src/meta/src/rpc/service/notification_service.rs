@@ -140,7 +140,6 @@ where
                 parallel_unit_mappings,
                 hummock_snapshot,
                 views,
-                compaction_groups: vec![],
             },
 
             SubscribeType::Compactor => MetaSnapshot {
@@ -151,13 +150,6 @@ where
             SubscribeType::Hummock => MetaSnapshot {
                 tables,
                 hummock_version: Some(hummock_manager_guard.current_version.clone()),
-                compaction_groups: self
-                    .hummock_manager
-                    .compaction_groups()
-                    .await
-                    .iter()
-                    .map(|group| group.into())
-                    .collect_vec(),
                 ..Default::default()
             },
 
