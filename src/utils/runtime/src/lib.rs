@@ -272,3 +272,29 @@ where
         .unwrap()
         .block_on(f)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::alloc::set_alloc_error_hook;
+
+    use tokio::spawn;
+
+    #[tokio::test]
+    async fn test_oom() {
+        set_alloc_error_hook(|layout| panic!("Oops, oom happened for layout {:?}", layout));
+
+        let f = spawn(async {
+            let mut y = Vec::with_capacity(1000);
+            for _ in 0..999999999 {
+                let x = Vec::<u128>::with_capacity(100000);
+                println!("x's len is {:?}", x.len());
+                y.push(x);
+            }
+
+            println!("y's length is {}", y.len());
+        });
+
+        let ret = f.await;
+        assert!(ret.is_err());
+    }
+}
