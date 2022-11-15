@@ -10,7 +10,7 @@ import {
   workerTypeFromJSON,
   workerTypeToJSON,
 } from "./common";
-import { CompactionGroup, HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
+import { HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
 import { ConnectorSplits } from "./source";
 import {
   Dispatcher,
@@ -372,19 +372,26 @@ export interface SubscribeRequest {
 }
 
 export interface MetaSnapshot {
-  nodes: WorkerNode[];
   databases: Database[];
   schemas: Schema[];
   sources: Source[];
   sinks: Sink[];
   tables: Table[];
   indexes: Index[];
-  users: UserInfo[];
-  hummockVersion: HummockVersion | undefined;
-  parallelUnitMappings: ParallelUnitMapping[];
-  hummockSnapshot: HummockSnapshot | undefined;
-  compactionGroups: CompactionGroup[];
   views: View[];
+  users: UserInfo[];
+  parallelUnitMappings: ParallelUnitMapping[];
+  nodes: WorkerNode[];
+  hummockSnapshot: HummockSnapshot | undefined;
+  hummockVersion: HummockVersion | undefined;
+  version: MetaSnapshot_SnapshotVersion | undefined;
+}
+
+export interface MetaSnapshot_SnapshotVersion {
+  catalogVersion: number;
+  parallelUnitMappingVersion: number;
+  workerNodeVersion: number;
+  hummockVersionVersion: number;
 }
 
 export interface SubscribeResponse {
@@ -392,19 +399,19 @@ export interface SubscribeResponse {
   operation: SubscribeResponse_Operation;
   version: number;
   info?:
-    | { $case: "node"; node: WorkerNode }
     | { $case: "database"; database: Database }
     | { $case: "schema"; schema: Schema }
     | { $case: "table"; table: Table }
     | { $case: "source"; source: Source }
     | { $case: "sink"; sink: Sink }
     | { $case: "index"; index: Index }
+    | { $case: "view"; view: View }
     | { $case: "user"; user: UserInfo }
-    | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "parallelUnitMapping"; parallelUnitMapping: ParallelUnitMapping }
+    | { $case: "node"; node: WorkerNode }
+    | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
-    | { $case: "snapshot"; snapshot: MetaSnapshot }
-    | { $case: "view"; view: View };
+    | { $case: "snapshot"; snapshot: MetaSnapshot };
 }
 
 export const SubscribeResponse_Operation = {
@@ -1453,54 +1460,47 @@ export const SubscribeRequest = {
 
 function createBaseMetaSnapshot(): MetaSnapshot {
   return {
-    nodes: [],
     databases: [],
     schemas: [],
     sources: [],
     sinks: [],
     tables: [],
     indexes: [],
-    users: [],
-    hummockVersion: undefined,
-    parallelUnitMappings: [],
-    hummockSnapshot: undefined,
-    compactionGroups: [],
     views: [],
+    users: [],
+    parallelUnitMappings: [],
+    nodes: [],
+    hummockSnapshot: undefined,
+    hummockVersion: undefined,
+    version: undefined,
   };
 }
 
 export const MetaSnapshot = {
   fromJSON(object: any): MetaSnapshot {
     return {
-      nodes: Array.isArray(object?.nodes) ? object.nodes.map((e: any) => WorkerNode.fromJSON(e)) : [],
       databases: Array.isArray(object?.databases) ? object.databases.map((e: any) => Database.fromJSON(e)) : [],
       schemas: Array.isArray(object?.schemas) ? object.schemas.map((e: any) => Schema.fromJSON(e)) : [],
       sources: Array.isArray(object?.sources) ? object.sources.map((e: any) => Source.fromJSON(e)) : [],
       sinks: Array.isArray(object?.sinks) ? object.sinks.map((e: any) => Sink.fromJSON(e)) : [],
       tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => Table.fromJSON(e)) : [],
       indexes: Array.isArray(object?.indexes) ? object.indexes.map((e: any) => Index.fromJSON(e)) : [],
+      views: Array.isArray(object?.views) ? object.views.map((e: any) => View.fromJSON(e)) : [],
       users: Array.isArray(object?.users) ? object.users.map((e: any) => UserInfo.fromJSON(e)) : [],
-      hummockVersion: isSet(object.hummockVersion) ? HummockVersion.fromJSON(object.hummockVersion) : undefined,
       parallelUnitMappings: Array.isArray(object?.parallelUnitMappings)
         ? object.parallelUnitMappings.map((e: any) => ParallelUnitMapping.fromJSON(e))
         : [],
+      nodes: Array.isArray(object?.nodes)
+        ? object.nodes.map((e: any) => WorkerNode.fromJSON(e))
+        : [],
       hummockSnapshot: isSet(object.hummockSnapshot) ? HummockSnapshot.fromJSON(object.hummockSnapshot) : undefined,
-      compactionGroups: Array.isArray(object?.compactionGroups)
-        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
-        : [],
-      views: Array.isArray(object?.views)
-        ? object.views.map((e: any) => View.fromJSON(e))
-        : [],
+      hummockVersion: isSet(object.hummockVersion) ? HummockVersion.fromJSON(object.hummockVersion) : undefined,
+      version: isSet(object.version) ? MetaSnapshot_SnapshotVersion.fromJSON(object.version) : undefined,
     };
   },
 
   toJSON(message: MetaSnapshot): unknown {
     const obj: any = {};
-    if (message.nodes) {
-      obj.nodes = message.nodes.map((e) => e ? WorkerNode.toJSON(e) : undefined);
-    } else {
-      obj.nodes = [];
-    }
     if (message.databases) {
       obj.databases = message.databases.map((e) => e ? Database.toJSON(e) : undefined);
     } else {
@@ -1531,52 +1531,93 @@ export const MetaSnapshot = {
     } else {
       obj.indexes = [];
     }
-    if (message.users) {
-      obj.users = message.users.map((e) => e ? UserInfo.toJSON(e) : undefined);
-    } else {
-      obj.users = [];
-    }
-    message.hummockVersion !== undefined &&
-      (obj.hummockVersion = message.hummockVersion ? HummockVersion.toJSON(message.hummockVersion) : undefined);
-    if (message.parallelUnitMappings) {
-      obj.parallelUnitMappings = message.parallelUnitMappings.map((e) => e ? ParallelUnitMapping.toJSON(e) : undefined);
-    } else {
-      obj.parallelUnitMappings = [];
-    }
-    message.hummockSnapshot !== undefined &&
-      (obj.hummockSnapshot = message.hummockSnapshot ? HummockSnapshot.toJSON(message.hummockSnapshot) : undefined);
-    if (message.compactionGroups) {
-      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
-    } else {
-      obj.compactionGroups = [];
-    }
     if (message.views) {
       obj.views = message.views.map((e) => e ? View.toJSON(e) : undefined);
     } else {
       obj.views = [];
     }
+    if (message.users) {
+      obj.users = message.users.map((e) => e ? UserInfo.toJSON(e) : undefined);
+    } else {
+      obj.users = [];
+    }
+    if (message.parallelUnitMappings) {
+      obj.parallelUnitMappings = message.parallelUnitMappings.map((e) => e ? ParallelUnitMapping.toJSON(e) : undefined);
+    } else {
+      obj.parallelUnitMappings = [];
+    }
+    if (message.nodes) {
+      obj.nodes = message.nodes.map((e) => e ? WorkerNode.toJSON(e) : undefined);
+    } else {
+      obj.nodes = [];
+    }
+    message.hummockSnapshot !== undefined &&
+      (obj.hummockSnapshot = message.hummockSnapshot ? HummockSnapshot.toJSON(message.hummockSnapshot) : undefined);
+    message.hummockVersion !== undefined &&
+      (obj.hummockVersion = message.hummockVersion ? HummockVersion.toJSON(message.hummockVersion) : undefined);
+    message.version !== undefined &&
+      (obj.version = message.version ? MetaSnapshot_SnapshotVersion.toJSON(message.version) : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<MetaSnapshot>, I>>(object: I): MetaSnapshot {
     const message = createBaseMetaSnapshot();
-    message.nodes = object.nodes?.map((e) => WorkerNode.fromPartial(e)) || [];
     message.databases = object.databases?.map((e) => Database.fromPartial(e)) || [];
     message.schemas = object.schemas?.map((e) => Schema.fromPartial(e)) || [];
     message.sources = object.sources?.map((e) => Source.fromPartial(e)) || [];
     message.sinks = object.sinks?.map((e) => Sink.fromPartial(e)) || [];
     message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
     message.indexes = object.indexes?.map((e) => Index.fromPartial(e)) || [];
+    message.views = object.views?.map((e) => View.fromPartial(e)) || [];
     message.users = object.users?.map((e) => UserInfo.fromPartial(e)) || [];
-    message.hummockVersion = (object.hummockVersion !== undefined && object.hummockVersion !== null)
-      ? HummockVersion.fromPartial(object.hummockVersion)
-      : undefined;
     message.parallelUnitMappings = object.parallelUnitMappings?.map((e) => ParallelUnitMapping.fromPartial(e)) || [];
+    message.nodes = object.nodes?.map((e) => WorkerNode.fromPartial(e)) || [];
     message.hummockSnapshot = (object.hummockSnapshot !== undefined && object.hummockSnapshot !== null)
       ? HummockSnapshot.fromPartial(object.hummockSnapshot)
       : undefined;
-    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
-    message.views = object.views?.map((e) => View.fromPartial(e)) || [];
+    message.hummockVersion = (object.hummockVersion !== undefined && object.hummockVersion !== null)
+      ? HummockVersion.fromPartial(object.hummockVersion)
+      : undefined;
+    message.version = (object.version !== undefined && object.version !== null)
+      ? MetaSnapshot_SnapshotVersion.fromPartial(object.version)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseMetaSnapshot_SnapshotVersion(): MetaSnapshot_SnapshotVersion {
+  return { catalogVersion: 0, parallelUnitMappingVersion: 0, workerNodeVersion: 0, hummockVersionVersion: 0 };
+}
+
+export const MetaSnapshot_SnapshotVersion = {
+  fromJSON(object: any): MetaSnapshot_SnapshotVersion {
+    return {
+      catalogVersion: isSet(object.catalogVersion) ? Number(object.catalogVersion) : 0,
+      parallelUnitMappingVersion: isSet(object.parallelUnitMappingVersion)
+        ? Number(object.parallelUnitMappingVersion)
+        : 0,
+      workerNodeVersion: isSet(object.workerNodeVersion) ? Number(object.workerNodeVersion) : 0,
+      hummockVersionVersion: isSet(object.hummockVersionVersion) ? Number(object.hummockVersionVersion) : 0,
+    };
+  },
+
+  toJSON(message: MetaSnapshot_SnapshotVersion): unknown {
+    const obj: any = {};
+    message.catalogVersion !== undefined && (obj.catalogVersion = Math.round(message.catalogVersion));
+    message.parallelUnitMappingVersion !== undefined &&
+      (obj.parallelUnitMappingVersion = Math.round(message.parallelUnitMappingVersion));
+    message.workerNodeVersion !== undefined && (obj.workerNodeVersion = Math.round(message.workerNodeVersion));
+    message.hummockVersionVersion !== undefined &&
+      (obj.hummockVersionVersion = Math.round(message.hummockVersionVersion));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MetaSnapshot_SnapshotVersion>, I>>(object: I): MetaSnapshot_SnapshotVersion {
+    const message = createBaseMetaSnapshot_SnapshotVersion();
+    message.catalogVersion = object.catalogVersion ?? 0;
+    message.parallelUnitMappingVersion = object.parallelUnitMappingVersion ?? 0;
+    message.workerNodeVersion = object.workerNodeVersion ?? 0;
+    message.hummockVersionVersion = object.hummockVersionVersion ?? 0;
     return message;
   },
 };
@@ -1593,9 +1634,7 @@ export const SubscribeResponse = {
         ? subscribeResponse_OperationFromJSON(object.operation)
         : SubscribeResponse_Operation.UNSPECIFIED,
       version: isSet(object.version) ? Number(object.version) : 0,
-      info: isSet(object.node)
-        ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
-        : isSet(object.database)
+      info: isSet(object.database)
         ? { $case: "database", database: Database.fromJSON(object.database) }
         : isSet(object.schema)
         ? { $case: "schema", schema: Schema.fromJSON(object.schema) }
@@ -1607,15 +1646,19 @@ export const SubscribeResponse = {
         ? { $case: "sink", sink: Sink.fromJSON(object.sink) }
         : isSet(object.index)
         ? { $case: "index", index: Index.fromJSON(object.index) }
+        : isSet(object.view)
+        ? { $case: "view", view: View.fromJSON(object.view) }
         : isSet(object.user)
         ? { $case: "user", user: UserInfo.fromJSON(object.user) }
-        : isSet(object.hummockSnapshot)
-        ? { $case: "hummockSnapshot", hummockSnapshot: HummockSnapshot.fromJSON(object.hummockSnapshot) }
         : isSet(object.parallelUnitMapping)
         ? {
           $case: "parallelUnitMapping",
           parallelUnitMapping: ParallelUnitMapping.fromJSON(object.parallelUnitMapping),
         }
+        : isSet(object.node)
+        ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
+        : isSet(object.hummockSnapshot)
+        ? { $case: "hummockSnapshot", hummockSnapshot: HummockSnapshot.fromJSON(object.hummockSnapshot) }
         : isSet(object.hummockVersionDeltas)
         ? {
           $case: "hummockVersionDeltas",
@@ -1623,8 +1666,6 @@ export const SubscribeResponse = {
         }
         : isSet(object.snapshot)
         ? { $case: "snapshot", snapshot: MetaSnapshot.fromJSON(object.snapshot) }
-        : isSet(object.view)
-        ? { $case: "view", view: View.fromJSON(object.view) }
         : undefined,
     };
   },
@@ -1634,8 +1675,6 @@ export const SubscribeResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.operation !== undefined && (obj.operation = subscribeResponse_OperationToJSON(message.operation));
     message.version !== undefined && (obj.version = Math.round(message.version));
-    message.info?.$case === "node" &&
-      (obj.node = message.info?.node ? WorkerNode.toJSON(message.info?.node) : undefined);
     message.info?.$case === "database" &&
       (obj.database = message.info?.database ? Database.toJSON(message.info?.database) : undefined);
     message.info?.$case === "schema" &&
@@ -1647,19 +1686,21 @@ export const SubscribeResponse = {
     message.info?.$case === "sink" && (obj.sink = message.info?.sink ? Sink.toJSON(message.info?.sink) : undefined);
     message.info?.$case === "index" &&
       (obj.index = message.info?.index ? Index.toJSON(message.info?.index) : undefined);
+    message.info?.$case === "view" && (obj.view = message.info?.view ? View.toJSON(message.info?.view) : undefined);
     message.info?.$case === "user" && (obj.user = message.info?.user ? UserInfo.toJSON(message.info?.user) : undefined);
-    message.info?.$case === "hummockSnapshot" && (obj.hummockSnapshot = message.info?.hummockSnapshot
-      ? HummockSnapshot.toJSON(message.info?.hummockSnapshot)
-      : undefined);
     message.info?.$case === "parallelUnitMapping" && (obj.parallelUnitMapping = message.info?.parallelUnitMapping
       ? ParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
+      : undefined);
+    message.info?.$case === "node" &&
+      (obj.node = message.info?.node ? WorkerNode.toJSON(message.info?.node) : undefined);
+    message.info?.$case === "hummockSnapshot" && (obj.hummockSnapshot = message.info?.hummockSnapshot
+      ? HummockSnapshot.toJSON(message.info?.hummockSnapshot)
       : undefined);
     message.info?.$case === "hummockVersionDeltas" && (obj.hummockVersionDeltas = message.info?.hummockVersionDeltas
       ? HummockVersionDeltas.toJSON(message.info?.hummockVersionDeltas)
       : undefined);
     message.info?.$case === "snapshot" &&
       (obj.snapshot = message.info?.snapshot ? MetaSnapshot.toJSON(message.info?.snapshot) : undefined);
-    message.info?.$case === "view" && (obj.view = message.info?.view ? View.toJSON(message.info?.view) : undefined);
     return obj;
   },
 
@@ -1670,9 +1711,6 @@ export const SubscribeResponse = {
       : undefined;
     message.operation = object.operation ?? SubscribeResponse_Operation.UNSPECIFIED;
     message.version = object.version ?? 0;
-    if (object.info?.$case === "node" && object.info?.node !== undefined && object.info?.node !== null) {
-      message.info = { $case: "node", node: WorkerNode.fromPartial(object.info.node) };
-    }
     if (object.info?.$case === "database" && object.info?.database !== undefined && object.info?.database !== null) {
       message.info = { $case: "database", database: Database.fromPartial(object.info.database) };
     }
@@ -1691,18 +1729,11 @@ export const SubscribeResponse = {
     if (object.info?.$case === "index" && object.info?.index !== undefined && object.info?.index !== null) {
       message.info = { $case: "index", index: Index.fromPartial(object.info.index) };
     }
+    if (object.info?.$case === "view" && object.info?.view !== undefined && object.info?.view !== null) {
+      message.info = { $case: "view", view: View.fromPartial(object.info.view) };
+    }
     if (object.info?.$case === "user" && object.info?.user !== undefined && object.info?.user !== null) {
       message.info = { $case: "user", user: UserInfo.fromPartial(object.info.user) };
-    }
-    if (
-      object.info?.$case === "hummockSnapshot" &&
-      object.info?.hummockSnapshot !== undefined &&
-      object.info?.hummockSnapshot !== null
-    ) {
-      message.info = {
-        $case: "hummockSnapshot",
-        hummockSnapshot: HummockSnapshot.fromPartial(object.info.hummockSnapshot),
-      };
     }
     if (
       object.info?.$case === "parallelUnitMapping" &&
@@ -1712,6 +1743,19 @@ export const SubscribeResponse = {
       message.info = {
         $case: "parallelUnitMapping",
         parallelUnitMapping: ParallelUnitMapping.fromPartial(object.info.parallelUnitMapping),
+      };
+    }
+    if (object.info?.$case === "node" && object.info?.node !== undefined && object.info?.node !== null) {
+      message.info = { $case: "node", node: WorkerNode.fromPartial(object.info.node) };
+    }
+    if (
+      object.info?.$case === "hummockSnapshot" &&
+      object.info?.hummockSnapshot !== undefined &&
+      object.info?.hummockSnapshot !== null
+    ) {
+      message.info = {
+        $case: "hummockSnapshot",
+        hummockSnapshot: HummockSnapshot.fromPartial(object.info.hummockSnapshot),
       };
     }
     if (
@@ -1726,9 +1770,6 @@ export const SubscribeResponse = {
     }
     if (object.info?.$case === "snapshot" && object.info?.snapshot !== undefined && object.info?.snapshot !== null) {
       message.info = { $case: "snapshot", snapshot: MetaSnapshot.fromPartial(object.info.snapshot) };
-    }
-    if (object.info?.$case === "view" && object.info?.view !== undefined && object.info?.view !== null) {
-      message.info = { $case: "view", view: View.fromPartial(object.info.view) };
     }
     return message;
   },

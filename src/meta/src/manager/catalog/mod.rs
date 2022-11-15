@@ -21,7 +21,7 @@ use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use database::*;
+pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
 use risingwave_common::catalog::{

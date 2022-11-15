@@ -186,18 +186,27 @@ message SubscribeRequest {
 }
 
 message MetaSnapshot {
-  repeated common.WorkerNode nodes = 1;
-  repeated catalog.Database databases = 2;
-  repeated catalog.Schema schemas = 3;
-  repeated catalog.Source sources = 4;
-  repeated catalog.Sink sinks = 5;
-  repeated catalog.Table tables = 6;
-  repeated catalog.Index indexes = 7;
+  message SnapshotVersion 
+  {
+    uint64 catalog_version = 1;
+    uint64 parallel_unit_mapping_version = 2;
+    uint64 worker_node_version = 3;
+    uint64 hummock_version_version = 4;
+  }
+  repeated catalog.Database databases = 1;
+  repeated catalog.Schema schemas = 2;
+  repeated catalog.Source sources = 3;
+  repeated catalog.Sink sinks = 4;
+  repeated catalog.Table tables = 5;
+  repeated catalog.Index indexes = 6;
+  repeated catalog.View views = 7;
   repeated user.UserInfo users = 8;
-  hummock.HummockVersion hummock_version = 9;
-  repeated common.ParallelUnitMapping parallel_unit_mappings = 10;
+  repeated common.ParallelUnitMapping parallel_unit_mappings = 9;
+  repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
-  repeated catalog.View views = 13;
+  hummock.HummockVersion hummock_version = 12;
+
+  SnapshotVersion version = 13;
 }
 
 message SubscribeResponse {
@@ -212,19 +221,19 @@ message SubscribeResponse {
   Operation operation = 2;
   uint64 version = 3;
   oneof info {
-    common.WorkerNode node = 4;
-    catalog.Database database = 5;
-    catalog.Schema schema = 6;
-    catalog.Table table = 7;
-    catalog.Source source = 8;
-    catalog.Sink sink = 9;
-    catalog.Index index = 10;
+    catalog.Database database = 4;
+    catalog.Schema schema = 5;
+    catalog.Table table = 6;
+    catalog.Source source = 7;
+    catalog.Sink sink = 8;
+    catalog.Index index = 9;
+    catalog.View view = 10;
     user.UserInfo user = 11;
-    hummock.HummockSnapshot hummock_snapshot = 12;
-    common.ParallelUnitMapping parallel_unit_mapping = 13;
-    hummock.HummockVersionDeltas hummock_version_deltas = 14;
-    MetaSnapshot snapshot = 20;
-    catalog.View view = 21;
+    common.ParallelUnitMapping parallel_unit_mapping = 12;
+    common.WorkerNode node = 13;
+    hummock.HummockSnapshot hummock_snapshot = 14;
+    hummock.HummockVersionDeltas hummock_version_deltas = 15;
+    MetaSnapshot snapshot = 16;
   }
 }
 

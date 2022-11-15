@@ -20,7 +20,7 @@ use risingwave_pb::hummock::CompactTask;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use tokio::sync::mpsc::{self, UnboundedSender};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex, MutexGuard};
 use tonic::Status;
 
 use crate::manager::cluster::WorkerKey;
@@ -180,11 +180,15 @@ where
 
     pub async fn current_version(&self) -> NotificationVersion {
         let core_guard = self.core.lock().await;
-        core_guard.current_version.version()
+        core_guard.current_version()
+    }
+
+    pub async fn core_guard(&self) -> MutexGuard<'_, NotificationManagerCore<S>> {
+        self.core.lock().await
     }
 }
 
-struct NotificationManagerCore<S> {
+pub struct NotificationManagerCore<S> {
     /// The notification sender to frontends.
     frontend_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to nodes that subscribes the hummock.
@@ -244,5 +248,9 @@ where
                 })
                 .is_ok()
         });
+    }
+
+    pub fn current_version(&self) -> NotificationVersion {
+        self.current_version.version()
     }
 }

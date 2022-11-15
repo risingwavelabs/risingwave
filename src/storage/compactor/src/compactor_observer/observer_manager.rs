@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeCompactor};
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
@@ -59,22 +58,12 @@ impl ObserverState for CompactorObserverNode {
         self.version = resp.version;
     }
 
-    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
-        match resp.info {
-            Some(Info::Snapshot(snapshot)) => {
-                self.handle_catalog_snapshot(snapshot.tables);
-                self.version = resp.version;
-            }
-            _ => {
-                return Err(ErrorCode::InternalError(format!(
-                    "the first notify should be compactor snapshot, but get {:?}",
-                    resp
-                ))
-                .into())
-            }
-        }
-
-        Ok(())
+    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
+        let Some(Info::Snapshot(snapshot)) = resp.info else {
+            unreachable!();
+        };
+        self.handle_catalog_snapshot(snapshot.tables);
+        self.version = resp.version;
     }
 }
 
