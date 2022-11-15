@@ -111,24 +111,16 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
 ///     i64_to_timestamp(1_666_666_666_666_666_666)
 ///         .unwrap()
 ///         .to_string(),
-///     "2022-10-25 02:57:46.666666666"
+///     // note that we only support microseconds precision
+///     "2022-10-25 02:57:46.666666"
 /// );
 /// ```
 #[inline]
 pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
-    const E11: i64 = 100_000_000_000;
-    const E14: i64 = 100_000_000_000_000;
-    const E17: i64 = 100_000_000_000_000_000;
-    let ns = match t {
-        0..E11 => t * 1_000_000_000, // s
-        E11..E14 => t * 1_000_000,   // ms
-        E14..E17 => t * 1_000,       // us
-        E17.. => t,                  // ns
-        _ => return Err(ExprError::Parse(ERROR_INT_TO_TIMESTAMP)),
-    };
+    let us = i64_to_timestampz(t)?;
     Ok(NaiveDateTimeWrapper::new(NaiveDateTime::from_timestamp(
-        ns / 1_000_000_000,
-        (ns % 1_000_000_000) as u32,
+        us / 1_000_000,
+        (us % 1_000_000) as u32 * 1000,
     )))
 }
 
