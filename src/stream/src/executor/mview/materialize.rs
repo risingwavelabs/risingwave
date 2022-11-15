@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures::StreamExt;
+use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, RowDeserializer, StreamChunk, Vis};
@@ -176,111 +176,81 @@ impl<S: StateStore> MaterializeExecutor<S> {
                             if buffer.is_empty() {
                                 // empty chunk
                                 continue;
-                            } else {
-                                // fill cache
-                                for key_bytes in buffer.get_keys() {
-                                    if self.materialize_cache.get(key_bytes).is_none() {
-                                        // cache miss
+                            }
 
-                                        // computing vnode and get bloom filter's hint should random
-                                        // access the row, so before we find a better way, we should
-                                        // expose this logic.
-                                        let key = self
-                                            .state_table
-                                            .pk_serde()
-                                            .deserialize(key_bytes)
-                                            .unwrap();
-                                        if let Some(storage_value) =
-                                            self.state_table.get_compacted_row(&key).await?
+                            // fill cache
+                            self.materialize_cache
+                                .fetch_keys(buffer.keys().map(|v| v.as_ref()), &self.state_table)
+                                .await?;
+                            // handle pk conflict
+                            let mut output = buffer.buffer.clone();
+                            for (key, row_op) in buffer.into_parts() {
+                                match row_op {
+                                    RowOp::Insert(row) => {
+                                        if let Some(cache_row) =
+                                            self.materialize_cache.force_get(&key)
                                         {
-                                            self.materialize_cache
-                                                .insert(key_bytes.to_vec(), Some(storage_value));
-                                        } else {
-                                            self.materialize_cache.insert(key_bytes.clone(), None);
+                                            // double insert
+                                            output.insert(
+                                                key.clone(),
+                                                RowOp::Update((cache_row.row.clone(), row.clone())),
+                                            );
                                         }
-                                    }
-                                }
 
-                                // handle pk conflict
-                                let mut output = buffer.buffer.clone();
-                                for (key, row_op) in buffer.into_parts() {
-                                    match row_op {
-                                        RowOp::Insert(row) => {
-                                            if let Some(cache_row) =
-                                                self.materialize_cache.get(&key).unwrap()
-                                            {
-                                                // double insert
+                                        self.materialize_cache
+                                            .insert(key, Some(CompactedRow::new(row)));
+                                    }
+                                    RowOp::Delete(old_row) => {
+                                        if let Some(cache_row) =
+                                            self.materialize_cache.force_get(&key)
+                                        {
+                                            if cache_row.row != old_row {
+                                                // delete a nonexistent value
+                                                output.insert(
+                                                    key.clone(),
+                                                    RowOp::Delete(cache_row.row.clone()),
+                                                );
+                                            }
+                                        } else {
+                                            // delete a nonexistent pk
+                                            output.remove(&key);
+                                        }
+                                        self.materialize_cache.insert(key, None);
+                                    }
+                                    RowOp::Update((old_row, new_row)) => {
+                                        if let Some(cache_row) =
+                                            self.materialize_cache.force_get(&key)
+                                        {
+                                            if cache_row.row != old_row {
+                                                // update a nonexistent old value
                                                 output.insert(
                                                     key.clone(),
                                                     RowOp::Update((
                                                         cache_row.row.clone(),
-                                                        row.clone(),
+                                                        new_row.clone(),
                                                     )),
                                                 );
                                             }
-
-                                            self.materialize_cache
-                                                .insert(key, Some(CompactedRow { row }));
+                                        } else {
+                                            // update a nonexistent pk
+                                            output.insert(
+                                                key.clone(),
+                                                RowOp::Insert(new_row.clone()),
+                                            );
                                         }
-                                        RowOp::Delete(old_row) => {
-                                            if let Some(cache_row) =
-                                                self.materialize_cache.get(&key).unwrap()
-                                            {
-                                                if cache_row.row != old_row {
-                                                    // delete a nonexistent value
-                                                    output.insert(
-                                                        key.clone(),
-                                                        RowOp::Delete(cache_row.row.clone()),
-                                                    );
-                                                }
-
-                                                self.materialize_cache.insert(key, None);
-                                            } else {
-                                                // delete a nonexistent pk
-                                                output.remove(&key);
-                                            }
-                                        }
-                                        RowOp::Update((old_row, new_row)) => {
-                                            if let Some(cache_row) =
-                                                self.materialize_cache.get(&key).unwrap()
-                                            {
-                                                if cache_row.row != old_row {
-                                                    // update a nonexistent old value
-                                                    output.insert(
-                                                        key.clone(),
-                                                        RowOp::Update((
-                                                            cache_row.row.clone(),
-                                                            new_row.clone(),
-                                                        )),
-                                                    );
-                                                }
-                                                self.materialize_cache.insert(
-                                                    key,
-                                                    Some(CompactedRow { row: new_row }),
-                                                );
-                                            } else {
-                                                // update a nonexistent pk
-                                                output.insert(
-                                                    key.clone(),
-                                                    RowOp::Insert(new_row.clone()),
-                                                );
-                                                self.materialize_cache.insert(
-                                                    key,
-                                                    Some(CompactedRow { row: new_row }),
-                                                );
-                                            }
-                                        }
+                                        self.materialize_cache
+                                            .insert(key, Some(CompactedRow::new(new_row)));
                                     }
                                 }
+                            }
 
-                                // // construct output chunk
-                                match generator_output(output, data_types.clone())? {
-                                    Some(output_chunk) => {
-                                        self.state_table.write_chunk(output_chunk.clone());
-                                        Message::Chunk(output_chunk)
-                                    }
-                                    None => continue,
+                            // // construct output chunk
+                            match generator_output(output, data_types.clone())? {
+                                Some(output_chunk) => {
+                                    self.state_table.write_chunk(output_chunk.clone());
+                                    Message::Chunk(output_chunk)
                                 }
+                                None => continue,
                             }
                         }
                         false => {
@@ -451,8 +421,8 @@ impl MaterializeBuffer {
         self.buffer.is_empty()
     }
 
-    fn get_keys(&self) -> Vec<&Vec<u8>> {
-        self.buffer.keys().collect()
+    fn keys(&self) -> impl Iterator<Item = &Vec<u8>> {
+        self.buffer.keys()
     }
 
     pub fn into_parts(self) -> HashMap<Vec<u8>, RowOp> {
@@ -501,8 +471,34 @@ impl MaterializeCache {
         Self { data: cache }
     }
 
-    pub fn get(&mut self, key: &[u8]) -> Option<&Option<CompactedRow>> {
-        self.data.get(key)
+    pub async fn fetch_keys<'a, S: StateStore>(
+        &mut self,
+        keys: impl Iterator<Item = &'a [u8]>,
+        table: &StateTable<S>,
+    ) -> StreamExecutorResult<()> {
+        let mut futures = vec![];
+        for key in keys {
+            if self.data.contains(key) {
+                continue;
+            }
+
+            futures.push(async {
+                let key_row = table.pk_serde().deserialize(key).unwrap();
+                (key.to_vec(), table.get_compacted_row(&key_row).await)
+            });
+        }
+
+        let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
+        while let Some(result) = buffered.next().await {
+            let (key, value) = result;
+            self.data.push(key, value?);
+        }
+
+        Ok(())
+    }
+
+    pub fn force_get(&mut self, key: &[u8]) -> &Option<CompactedRow> {
+        self.data.get(key).unwrap()
     }
 
     pub fn insert(&mut self, key: Vec<u8>, value: Option<CompactedRow>) {

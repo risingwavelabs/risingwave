@@ -397,16 +397,6 @@ impl<S: StateStore> StateTable<S> {
         self.mem_table.is_dirty()
     }
 
-    pub fn get_read_option(&self) -> ReadOptions {
-        ReadOptions {
-            prefix_hint: None,
-            table_id: self.table_id(),
-            retention_seconds: self.table_option.retention_seconds,
-            check_bloom_filter: false,
-            ignore_range_tombstone: false,
-        }
-    }
-
     pub fn vnode_bitmap(&self) -> &Bitmap {
         &self.vnodes
     }
