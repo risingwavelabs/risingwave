@@ -81,11 +81,31 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
     }
 }
 
+/// Converts UNIX epoch time to timestamp.
+///
+/// The input UNIX epoch time is interpreted as follows:
+///
+/// - [0, 1e11) are assumed to be in seconds.
+/// - [1e11, 1e14) are assumed to be in milliseconds.
+/// - [1e14, 1e17) are assumed to be in microseconds.
+/// - [1e17, upper) are assumed to be in nanoseconds.
+///
+/// This would cause no problem for timestamp in [1973-03-03 09:46:40, 5138-11-16 09:46:40).
 #[inline]
-pub fn i64_to_timestamp(ms: i64) -> Result<NaiveDateTimeWrapper> {
+pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
+    const E11: i64 = 100_000_000_000;
+    const E14: i64 = 100_000_000_000_000;
+    const E17: i64 = 100_000_000_000_000_000;
+    let ns = match t {
+        0..E11 => t * 1_000_000_000, // s
+        E11..E14 => t * 1_000_000,   // ms
+        E14..E17 => t * 1_000,       // us
+        E17.. => t,                  // ns
+        _ => return Err(ExprError::Parse(ERROR_INT_TO_TIMESTAMP)),
+    };
     Ok(NaiveDateTimeWrapper::new(NaiveDateTime::from_timestamp(
-        ms / 1000,
-        (ms % 1000) as u32 * 1_000_000,
+        ns / 1_000_000_000,
+        (ns % 1_000_000_000) as u32,
     )))
 }
 
