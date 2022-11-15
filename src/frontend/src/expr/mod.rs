@@ -307,7 +307,9 @@ impl ExprImpl {
                         values.exprs().for_each(|expr| has |= self.visit_expr(expr))
                     }
                     BoundSetExpr::Query(query) => {
+                        self.depth += 1;
                         has = self.visit_bound_set_expr(&query.body);
+                        self.depth -= 1;
                     }
                     BoundSetExpr::SetOperation { left, right, .. } => {
                         has |= self.visit_bound_set_expr(left);
@@ -410,7 +412,9 @@ impl ExprImpl {
                         values.exprs_mut().for_each(|expr| self.visit_expr(expr))
                     }
                     BoundSetExpr::Query(query) => {
+                        self.depth += 1;
                         self.visit_bound_set_expr(&mut query.body);
+                        self.depth -= 1;
                     }
                     BoundSetExpr::SetOperation { left, right, .. } => {
                         self.visit_bound_set_expr(&mut *left);
