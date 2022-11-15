@@ -16,7 +16,7 @@ use crate::config::{GeneratorConfig, NexmarkConfig};
 use crate::event::Event;
 
 /// Nexmark event generator.
-#[derive(Clone, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct EventGenerator {
     config: GeneratorConfig,
     events_so_far: u64,

@@ -38,8 +38,7 @@ use risingwave_storage::monitor::{
     StateStoreMetrics,
 };
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
-use risingwave_storage::StateStoreImpl::HummockStateStore;
-use risingwave_storage::{StateStoreImpl, StateStoreIter};
+use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
 
@@ -593,6 +592,7 @@ async fn open_hummock_iters(
                     table_id: TableId { table_id },
                     retention_seconds: None,
                     check_bloom_filter: false,
+                    ignore_range_tombstone: false,
                 },
             )
             .await?;
@@ -666,8 +666,10 @@ pub async fn create_hummock_store_with_metrics(
     )
     .await?;
 
-    if let HummockStateStore(hummock_state_store) = state_store_impl {
-        Ok(hummock_state_store)
+    if let Some(hummock_state_store) = state_store_impl.as_hummock() {
+        Ok(hummock_state_store
+            .clone()
+            .monitored(metrics.state_store_metrics))
     } else {
         Err(anyhow!("only Hummock state store is supported!"))
     }

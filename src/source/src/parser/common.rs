@@ -18,7 +18,8 @@ use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{
-    str_to_date, str_to_time, str_to_timestamp, str_to_timestampz,
+    i64_to_timestamp, i64_to_timestampz, str_to_date, str_to_time, str_to_timestamp,
+    str_to_timestampz,
 };
 #[cfg(not(any(
     target_feature = "sse4.2",
@@ -98,8 +99,16 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
         DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
-        DataType::Timestamp => str_to_timestamp(ensure_str!(v, "timestamp"))?.into(),
-        DataType::Timestampz => str_to_timestampz(ensure_str!(v, "timestampz"))?.into(),
+        DataType::Timestamp => match v {
+            Value::String(s) => str_to_timestamp(s)?.into(),
+            Value::Number(n) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
+            _ => anyhow::bail!("expect timestamp, but found {v}"),
+        },
+        DataType::Timestampz => match v {
+            Value::String(s) => str_to_timestampz(s)?.into(),
+            Value::Number(n) => i64_to_timestampz(ensure_int!(v, i64))?.into(),
+            _ => anyhow::bail!("expect timestampz, but found {v}"),
+        },
         DataType::Struct(struct_type_info) => {
             let fields = struct_type_info
                 .field_names
@@ -176,8 +185,16 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
         DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
-        DataType::Timestamp => str_to_timestamp(ensure_str!(v, "timestamp"))?.into(),
-        DataType::Timestampz => str_to_timestampz(ensure_str!(v, "timestampz"))?.into(),
+        DataType::Timestamp => match v {
+            BorrowedValue::String(s) => str_to_timestamp(s)?.into(),
+            BorrowedValue::Static(_) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
+            _ => anyhow::bail!("expect timestamp, but found {v}"),
+        },
+        DataType::Timestampz => match v {
+            BorrowedValue::String(s) => str_to_timestampz(s)?.into(),
+            BorrowedValue::Static(_) => i64_to_timestampz(ensure_int!(v, i64))?.into(),
+            _ => anyhow::bail!("expect timestampz, but found {v}"),
+        },
         DataType::Struct(struct_type_info) => {
             let fields = struct_type_info
                 .field_names

@@ -3461,7 +3461,7 @@ dependencies = [
 name = "nexmark"
 version = "0.1.0"
 dependencies = [
- "chrono",
+ "criterion 0.4.0",
  "rand 0.8.5",
  "serde",
 ]
@@ -3999,6 +3999,7 @@ dependencies = [
  "pg_interval",
  "postgres-types",
  "regex",
+ "risingwave_common",
  "rust_decimal",
  "thiserror",
  "tokio-openssl",
@@ -5592,8 +5593,6 @@ dependencies = [
  "farmhash",
  "futures",
  "futures-async-stream",
- "hyper",
- "hyper-tls",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
@@ -5606,6 +5605,7 @@ dependencies = [
  "prost",
  "prost-reflect",
  "rand 0.8.5",
+ "reqwest",
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",

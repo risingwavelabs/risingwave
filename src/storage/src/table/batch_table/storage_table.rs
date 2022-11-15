@@ -258,6 +258,7 @@ impl<S: StateStore> StorageTable<S> {
             prefix_hint: None,
             check_bloom_filter: self.dist_key_indices == key_indices,
             retention_seconds: self.table_option.retention_seconds,
+            ignore_range_tombstone: false,
             table_id: self.keyspace.table_id(),
         };
         if let Some(value) = self
@@ -334,6 +335,7 @@ impl<S: StateStore> StorageTable<S> {
                 let read_options = ReadOptions {
                     prefix_hint,
                     check_bloom_filter,
+                    ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.keyspace.table_id(),
                 };
