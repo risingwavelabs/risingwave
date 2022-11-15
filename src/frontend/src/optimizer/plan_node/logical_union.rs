@@ -34,6 +34,7 @@ pub struct LogicalUnion {
 impl LogicalUnion {
     pub fn new(all: bool, inputs: Vec<PlanRef>) -> Self {
         let ctx = inputs[0].ctx();
+        // Use first input as its schema
         let schema = inputs[0].schema().clone();
         let mut pk_indices = vec![];
         for input in &inputs {
