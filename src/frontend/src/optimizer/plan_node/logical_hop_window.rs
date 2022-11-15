@@ -381,12 +381,12 @@ mod test {
     #[tokio::test]
     /// Pruning
     /// ```text
-    /// HopWindow(time_col: $0 slide: 1 day 00:00:00 size: 3 days 00:00:00)
+    /// HopWindow(time_col: $0 slide: 1 day size: 3 days)
     ///   TableScan(date, v1, v2)
     /// ```
     /// with required columns [4, 2, 3] will result in
     /// ```text
-    ///   HopWindow(time_col: $0 slide: 1 day 00:00:00 size: 3 days 00:00:00 output_indices: [3, 1, 2])
+    ///   HopWindow(time_col: $0 slide: 1 day size: 3 days output_indices: [3, 1, 2])
     ///     TableScan(date, v3)
     /// ```
     async fn test_prune_hop_window_with_order_required() {
