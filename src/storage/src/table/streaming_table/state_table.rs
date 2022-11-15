@@ -605,6 +605,7 @@ impl<S: StateStore> StateTable<S> {
     /// just specially used by those state table read-only and after the call the data
     /// in the epoch will be visible
     pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
+        assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
         self.update_epoch(new_epoch);
     }
