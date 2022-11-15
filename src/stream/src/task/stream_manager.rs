@@ -622,11 +622,11 @@ impl LocalStreamManagerCore {
             let handle = {
                 let context = self.context.clone();
                 let actor = async move {
-                    let _ = actor.run().await.inspect_err(|err| {
+                    if let Err(err) = actor.run().await {
                         // TODO: check error type and panic if it's unexpected.
-                        context.lock_barrier_manager().notify_failure(actor_id, err);
                         tracing::error!(actor=%actor_id, error=%err, "actor exit");
-                    });
+                        context.lock_barrier_manager().notify_failure(actor_id, err);
+                    }
                 };
                 #[auto_enums::auto_enum(Future)]
                 let traced = match trace_reporter {

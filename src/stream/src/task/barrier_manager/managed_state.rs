@@ -65,7 +65,7 @@ pub(super) struct ManagedBarrierState {
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, ChainState>>,
 
     /// Record all unexpected exited actors.
-    failure_actors: HashSet<ActorId>,
+    failure_actors: HashMap<ActorId, StreamError>,
 
     state_store: StateStoreImpl,
 }
@@ -159,8 +159,7 @@ impl ManagedBarrierState {
     }
 
     /// Notify unexpected actor exit with given `actor_id`.
-    pub(crate) fn notify_failure(&mut self, actor_id: ActorId, err: &StreamError) {
-        self.failure_actors.insert(actor_id);
+    pub(crate) fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
         for barrier_state in self.epoch_barrier_state_map.values_mut() {
             #[allow(clippy::single_match)]
             match barrier_state.inner {
@@ -181,6 +180,7 @@ impl ManagedBarrierState {
                 _ => {}
             }
         }
+        self.failure_actors.insert(actor_id, err);
     }
 
     /// Collect a `barrier` from the actor with `actor_id`.
@@ -259,9 +259,9 @@ impl ManagedBarrierState {
                     .into_iter()
                     .filter(|a| !collected_actors.remove(a))
                     .collect();
-                for actor_id in &self.failure_actors {
+                for (actor_id, err) in &self.failure_actors {
                     if remaining_actors.contains(actor_id) {
-                        bail!("Actor {} exit unexpectedly", actor_id);
+                        bail!("Actor {actor_id} exit unexpectedly: {:?}", err);
                     }
                 }
                 assert!(collected_actors.is_empty());

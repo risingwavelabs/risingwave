@@ -218,7 +218,7 @@ impl LocalBarrierManager {
 
     /// When a actor exit unexpectedly, it should report this event using this function, so meta
     /// will notice actor's exit while collecting.
-    pub fn notify_failure(&mut self, actor_id: ActorId, err: &StreamError) {
+    pub fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}
