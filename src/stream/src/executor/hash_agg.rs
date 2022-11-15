@@ -534,8 +534,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 Message::Watermark(mut watermark) => {
                     let group_key_seq = extra.group_key_invert_idx[watermark.col_idx];
                     if let Some(group_key_seq) = group_key_seq {
-                        watermark.col_idx = group_key_seq as usize;
-                        extra.buffered_watermarks[group_key_seq as usize] = Some(watermark);
+                        watermark.col_idx = group_key_seq;
+                        extra.buffered_watermarks[group_key_seq] = Some(watermark);
                     }
                 }
 
