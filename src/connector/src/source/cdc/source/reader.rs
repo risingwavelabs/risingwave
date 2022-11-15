@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
@@ -24,17 +23,15 @@ use risingwave_pb::cdc_service::{DbConnectorProperties, GetEventStreamResponse};
 use risingwave_rpc_client::CdcClient;
 
 use crate::source::base::{SourceMessage, SplitReader};
-use crate::source::cdc::{CdcProperties, CdcSplit};
+use crate::source::cdc::CdcProperties;
 use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
 
 // FIXME: put the connector node addr to config file
 const CDC_NODE_ENDPOINT: &str = "127.0.0.1:60061";
 
-// FIXME: currently only support single split for CDC source
 pub struct CdcSplitReader {
-    assigned_splits: HashMap<String, Vec<CdcSplit>>,
-    cdc_client: CdcClient,
     source_id: u64,
+    props: CdcProperties,
 }
 
 #[async_trait]
@@ -46,43 +43,22 @@ impl SplitReader for CdcSplitReader {
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let host_addr = HostAddr::from_str(CDC_NODE_ENDPOINT)?;
-        let cdc_client = CdcClient::new(host_addr).await?;
-
-        let mut source_id: u64 = 0;
         if let Some(splits) = state {
+            // expect only one split
+            debug_assert!(splits.len() == 1);
             for split in &splits {
                 if let SplitImpl::Cdc(cdc_split) = split {
-                    let resp = cdc_client
-                        .create_source(
-                            cdc_split.source_id as u64,
-                            DbConnectorProperties {
-                                database_host: props.database_host.clone(),
-                                database_port: props.database_port.clone(),
-                                database_user: props.database_user.clone(),
-                                database_password: props.database_password.clone(),
-                                database_name: props.database_name.clone(),
-                                table_name: props.table_name.clone(),
-                                partition: props.parititon.clone(),
-                                start_offset: props.start_offset.clone(),
-                                include_schema_events: false,
-                            },
-                        )
-                        .await?;
-                    source_id = cdc_split.source_id as u64;
-                    // the status is not None means there is error
-                    if let Some(ret) = resp.status {
-                        return Err(anyhow!("fail to create cdc engine: {}", ret.message));
-                    }
+                    return Ok(Self {
+                        source_id: cdc_split.source_id as u64,
+                        props,
+                    });
                 }
             }
         }
 
-        Ok(Self {
-            assigned_splits: HashMap::new(),
-            cdc_client,
-            source_id,
-        })
+        Err(anyhow!(
+            "failed to create SplitReader: invalid cdc split state"
+        ))
     }
 
     fn into_stream(self) -> BoxSourceStream {
@@ -93,13 +69,28 @@ impl SplitReader for CdcSplitReader {
 impl CdcSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(self) {
-        let cdc_stream = self.cdc_client.get_event_stream(self.source_id).await?;
-
+        let props = &self.props;
+        let cdc_client = CdcClient::new(HostAddr::from_str(CDC_NODE_ENDPOINT)?).await?;
+        let cdc_stream = cdc_client
+            .get_event_stream(
+                self.source_id,
+                DbConnectorProperties {
+                    database_host: props.database_host.clone(),
+                    database_port: props.database_port.clone(),
+                    database_user: props.database_user.clone(),
+                    database_password: props.database_password.clone(),
+                    database_name: props.database_name.clone(),
+                    table_name: props.table_name.clone(),
+                    partition: props.parititon.clone(),
+                    start_offset: props.start_offset.clone(),
+                    include_schema_events: false,
+                },
+            )
+            .await?;
         pin_mut!(cdc_stream);
         while let Some(event_res) = cdc_stream.next().await {
             match event_res {
                 Ok(GetEventStreamResponse { events, .. }) => {
-                    tracing::info!("get {} events from cdc source", events.len());
                     let mut msgs = Vec::with_capacity(events.len());
                     for event in events {
                         msgs.push(SourceMessage::from(event));

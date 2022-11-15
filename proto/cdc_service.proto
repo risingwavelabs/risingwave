@@ -32,17 +32,9 @@ message CdcMessage {
   string offset = 3;
 }
 
-message CreateSourceRequest {
-  uint64 source_id = 1;
-  DbConnectorProperties properties = 2;
-}
-
-message CreateSourceResponse {
-  Status status = 1;
-}
-
 message GetEventStreamRequest {
   uint64 source_id = 1;
+  DbConnectorProperties properties = 2;
 }
 
 message GetEventStreamResponse {
@@ -50,16 +42,6 @@ message GetEventStreamResponse {
   repeated CdcMessage events = 2;
 }
 
-message DropSourceRequest {
-  uint64 source_id = 1;
-}
-
-message DropSourceResponse {
-  Status status = 1;
-}
-
 service CdcService {
-  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
-  rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
 }

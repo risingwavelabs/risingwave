@@ -38,45 +38,22 @@ impl CdcClient {
         Ok(Self(CdcServiceClient::new(channel)))
     }
 
-    pub async fn create_source(
-        &self,
-        source_id: u64,
-        properties: DbConnectorProperties,
-    ) -> Result<CreateSourceResponse> {
-        let resp = self
-            .0
-            .to_owned()
-            .create_source(CreateSourceRequest {
-                source_id,
-                properties: Some(properties),
-            })
-            .await?;
-
-        Ok(resp.into_inner())
-    }
-
     pub async fn get_event_stream(
         &self,
         source_id: u64,
+        props: DbConnectorProperties,
     ) -> Result<Streaming<GetEventStreamResponse>> {
         Ok(self
             .0
             .to_owned()
-            .get_event_stream(GetEventStreamRequest { source_id })
+            .get_event_stream(GetEventStreamRequest {
+                source_id,
+                properties: Some(props),
+            })
             .await
             .inspect_err(|_| {
                 tracing::error!("failed to create event stream for CDC source {}", source_id)
             })?
-            .into_inner())
-    }
-
-    pub async fn drop_source(&self, source_id: u64) -> Result<DropSourceResponse> {
-        Ok(self
-            .0
-            .to_owned()
-            .drop_source(DropSourceRequest { source_id })
-            .await
-            .inspect_err(|_| tracing::error!("failed to drop source for CDC source {}", source_id))?
             .into_inner())
     }
 }
