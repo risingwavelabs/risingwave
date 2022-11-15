@@ -22,6 +22,7 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::HummockVersion;
@@ -76,7 +77,6 @@ pub use validator::*;
 use value::*;
 
 use self::iterator::{BackwardUserIterator, HummockIterator, UserIterator};
-use self::key::user_key;
 pub use self::sstable_store::*;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
@@ -95,6 +95,7 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::{HummockReadVersion, HummockVersionReader};
 use crate::monitor::StoreLocalStatistic;
+use crate::store::ReadOptions;
 
 struct HummockStorageShutdownGuard {
     shutdown_sender: UnboundedSender<HummockEvent>,
@@ -306,14 +307,24 @@ impl HummockStorage {
 pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
     sstable_info: &SstableInfo,
-    internal_key: &[u8],
-    check_bloom_filter: bool,
+    full_key: FullKey<&[u8]>,
+    read_options: &ReadOptions,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
-    let ukey = user_key(internal_key);
-    if check_bloom_filter && !hit_sstable_bloom_filter(sstable.value(), ukey, local_stats) {
+    let ukey = &full_key.user_key;
+    let delete_epoch = if read_options.ignore_range_tombstone {
+        None
+    } else {
+        get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
+    };
+    if read_options.check_bloom_filter
+        && !hit_sstable_bloom_filter(sstable.value(), ukey.encode().as_slice(), local_stats)
+    {
+        if delete_epoch.is_some() {
+            return Ok(Some(HummockValue::Delete));
+        }
         return Ok(None);
     }
 
@@ -324,17 +335,30 @@ pub async fn get_from_sstable_info(
         sstable_store_ref.clone(),
         Arc::new(SstableIteratorReadOptions::default()),
     );
-    iter.seek(internal_key).await?;
+    iter.seek(full_key).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
+        if delete_epoch.is_some() {
+            return Ok(Some(HummockValue::Delete));
+        }
         return Ok(None);
     }
 
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
-    let value = match key::user_key(iter.key()) == ukey {
-        true => Some(iter.value().to_bytes()),
-        false => None,
+    let value = if iter.key().user_key == *ukey {
+        if delete_epoch
+            .map(|epoch| epoch >= iter.key().epoch)
+            .unwrap_or(false)
+        {
+            Some(HummockValue::Delete)
+        } else {
+            Some(iter.value().to_bytes())
+        }
+    } else if delete_epoch.is_some() {
+        Some(HummockValue::Delete)
+    } else {
+        None
     };
     iter.collect_local_statistic(local_stats);
 
@@ -343,11 +367,11 @@ pub async fn get_from_sstable_info(
 
 pub fn hit_sstable_bloom_filter(
     sstable_info_ref: &Sstable,
-    key: &[u8],
+    user_key: &[u8],
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
-    let surely_not_have = sstable_info_ref.surely_not_have_user_key(key);
+    let surely_not_have = sstable_info_ref.surely_not_have_user_key(user_key);
 
     if surely_not_have {
         local_stats.bloom_filter_true_negative_count += 1;
@@ -360,31 +384,32 @@ pub fn hit_sstable_bloom_filter(
 pub async fn get_from_order_sorted_uncommitted_data(
     sstable_store_ref: SstableStoreRef,
     order_sorted_uncommitted_data: OrderSortedUncommittedData,
-    internal_key: &[u8],
+    full_key: FullKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
-    key: &[u8],
-    check_bloom_filter: bool,
+    read_options: &ReadOptions,
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
-    let epoch = key::get_epoch(internal_key);
+    let epoch = full_key.epoch;
     for data_list in order_sorted_uncommitted_data {
         for data in data_list {
             match data {
                 UncommittedData::Batch(batch) => {
                     assert!(batch.epoch() <= epoch, "batch'epoch greater than epoch");
-                    if let Some(data) = get_from_batch(&batch, key, local_stats) {
+                    if let Some(data) =
+                        get_from_batch(&batch, full_key.user_key.table_key, local_stats)
+                    {
                         return Ok((Some(data), table_counts));
                     }
                 }
 
-                UncommittedData::Sst((_, sstable_info)) => {
+                UncommittedData::Sst(LocalSstableInfo { sst_info, .. }) => {
                     table_counts += 1;
 
                     if let Some(data) = get_from_sstable_info(
                         sstable_store_ref.clone(),
-                        &sstable_info,
-                        internal_key,
-                        check_bloom_filter,
+                        &sst_info,
+                        full_key,
+                        read_options,
                         local_stats,
                     )
                     .await?
@@ -401,10 +426,13 @@ pub async fn get_from_order_sorted_uncommitted_data(
 /// Get `user_value` from `SharedBufferBatch`
 pub fn get_from_batch(
     batch: &SharedBufferBatch,
-    key: &[u8],
+    table_key: TableKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
-    batch.get(key).map(|v| {
+    if batch.check_delete_by_range(table_key) {
+        return Some(HummockValue::Delete);
+    }
+    batch.get(table_key).map(|v| {
         local_stats.get_shared_buffer_hit_counts += 1;
         v
     })

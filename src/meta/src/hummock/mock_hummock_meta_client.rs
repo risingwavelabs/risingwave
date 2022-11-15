@@ -131,7 +131,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     ) -> Result<()> {
         let sst_to_worker = sstables
             .iter()
-            .map(|(_, sst)| (sst.id, self.context_id))
+            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, self.context_id))
             .collect();
         self.hummock_manager
             .commit_epoch(epoch, sstables, sst_to_worker)

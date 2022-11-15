@@ -182,7 +182,7 @@ mod tests {
 
     fn new_source() -> TableSource {
         let store = MemoryStateStore::new();
-        let _keyspace = Keyspace::table_root(store, &Default::default());
+        let _keyspace = Keyspace::table_root(store, Default::default());
 
         TableSource::new(vec![ColumnDesc::unnamed(
             ColumnId::from(0),

@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use rand::RngCore;
@@ -35,6 +35,7 @@ use risingwave_common::config::{load_config, BatchConfig};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
+use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
@@ -803,33 +804,66 @@ impl Session<PgResponseStream> for SessionImpl {
             Statement::ShowObjects(show_object) => match show_object {
                 ShowObject::Columns { table: _ } => {
                     vec![
-                        PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
-                        PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                        PgFieldDescriptor::new(
+                            "Name".to_owned(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Type".to_owned(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
                     ]
                 }
                 _ => {
-                    vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)]
+                    vec![PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    )]
                 }
             },
             Statement::ShowVariable { variable } => {
                 let name = &variable[0].value.to_lowercase();
                 if name.eq_ignore_ascii_case("ALL") {
                     vec![
-                        PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
-                        PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
-                        PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new(
+                            "Name".to_string(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Setting".to_string(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Description".to_string(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
                     ]
                 } else {
                     vec![PgFieldDescriptor::new(
                         name.to_ascii_lowercase(),
-                        TypeOid::Varchar,
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
                     )]
                 }
             }
             Statement::Describe { name: _ } => {
                 vec![
-                    PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
-                    PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Type".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
                 ]
             }
             _ => {

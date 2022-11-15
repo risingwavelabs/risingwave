@@ -98,7 +98,7 @@ steps:
           environment:
             - CODECOV_TOKEN
             - RW_RANDOM_SEED_SQLSMITH: true
-    timeout_in_minutes: 15
+    timeout_in_minutes: 18
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"

@@ -93,7 +93,7 @@ After compaction (w/ min watermark = 0), there will eventually be an SST with th
 (b, 1) => 2
 ```
 
-The final written key (aka. full key) is encoded by appending the 8-byte epoch after the user key. When doing full key comparison in Hummock, we should always compare full keys using the `VersionedComparator` to get the correct result.
+The final written key (aka. full key) is encoded by appending the 8-byte epoch after the user key. When doing full key comparison in Hummock, we should always compare full keys using the `KeyComparator` to get the correct result.
 
 ### Write Path
 
