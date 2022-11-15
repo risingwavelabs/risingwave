@@ -56,7 +56,7 @@ impl NexmarkRng for SmallRng {
             return String::new();
         }
         let desired_average_size = desired_average_size - current_size;
-        let delta = desired_average_size / 5;
+        let delta = (desired_average_size + 2) / 5;
         let min_size = desired_average_size - delta;
         let desired_size = min_size
             + if delta == 0 {
