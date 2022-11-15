@@ -681,7 +681,7 @@ where
             .await
         {
             self.fragment_manager
-                .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)))
+                .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)), None)
                 .await?;
             return Err(err);
         }

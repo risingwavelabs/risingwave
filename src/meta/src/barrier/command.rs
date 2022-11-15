@@ -163,6 +163,12 @@ impl Command {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
         !matches!(self, Command::Plain(None | Some(Mutation::Resume(_))))
     }
+
+    pub fn need_align(&self) -> bool {
+        matches!(self, Command::CreateStreamingJob { .. })
+            || matches!(self, Command::DropStreamingJobs(_))
+            || matches!(self, Command::RescheduleFragment(_))
+    }
 }
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
@@ -411,28 +417,30 @@ where
 
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
-    pub async fn post_collect(&self) -> MetaResult<()> {
+    pub async fn post_collect(&self, align_epoch: u64) -> MetaResult<()> {
         match &self.command {
             #[allow(clippy::single_match)]
-            Command::Plain(mutation) => match mutation {
-                // After the `Pause` barrier is collected and committed, we must ensure that the
-                // storage version with this epoch is synced to all compute nodes before the
-                // execution of the next command of `Update`, as some newly created operators may
-                // immediately initialize their states on that barrier.
-                Some(Mutation::Pause(..)) => {
-                    let futures = self.info.node_map.values().map(|worker_node| async {
-                        let client = self.client_pool.get(worker_node).await?;
-                        let request = WaitEpochCommitRequest {
-                            epoch: self.prev_epoch.0,
-                        };
-                        client.wait_epoch_commit(request).await
-                    });
+            Command::Plain(mutation) => {
+                match mutation {
+                    // After the `Pause` barrier is collected and committed, we must ensure that the
+                    // storage version with this epoch is synced to all compute nodes before the
+                    // execution of the next command of `Update`, as some newly created operators
+                    // may immediately initialize their states on that barrier.
+                    Some(Mutation::Pause(..)) => {
+                        let futures = self.info.node_map.values().map(|worker_node| async {
+                            let client = self.client_pool.get(worker_node).await?;
+                            let request = WaitEpochCommitRequest {
+                                epoch: self.prev_epoch.0,
+                            };
+                            client.wait_epoch_commit(request).await
+                        });
 
-                    try_join_all(futures).await?;
+                        try_join_all(futures).await?;
+                    }
+
+                    _ => {}
                 }
-
-                _ => {}
-            },
+            }
 
             Command::SourceSplitAssignment(split_assignment) => {
                 self.fragment_manager
@@ -464,7 +472,7 @@ where
 
                 // Drop fragment info in meta store.
                 self.fragment_manager
-                    .drop_table_fragments_vec(table_ids)
+                    .drop_table_fragments_vec(table_ids, Some(align_epoch))
                     .await?;
             }
 
@@ -488,6 +496,7 @@ where
                         &table_fragments.table_id(),
                         dependent_table_actors,
                         init_split_assignment.clone(),
+                        Some(align_epoch),
                     )
                     .await?;
 
@@ -550,7 +559,7 @@ where
 
                 // Update fragment info after rescheduling in meta store.
                 self.fragment_manager
-                    .post_apply_reschedules(reschedules.clone())
+                    .post_apply_reschedules(reschedules.clone(), Some(align_epoch))
                     .await?;
 
                 let mut stream_source_actor_splits = HashMap::new();

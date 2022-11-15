@@ -70,7 +70,7 @@ where
     }
 
     /// Clean up all dirty streaming jobs.
-    async fn clean_dirty_fragments(&self) -> MetaResult<()> {
+    async fn clean_dirty_fragments(&self, align_epoch: u64) -> MetaResult<()> {
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
         let table_fragments = self.fragment_manager.list_table_fragments().await?;
         let to_drop_table_fragments = table_fragments
@@ -88,7 +88,7 @@ where
 
         debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
         self.fragment_manager
-            .drop_table_fragments_vec(&to_drop_streaming_ids)
+            .drop_table_fragments_vec(&to_drop_streaming_ids, Some(align_epoch))
             .await?;
 
         // unregister compaction group for dirty table fragments.
@@ -123,7 +123,7 @@ where
         self.scheduled_barriers.abort().await;
 
         debug!("recovery start!");
-        self.clean_dirty_fragments()
+        self.clean_dirty_fragments(prev_epoch.0)
             .await
             .expect("clean dirty fragments");
         let retry_strategy = Self::get_retry_strategy();
@@ -132,7 +132,7 @@ where
             let mut new_epoch = prev_epoch.next();
 
             // Migrate expired actors to newly joined node by changing actor_map
-            let migrated = self.migrate_actors(&info).await?;
+            let migrated = self.migrate_actors(&info, prev_epoch.0).await?;
             if migrated {
                 info = self.resolve_actor_info_for_recovery().await;
             }
@@ -178,7 +178,7 @@ where
                 .await;
             match barrier_complete_rx.recv().await.unwrap() {
                 (_, Ok(response)) => {
-                    if let Err(err) = command_ctx.post_collect().await {
+                    if let Err(err) = command_ctx.post_collect(prev_epoch.0).await {
                         error!("post_collect failed: {}", err);
                         return Err(err);
                     }
@@ -243,7 +243,7 @@ where
         (migrate_map, node_map)
     }
 
-    async fn migrate_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
+    async fn migrate_actors(&self, info: &BarrierActorInfo, align_epoch: u64) -> MetaResult<bool> {
         debug!("start migrate actors.");
 
         // 1. get expired workers
@@ -262,7 +262,7 @@ where
         let (migrate_map, node_map) = self.get_migrate_map_plan(info, &expired_workers).await;
         // 2. migrate actors in fragments
         self.fragment_manager
-            .migrate_actors(&migrate_map, &node_map)
+            .migrate_actors(&migrate_map, &node_map, Some(align_epoch))
             .await?;
         debug!("migrate actors succeed.");
 

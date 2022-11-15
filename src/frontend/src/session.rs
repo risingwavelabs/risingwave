@@ -297,11 +297,11 @@ impl FrontendEnv {
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
 
-        let worker_node_manager = Arc::new(WorkerNodeManager::new());
-
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
+        let worker_node_manager =
+            Arc::new(WorkerNodeManager::new(hummock_snapshot_manager.clone()));
         let compute_client_pool = Arc::new(ComputeClientPool::new(
             frontend_config.server.connection_pool_size,
         ));

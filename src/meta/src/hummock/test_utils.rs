@@ -58,7 +58,7 @@ where
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, ssts, sst_to_worker, false)
         .await
         .unwrap();
     // Current state: {v0: [], v1: [test_tables]}
@@ -121,7 +121,7 @@ where
     let ssts = to_local_sstable_info(&test_tables_3);
     let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, ssts, sst_to_worker, false)
         .await
         .unwrap();
     // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables], v3:
@@ -312,7 +312,7 @@ where
 {
     let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, META_NODE_ID)).collect();
     hummock_manager_ref
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, ssts, sst_to_worker, false)
         .await
 }
 
@@ -335,7 +335,7 @@ where
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, ssts, sst_to_worker, false)
         .await
         .unwrap();
     test_tables

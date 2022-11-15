@@ -20,13 +20,17 @@ use risingwave_common::bail;
 use risingwave_common::types::{ParallelUnitId, VnodeMapping};
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::meta::AlignEpoch;
 
 use crate::catalog::FragmentId;
-use crate::scheduler::{SchedulerError, SchedulerResult};
+use crate::scheduler::{
+    HummockSnapshotManager, HummockSnapshotManagerRef, SchedulerError, SchedulerResult,
+};
 
 /// `WorkerNodeManager` manages live worker nodes and table vnode mapping information.
 pub struct WorkerNodeManager {
     inner: RwLock<WorkerNodeManagerInner>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 #[derive(Default)]
@@ -38,16 +42,11 @@ struct WorkerNodeManagerInner {
 
 pub type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
 
-impl Default for WorkerNodeManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl WorkerNodeManager {
-    pub fn new() -> Self {
+    pub fn new(hummock_snapshot_manager: HummockSnapshotManagerRef) -> Self {
         Self {
             inner: RwLock::new(WorkerNodeManagerInner::default()),
+            hummock_snapshot_manager,
         }
     }
 
@@ -57,7 +56,11 @@ impl WorkerNodeManager {
             worker_nodes,
             fragment_vnode_mapping: HashMap::new(),
         });
-        Self { inner }
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::mock());
+        Self {
+            inner,
+            hummock_snapshot_manager,
+        }
     }
 
     pub fn list_worker_nodes(&self) -> Vec<WorkerNode> {
@@ -135,7 +138,13 @@ impl WorkerNodeManager {
             .cloned()
     }
 
-    pub fn insert_fragment_mapping(&self, fragment_id: FragmentId, vnode_mapping: VnodeMapping) {
+    pub fn insert_fragment_mapping(
+        &self,
+        fragment_id: FragmentId,
+        vnode_mapping: VnodeMapping,
+        align_epoch: Option<AlignEpoch>,
+    ) {
+        self.update_align_epoch(align_epoch);
         self.inner
             .write()
             .unwrap()
@@ -144,7 +153,13 @@ impl WorkerNodeManager {
             .unwrap();
     }
 
-    pub fn update_fragment_mapping(&self, fragment_id: FragmentId, vnode_mapping: VnodeMapping) {
+    pub fn update_fragment_mapping(
+        &self,
+        fragment_id: FragmentId,
+        vnode_mapping: VnodeMapping,
+        align_epoch: Option<AlignEpoch>,
+    ) {
+        self.update_align_epoch(align_epoch);
         self.inner
             .write()
             .unwrap()
@@ -153,13 +168,25 @@ impl WorkerNodeManager {
             .unwrap();
     }
 
-    pub fn remove_fragment_mapping(&self, fragment_id: &FragmentId) {
+    pub fn remove_fragment_mapping(
+        &self,
+        fragment_id: &FragmentId,
+        align_epoch: Option<AlignEpoch>,
+    ) {
+        self.update_align_epoch(align_epoch);
         self.inner
             .write()
             .unwrap()
             .fragment_vnode_mapping
             .remove(fragment_id)
             .unwrap();
+    }
+
+    pub fn update_align_epoch(&self, align_epoch: Option<AlignEpoch>) {
+        if let Some(epoch) = align_epoch {
+            self.hummock_snapshot_manager
+                .update_align_epoch(epoch.align_epoch);
+        }
     }
 }
 

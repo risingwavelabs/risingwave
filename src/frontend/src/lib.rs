@@ -26,6 +26,7 @@
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
 #![feature(once_cell)]
+#![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
 #![recursion_limit = "256"]
 

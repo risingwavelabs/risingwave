@@ -826,7 +826,12 @@ where
                     );
                 } else if checkpoint {
                     self.hummock_manager
-                        .commit_epoch(node.command_ctx.prev_epoch.0, synced_ssts, sst_to_worker)
+                        .commit_epoch(
+                            node.command_ctx.prev_epoch.0,
+                            synced_ssts,
+                            sst_to_worker,
+                            node.command_ctx.command.need_align(),
+                        )
                         .await?;
                 } else {
                     self.hummock_manager.update_current_epoch(prev_epoch)?;
@@ -836,7 +841,7 @@ where
                     assert!(!node.command_ctx.command.need_checkpoint());
                 }
 
-                node.command_ctx.post_collect().await?;
+                node.command_ctx.post_collect(prev_epoch).await?;
 
                 // Notify about collected.
                 let mut notifiers = take(&mut node.notifiers);

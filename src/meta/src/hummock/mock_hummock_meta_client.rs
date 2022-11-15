@@ -99,6 +99,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                 HummockSnapshot {
                     committed_epoch: pinned_epochs,
                     current_epoch: pinned_epochs,
+                    need_align: false,
                 },
             )
             .await
@@ -134,7 +135,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map(|(_, sst)| (sst.id, self.context_id))
             .collect();
         self.hummock_manager
-            .commit_epoch(epoch, sstables, sst_to_worker)
+            .commit_epoch(epoch, sstables, sst_to_worker, false)
             .await
             .map_err(mock_err)
     }

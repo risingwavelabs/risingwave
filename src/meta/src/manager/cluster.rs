@@ -185,7 +185,7 @@ where
         if worker_type == WorkerType::ComputeNode {
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Add, Info::Node(worker.worker_node))
+                .notify_frontend(Operation::Add, Info::Node(worker.worker_node), None)
                 .await;
         }
 
@@ -208,7 +208,7 @@ where
         if worker_type == WorkerType::ComputeNode {
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Delete, Info::Node(worker_node.clone()))
+                .notify_frontend(Operation::Delete, Info::Node(worker_node.clone()), None)
                 .await;
         }
 

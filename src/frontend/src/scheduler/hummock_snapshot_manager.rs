@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
@@ -34,12 +34,27 @@ const UNPIN_INTERVAL_SECS: u64 = 10;
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 pub type PinnedHummockSnapshot = HummockSnapshotGuard;
 
-type SnapshotRef = Arc<ArcSwap<HummockSnapshot>>;
+type SnapshotRef = Arc<ArcSwap<QueryHummockSnapshot>>;
 
+#[derive(Clone, Debug)]
+pub struct QueryHummockSnapshot {
+    pub committed_epoch: u64,
+
+    pub current_epoch: u64,
+}
+
+impl QueryHummockSnapshot {
+    fn from(snapshot: HummockSnapshot) -> Self {
+        QueryHummockSnapshot {
+            committed_epoch: snapshot.committed_epoch,
+            current_epoch: snapshot.current_epoch,
+        }
+    }
+}
 /// Cache of hummock snapshot in meta.
 pub struct HummockSnapshotManager {
     /// Send epoch-related operations to `HummockSnapshotManagerCore` for async batch handling.
-    sender: UnboundedSender<EpochOperation>,
+    sender: Option<UnboundedSender<EpochOperation>>,
 
     /// The latest snapshot synced from the meta service.
     ///
@@ -51,13 +66,17 @@ pub struct HummockSnapshotManager {
     /// `current_epoch` is always in the shared buffer, so it will never be gc before the data
     /// of `committed_epoch`.
     latest_snapshot: SnapshotRef,
+
+    align_epoch: RwLock<u64>,
+
+    align_epoch_snapshot_map: RwLock<BTreeMap<u64, QueryHummockSnapshot>>,
 }
 
 #[derive(Debug)]
 enum EpochOperation {
     RequestEpoch {
         query_id: QueryId,
-        sender: Callback<SchedulerResult<HummockSnapshot>>,
+        sender: Callback<SchedulerResult<QueryHummockSnapshot>>,
     },
     ReleaseEpoch {
         query_id: QueryId,
@@ -67,7 +86,7 @@ enum EpochOperation {
 }
 
 pub struct HummockSnapshotGuard {
-    snapshot: HummockSnapshot,
+    snapshot: QueryHummockSnapshot,
     query_id: QueryId,
     unpin_snapshot_sender: UnboundedSender<EpochOperation>,
 }
@@ -97,10 +116,22 @@ impl Drop for HummockSnapshotGuard {
 }
 
 impl HummockSnapshotManager {
+    pub fn mock() -> Self {
+        Self {
+            sender: None,
+            latest_snapshot: Arc::new(ArcSwap::from_pointee(QueryHummockSnapshot {
+                committed_epoch: INVALID_EPOCH,
+                current_epoch: INVALID_EPOCH,
+            })),
+            align_epoch: RwLock::new(INVALID_EPOCH),
+            align_epoch_snapshot_map: RwLock::new(BTreeMap::default()),
+        }
+    }
+
     pub fn new(meta_client: Arc<dyn FrontendMetaClient>) -> Self {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
 
-        let latest_snapshot = Arc::new(ArcSwap::from_pointee(HummockSnapshot {
+        let latest_snapshot = Arc::new(ArcSwap::from_pointee(QueryHummockSnapshot {
             committed_epoch: INVALID_EPOCH,
             current_epoch: INVALID_EPOCH,
         }));
@@ -160,8 +191,10 @@ impl HummockSnapshotManager {
             }
         });
         Self {
-            sender,
+            sender: Some(sender),
             latest_snapshot,
+            align_epoch: RwLock::new(INVALID_EPOCH),
+            align_epoch_snapshot_map: RwLock::new(BTreeMap::default()),
         }
     }
 
@@ -171,7 +204,7 @@ impl HummockSnapshotManager {
             query_id: query_id.clone(),
             sender,
         };
-        self.sender.send(msg).map_err(|_| {
+        self.sender.as_ref().unwrap().send(msg).map_err(|_| {
             SchedulerError::Internal(anyhow!("Failed to get epoch for query: {:?}", query_id,))
         })?;
         let snapshot = rc.await.unwrap_or_else(|e| {
@@ -184,17 +217,63 @@ impl HummockSnapshotManager {
         Ok(HummockSnapshotGuard {
             snapshot,
             query_id: query_id.clone(),
-            unpin_snapshot_sender: self.sender.clone(),
+            unpin_snapshot_sender: self.sender.as_ref().unwrap().clone(),
         })
     }
 
-    pub fn update_epoch(&self, snapshot: HummockSnapshot) {
+    pub fn update_snapshot(&self, snapshot: HummockSnapshot) {
+        let need_align = snapshot.need_align;
+        let query_hummock_snapshot = QueryHummockSnapshot::from(snapshot);
+        if !need_align {
+            if self.align_epoch_snapshot_map.read().unwrap().is_empty() {
+                self.update_snapshot_epoch(query_hummock_snapshot);
+            } else if let Some(mut entry) =
+                self.align_epoch_snapshot_map.write().unwrap().last_entry()
+            {
+                *entry.get_mut() = query_hummock_snapshot;
+            }
+        } else if self
+            .align_epoch
+            .read()
+            .unwrap()
+            .gt(&query_hummock_snapshot.committed_epoch)
+        {
+            self.update_snapshot_epoch(query_hummock_snapshot);
+        } else {
+            self.align_epoch_snapshot_map
+                .write()
+                .unwrap()
+                .insert(*self.align_epoch.read().unwrap(), query_hummock_snapshot);
+        }
+    }
+
+    pub fn update_snapshot_epoch(&self, snapshot: QueryHummockSnapshot) {
         // Note: currently the snapshot is not only updated from the observer, so we need to take
         // the `max` here instead of directly replace the snapshot.
-        self.latest_snapshot.rcu(|prev| HummockSnapshot {
+        self.latest_snapshot.rcu(|prev| QueryHummockSnapshot {
             committed_epoch: std::cmp::max(prev.committed_epoch, snapshot.committed_epoch),
             current_epoch: std::cmp::max(prev.current_epoch, snapshot.current_epoch),
         });
+    }
+
+    pub fn update_align_epoch(&self, epoch: u64) {
+        let mut align_epoch = self.align_epoch.write().unwrap();
+        *align_epoch = epoch;
+        let mut evens: BTreeMap<_, _> = self
+            .align_epoch_snapshot_map
+            .write()
+            .unwrap()
+            .drain_filter(|key, _| key <= &align_epoch)
+            .collect();
+
+        let query_hummock_snapshot = match evens.pop_last() {
+            Some((_, snapshot)) => snapshot,
+            None => QueryHummockSnapshot {
+                committed_epoch: epoch,
+                current_epoch: epoch,
+            },
+        };
+        self.update_snapshot_epoch(query_hummock_snapshot);
     }
 }
 
@@ -222,13 +301,14 @@ impl HummockSnapshotManagerCore {
     /// better epoch freshness.
     async fn get_epoch_for_query_from_rpc(
         &mut self,
-        batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockSnapshot>>)>,
-    ) -> HummockSnapshot {
+        batches: &mut Vec<(QueryId, Callback<SchedulerResult<QueryHummockSnapshot>>)>,
+    ) -> QueryHummockSnapshot {
         let ret = self.meta_client.get_epoch().await;
         match ret {
             Ok(snapshot) => {
-                self.notify_epoch_assigned_for_queries(&snapshot, batches);
-                snapshot
+                let query_snapshot = QueryHummockSnapshot::from(snapshot);
+                self.notify_epoch_assigned_for_queries(&query_snapshot, batches);
+                query_snapshot
             }
             Err(e) => {
                 for (id, cb) in batches.drain(..) {
@@ -238,7 +318,7 @@ impl HummockSnapshotManagerCore {
                         e
                     ))));
                 }
-                HummockSnapshot {
+                QueryHummockSnapshot {
                     committed_epoch: INVALID_EPOCH,
                     current_epoch: INVALID_EPOCH,
                 }
@@ -250,9 +330,9 @@ impl HummockSnapshotManagerCore {
     /// maintained by meta's notification service.
     fn get_epoch_for_query_from_push(
         &mut self,
-        batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockSnapshot>>)>,
-    ) -> HummockSnapshot {
-        let snapshot = HummockSnapshot::clone(&self.latest_snapshot.load());
+        batches: &mut Vec<(QueryId, Callback<SchedulerResult<QueryHummockSnapshot>>)>,
+    ) -> QueryHummockSnapshot {
+        let snapshot = QueryHummockSnapshot::clone(&self.latest_snapshot.load());
         self.notify_epoch_assigned_for_queries(&snapshot, batches);
         snapshot
     }
@@ -261,8 +341,8 @@ impl HummockSnapshotManagerCore {
     /// epoch
     fn notify_epoch_assigned_for_queries(
         &mut self,
-        snapshot: &HummockSnapshot,
-        batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockSnapshot>>)>,
+        snapshot: &QueryHummockSnapshot,
+        batches: &mut Vec<(QueryId, Callback<SchedulerResult<QueryHummockSnapshot>>)>,
     ) {
         if batches.is_empty() {
             return;

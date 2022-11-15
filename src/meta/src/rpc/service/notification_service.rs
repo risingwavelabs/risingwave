@@ -169,6 +169,7 @@ where
             operation: Operation::Snapshot as i32,
             info: Some(Info::Snapshot(meta_snapshot)),
             version: self.env.notification_manager().current_version().await,
+            align_epoch: None,
         }))
         .unwrap();
 

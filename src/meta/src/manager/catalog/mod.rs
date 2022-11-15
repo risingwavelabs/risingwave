@@ -198,8 +198,6 @@ where
             .await;
         for schema in schemas_added {
             version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Add, Info::Schema(schema))
                 .await;
         }
@@ -1130,8 +1128,6 @@ where
                 .await;
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Add, Info::Index(index.to_owned()))
                 .await;
 
@@ -1251,7 +1247,7 @@ where
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.env
             .notification_manager()
-            .notify_frontend(operation, info)
+            .notify_frontend(operation, info, None)
             .await
     }
 }
@@ -1304,8 +1300,6 @@ where
         commit_meta!(self, users)?;
 
         let version = self
-            .env
-            .notification_manager()
             .notify_frontend(Operation::Add, Info::User(user.to_owned()))
             .await;
         Ok(version)
@@ -1347,8 +1341,6 @@ where
         commit_meta!(self, users)?;
 
         let version = self
-            .env
-            .notification_manager()
             .notify_frontend(Operation::Update, Info::User(new_user))
             .await;
         Ok(version)
@@ -1398,8 +1390,6 @@ where
         commit_meta!(self, users)?;
 
         let version = self
-            .env
-            .notification_manager()
             .notify_frontend(Operation::Delete, Info::User(user))
             .await;
         Ok(version)
@@ -1535,8 +1525,6 @@ where
         let mut version = 0;
         for user in user_updated {
             version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Update, Info::User(user))
                 .await;
         }
@@ -1695,8 +1683,6 @@ where
         let mut version = 0;
         for (_, user_info) in user_updated {
             version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Update, Info::User(user_info))
                 .await;
         }

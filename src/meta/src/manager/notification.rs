@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::CompactTask;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
+use risingwave_pb::meta::{AlignEpoch, SubscribeResponse, SubscribeType};
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tonic::Status;
@@ -44,6 +44,7 @@ struct Task {
     callback_tx: Option<oneshot::Sender<NotificationVersion>>,
     operation: Operation,
     info: Info,
+    align_epoch: Option<AlignEpoch>,
 }
 
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
@@ -66,7 +67,9 @@ where
         tokio::spawn(async move {
             while let Some(task) = task_rx.recv().await {
                 let mut guard = core.lock().await;
-                guard.notify(task.target, task.operation, &task.info).await;
+                guard
+                    .notify(task.target, task.operation, &task.info, task.align_epoch)
+                    .await;
                 if let Some(tx) = task.callback_tx {
                     tx.send(guard.current_version.version()).unwrap();
                 }
@@ -86,6 +89,7 @@ where
             callback_tx: None,
             operation,
             info,
+            align_epoch: None,
         };
         self.task_tx.send(task).unwrap();
     }
@@ -97,6 +101,7 @@ where
         target: SubscribeType,
         operation: Operation,
         info: Info,
+        align_epoch: Option<AlignEpoch>,
     ) -> NotificationVersion {
         let (callback_tx, callback_rx) = oneshot::channel();
         let task = Task {
@@ -104,6 +109,7 @@ where
             callback_tx: Some(callback_tx),
             operation,
             info,
+            align_epoch,
         };
         self.task_tx.send(task).unwrap();
         callback_rx.await.unwrap()
@@ -113,16 +119,25 @@ where
         self.notify_asynchronously(SubscribeType::Frontend, operation, info);
     }
 
-    pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(SubscribeType::Frontend, operation, info).await
+    pub async fn notify_frontend(
+        &self,
+        operation: Operation,
+        info: Info,
+        align_epoch: Option<u64>,
+    ) -> NotificationVersion {
+        let align_epoch = align_epoch.map(|align_epoch| AlignEpoch { align_epoch });
+        self.notify(SubscribeType::Frontend, operation, info, align_epoch)
+            .await
     }
 
     pub async fn notify_hummock(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(SubscribeType::Hummock, operation, info).await
+        self.notify(SubscribeType::Hummock, operation, info, None)
+            .await
     }
 
     pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(SubscribeType::Compactor, operation, info).await
+        self.notify(SubscribeType::Compactor, operation, info, None)
+            .await
     }
 
     pub fn notify_hummock_asynchronously(&self, operation: Operation, info: Info) {
@@ -214,7 +229,13 @@ where
         }
     }
 
-    async fn notify(&mut self, subscribe_type: SubscribeType, operation: Operation, info: &Info) {
+    async fn notify(
+        &mut self,
+        subscribe_type: SubscribeType,
+        operation: Operation,
+        info: &Info,
+        align_epoch: Option<AlignEpoch>,
+    ) {
         self.current_version
             .increase_version(&*self.meta_store)
             .await
@@ -233,6 +254,7 @@ where
                     operation: operation as i32,
                     info: Some(info.clone()),
                     version: self.current_version.version(),
+                    align_epoch: align_epoch.clone(),
                 }))
                 .inspect_err(|err| {
                     tracing::warn!(

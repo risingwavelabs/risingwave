@@ -74,6 +74,7 @@ async fn test_unpin_snapshot_before() {
                 HummockSnapshot {
                     committed_epoch: epoch,
                     current_epoch: epoch,
+                    need_align: false,
                 },
             )
             .await
@@ -92,6 +93,7 @@ async fn test_unpin_snapshot_before() {
                 HummockSnapshot {
                     committed_epoch: epoch + 1,
                     current_epoch: epoch + 1,
+                    need_align: false,
                 },
             )
             .await
@@ -787,14 +789,14 @@ async fn test_invalid_sst_id() {
         .map(|(_, sst)| (sst.id, WorkerId::MAX))
         .collect();
     let error = hummock_manager
-        .commit_epoch(epoch, ssts.clone(), sst_to_worker)
+        .commit_epoch(epoch, ssts.clone(), sst_to_worker, false)
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InvalidSst(1)));
 
     let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, ssts, sst_to_worker, false)
         .await
         .unwrap();
 }

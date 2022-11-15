@@ -105,6 +105,7 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
             operation: Operation::Snapshot as i32,
             info: Some(Info::Snapshot(meta_snapshot)),
             version: self.notification_manager.current_version().await,
+            align_epoch: None,
         }))
         .unwrap();
         self.notification_manager

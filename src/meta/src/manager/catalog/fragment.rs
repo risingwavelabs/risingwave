@@ -137,6 +137,7 @@ where
     pub async fn batch_update_table_fragments(
         &self,
         table_fragments: &[TableFragments],
+        align_epoch: Option<u64>,
     ) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
         if table_fragments
@@ -153,14 +154,19 @@ where
         commit_meta!(self, table_fragments_txn)?;
 
         for table_fragment in table_fragments {
-            self.notify_fragment_mapping(table_fragment, Operation::Update)
+            self.notify_fragment_mapping(table_fragment, Operation::Update, align_epoch)
                 .await;
         }
 
         Ok(())
     }
 
-    async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
+    async fn notify_fragment_mapping(
+        &self,
+        table_fragment: &TableFragments,
+        operation: Operation,
+        align_epoch: Option<u64>,
+    ) {
         for fragment in table_fragment.fragments.values() {
             if !fragment.state_table_ids.is_empty() {
                 let mapping = fragment
@@ -169,7 +175,7 @@ where
                     .expect("no data distribution found");
                 self.env
                     .notification_manager()
-                    .notify_frontend(operation, Info::ParallelUnitMapping(mapping))
+                    .notify_frontend(operation, Info::ParallelUnitMapping(mapping), align_epoch)
                     .await;
             }
         }
@@ -231,6 +237,7 @@ where
         table_id: &TableId,
         dependent_table_actors: Vec<(TableId, HashMap<ActorId, Vec<Dispatcher>>)>,
         split_assignment: SplitAssignment,
+        align_epoch: Option<u64>,
     ) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
@@ -263,7 +270,7 @@ where
             }
         }
         commit_meta!(self, table_fragments)?;
-        self.notify_fragment_mapping(&table_fragment, Operation::Add)
+        self.notify_fragment_mapping(&table_fragment, Operation::Add, align_epoch)
             .await;
 
         Ok(())
@@ -286,7 +293,11 @@ where
 
     /// Drop table fragments info and remove downstream actor infos in fragments from its dependent
     /// tables.
-    pub async fn drop_table_fragments_vec(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
+    pub async fn drop_table_fragments_vec(
+        &self,
+        table_ids: &HashSet<TableId>,
+        align_epoch: Option<u64>,
+    ) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
         let to_delete_table_fragments = table_ids
             .iter()
@@ -328,7 +339,7 @@ where
 
         for table_fragments in to_delete_table_fragments {
             if table_fragments.state() != State::Initial {
-                self.notify_fragment_mapping(&table_fragments, Operation::Delete)
+                self.notify_fragment_mapping(&table_fragments, Operation::Delete, align_epoch)
                     .await;
             }
         }
@@ -383,6 +394,7 @@ where
         &self,
         migrate_map: &HashMap<ActorId, WorkerId>,
         node_map: &HashMap<WorkerId, WorkerNode>,
+        align_epoch: Option<u64>,
     ) -> MetaResult<()> {
         let mut parallel_unit_migrate_map = HashMap::new();
         let mut pu_map: HashMap<WorkerId, Vec<&ParallelUnit>> = node_map
@@ -427,7 +439,8 @@ where
             }
         });
         // update fragments
-        self.batch_update_table_fragments(&new_fragments).await?;
+        self.batch_update_table_fragments(&new_fragments, align_epoch)
+            .await?;
         Ok(())
     }
 
@@ -561,6 +574,7 @@ where
     pub async fn post_apply_reschedules(
         &self,
         mut reschedules: HashMap<FragmentId, Reschedule>,
+        align_epoch: Option<u64>,
     ) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
@@ -770,7 +784,11 @@ where
         for mapping in fragment_mapping_to_notify {
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
+                .notify_frontend(
+                    Operation::Update,
+                    Info::ParallelUnitMapping(mapping),
+                    align_epoch,
+                )
                 .await;
         }
 

@@ -227,6 +227,10 @@ message SubscribeResponse {
     MetaSnapshot snapshot = 20;
     catalog.View view = 21;
   }
+  AlignEpoch align_epoch = 15;
+}
+message AlignEpoch {
+  uint64 align_epoch = 1;
 }
 
 service NotificationService {
