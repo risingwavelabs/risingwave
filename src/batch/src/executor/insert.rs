@@ -98,7 +98,7 @@ impl InsertExecutor {
             if !&self.column_idxs.is_sorted() {
                 let mut ordered_cols: Vec<Column> = Vec::with_capacity(len);
                 for idx in &self.column_idxs {
-                    ordered_cols.push(columns[usize::from(*idx)].clone());
+                    ordered_cols.push(columns[*idx].clone());
                 }
                 columns = ordered_cols
             }
