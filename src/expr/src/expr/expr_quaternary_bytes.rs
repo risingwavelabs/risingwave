@@ -41,7 +41,8 @@ pub fn new_overlay_for_exp(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{DataChunk, Row};
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::row::Row;
     use risingwave_common::types::{Datum, ScalarImpl};
 
     use super::*;

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod config_service;
 pub mod exchange_metrics;
 pub mod exchange_service;
 pub mod monitor_service;

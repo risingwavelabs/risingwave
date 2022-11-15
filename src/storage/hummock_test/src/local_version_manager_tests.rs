@@ -111,7 +111,7 @@ async fn test_update_pinned_version() {
         assert_eq!(
             local_version.get_shared_buffer(epochs[i]).unwrap().size(),
             SharedBufferBatch::measure_batch_size(
-                &SharedBufferBatch::build_shared_buffer_item_batches(batches[i].clone(), epochs[i])
+                &SharedBufferBatch::build_shared_buffer_item_batches(batches[i].clone())
             )
         );
     }
@@ -125,7 +125,7 @@ async fn test_update_pinned_version() {
 
     let build_batch = |pairs, epoch| {
         SharedBufferBatch::for_test(
-            SharedBufferBatch::build_shared_buffer_item_batches(pairs, epoch),
+            SharedBufferBatch::build_shared_buffer_item_batches(pairs),
             epoch,
             TableId::from(0),
         )
@@ -194,7 +194,7 @@ async fn test_update_pinned_version() {
     assert_eq!(
         local_version.get_shared_buffer(epochs[1]).unwrap().size(),
         SharedBufferBatch::measure_batch_size(
-            &SharedBufferBatch::build_shared_buffer_item_batches(batches[1].clone(), epochs[1])
+            &SharedBufferBatch::build_shared_buffer_item_batches(batches[1].clone())
         )
     );
 
@@ -248,7 +248,7 @@ async fn test_update_uncommitted_ssts() {
     let epochs: Vec<u64> = vec![max_commit_epoch + 1, max_commit_epoch + 2];
     let kvs: Vec<Vec<(Bytes, StorageValue)>> = epochs
         .iter()
-        .map(|e| gen_dummy_batch_several_keys(*e, 2000))
+        .map(|_| gen_dummy_batch_several_keys(2000))
         .collect();
     let mut batches = Vec::with_capacity(kvs.len());
 
@@ -260,7 +260,7 @@ async fn test_update_uncommitted_ssts() {
             .unwrap();
         let local_version = local_version_manager.get_local_version();
         let batch = SharedBufferBatch::for_test(
-            SharedBufferBatch::build_shared_buffer_item_batches(kvs[i].clone(), epochs[i]),
+            SharedBufferBatch::build_shared_buffer_item_batches(kvs[i].clone()),
             epochs[i],
             Default::default(),
         );
@@ -272,7 +272,7 @@ async fn test_update_uncommitted_ssts() {
     }
 
     // Update uncommitted sst for epochs[0]
-    let sst1 = gen_dummy_sst_info(1, vec![batches[0].clone()]);
+    let sst1 = gen_dummy_sst_info(1, vec![batches[0].clone()], TableId::default(), epochs[0]);
     {
         let (payload, task_size) = {
             let mut local_version_guard = local_version_manager.local_version().write();
@@ -300,7 +300,7 @@ async fn test_update_uncommitted_ssts() {
             epoch_uncommitted_ssts
                 .first()
                 .unwrap()
-                .1
+                .sst_info
                 .key_range
                 .as_ref()
                 .unwrap()
@@ -311,7 +311,7 @@ async fn test_update_uncommitted_ssts() {
             epoch_uncommitted_ssts
                 .last()
                 .unwrap()
-                .1
+                .sst_info
                 .key_range
                 .as_ref()
                 .unwrap()
@@ -333,7 +333,7 @@ async fn test_update_uncommitted_ssts() {
     assert_eq!(local_version.iter_shared_buffer().count(), 1);
 
     // Update uncommitted sst for epochs[1]
-    let sst2 = gen_dummy_sst_info(2, vec![batches[1].clone()]);
+    let sst2 = gen_dummy_sst_info(2, vec![batches[1].clone()], TableId::default(), epochs[1]);
     {
         let (payload, task_size) = {
             let mut local_version_guard = local_version_manager.local_version().write();
@@ -361,7 +361,7 @@ async fn test_update_uncommitted_ssts() {
             epoch_uncommitted_ssts
                 .first()
                 .unwrap()
-                .1
+                .sst_info
                 .key_range
                 .as_ref()
                 .unwrap()
@@ -372,7 +372,7 @@ async fn test_update_uncommitted_ssts() {
             epoch_uncommitted_ssts
                 .last()
                 .unwrap()
-                .1
+                .sst_info
                 .key_range
                 .as_ref()
                 .unwrap()
@@ -446,7 +446,7 @@ async fn test_clear_shared_buffer() {
         assert_eq!(
             local_version.get_shared_buffer(epochs[i]).unwrap().size(),
             SharedBufferBatch::measure_batch_size(
-                &SharedBufferBatch::build_shared_buffer_item_batches(batches[i].clone(), epochs[i])
+                &SharedBufferBatch::build_shared_buffer_item_batches(batches[i].clone())
             )
         );
     }

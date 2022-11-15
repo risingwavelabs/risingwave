@@ -32,6 +32,7 @@ mod stream_chunk_iter;
 pub mod struct_array;
 mod utf8_array;
 mod value_reader;
+mod vis;
 
 use std::convert::From;
 use std::hash::{Hash, Hasher};
@@ -43,8 +44,8 @@ pub use chrono_array::{
     NaiveTimeArray, NaiveTimeArrayBuilder,
 };
 pub use column_proto_readers::*;
-pub use data_chunk::{DataChunk, DataChunkTestExt, Vis};
-pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
+pub use data_chunk::{DataChunk, DataChunkTestExt};
+pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::{ArrayImplIterator, ArrayIterator};
@@ -55,9 +56,11 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
+pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
 use crate::buffer::Bitmap;
+pub use crate::row::{Row, RowDeserializer};
 use crate::types::*;
 pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 

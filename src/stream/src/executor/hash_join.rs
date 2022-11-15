@@ -20,10 +20,11 @@ use fixedbitset::FixedBitSet;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, Row, RowRef, StreamChunk};
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::BoxedExpression;
@@ -115,20 +116,6 @@ const fn is_right_semi_or_anti(join_type: JoinTypePrimitive) -> bool {
     join_type == JoinType::RightSemi || join_type == JoinType::RightAnti
 }
 
-const fn need_update_side_matched_degree(
-    join_type: JoinTypePrimitive,
-    side_type: SideTypePrimitive,
-) -> bool {
-    only_forward_matched_side(join_type, side_type) || outer_side_null(join_type, side_type)
-}
-
-const fn need_update_side_update_degree(
-    join_type: JoinTypePrimitive,
-    side_type: SideTypePrimitive,
-) -> bool {
-    forward_exactly_once(join_type, side_type) || is_outer_side(join_type, side_type)
-}
-
 const fn need_left_degree(join_type: JoinTypePrimitive) -> bool {
     join_type == FullOuter
         || join_type == LeftOuter
@@ -176,6 +163,8 @@ struct JoinSide<K: HashKey, S: StateStore> {
     start_pos: usize,
     /// The mapping from input indices of a side to output columes.
     i2o_mapping: Vec<(usize, usize)>,
+    /// Whether degree table is needed for this side.
+    need_degree_table: bool,
 }
 
 impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
@@ -538,8 +527,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             null_matched
         };
 
-        let need_degree_table_l = need_left_degree(T) && !pk_contained_l;
-        let need_degree_table_r = need_right_degree(T) && !pk_contained_r;
+        let need_degree_table_l = need_left_degree(T) && !pk_contained_r;
+        let need_degree_table_r = need_right_degree(T) && !pk_contained_l;
 
         let (left_to_output, right_to_output) = {
             let (left_len, right_len) = if is_left_semi_or_anti(T) {
@@ -580,6 +569,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 pk_indices: state_pk_indices_l,
                 start_pos: 0,
                 i2o_mapping: left_to_output,
+                need_degree_table: need_degree_table_l,
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
@@ -603,6 +593,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 pk_indices: state_pk_indices_r,
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
+                need_degree_table: need_degree_table_r,
             },
             pk_indices,
             cond,
@@ -751,7 +742,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         if !key.null_bitmap().is_subset(ht.null_matched()) {
             Ok(None)
         } else {
-            ht.remove_state(key).await.map(Some)
+            ht.take_state(key).await.map(Some)
         }
     }
 
@@ -777,8 +768,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     async fn eq_join_oneside<'a, const SIDE: SideTypePrimitive>(
         ctx: &'a ActorContextRef,
         identity: &'a str,
-        mut side_l: &'a mut JoinSide<K, S>,
-        mut side_r: &'a mut JoinSide<K, S>,
+        side_l: &'a mut JoinSide<K, S>,
+        side_r: &'a mut JoinSide<K, S>,
         actual_output_data_types: &'a [DataType],
         cond: &'a mut Option<BoxedExpression>,
         chunk: StreamChunk,
@@ -788,9 +779,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let chunk = chunk.compact();
 
         let (side_update, side_match) = if SIDE == SideType::Left {
-            (&mut side_l, &mut side_r)
+            (side_l, side_r)
         } else {
-            (&mut side_r, &mut side_l)
+            (side_r, side_l)
         };
 
         let mut hashjoin_chunk_builder = HashJoinChunkBuilder::<T, SIDE> {
@@ -847,7 +838,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                         yield Message::Chunk(chunk);
                                     }
                                 }
-                                if need_update_side_matched_degree(T, SIDE) {
+                                if side_match.need_degree_table {
                                     side_match.ht.inc_degree(matched_row_ref)?;
                                     matched_row.inc_degree();
                                 }
@@ -871,7 +862,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             yield Message::Chunk(chunk);
                         }
                         // Insert back the state taken from ht.
-                        side_match.ht.insert_state(key, matched_rows);
+                        side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
                         hashjoin_chunk_builder.forward_if_not_matched(op, &row)?
                     {
@@ -883,7 +874,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         // one row if matched
                         let [row]: [_; 1] = append_only_matched_rows.try_into().unwrap();
                         side_match.ht.delete(key, row);
-                    } else if need_update_side_update_degree(T, SIDE) {
+                    } else if side_update.need_degree_table {
                         side_update.ht.insert(key, JoinRow::new(value, degree));
                     } else {
                         side_update.ht.insert_row(key, value);
@@ -898,7 +889,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             let mut matched_row = matched_row?;
                             if check_join_condition(&row, &matched_row.row)? {
                                 degree += 1;
-                                if need_update_side_matched_degree(T, SIDE) {
+                                if side_match.need_degree_table {
                                     side_match.ht.dec_degree(matched_row_ref)?;
                                     matched_row.dec_degree()?;
                                 }
@@ -923,13 +914,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             yield Message::Chunk(chunk);
                         }
                         // Insert back the state taken from ht.
-                        side_match.ht.insert_state(key, matched_rows);
+                        side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
                         hashjoin_chunk_builder.forward_if_not_matched(op, &row)?
                     {
                         yield Message::Chunk(chunk);
                     }
-                    if need_update_side_update_degree(T, SIDE) {
+                    if side_update.need_degree_table {
                         side_update.ht.delete(key, JoinRow::new(value, degree));
                     } else {
                         side_update.ht.delete_row(key, value);

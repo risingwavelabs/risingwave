@@ -17,8 +17,8 @@ pub mod tables;
 
 pub use columns::*;
 use itertools::Itertools;
-use risingwave_common::array::Row;
 use risingwave_common::error::Result;
+use risingwave_common::row::Row;
 use risingwave_common::types::ScalarImpl;
 pub use tables::*;
 

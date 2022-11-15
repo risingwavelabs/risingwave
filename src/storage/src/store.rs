@@ -19,6 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::StorageResult;
@@ -29,7 +30,7 @@ use crate::write_batch::WriteBatch;
 pub trait StaticSendSync = Send + Sync + 'static;
 
 pub trait NextFutureTrait<'a, Item> = Future<Output = StorageResult<Option<Item>>> + Send + 'a;
-pub trait StateStoreIter: Send + 'static {
+pub trait StateStoreIter: StaticSendSync {
     type Item: Send;
     type NextFuture<'a>: NextFutureTrait<'a, Self::Item>;
 
@@ -73,10 +74,10 @@ macro_rules! define_state_store_read_associated_type {
 }
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
-pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>> =
+pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> =
     Future<Output = StorageResult<I>> + Send + 'a;
 pub trait StateStoreRead: StaticSendSync {
-    type Iter: StateStoreIter<Item = (Bytes, Bytes)> + 'static;
+    type Iter: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + 'static;
 
     type GetFuture<'a>: GetFutureTrait<'a>;
     type IterFuture<'a>: IterFutureTrait<'a, Self::Iter>;
@@ -103,7 +104,8 @@ pub trait StateStoreRead: StaticSendSync {
     ) -> Self::IterFuture<'_>;
 }
 
-pub trait ScanFutureTrait<'a> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send + 'a;
+pub trait ScanFutureTrait<'a> =
+    Future<Output = StorageResult<Vec<(FullKey<Vec<u8>>, Bytes)>>> + Send + 'a;
 
 pub trait StateStoreReadExt: StaticSendSync {
     type ScanFuture<'a>: ScanFutureTrait<'a>;
@@ -271,6 +273,7 @@ pub struct ReadOptions {
     /// If the `prefix_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Vec<u8>>,
+    pub ignore_range_tombstone: bool,
     pub check_bloom_filter: bool,
 
     pub retention_seconds: Option<u32>,

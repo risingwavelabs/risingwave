@@ -1335,9 +1335,9 @@ checksum = "5827cebf4670468b8772dd191856768aedcb1b0278a04f989f7766351917b9dc"
 
 [[package]]
 name = "cpp_demangle"
-version = "0.3.5"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eeaa953eaad386a53111e47172c2fedba671e5684c8dd601a5f474f4f118710f"
+checksum = "b446fd40bcc17eddd6a4a78f24315eb90afdb3334999ddfd4909985c47722442"
 dependencies = [
  "cfg-if",
 ]
@@ -3458,6 +3458,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexmark"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.4.0",
+ "rand 0.8.5",
+ "serde",
+]
+
+[[package]]
 name = "nix"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3990,6 +3999,7 @@ dependencies = [
  "pg_interval",
  "postgres-types",
  "regex",
+ "risingwave_common",
  "rust_decimal",
  "thiserror",
  "tokio-openssl",
@@ -4184,9 +4194,9 @@ dependencies = [
 
 [[package]]
 name = "pprof"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bba88ee898c63351101af3e60c66c5398c517681ce533eef8caff10ecf11ec1"
+checksum = "e20150f965e0e4c925982b9356da71c84bcd56cb66ef4e894825837cbcf6613e"
 dependencies = [
  "backtrace",
  "cfg-if",
@@ -5130,6 +5140,7 @@ dependencies = [
  "maplit",
  "memcomparable",
  "mysql_async",
+ "nexmark",
  "num-traits",
  "paste",
  "prost",
@@ -5182,6 +5193,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
+ "serde_json",
  "size",
  "tracing",
  "workspace-hack",
@@ -5584,8 +5596,6 @@ dependencies = [
  "farmhash",
  "futures",
  "futures-async-stream",
- "hyper",
- "hyper-tls",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
@@ -5598,6 +5608,7 @@ dependencies = [
  "prost",
  "prost-reflect",
  "rand 0.8.5",
+ "reqwest",
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",
@@ -6535,9 +6546,9 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "symbolic-common"
-version = "9.1.1"
+version = "10.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e555b2c3ebd97b963c8a3e94ce5e5137ba42da4a26687f81c700d8de1c997f0"
+checksum = "492875918a6bcbae753a5fc6f39bc87566fc3c25182e76d7f128ef1c8a2375c6"
 dependencies = [
  "debugid",
  "memmap2",
@@ -6547,9 +6558,9 @@ dependencies = [
 
 [[package]]
 name = "symbolic-demangle"
-version = "9.1.1"
+version = "10.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71a1425bccf0a24c68c9faea6c4f1f84b4865a3dd5976454d8a796c80216e38a"
+checksum = "214d3a420108471222e55268ef502ba0fc89cfd4de876ff26105c560729127af"
 dependencies = [
  "cpp_demangle",
  "rustc-demangle",

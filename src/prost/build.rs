@@ -22,6 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_files = vec![
         "catalog",
         "common",
+        "compute",
         "data",
         "ddl_service",
         "expr",
