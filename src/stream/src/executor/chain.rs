@@ -179,15 +179,17 @@ mod test {
             schema.clone(),
             PkIndices::new(),
             vec![
-                Message::Barrier(Barrier::new_test_barrier(1, None).with_mutation(Mutation::Add {
-                    adds: maplit::hashmap! {
-                        0 => vec![Dispatcher {
-                            downstream_actor_id: vec![actor_id],
-                            ..Default::default()
-                        }],
-                    },
-                    splits: Default::default(),
-                })),
+                Message::Barrier(
+                    Barrier::new_test_barrier(1, None).with_mutation(Mutation::Add {
+                        adds: maplit::hashmap! {
+                            0 => vec![Dispatcher {
+                                downstream_actor_id: vec![actor_id],
+                                ..Default::default()
+                            }],
+                        },
+                        splits: Default::default(),
+                    }),
+                ),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
             ],

@@ -604,7 +604,9 @@ mod tests {
             table_source.write_chunk(chunk).unwrap();
         };
 
-        barrier_sender.send(Barrier::new_test_barrier(1, None)).unwrap();
+        barrier_sender
+            .send(Barrier::new_test_barrier(1, None))
+            .unwrap();
 
         let msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
@@ -892,10 +894,11 @@ mod tests {
             }),
         ];
 
-        let change_split_mutation =
-            Barrier::new_test_barrier(2, None).with_mutation(Mutation::SourceChangeSplit(hashmap! {
+        let change_split_mutation = Barrier::new_test_barrier(2, None).with_mutation(
+            Mutation::SourceChangeSplit(hashmap! {
                 ActorId::default() => new_assignments.clone()
-            }));
+            }),
+        );
 
         barrier_tx.send(change_split_mutation).unwrap();
 
