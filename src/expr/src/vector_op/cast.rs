@@ -91,6 +91,29 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
 /// - [1e17, upper) are assumed to be in nanoseconds.
 ///
 /// This would cause no problem for timestamp in [1973-03-03 09:46:40, 5138-11-16 09:46:40).
+///
+/// # Example
+/// ```
+/// # use risingwave_expr::vector_op::cast::i64_to_timestamp;
+/// assert_eq!(
+///     i64_to_timestamp(1_666_666_666).unwrap().to_string(),
+///     "2022-10-25 02:57:46"
+/// );
+/// assert_eq!(
+///     i64_to_timestamp(1_666_666_666_666).unwrap().to_string(),
+///     "2022-10-25 02:57:46.666"
+/// );
+/// assert_eq!(
+///     i64_to_timestamp(1_666_666_666_666_666).unwrap().to_string(),
+///     "2022-10-25 02:57:46.666666"
+/// );
+/// assert_eq!(
+///     i64_to_timestamp(1_666_666_666_666_666_666)
+///         .unwrap()
+///         .to_string(),
+///     "2022-10-25 02:57:46.666666666"
+/// );
+/// ```
 #[inline]
 pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
     const E11: i64 = 100_000_000_000;
