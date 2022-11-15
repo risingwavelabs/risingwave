@@ -537,15 +537,15 @@ mod tests {
             create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone()).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(1, false, None);
+        tx_r.push_barrier(1, false, None);
         dynamic_filter.next().await.unwrap().unwrap();
 
         // push the 0th right chunk
         tx_r.push_chunk(chunk_r0);
 
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(2, false, None);
+        tx_r.push_barrier(2, false, None);
 
         // Get empty chunk
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
@@ -566,8 +566,8 @@ mod tests {
             create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone()).await;
 
         // push the recovery barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(2, false, None);
+        tx_r.push_barrier(2, false, None);
 
         // Get recovery barrier
         dynamic_filter.next().await.unwrap().unwrap();
@@ -578,8 +578,8 @@ mod tests {
         tx_l.push_chunk(chunk_l1);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(3, false, None);
+        tx_r.push_barrier(3, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -613,8 +613,8 @@ mod tests {
             create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone()).await;
 
         // push recovery barrier
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(3, false, None);
+        tx_r.push_barrier(3, false, None);
 
         // Get the barrier
         dynamic_filter.next().await.unwrap().unwrap();
@@ -635,8 +635,8 @@ mod tests {
         tx_r.push_chunk(chunk_r2);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(4, false);
-        tx_r.push_barrier(4, false);
+        tx_l.push_barrier(4, false, None);
+        tx_r.push_barrier(4, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -654,8 +654,8 @@ mod tests {
         tx_r.push_chunk(chunk_r3);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(5, false);
-        tx_r.push_barrier(5, false);
+        tx_l.push_barrier(5, false, None);
+        tx_r.push_barrier(5, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -697,8 +697,8 @@ mod tests {
             create_executor(ExprNodeType::GreaterThan).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(1, false, None);
+        tx_r.push_barrier(1, false, None);
         dynamic_filter.next().await.unwrap().unwrap();
 
         // push the 1st left chunk
@@ -708,8 +708,8 @@ mod tests {
         tx_r.push_chunk(chunk_r1);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(2, false, None);
+        tx_r.push_barrier(2, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -739,8 +739,8 @@ mod tests {
         tx_r.push_chunk(chunk_r2);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(3, false, None);
+        tx_r.push_barrier(3, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -758,8 +758,8 @@ mod tests {
         tx_r.push_chunk(chunk_r3);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(4, false);
-        tx_r.push_barrier(4, false);
+        tx_l.push_barrier(4, false, None);
+        tx_r.push_barrier(4, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -801,8 +801,8 @@ mod tests {
             create_executor(ExprNodeType::GreaterThanOrEqual).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(1, false, None);
+        tx_r.push_barrier(1, false, None);
         dynamic_filter.next().await.unwrap().unwrap();
 
         // push the 1st left chunk
@@ -812,8 +812,8 @@ mod tests {
         tx_r.push_chunk(chunk_r1);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(2, false, None);
+        tx_r.push_barrier(2, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -843,8 +843,8 @@ mod tests {
         tx_r.push_chunk(chunk_r2);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(3, false, None);
+        tx_r.push_barrier(3, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -862,8 +862,8 @@ mod tests {
         tx_r.push_chunk(chunk_r3);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(4, false);
-        tx_r.push_barrier(4, false);
+        tx_l.push_barrier(4, false, None);
+        tx_r.push_barrier(4, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -905,8 +905,8 @@ mod tests {
             create_executor(ExprNodeType::LessThan).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(1, false, None);
+        tx_r.push_barrier(1, false, None);
         dynamic_filter.next().await.unwrap().unwrap();
 
         // push the 1st left chunk
@@ -916,8 +916,8 @@ mod tests {
         tx_r.push_chunk(chunk_r1);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(2, false, None);
+        tx_r.push_barrier(2, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -947,8 +947,8 @@ mod tests {
         tx_r.push_chunk(chunk_r2);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(3, false, None);
+        tx_r.push_barrier(3, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -966,8 +966,8 @@ mod tests {
         tx_r.push_chunk(chunk_r3);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(4, false);
-        tx_r.push_barrier(4, false);
+        tx_l.push_barrier(4, false, None);
+        tx_r.push_barrier(4, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -1009,8 +1009,8 @@ mod tests {
             create_executor(ExprNodeType::LessThanOrEqual).await;
 
         // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(1, false, None);
+        tx_r.push_barrier(1, false, None);
         dynamic_filter.next().await.unwrap().unwrap();
 
         // push the 1st left chunk
@@ -1020,8 +1020,8 @@ mod tests {
         tx_r.push_chunk(chunk_r1);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
+        tx_l.push_barrier(2, false, None);
+        tx_r.push_barrier(2, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -1051,8 +1051,8 @@ mod tests {
         tx_r.push_chunk(chunk_r2);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(3, false, None);
+        tx_r.push_barrier(3, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(
@@ -1070,8 +1070,8 @@ mod tests {
         tx_r.push_chunk(chunk_r3);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(4, false);
-        tx_r.push_barrier(4, false);
+        tx_l.push_barrier(4, false, None);
+        tx_r.push_barrier(4, false, None);
 
         let chunk = dynamic_filter.next().await.unwrap().unwrap();
         assert_eq!(

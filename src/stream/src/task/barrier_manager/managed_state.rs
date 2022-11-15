@@ -314,9 +314,9 @@ mod tests {
     #[tokio::test]
     async fn test_managed_state_add_actor() {
         let mut managed_barrier_state = ManagedBarrierState::new(StateStoreImpl::for_test());
-        let barrier1 = Barrier::new_test_barrier(1);
-        let barrier2 = Barrier::new_test_barrier(2);
-        let barrier3 = Barrier::new_test_barrier(3);
+        let barrier1 = Barrier::new_test_barrier(1, None);
+        let barrier2 = Barrier::new_test_barrier(2, None);
+        let barrier3 = Barrier::new_test_barrier(3, None);
         let (tx1, _rx1) = oneshot::channel();
         let (tx2, _rx2) = oneshot::channel();
         let (tx3, _rx3) = oneshot::channel();
@@ -361,9 +361,9 @@ mod tests {
     #[tokio::test]
     async fn test_managed_state_stop_actor() {
         let mut managed_barrier_state = ManagedBarrierState::new(StateStoreImpl::for_test());
-        let barrier1 = Barrier::new_test_barrier(1);
-        let barrier2 = Barrier::new_test_barrier(2);
-        let barrier3 = Barrier::new_test_barrier(3);
+        let barrier1 = Barrier::new_test_barrier(1, None);
+        let barrier2 = Barrier::new_test_barrier(2, None);
+        let barrier3 = Barrier::new_test_barrier(3, None);
         let (tx1, _rx1) = oneshot::channel();
         let (tx2, _rx2) = oneshot::channel();
         let (tx3, _rx3) = oneshot::channel();
@@ -411,9 +411,9 @@ mod tests {
     #[tokio::test]
     async fn test_managed_state_issued_after_collect() {
         let mut managed_barrier_state = ManagedBarrierState::new(StateStoreImpl::for_test());
-        let barrier1 = Barrier::new_test_barrier(1);
-        let barrier2 = Barrier::new_test_barrier(2);
-        let barrier3 = Barrier::new_test_barrier(3);
+        let barrier1 = Barrier::new_test_barrier(1, None);
+        let barrier2 = Barrier::new_test_barrier(2, None);
+        let barrier3 = Barrier::new_test_barrier(3, None);
         let (tx1, _rx1) = oneshot::channel();
         let (tx2, _rx2) = oneshot::channel();
         let (tx3, _rx3) = oneshot::channel();

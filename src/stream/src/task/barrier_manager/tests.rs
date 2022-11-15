@@ -41,7 +41,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 
     // Send a barrier to all actors
     let epoch = 114514;
-    let barrier = Barrier::new_test_barrier(epoch);
+    let barrier = Barrier::new_test_barrier(epoch, None);
     manager
         .send_barrier(&barrier, actor_ids.clone(), actor_ids, None)
         .unwrap();
@@ -100,7 +100,7 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
 
     // Prepare the barrier
     let epoch = 114514;
-    let barrier = Barrier::new_test_barrier(epoch);
+    let barrier = Barrier::new_test_barrier(epoch, None);
 
     // Collect a barrier before sending
     manager.collect(extra_actor_id, &barrier);

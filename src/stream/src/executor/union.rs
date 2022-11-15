@@ -112,15 +112,15 @@ mod tests {
         let streams = vec![
             try_stream! {
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-                yield Message::Barrier(Barrier::new_test_barrier(1));
+                yield Message::Barrier(Barrier::new_test_barrier(1, None));
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 2"));
-                yield Message::Barrier(Barrier::new_test_barrier(2));
+                yield Message::Barrier(Barrier::new_test_barrier(2, None));
             }
             .boxed(),
             try_stream! {
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
-                yield Message::Barrier(Barrier::new_test_barrier(1));
-                yield Message::Barrier(Barrier::new_test_barrier(2));
+                yield Message::Barrier(Barrier::new_test_barrier(1, None));
+                yield Message::Barrier(Barrier::new_test_barrier(2, None));
                 yield Message::Chunk(StreamChunk::from_pretty("I\n + 3"));
             }
             .boxed(),
@@ -131,9 +131,9 @@ mod tests {
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(1, None)),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(2, None)),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
             ]
         );

@@ -362,15 +362,15 @@ mod tests {
                 schema,
                 PkIndices::new(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(1)),
+                    Message::Barrier(Barrier::new_test_barrier(1, None)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
-                    Message::Barrier(Barrier::new_test_barrier(2)),
+                    Message::Barrier(Barrier::new_test_barrier(2, None)),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(3)),
+                    Message::Barrier(Barrier::new_test_barrier(3, None)),
                     Message::Chunk(std::mem::take(&mut chunks[2])),
-                    Message::Barrier(Barrier::new_test_barrier(4)),
+                    Message::Barrier(Barrier::new_test_barrier(4, None)),
                     Message::Chunk(std::mem::take(&mut chunks[3])),
-                    Message::Barrier(Barrier::new_test_barrier(5)),
+                    Message::Barrier(Barrier::new_test_barrier(5, None)),
                 ],
             ))
         }
@@ -823,12 +823,12 @@ mod tests {
                 schema,
                 PkIndices::new(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(1)),
+                    Message::Barrier(Barrier::new_test_barrier(1, None)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Chunk(std::mem::take(&mut chunks[2])),
                     Message::Chunk(std::mem::take(&mut chunks[3])),
-                    Message::Barrier(Barrier::new_test_barrier(2)),
+                    Message::Barrier(Barrier::new_test_barrier(2, None)),
                 ],
             ))
         }
@@ -856,10 +856,10 @@ mod tests {
                 schema,
                 PkIndices::new(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(1)),
+                    Message::Barrier(Barrier::new_test_barrier(1, None)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(2)),
+                    Message::Barrier(Barrier::new_test_barrier(2, None)),
                 ],
             ))
         }
@@ -889,10 +889,10 @@ mod tests {
                 schema,
                 PkIndices::new(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(3)),
+                    Message::Barrier(Barrier::new_test_barrier(3, None)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(4)),
+                    Message::Barrier(Barrier::new_test_barrier(4, None)),
                 ],
             ))
         }
@@ -1131,12 +1131,12 @@ mod tests {
                 schema,
                 PkIndices::new(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(1)),
+                    Message::Barrier(Barrier::new_test_barrier(1, None)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
                     Message::Chunk(std::mem::take(&mut chunks[2])),
                     Message::Chunk(std::mem::take(&mut chunks[3])),
-                    Message::Barrier(Barrier::new_test_barrier(2)),
+                    Message::Barrier(Barrier::new_test_barrier(2, None)),
                 ],
             ))
         }
@@ -1255,10 +1255,10 @@ mod tests {
                 schema,
                 PkIndices::new(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(1)),
+                    Message::Barrier(Barrier::new_test_barrier(1, None)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(2)),
+                    Message::Barrier(Barrier::new_test_barrier(2, None)),
                 ],
             ))
         }
@@ -1284,10 +1284,10 @@ mod tests {
                 schema,
                 PkIndices::new(),
                 vec![
-                    Message::Barrier(Barrier::new_test_barrier(3)),
+                    Message::Barrier(Barrier::new_test_barrier(3, None)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
                     Message::Chunk(std::mem::take(&mut chunks[1])),
-                    Message::Barrier(Barrier::new_test_barrier(4)),
+                    Message::Barrier(Barrier::new_test_barrier(4, None)),
                 ],
             ))
         }

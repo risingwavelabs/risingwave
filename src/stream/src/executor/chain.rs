@@ -179,7 +179,7 @@ mod test {
             schema.clone(),
             PkIndices::new(),
             vec![
-                Message::Barrier(Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
+                Message::Barrier(Barrier::new_test_barrier(1, None).with_mutation(Mutation::Add {
                     adds: maplit::hashmap! {
                         0 => vec![Dispatcher {
                             downstream_actor_id: vec![actor_id],

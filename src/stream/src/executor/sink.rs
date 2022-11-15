@@ -187,7 +187,7 @@ mod test {
                     " I I I
             +  3 2 1",
                 ))),
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(1, None)),
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     " I I I
             +  6 5 4",

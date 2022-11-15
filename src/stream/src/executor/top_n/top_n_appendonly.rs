@@ -315,11 +315,11 @@ mod tests {
             schema,
             PkIndices::new(),
             vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(1, None)),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(2, None)),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Barrier(Barrier::new_test_barrier(3, None)),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
             ],
         ))

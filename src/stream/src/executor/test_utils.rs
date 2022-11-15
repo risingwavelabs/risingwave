@@ -40,8 +40,8 @@ impl MessageSender {
     }
 
     #[allow(dead_code)]
-    pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
-        let mut barrier = Barrier::new_test_barrier(epoch);
+    pub fn push_barrier(&mut self, epoch: u64, stop: bool, prev_epoch: Option<u64>) {
+        let mut barrier = Barrier::new_test_barrier(epoch, prev_epoch);
         if stop {
             barrier = barrier.with_stop();
         }
@@ -114,7 +114,7 @@ impl MockSource {
         }
 
         if self.stop_on_finish {
-            yield Message::Barrier(Barrier::new_test_barrier(epoch).with_stop());
+            yield Message::Barrier(Barrier::new_test_barrier(epoch, None).with_stop());
         }
     }
 }

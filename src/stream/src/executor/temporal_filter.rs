@@ -305,9 +305,9 @@ impl<S: StateStore> TemporalFilterExecutor<S> {
                 Message::Chunk(chunk) => {
                     if sync_expr.is_none() {
                         sync_expr = Some(dynamic_cond(time_millis)?);
-                    }
-                    for stream_chunk in self.sync(sync_expr.as_ref().unwrap())? {
-                        yield Message::Chunk(stream_chunk);
+                        for stream_chunk in self.sync(sync_expr.as_ref().unwrap())? {
+                            yield Message::Chunk(stream_chunk);
+                        }
                     }
 
                     let (data_chunk, ops) = chunk.into_parts();
@@ -360,5 +360,120 @@ impl<S: StateStore> Executor for TemporalFilterExecutor<S> {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::StreamExt;
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::streaming_table::state_table::StateTable;
+
+    use super::TemporalFilterExecutor;
+    use crate::executor::test_utils::{MessageSender, MockSource};
+    use crate::executor::{ActorContext, BoxedMessageStream, Executor, PkIndices};
+
+    #[tokio::test]
+    async fn test_temporal_filter() {
+        let time_column_index = 1;
+
+        let chunk = StreamChunk::from_pretty(
+            " I TS
+            + 1 2015-09-18T23:56:04
+            + 2 2021-03-31T00:00:00",
+        );
+
+        let state_table = create_state_table().await;
+        let (mut tx, mut temporal_filter_executor) =
+            create_executor(time_column_index, state_table);
+
+        // Init barrier
+        tx.push_barrier(1, false, None);
+
+        // Consume the barrier
+        temporal_filter_executor.next().await.unwrap().unwrap();
+
+        // Push data chunk
+        tx.push_chunk(chunk);
+
+        // Consume the data chunk
+        let chunk_msg = temporal_filter_executor.next().await.unwrap().unwrap();
+
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap().compact(),
+            StreamChunk::from_pretty(
+                " I TS
+                + 2 2021-03-31T00:00:00"
+            )
+        );
+
+        // Init barrier
+        tx.push_barrier(1 << 16, false, Some(1));
+
+        // Consume the data chunk
+        let chunk_msg = temporal_filter_executor.next().await.unwrap().unwrap();
+
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap().compact(),
+            StreamChunk::from_pretty(
+                " I TS
+                - 2 2021-03-31T00:00:00"
+            )
+        );
+
+        // Consume the barrier
+        temporal_filter_executor.next().await.unwrap().unwrap();
+    }
+
+    #[inline]
+    fn create_pk_indices() -> PkIndices {
+        vec![0]
+    }
+
+    async fn create_state_table() -> StateTable<MemoryStateStore> {
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        let column_descs = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Timestamp),
+        ];
+        let order_types = vec![OrderType::Ascending];
+        let pk_indices = create_pk_indices();
+        StateTable::new_without_distribution(
+            memory_state_store,
+            table_id,
+            column_descs,
+            order_types,
+            pk_indices,
+        )
+        .await
+    }
+
+    fn create_executor(
+        time_column_index: usize,
+        state_table: StateTable<MemoryStateStore>,
+    ) -> (MessageSender, BoxedMessageStream) {
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Timestamp),
+        ]);
+        let pk_indices = create_pk_indices();
+        let (tx, source) = MockSource::channel(schema, pk_indices.clone());
+        let temporal_filter_executor = TemporalFilterExecutor::new(
+            ActorContext::create(123),
+            Box::new(source),
+            pk_indices,
+            1,
+            state_table,
+            time_column_index,
+            ScalarImpl::Interval(IntervalUnit::new(0, 1, 0)),
+            1024,
+        );
+        (tx, Box::new(temporal_filter_executor).execute())
     }
 }

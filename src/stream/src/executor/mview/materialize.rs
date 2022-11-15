@@ -548,11 +548,11 @@ mod tests {
             schema.clone(),
             PkIndices::new(),
             vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(1, None)),
                 Message::Chunk(chunk1),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(2, None)),
                 Message::Chunk(chunk2),
-                Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Barrier(Barrier::new_test_barrier(3, None)),
             ],
         );
 

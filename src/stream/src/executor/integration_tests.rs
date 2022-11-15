@@ -194,7 +194,7 @@ async fn test_merger_sum_aggr() {
 
     let mut epoch = 1;
     input
-        .send(Message::Barrier(Barrier::new_test_barrier(epoch)))
+        .send(Message::Barrier(Barrier::new_test_barrier(epoch, None)))
         .await
         .unwrap();
     epoch += 1;
@@ -209,14 +209,14 @@ async fn test_merger_sum_aggr() {
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
         input
-            .send(Message::Barrier(Barrier::new_test_barrier(epoch)))
+            .send(Message::Barrier(Barrier::new_test_barrier(epoch, None)))
             .await
             .unwrap();
         epoch += 1;
     }
     input
         .send(Message::Barrier(
-            Barrier::new_test_barrier(epoch)
+            Barrier::new_test_barrier(epoch, None)
                 .with_mutation(Mutation::Stop([0].into_iter().collect())),
         ))
         .await
