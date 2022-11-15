@@ -21,3 +21,6 @@ objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/risingwave && \
   objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/compute-node && \
   objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/meta-node && \
   objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/compactor
+
+
+# TODO: Use this script docker/Dockerfile. This way we do not have to copy paste this

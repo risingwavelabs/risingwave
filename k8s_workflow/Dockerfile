@@ -46,3 +46,7 @@ COPY ./risedev.yml /risedev.yml
 ENV PLAYGROUND_PROFILE docker-playground
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "playground" ]
+
+
+# TODO: use docker/Dockerfile by inserting new build layer into it. This way we do not have to copy-paste this part 
+
