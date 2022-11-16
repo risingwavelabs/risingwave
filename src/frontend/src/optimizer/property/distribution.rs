@@ -57,6 +57,7 @@ use risingwave_pb::batch_plan::exchange_info::{
 use risingwave_pb::batch_plan::ExchangeInfo;
 
 use super::super::plan_node::*;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
@@ -318,8 +319,9 @@ impl RequiredDist {
         plan: stream::PlanRef,
     ) -> Result<stream::PlanRef> {
         if !plan.distribution().satisfies(self) {
+            // FIXME(st1page);
             Ok(stream::Exchange {
-                dist: self.to_dist(),
+                dist: self.to_dist(&plan),
                 input: plan,
             }
             .into())
@@ -345,7 +347,7 @@ impl RequiredDist {
     }
 
     fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
-        let dist = self.to_dist();
+        let dist = self.to_dist(&plan);
         match plan.convention() {
             Convention::Batch => BatchExchange::new(plan, required_order.clone(), dist).into(),
             Convention::Stream => StreamExchange::new(plan, dist).into(),
@@ -353,11 +355,13 @@ impl RequiredDist {
         }
     }
 
-    fn to_dist(&self) -> Distribution {
+    fn to_dist(&self, plan: &impl GenericPlanRef) -> Distribution {
         let dist = match self {
+            // all the distribution satisfy the Any, and the function can be only called by
+            // `enforce_if_not_satisfies`
             RequiredDist::Any => unreachable!(),
             // TODO: add round robin distributed type
-            RequiredDist::AnyShard => todo!(),
+            RequiredDist::AnyShard => Distribution::HashShard(plan.logical_pk().to_vec()),
             RequiredDist::ShardByKey(required_keys) => {
                 Distribution::HashShard(required_keys.ones().collect())
             }
