@@ -101,6 +101,7 @@ pub fn gen_dummy_sst_info(
         key_range: Some(KeyRange {
             left: FullKey::for_test(table_id, min_table_key, epoch).encode(),
             right: FullKey::for_test(table_id, max_table_key, epoch).encode(),
+            right_exclusive: false,
         }),
         file_size,
         table_ids: vec![],
@@ -172,6 +173,7 @@ pub async fn put_sst(
         key_range: Some(KeyRange {
             left: meta.smallest_key.clone(),
             right: meta.largest_key.clone(),
+            right_exclusive: false,
         }),
         file_size: meta.estimated_size as u64,
         table_ids: vec![],
