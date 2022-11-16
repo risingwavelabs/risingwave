@@ -59,6 +59,7 @@ pub struct NexmarkConfig {
     /// generator.
     pub in_flight_auctions: usize,
     /// Number of events in out-of-order groups.
+    ///
     /// 1 implies no out-of-order events. 1000 implies every 1000 events per
     /// generator are emitted in pseudo-random order.
     pub out_of_order_group_size: usize,
@@ -77,10 +78,12 @@ pub struct NexmarkConfig {
     /// Ratio of bids for 'hot' channels compared to all other channels.
     pub hot_channel_ratio: usize,
     /// Event id of first event to be generated.
+    ///
     /// Event ids are unique over all generators, and are used as a seed to
     /// generate each event's data.
     pub first_event_id: usize,
     /// First event number.
+    ///
     /// Generators running in parallel time may share the same event number, and
     /// the event number is used to determine the event timestamp.
     pub first_event_number: usize,

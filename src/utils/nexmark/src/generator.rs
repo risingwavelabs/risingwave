@@ -38,18 +38,20 @@ impl EventGenerator {
         }
     }
 
+    /// Set the start event offset.
     pub fn with_events_so_far(mut self, events_so_far: u64) -> Self {
         self.events_so_far = events_so_far;
         self
     }
 
+    /// Set the type of events to generate.
     pub fn with_type_filter(mut self, type_: EventType) -> Self {
         self.type_filter = Some(type_);
         self
     }
 
     /// Return the number of events so far.
-    pub const fn events_so_far(&self) -> u64 {
+    pub fn events_so_far(&self) -> u64 {
         self.events_so_far
     }
 
