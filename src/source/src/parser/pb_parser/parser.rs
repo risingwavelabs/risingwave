@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use futures::future::ready;
 use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
@@ -30,7 +31,7 @@ use url::Url;
 use super::schema_resolver::*;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
-use crate::{SourceParser, WriteGuard};
+use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 #[derive(Debug, Clone)]
 pub struct ProtobufParser {
@@ -152,6 +153,39 @@ impl ProtobufParser {
             })
         }
     }
+
+    fn parse_inner(
+        &self,
+        mut payload: &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
+        if self.confluent_wire_type {
+            let raw_payload = resolve_pb_header(payload)?;
+            payload = raw_payload;
+        }
+
+        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
+            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
+        writer.insert(|column_desc| {
+            let field_desc = message
+                .descriptor()
+                .get_field_by_name(&column_desc.name)
+                .ok_or_else(|| {
+                    let err_msg = format!("protobuf schema don't have field {}", column_desc.name);
+                    tracing::error!(err_msg);
+                    RwError::from(ProtocolError(err_msg))
+                })?;
+            let value = message.get_field(&field_desc);
+            from_protobuf_value(&field_desc, &value).map_err(|e| {
+                tracing::error!(
+                    "failed to process value ({}): {}",
+                    String::from_utf8_lossy(payload),
+                    e
+                );
+                e
+            })
+        })
+    }
 }
 
 fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
@@ -270,39 +304,19 @@ pub(crate) fn resolve_pb_header(payload: &[u8]) -> Result<&[u8]> {
     }
 }
 
-#[async_trait::async_trait]
 impl SourceParser for ProtobufParser {
-    async fn parse(
-        &self,
-        mut payload: &[u8],
-        writer: crate::SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        if self.confluent_wire_type {
-            let raw_payload = resolve_pb_header(payload)?;
-            payload = raw_payload;
-        }
+    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
 
-        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
-            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
-        writer.insert(|column_desc| {
-            let field_desc = message
-                .descriptor()
-                .get_field_by_name(&column_desc.name)
-                .ok_or_else(|| {
-                    let err_msg = format!("protobuf schema don't have field {}", column_desc.name);
-                    tracing::error!(err_msg);
-                    RwError::from(ProtocolError(err_msg))
-                })?;
-            let value = message.get_field(&field_desc);
-            from_protobuf_value(&field_desc, &value).map_err(|e| {
-                tracing::error!(
-                    "failed to process value ({}): {}",
-                    String::from_utf8_lossy(payload),
-                    e
-                );
-                e
-            })
-        })
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a,
+    {
+        ready(self.parse_inner(payload, writer))
     }
 }
 
