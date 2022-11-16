@@ -1,0 +1,61 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 int, v2 int);
+
+statement ok
+create table t2 (v1 int, v3 int);
+
+statement ok
+insert into t1 values(1, 2);
+
+statement ok
+insert into t2 values(1, 2);
+
+query II
+select * from t1 union select * from t2
+----
+1 2
+
+query II
+select * from t1 union all select * from t2
+----
+1 2
+1 2
+
+query II
+select * from t1 union all select * from t2 order by v1
+----
+1 2
+1 2
+
+statement error
+select * from t1 union all select * from t2 order by v1 + 1
+
+
+query I
+select 1 union select 1
+----
+1
+
+query I
+select 1 union all select 1
+----
+1
+1
+
+statement error
+select 1 as a union all select 1 as b order by a + 1;
+
+query I
+select 1 as a union all select 1 as b order by a;
+----
+1
+1
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

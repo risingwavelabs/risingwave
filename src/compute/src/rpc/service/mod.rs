@@ -15,5 +15,6 @@
 pub mod config_service;
 pub mod exchange_metrics;
 pub mod exchange_service;
+pub mod health_service;
 pub mod monitor_service;
 pub mod stream_service;

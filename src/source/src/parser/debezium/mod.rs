@@ -48,8 +48,9 @@ mod test {
 
     use std::convert::TryInto;
 
-    use risingwave_common::array::{Op, Row};
+    use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
