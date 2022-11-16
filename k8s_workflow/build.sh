@@ -7,7 +7,7 @@ usage() {
         echo "This script builds the docker images"
         echo ""
         echo "Usage:"
-        echo "$0 [-h] [-d] [-r] [-k <aws_access_key>] [-s <aws_secret_key>] [-n <namespace>]"
+        echo "$0 [-h] [-d] [-r]"
         echo ""
         echo "-c    Build one specific component. Valid values are: 'risingwave', 'compute-node', 'meta-node', 'frontend-node', 'compactor-node'"
         echo "-h    Show this help message"

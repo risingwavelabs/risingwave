@@ -55,6 +55,6 @@ fi
 for component in "${components[@]}"
 do
   echo "--- docker build and tag : ${component}:latest"
-  docker build -f docker/Dockerfile -t "${component}:latest" --target "${component}" .
+  docker build -f k8s_workflow/Dockerfile -t "${component}:latest" --target "${component}" .
 done
 
