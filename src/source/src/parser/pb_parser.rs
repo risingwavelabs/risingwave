@@ -63,7 +63,7 @@ impl ProtobufParser {
                 Self::local_read_to_bytes(&path)
             }
             "s3" => load_bytes_from_s3(&url, props).await,
-            "https" => load_bytes_from_https(&url).await,
+            "https" | "http" => load_bytes_from_http(&url).await,
             scheme => Err(RwError::from(ProtocolError(format!(
                 "path scheme {} is not supported",
                 scheme
@@ -179,7 +179,7 @@ async fn load_bytes_from_s3(
     Ok(body.into_bytes().to_vec())
 }
 
-async fn load_bytes_from_https(location: &Url) -> Result<Vec<u8>> {
+async fn load_bytes_from_http(location: &Url) -> Result<Vec<u8>> {
     let res = reqwest::get(location.clone()).await.map_err(|e| {
         InvalidParameterValue(format!(
             "failed to make request to URL: {}, err: {}",
