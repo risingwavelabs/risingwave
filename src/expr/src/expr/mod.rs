@@ -42,7 +42,8 @@ use std::sync::Arc;
 pub use agg::AggKind;
 pub use expr_input_ref::InputRefExpression;
 pub use expr_literal::*;
-use risingwave_common::array::{ArrayRef, DataChunk, Row};
+use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 

@@ -14,7 +14,8 @@
 
 use std::collections::BTreeSet;
 
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::row::Row;
 
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 

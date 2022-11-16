@@ -17,9 +17,10 @@ use std::sync::Arc;
 
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListValue, Row,
+    ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListValue,
     StructArrayBuilder, StructValue,
 };
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -126,7 +127,8 @@ impl<'a> TryFrom<&'a ExprNode> for NestedConstructExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{DataChunk, ListValue, Row};
+    use risingwave_common::array::{DataChunk, ListValue};
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 
     use super::NestedConstructExpression;
