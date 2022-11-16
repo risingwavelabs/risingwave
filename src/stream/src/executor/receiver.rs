@@ -309,7 +309,7 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(1, None).with_mutation(Mutation::Update {
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
             dispatchers: Default::default(),
             merges: merge_updates,
             vnode_bitmaps: Default::default(),

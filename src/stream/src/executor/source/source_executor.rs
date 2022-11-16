@@ -604,9 +604,7 @@ mod tests {
             table_source.write_chunk(chunk).unwrap();
         };
 
-        barrier_sender
-            .send(Barrier::new_test_barrier(1, None))
-            .unwrap();
+        barrier_sender.send(Barrier::new_test_barrier(1)).unwrap();
 
         let msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
@@ -710,7 +708,7 @@ mod tests {
         };
 
         barrier_sender
-            .send(Barrier::new_test_barrier(1, None).with_stop())
+            .send(Barrier::new_test_barrier(1).with_stop())
             .unwrap();
         executor.next().await.unwrap().unwrap();
 
@@ -846,7 +844,7 @@ mod tests {
         .boxed()
         .execute();
 
-        let init_barrier = Barrier::new_test_barrier(1, None).with_mutation(Mutation::Add {
+        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
             adds: HashMap::new(),
             splits: hashmap! {
                 ActorId::default() => vec![
@@ -894,11 +892,10 @@ mod tests {
             }),
         ];
 
-        let change_split_mutation = Barrier::new_test_barrier(2, None).with_mutation(
-            Mutation::SourceChangeSplit(hashmap! {
+        let change_split_mutation =
+            Barrier::new_test_barrier(2).with_mutation(Mutation::SourceChangeSplit(hashmap! {
                 ActorId::default() => new_assignments.clone()
-            }),
-        );
+            }));
 
         barrier_tx.send(change_split_mutation).unwrap();
 
@@ -938,10 +935,10 @@ mod tests {
             )
         );
 
-        let barrier = Barrier::new_test_barrier(3, None).with_mutation(Mutation::Pause);
+        let barrier = Barrier::new_test_barrier(3).with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();
 
-        let barrier = Barrier::new_test_barrier(4, None).with_mutation(Mutation::Resume);
+        let barrier = Barrier::new_test_barrier(4).with_mutation(Mutation::Resume);
         barrier_tx.send(barrier).unwrap();
     }
 }

@@ -1072,7 +1072,7 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b1 = Barrier::new_test_barrier(1, None).with_mutation(Mutation::Update {
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
             dispatchers: dispatcher_updates,
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
@@ -1095,7 +1095,7 @@ mod tests {
         try_recv!(old_simple).unwrap().as_barrier().unwrap(); // Untouched.
 
         // 6. Send another barrier.
-        tx.send(Message::Barrier(Barrier::new_test_barrier(2, None)))
+        tx.send(Message::Barrier(Barrier::new_test_barrier(2)))
             .await
             .unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1123,7 +1123,7 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b3 = Barrier::new_test_barrier(3, None).with_mutation(Mutation::Update {
+        let b3 = Barrier::new_test_barrier(3).with_mutation(Mutation::Update {
             dispatchers: dispatcher_updates,
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
@@ -1140,7 +1140,7 @@ mod tests {
         try_recv!(new_simple).unwrap().as_barrier().unwrap(); // Since it's just added, it won't receive the chunk.
 
         // 11. Send another barrier.
-        tx.send(Message::Barrier(Barrier::new_test_barrier(4, None)))
+        tx.send(Message::Barrier(Barrier::new_test_barrier(4)))
             .await
             .unwrap();
         executor.next().await.unwrap().unwrap();

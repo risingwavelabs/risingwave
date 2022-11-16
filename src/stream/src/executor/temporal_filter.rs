@@ -393,7 +393,7 @@ mod tests {
             create_executor(time_column_index, state_table);
 
         // Init barrier
-        tx.push_barrier(1, false, None);
+        tx.push_barrier(1, false);
 
         // Consume the barrier
         temporal_filter_executor.next().await.unwrap().unwrap();
@@ -413,7 +413,7 @@ mod tests {
         );
 
         // Init barrier
-        tx.push_barrier(1 << 16, false, Some(1));
+        tx.push_barrier_with_prev_epoch(1 << 16, false, 1);
 
         // Consume the data chunk
         let chunk_msg = temporal_filter_executor.next().await.unwrap().unwrap();

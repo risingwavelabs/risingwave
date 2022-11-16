@@ -223,12 +223,19 @@ pub struct Barrier {
 
 impl Barrier {
     /// Create a plain barrier.
-    pub fn new_test_barrier(epoch: u64, prev_epoch: Option<u64>) -> Self {
+    pub fn new_test_barrier(epoch: u64) -> Self {
         Self {
-            epoch: match prev_epoch {
-                Some(prev_epoch) => EpochPair::new(epoch, prev_epoch),
-                None => EpochPair::new_test_epoch(epoch),
-            },
+            epoch: EpochPair::new_test_epoch(epoch),
+            checkpoint: true,
+            mutation: Default::default(),
+            passed_actors: Default::default(),
+        }
+    }
+
+    /// Create a plain barrier.
+    pub fn new_test_barrier_with_prev_epoch(epoch: u64, prev_epoch: u64) -> Self {
+        Self {
+            epoch: EpochPair::new(epoch, prev_epoch),
             checkpoint: true,
             mutation: Default::default(),
             passed_actors: Default::default(),

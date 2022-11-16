@@ -471,13 +471,13 @@ mod tests {
                         .await
                         .unwrap();
                     }
-                    tx.send(Message::Barrier(Barrier::new_test_barrier(epoch, None)))
+                    tx.send(Message::Barrier(Barrier::new_test_barrier(epoch)))
                         .await
                         .unwrap();
                     sleep(Duration::from_millis(1)).await;
                 }
                 tx.send(Message::Barrier(
-                    Barrier::new_test_barrier(1000, None)
+                    Barrier::new_test_barrier(1000)
                         .with_mutation(Mutation::Stop(HashSet::default())),
                 ))
                 .await
@@ -610,7 +610,7 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(1, None).with_mutation(Mutation::Update {
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
             dispatchers: Default::default(),
             merges: merge_updates,
             vnode_bitmaps: Default::default(),
@@ -667,7 +667,7 @@ mod tests {
             .await
             .unwrap();
             // send barrier
-            let barrier = Barrier::new_test_barrier(12345, None);
+            let barrier = Barrier::new_test_barrier(12345);
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(

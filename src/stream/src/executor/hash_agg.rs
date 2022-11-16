@@ -657,21 +657,21 @@ mod tests {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
-        tx.push_barrier(1, false, None);
+        tx.push_barrier(1, false);
         tx.push_chunk(StreamChunk::from_pretty(
             " I
             + 1
             + 2
             + 2",
         ));
-        tx.push_barrier(2, false, None);
+        tx.push_barrier(2, false);
         tx.push_chunk(StreamChunk::from_pretty(
             " I
             - 1
             - 2 D
             - 2",
         ));
-        tx.push_barrier(3, false, None);
+        tx.push_barrier(3, false);
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
@@ -758,14 +758,14 @@ mod tests {
         };
 
         let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
-        tx.push_barrier(1, false, None);
+        tx.push_barrier(1, false);
         tx.push_chunk(StreamChunk::from_pretty(
             " I I I
             + 1 1 1
             + 2 2 2
             + 2 2 2",
         ));
-        tx.push_barrier(2, false, None);
+        tx.push_barrier(2, false);
         tx.push_chunk(StreamChunk::from_pretty(
             " I I I
             - 1 1 1
@@ -773,7 +773,7 @@ mod tests {
             - 2 2 2
             + 3 3 3",
         ));
-        tx.push_barrier(3, false, None);
+        tx.push_barrier(3, false);
 
         // This is local hash aggregation, so we add another sum state
         let key_indices = vec![0];
@@ -864,21 +864,21 @@ mod tests {
             ],
         };
         let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
-        tx.push_barrier(1, false, None);
+        tx.push_barrier(1, false);
         tx.push_chunk(StreamChunk::from_pretty(
             " I     I    I
             + 1   233 1001
             + 1 23333 1002
             + 2  2333 1003",
         ));
-        tx.push_barrier(2, false, None);
+        tx.push_barrier(2, false);
         tx.push_chunk(StreamChunk::from_pretty(
             " I     I    I
             - 1   233 1001
             - 1 23333 1002 D
             - 2  2333 1003",
         ));
-        tx.push_barrier(3, false, None);
+        tx.push_barrier(3, false);
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
@@ -958,7 +958,7 @@ mod tests {
             ],
         };
         let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
-        tx.push_barrier(1, false, None);
+        tx.push_barrier(1, false);
         tx.push_chunk(StreamChunk::from_pretty(
             " I  I  I
             + 2 5  1000
@@ -968,7 +968,7 @@ mod tests {
             + 2 10 1004
             ",
         ));
-        tx.push_barrier(2, false, None);
+        tx.push_barrier(2, false);
         tx.push_chunk(StreamChunk::from_pretty(
             " I  I  I
             + 1 20 1005
@@ -977,7 +977,7 @@ mod tests {
             + 2 20 1008
             ",
         ));
-        tx.push_barrier(3, false, None);
+        tx.push_barrier(3, false);
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];

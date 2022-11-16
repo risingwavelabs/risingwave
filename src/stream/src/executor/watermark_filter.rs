@@ -394,7 +394,7 @@ mod tests {
         let mut executor = executor.execute();
 
         // push the init barrier
-        tx.push_barrier(1, false, None);
+        tx.push_barrier(1, false);
         executor.next().await.unwrap().unwrap();
 
         // Init watermark
@@ -428,7 +428,7 @@ mod tests {
         );
 
         // push the 2nd barrier
-        tx.push_barrier(2, false, None);
+        tx.push_barrier(2, false);
         executor.next().await.unwrap().unwrap();
 
         // push the 2nd chunk
@@ -454,7 +454,7 @@ mod tests {
         );
 
         // push the 3nd barrier
-        tx.push_barrier(3, false, None);
+        tx.push_barrier(3, false);
         executor.next().await.unwrap().unwrap();
 
         // Drop executor
@@ -465,7 +465,7 @@ mod tests {
         let mut executor = executor.execute();
 
         // push the 1st barrier after failover
-        tx.push_barrier(4, false, None);
+        tx.push_barrier(4, false);
         executor.next().await.unwrap().unwrap();
 
         // Init watermark after failover

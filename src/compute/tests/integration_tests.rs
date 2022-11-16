@@ -229,7 +229,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     // Send a barrier to start materialized view
     let curr_epoch = 1919;
     barrier_tx
-        .send(Barrier::new_test_barrier(curr_epoch, None))
+        .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
 
     assert!(matches!(
@@ -263,7 +263,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     // Send a barrier and poll again, should write changes to storage
     let curr_epoch = 1920;
     barrier_tx
-        .send(Barrier::new_test_barrier(curr_epoch, None))
+        .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
 
     assert!(matches!(
@@ -335,7 +335,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Send a barrier and poll again, should write changes to storage
     barrier_tx
-        .send(Barrier::new_test_barrier(curr_epoch + 1, None))
+        .send(Barrier::new_test_barrier(curr_epoch + 1))
         .unwrap();
 
     assert!(matches!(

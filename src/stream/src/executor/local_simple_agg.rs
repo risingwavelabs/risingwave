@@ -197,9 +197,9 @@ mod tests {
     async fn test_no_chunk() {
         let schema = schema_test_utils::ii();
         let (mut tx, source) = MockSource::channel(schema, vec![2]);
-        tx.push_barrier(1, false, None);
-        tx.push_barrier(2, false, None);
-        tx.push_barrier(3, false, None);
+        tx.push_barrier(1, false);
+        tx.push_barrier(2, false);
+        tx.push_barrier(3, false);
 
         let agg_calls = vec![AggCall {
             kind: AggKind::Count,
@@ -240,14 +240,14 @@ mod tests {
     async fn test_local_simple_agg() {
         let schema = schema_test_utils::iii();
         let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk\
-        tx.push_barrier(1, false, None);
+        tx.push_barrier(1, false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             + 100 200 1001
             +  10  14 1002
             +   4 300 1003",
         ));
-        tx.push_barrier(2, false, None);
+        tx.push_barrier(2, false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             - 100 200 1001
@@ -255,7 +255,7 @@ mod tests {
             -   4 300 1003
             + 104 500 1004",
         ));
-        tx.push_barrier(3, false, None);
+        tx.push_barrier(3, false);
 
         // This is local simple aggregation, so we add another row count state
         let agg_calls = vec![

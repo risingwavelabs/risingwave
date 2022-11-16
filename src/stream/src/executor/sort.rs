@@ -359,7 +359,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table);
 
         // Init barrier
-        tx.push_barrier(1, false, None);
+        tx.push_barrier(1, false);
 
         // Consume the barrier
         sort_executor.next().await.unwrap().unwrap();
@@ -403,7 +403,7 @@ mod tests {
         tx.push_chunk(chunk2);
 
         // Push barrier
-        tx.push_barrier(2, false, None);
+        tx.push_barrier(2, false);
 
         // Consume the barrier
         sort_executor.next().await.unwrap().unwrap();
@@ -449,7 +449,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table.clone());
 
         // Init barrier
-        tx.push_barrier(1, false, None);
+        tx.push_barrier(1, false);
 
         // Consume the barrier
         sort_executor.next().await.unwrap().unwrap();
@@ -466,7 +466,7 @@ mod tests {
         tx.push_chunk(chunk);
 
         // Push barrier
-        tx.push_barrier(2, false, None);
+        tx.push_barrier(2, false);
 
         // Consume the barrier
         sort_executor.next().await.unwrap().unwrap();
@@ -476,7 +476,7 @@ mod tests {
             create_executor(sort_column_index, state_table);
 
         // Push barrier
-        recovered_tx.push_barrier(3, false, None);
+        recovered_tx.push_barrier(3, false);
 
         // Consume the barrier
         recovered_sort_executor.next().await.unwrap().unwrap();

@@ -114,11 +114,11 @@ async fn create_arrangement(
         schema,
         vec![0],
         vec![
-            Message::Barrier(Barrier::new_test_barrier(2, None)),
+            Message::Barrier(Barrier::new_test_barrier(2)),
             Message::Chunk(chunk1),
-            Message::Barrier(Barrier::new_test_barrier(3, None)),
+            Message::Barrier(Barrier::new_test_barrier(3)),
             Message::Chunk(chunk2),
-            Message::Barrier(Barrier::new_test_barrier(4, None)),
+            Message::Barrier(Barrier::new_test_barrier(4)),
         ],
     );
 
@@ -189,11 +189,11 @@ fn create_source() -> Box<dyn Executor + Send> {
         schema,
         PkIndices::new(),
         vec![
-            Message::Barrier(Barrier::new_test_barrier(2, None)),
+            Message::Barrier(Barrier::new_test_barrier(2)),
             Message::Chunk(chunk1),
-            Message::Barrier(Barrier::new_test_barrier(3, None)),
+            Message::Barrier(Barrier::new_test_barrier(3)),
             Message::Chunk(chunk2),
-            Message::Barrier(Barrier::new_test_barrier(4, None)),
+            Message::Barrier(Barrier::new_test_barrier(4)),
         ],
     );
 
