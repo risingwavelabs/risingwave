@@ -43,7 +43,7 @@ use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::{
     pin_version_response, CompactTask, CompactTaskAssignment, GroupConstruct, GroupDelta,
     GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta, LevelType, ValidationTask,
+    HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta, LevelType,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -1439,6 +1439,13 @@ where
             .collect();
 
         let versioning = versioning_guard.deref_mut();
+        self.commit_epoch_sanity_check(
+            epoch,
+            &sstables,
+            &sst_to_context,
+            &versioning.current_version,
+        )
+        .await?;
         let old_version = versioning.current_version.clone();
         let new_version_id = old_version.id + 1;
         let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
@@ -1456,39 +1463,6 @@ where
         new_version_delta.id = new_version_id;
         new_hummock_version.id = new_version_id;
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
-
-        if self.env.opts.enable_committed_sst_sanity_check {
-            async {
-                if sstables.is_empty() {
-                    return;
-                }
-                let compactor = match self.compactor_manager.next_compactor() {
-                    None => {
-                        tracing::warn!(
-                            "Skip committed SST sanity check due to no available worker"
-                        );
-                        return;
-                    }
-                    Some(compactor) => compactor,
-                };
-                let sst_infos = sstables
-                    .iter()
-                    .map(|LocalSstableInfo { sst_info, .. }| sst_info.clone())
-                    .collect_vec();
-                if compactor
-                    .send_task(Task::ValidationTask(ValidationTask {
-                        sst_infos,
-                        sst_id_to_worker_id: sst_to_context.clone(),
-                        epoch,
-                    }))
-                    .await
-                    .is_err()
-                {
-                    tracing::warn!("Skip committed SST sanity check due to send failure");
-                }
-            }
-            .await;
-        }
 
         let mut branch_sstables = vec![];
         sstables.retain_mut(|local_sst_info| {
@@ -1543,27 +1517,6 @@ where
             is_sst_belong_to_group_declared
         });
         sstables.append(&mut branch_sstables);
-
-        for (sst_id, context_id) in &sst_to_context {
-            #[cfg(test)]
-            {
-                if *context_id == META_NODE_ID {
-                    continue;
-                }
-            }
-            if !self.check_context(*context_id).await {
-                return Err(Error::InvalidSst(*sst_id));
-            }
-        }
-
-        if epoch <= new_hummock_version.max_committed_epoch {
-            return Err(anyhow::anyhow!(
-                "Epoch {} <= max_committed_epoch {}",
-                epoch,
-                new_hummock_version.max_committed_epoch
-            )
-            .into());
-        }
 
         let mut modified_compaction_groups = vec![];
         // Append SSTs to a new version.
