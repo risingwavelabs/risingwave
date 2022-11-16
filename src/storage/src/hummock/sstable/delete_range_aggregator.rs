@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
+use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeSet, BinaryHeap};
 use std::sync::Arc;
 
@@ -71,20 +71,49 @@ impl DeleteRangeAggregatorBuilder {
         self.delete_tombstones.extend(data);
     }
 
-    pub fn build(mut self, watermark: u64, gc_delete_keys: bool) -> Arc<RangeTombstonesCollector> {
-        self.delete_tombstones.sort_by(|a, b| {
-            let ret = a.start_user_key.cmp(&b.start_user_key);
-            if ret == std::cmp::Ordering::Equal {
-                b.sequence.cmp(&a.sequence)
-            } else {
-                ret
+    pub fn build(self, watermark: u64, gc_delete_keys: bool) -> Arc<RangeTombstonesCollector> {
+        // sort tombstones by start-key.
+        let mut tombstone_index = BinaryHeap::<Reverse<DeleteRangeTombstone>>::default();
+        let mut sorted_tombstones: Vec<DeleteRangeTombstone> = vec![];
+        for tombstone in self.delete_tombstones {
+            tombstone_index.push(Reverse(tombstone));
+        }
+        while let Some(Reverse(tombstone)) = tombstone_index.pop() {
+            for last in sorted_tombstones.iter_mut().rev() {
+                if last.end_user_key.gt(&tombstone.end_user_key) {
+                    let mut new_tombstone = last.clone();
+                    new_tombstone.start_user_key = tombstone.end_user_key.clone();
+                    last.end_user_key = tombstone.end_user_key.clone();
+                    tombstone_index.push(Reverse(new_tombstone));
+                } else {
+                    break;
+                }
             }
-        });
+            sorted_tombstones.push(tombstone);
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            check_sorted_tombstone(&sorted_tombstones);
+        }
+
+        sorted_tombstones.sort();
         Arc::new(RangeTombstonesCollector {
-            range_tombstone_list: self.delete_tombstones,
+            range_tombstone_list: sorted_tombstones,
             gc_delete_keys,
             watermark,
         })
+    }
+}
+
+fn check_sorted_tombstone(sorted_tombstones: &[DeleteRangeTombstone]) {
+    for idx in 1..sorted_tombstones.len() {
+        assert!(sorted_tombstones[idx]
+            .start_user_key
+            .ge(&sorted_tombstones[idx - 1].start_user_key));
+        assert!(sorted_tombstones[idx]
+            .end_user_key
+            .ge(&sorted_tombstones[idx - 1].end_user_key));
     }
 }
 
@@ -110,7 +139,7 @@ impl RangeTombstonesCollector {
         smallest_user_key: &UserKey<&[u8]>,
         largest_user_key: &UserKey<&[u8]>,
     ) -> Vec<DeleteRangeTombstone> {
-        let mut delete_ranges = vec![];
+        let mut delete_ranges: Vec<DeleteRangeTombstone> = vec![];
         for tombstone in &self.range_tombstone_list {
             if !largest_user_key.is_empty()
                 && tombstone.start_user_key.as_ref().ge(largest_user_key)
@@ -124,8 +153,19 @@ impl RangeTombstonesCollector {
                 continue;
             }
 
-            if self.gc_delete_keys && tombstone.sequence <= self.watermark {
-                continue;
+            if tombstone.sequence <= self.watermark {
+                if self.gc_delete_keys {
+                    continue;
+                }
+                if let Some(last) = delete_ranges.last() {
+                    if last.start_user_key.eq(&tombstone.start_user_key)
+                        && last.end_user_key.eq(&tombstone.end_user_key)
+                        && last.sequence <= self.watermark
+                    {
+                        assert!(last.sequence > tombstone.sequence);
+                        continue;
+                    }
+                }
             }
 
             let mut ret = tombstone.clone();
@@ -353,7 +393,11 @@ pub fn get_delete_range_epoch_from_sstable(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use rand::Rng;
     use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::TableKey;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -480,5 +524,52 @@ mod tests {
             &iterator_test_key_of_epoch(8, 200).to_ref(),
         );
         assert!(ret.is_none());
+    }
+
+    #[test]
+    pub fn test_delete_cut_range() {
+        let mut builder = DeleteRangeAggregatorBuilder::default();
+        let mut rng = rand::thread_rng();
+        let mut origin = vec![];
+        const SEQUENCE_COUNT: HummockEpoch = 5000;
+        for sequence in 1..(SEQUENCE_COUNT + 1) {
+            let left: u64 = rng.gen_range(0..100);
+            let right: u64 = left + rng.gen_range(0..100) + 1;
+            let tombstone = DeleteRangeTombstone::new(
+                TableId::default(),
+                left.to_be_bytes().to_vec(),
+                right.to_be_bytes().to_vec(),
+                sequence,
+            );
+            assert!(tombstone.start_user_key.lt(&tombstone.end_user_key));
+            origin.push(tombstone);
+        }
+        builder.add_tombstone(origin.clone());
+        let agg = builder.build(0, false);
+        let split_ranges = agg.get_tombstone_between(
+            &UserKey::new(TableId::default(), TableKey(b"")),
+            &UserKey::new(TableId::default(), TableKey(b"")),
+        );
+        assert!(split_ranges.len() > origin.len());
+        let mut sequence_index: HashMap<u64, Vec<DeleteRangeTombstone>> = HashMap::default();
+        for tombstone in split_ranges {
+            let data = sequence_index.entry(tombstone.sequence).or_default();
+            data.push(tombstone);
+        }
+        assert_eq!(SEQUENCE_COUNT, sequence_index.len() as u64);
+        for (sequence, mut data) in sequence_index {
+            data.sort();
+            for i in 1..data.len() {
+                assert_eq!(data[i - 1].end_user_key, data[i].start_user_key);
+            }
+            assert_eq!(
+                data[0].start_user_key,
+                origin[sequence as usize - 1].start_user_key
+            );
+            assert_eq!(
+                data.last().unwrap().end_user_key,
+                origin[sequence as usize - 1].end_user_key
+            );
+        }
     }
 }

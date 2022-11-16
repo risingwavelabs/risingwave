@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::array::{ArrayBuilderImpl, ArrayResult, Op, Row, RowRef, StreamChunk};
+use risingwave_common::array::{ArrayBuilderImpl, ArrayResult, Op, RowRef, StreamChunk};
+use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 
 type IndexMappings = Vec<(usize, usize)>;
