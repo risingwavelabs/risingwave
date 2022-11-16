@@ -18,9 +18,10 @@ pub mod streaming_table;
 use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
 use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 

@@ -198,7 +198,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                         }
 
                                         self.materialize_cache
-                                            .insert(key, Some(CompactedRow{row}));
+                                            .insert(key, Some(CompactedRow { row }));
                                     }
                                     RowOp::Delete(old_row) => {
                                         if let Some(cache_row) =
@@ -239,7 +239,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                             );
                                         }
                                         self.materialize_cache
-                                            .insert(key, Some(CompactedRow{row: new_row}));
+                                            .insert(key, Some(CompactedRow { row: new_row }));
                                     }
                                 }
                             }
@@ -514,8 +514,8 @@ mod tests {
 
     use futures::stream::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
+    use risingwave_common::row::Row;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_hummock_sdk::HummockReadEpoch;
