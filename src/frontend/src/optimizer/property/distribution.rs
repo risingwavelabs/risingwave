@@ -356,7 +356,7 @@ impl RequiredDist {
     }
 
     fn to_dist(&self, plan: &impl GenericPlanRef) -> Distribution {
-        let dist = match self {
+        match self {
             // all the distribution satisfy the Any, and the function can be only called by
             // `enforce_if_not_satisfies`
             RequiredDist::Any => unreachable!(),
@@ -366,8 +366,7 @@ impl RequiredDist {
                 Distribution::HashShard(required_keys.ones().collect())
             }
             RequiredDist::PhysicalDist(dist) => dist.clone(),
-        };
-        dist
+        }
     }
 }
 
