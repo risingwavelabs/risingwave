@@ -220,6 +220,7 @@ pub fn spawn_data_generation_stream<T: Send + 'static>(
 #[cfg(test)]
 mod tests {
     use maplit::*;
+    use nexmark::event::EventType;
 
     use super::*;
 
@@ -245,7 +246,7 @@ mod tests {
         let props = ConnectorProperties::extract(props).unwrap();
 
         if let ConnectorProperties::Nexmark(props) = props {
-            assert_eq!(props.table_type, "Person");
+            assert_eq!(props.table_type, EventType::Person);
             assert_eq!(props.split_num, 1);
         } else {
             panic!("extract nexmark config failed");

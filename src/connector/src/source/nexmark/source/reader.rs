@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -75,29 +75,19 @@ impl SplitReader for NexmarkSplitReader {
             assigned_split = split;
         }
 
-        let event_type = match properties.table_type.as_str() {
-            "Person" => EventType::Person,
-            "Auction" => EventType::Auction,
-            "Bid" => EventType::Bid,
-            t => return Err(anyhow!("Unknown table type {t} found")),
-        };
         Ok(NexmarkSplitReader {
             generator: EventGenerator::new(NexmarkConfig::from(&*properties))
                 .with_events_so_far(events_so_far)
-                .with_type_filter(event_type),
+                .with_type_filter(properties.table_type),
             assigned_split,
             split_id,
             split_index,
             split_num,
             max_chunk_size: properties.max_chunk_size,
             event_num: properties.event_num,
-            event_type,
+            event_type: properties.table_type,
             use_real_time: properties.use_real_time,
-            min_event_gap_in_ns: if properties.use_real_time {
-                0
-            } else {
-                properties.min_event_gap_in_ns
-            },
+            min_event_gap_in_ns: properties.min_event_gap_in_ns,
         })
     }
 
@@ -184,7 +174,7 @@ mod tests {
         let props = Box::new(NexmarkPropertiesInner {
             split_num: 2,
             min_event_gap_in_ns: 0,
-            table_type: "Bid".to_string(),
+            table_type: EventType::Bid,
             max_chunk_size: 5,
             ..Default::default()
         });
