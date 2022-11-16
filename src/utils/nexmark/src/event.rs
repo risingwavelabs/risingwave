@@ -30,8 +30,6 @@
 
 //! Nexmark events.
 
-use std::cmp::{max, min};
-
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
@@ -157,13 +155,13 @@ impl Person {
 
     fn next_id(id: usize, rng: &mut SmallRng, nex: &GeneratorConfig) -> Id {
         let people = Self::last_id(id, nex) + 1;
-        let active = min(people, nex.active_people);
+        let active = people.min(nex.active_people);
         people - active + rng.gen_range(0..active + nex.person_id_lead)
     }
 
     fn last_id(id: usize, nex: &GeneratorConfig) -> Id {
         let epoch = id / nex.proportion_denominator;
-        let offset = (id % nex.proportion_denominator).max(nex.person_proportion - 1);
+        let offset = (id % nex.proportion_denominator).min(nex.person_proportion - 1);
         epoch * nex.person_proportion + offset
     }
 }
@@ -260,7 +258,7 @@ impl Auction {
         let future_auction = cfg.event_timestamp(event_number + events_for_auctions);
 
         let horizon = future_auction - time;
-        1 + rng.gen_range(0..max(horizon * 2, 1))
+        1 + rng.gen_range(0..(horizon * 2).max(1))
     }
 }
 
