@@ -25,7 +25,7 @@ mkdir -p /risingwave/target/release
 echo "building risingwave_cmd and risingwave_cmd_all..."
 cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features "static-link static-log-level"
 echo "done building"
-echo "moving to /risingwave/bin ..."
+echo "moving to /risingwave/bin ..." # TODO: do this with a loop and give debug output on each step
 mv /risingwave/target/release/{frontend,compute-node,meta-node,compactor,risingwave} /risingwave/bin/
 echo "done moving"
 
@@ -33,6 +33,7 @@ echo "done moving"
 # echo "cargo clean..."
 # cargo clean
 
+# TODO: do this with a loop and write debug output on every step
 echo "compressing debug section..."
 objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/risingwave
 objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/frontend
