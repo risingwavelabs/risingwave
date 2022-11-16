@@ -75,6 +75,7 @@ impl StateStoreImpl {
             }
         };
 
+        // The specific type of MemoryStateStoreType in deducted here.
         Self::MemoryStateStore(inner.monitored(state_store_metrics))
     }
 
@@ -94,6 +95,7 @@ impl StateStoreImpl {
             }
         };
 
+        // The specific type of HummockStateStoreType in deducted here.
         Self::HummockStateStore(inner.monitored(state_store_metrics))
     }
 
@@ -113,6 +115,7 @@ impl StateStoreImpl {
             }
         };
 
+        // The specific type of HummockStateStoreV1Type in deducted here.
         Self::HummockStateStoreV1(inner.monitored(state_store_metrics))
     }
 
