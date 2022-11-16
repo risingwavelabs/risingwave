@@ -162,8 +162,8 @@ impl Person {
     }
 
     fn last_id(id: usize, nex: &GeneratorConfig) -> Id {
-        let epoch = id / nex.proportion_denominator();
-        let offset = (id % nex.proportion_denominator()).max(nex.person_proportion - 1);
+        let epoch = id / nex.proportion_denominator;
+        let offset = (id % nex.proportion_denominator).max(nex.person_proportion - 1);
         epoch * nex.person_proportion + offset
     }
 }
@@ -240,8 +240,8 @@ impl Auction {
     }
 
     fn last_id(id: usize, nex: &GeneratorConfig) -> Id {
-        let mut epoch = id / nex.proportion_denominator();
-        let mut offset = id % nex.proportion_denominator();
+        let mut epoch = id / nex.proportion_denominator;
+        let mut offset = id % nex.proportion_denominator;
         if offset < nex.person_proportion {
             epoch -= 1;
             offset = nex.auction_proportion - 1;
@@ -256,7 +256,7 @@ impl Auction {
     fn next_length(id: usize, rng: &mut SmallRng, time: u64, cfg: &GeneratorConfig) -> u64 {
         let event_number = id - cfg.first_event_id;
         let events_for_auctions =
-            (cfg.in_flight_auctions * cfg.proportion_denominator()) / cfg.auction_proportion;
+            (cfg.in_flight_auctions * cfg.proportion_denominator) / cfg.auction_proportion;
         let future_auction = cfg.event_timestamp(event_number + events_for_auctions);
 
         let horizon = future_auction - time;
@@ -331,8 +331,9 @@ mod tests {
 
     #[test]
     fn test_event() {
+        let config = GeneratorConfig::default();
         assert_eq!(
-            Event::new(0, &GeneratorConfig::default()),
+            Event::new(0, &config),
             Event::Person(Person {
                 id: 1000,
                 name: "vicky noris".into(),
@@ -340,7 +341,7 @@ mod tests {
                 credit_card: "7878 5821 1864 2539".into(),
                 city: "cheyenne".into(),
                 state: "az".into(),
-                date_time: 1436918400000,
+                date_time: config.base_time,
                 extra: "lwaiyhjhrkaruidlsjilvqccyedttedeynpqmackqbwvklwuyypztnkengzgtwtjivjgrxurskpcldfohdzuwnefqymyncrksxyfaecwsbswjumzxudgoznyhakxrudomnxtmqtgshecfjgspxzpludz".into(),
             })
         );

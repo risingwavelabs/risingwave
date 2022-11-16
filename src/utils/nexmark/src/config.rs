@@ -33,12 +33,12 @@
 use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::ops::Deref;
+use std::time::SystemTime;
 
 use crate::event::EventType;
 use crate::utils::{build_channel_url_map, get_base_url};
 
-pub const CHANNEL_NUMBER: usize = 10_000;
-pub const NEXMARK_BASE_TIME: u64 = 1_436_918_400_000;
+pub(crate) const CHANNEL_NUMBER: usize = 10_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -170,7 +170,10 @@ impl Default for NexmarkConfig {
             first_category_id: 10,
             person_id_lead: 10,
             sine_approx_steps: 10,
-            base_time: NEXMARK_BASE_TIME,
+            base_time: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64,
             us_states: split_str("az,ca,id,or,wa,wy"),
             us_cities: split_str("phoenix,los angeles,san francisco,boise,portland,bend,redmond,seattle,kent,cheyenne"),
             hot_channels: split_str("Google,Facebook,Baidu,Apple"),
@@ -188,17 +191,13 @@ impl Default for NexmarkConfig {
     }
 }
 
-impl NexmarkConfig {
-    /// Returns the proportion denominator.
-    pub const fn proportion_denominator(&self) -> usize {
-        self.person_proportion + self.auction_proportion + self.bid_proportion
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct GeneratorConfig {
     pub config: NexmarkConfig,
 
+    // The following are derived from config thus should not be changed.
+    /// The proportion denominator.
+    pub proportion_denominator: usize,
     /// Delay before changing the current inter-event delay.
     pub step_length: usize,
     /// Number of events per epoch.
@@ -230,6 +229,8 @@ impl Deref for GeneratorConfig {
 
 impl From<NexmarkConfig> for GeneratorConfig {
     fn from(cfg: NexmarkConfig) -> Self {
+        let proportion_denominator =
+            cfg.person_proportion + cfg.auction_proportion + cfg.bid_proportion;
         let generators = cfg.num_event_generators as f32;
 
         // Calculate inter event delays array.
@@ -274,6 +275,7 @@ impl From<NexmarkConfig> for GeneratorConfig {
 
         Self {
             config: cfg,
+            proportion_denominator,
             step_length,
             events_per_epoch,
             epoch_period,
@@ -319,7 +321,7 @@ impl GeneratorConfig {
 
     /// Returns the event type.
     pub fn event_type(&self, event_number: usize) -> EventType {
-        let rem = event_number % self.proportion_denominator();
+        let rem = event_number % self.proportion_denominator;
         if rem < self.person_proportion {
             EventType::Person
         } else if rem < self.person_proportion + self.auction_proportion {
