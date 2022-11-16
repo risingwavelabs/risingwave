@@ -58,65 +58,43 @@ pub enum StateStoreImpl {
     MemoryStateStore(Monitored<MemoryStateStoreType>),
 }
 
+fn may_dynamic_dispatch(
+    state_store: impl StateStore + AsHummockTrait,
+) -> impl StateStore + AsHummockTrait {
+    #[cfg(not(debug_assertions))]
+    {
+        state_store
+    }
+    #[cfg(debug_assertions)]
+    {
+        use crate::store_impl::boxed_state_store::BoxDynamicDispatchedStateStore;
+        Box::new(state_store) as BoxDynamicDispatchedStateStore
+    }
+}
+
 impl StateStoreImpl {
     fn in_memory(
         state_store: MemoryStateStore,
         state_store_metrics: Arc<StateStoreMetrics>,
     ) -> Self {
-        let inner = {
-            #[cfg(not(debug_assertions))]
-            {
-                state_store
-            }
-            #[cfg(debug_assertions)]
-            {
-                use crate::store_impl::boxed_state_store::BoxDynamicDispatchedStateStore;
-                Box::new(state_store) as BoxDynamicDispatchedStateStore
-            }
-        };
-
         // The specific type of MemoryStateStoreType in deducted here.
-        Self::MemoryStateStore(inner.monitored(state_store_metrics))
+        Self::MemoryStateStore(may_dynamic_dispatch(state_store).monitored(state_store_metrics))
     }
 
     pub fn hummock(
         state_store: HummockStorage,
         state_store_metrics: Arc<StateStoreMetrics>,
     ) -> Self {
-        let inner = {
-            #[cfg(not(debug_assertions))]
-            {
-                state_store
-            }
-            #[cfg(debug_assertions)]
-            {
-                use crate::store_impl::boxed_state_store::BoxDynamicDispatchedStateStore;
-                Box::new(state_store) as BoxDynamicDispatchedStateStore
-            }
-        };
-
         // The specific type of HummockStateStoreType in deducted here.
-        Self::HummockStateStore(inner.monitored(state_store_metrics))
+        Self::HummockStateStore(may_dynamic_dispatch(state_store).monitored(state_store_metrics))
     }
 
     pub fn hummock_v1(
         state_store: HummockStorageV1,
         state_store_metrics: Arc<StateStoreMetrics>,
     ) -> Self {
-        let inner = {
-            #[cfg(not(debug_assertions))]
-            {
-                state_store
-            }
-            #[cfg(debug_assertions)]
-            {
-                use crate::store_impl::boxed_state_store::BoxDynamicDispatchedStateStore;
-                Box::new(state_store) as BoxDynamicDispatchedStateStore
-            }
-        };
-
         // The specific type of HummockStateStoreV1Type in deducted here.
-        Self::HummockStateStoreV1(inner.monitored(state_store_metrics))
+        Self::HummockStateStoreV1(may_dynamic_dispatch(state_store).monitored(state_store_metrics))
     }
 
     pub fn shared_in_memory_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
