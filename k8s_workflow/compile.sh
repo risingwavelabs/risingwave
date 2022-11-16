@@ -16,7 +16,7 @@ usage() {
         echo "-c    Run cargo clean. Default is false"
         echo "-o    Optimize. Compress debug section. Default is false"
         echo "-o    Move binaries to /risingwave/bin/{binaryname}. Default is false"
-        echo "-p    Build ONE specific package. By default this script builds risingwave_cmd AND risingwave_cmd_all"
+        echo "-p    Build risingwave_cmd and the specified package. By default this script builds risingwave_cmd AND risingwave_cmd_all"
         echo "-h    Show this help message"
     } 1>&2
 
@@ -76,7 +76,7 @@ if [[ $p == false ]]; then
   cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features "static-link static-log-level"
 else
   echo "building ${p}..."
-  cargo build -p ${p} --release
+  cargo build -p ${p} -p risingwave_cmd --release --features "static-link static-log-level"
 fi
 
 echo -e "\tdone building"
@@ -100,7 +100,7 @@ if [[ $o == true ]]; then
   echo -e "\tdone compressing"
 fi 
 
-# TODO: No need to move these around. We can just mount a differen dir
+
 
 if [[ $m == true ]]; then 
   echo "moving to /risingwave/bin ..." 
