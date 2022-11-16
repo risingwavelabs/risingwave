@@ -71,6 +71,7 @@ impl Row {
         Self(values)
     }
 
+    // TODO(row trait): use `row::empty` instead.
     pub fn empty<'a>() -> &'a Self {
         static EMPTY_ROW: Row = Row(Vec::new());
         &EMPTY_ROW

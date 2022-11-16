@@ -22,7 +22,7 @@ pub use vec_datum::{Row, RowDeserializer};
 
 use crate::array::RowRef;
 use crate::hash::HashCode;
-use crate::types::{hash_datum_ref, to_datum_ref, Datum, DatumRef, ToOwnedDatum};
+use crate::types::{hash_datum_ref, to_datum_ref, Datum, DatumRef, ToDatumRef, ToOwnedDatum};
 use crate::util::value_encoding;
 
 pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
@@ -128,6 +128,13 @@ impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
     fn datums(&self) -> Self::DatumIter<'_> {
         self.r1.datums().chain(self.r2.datums())
     }
+
+    fn value_serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend(self.r1.value_serialize());
+        buf.extend(self.r2.value_serialize());
+        buf
+    }
 }
 
 #[derive(Debug)]
@@ -182,6 +189,14 @@ macro_rules! deref_forward_row {
 
         fn to_owned_row(&self) -> Row {
             (**self).to_owned_row()
+        }
+
+        fn value_serialize(&self) -> Vec<u8> {
+            (**self).value_serialize()
+        }
+
+        fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
+            (**self).hash(hash_builder)
         }
     };
 }
@@ -287,7 +302,7 @@ impl Row2 for RowRef<'_> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct Empty;
+pub struct Empty(());
 
 impl Row2 for Empty {
     type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
@@ -305,4 +320,33 @@ impl Row2 for Empty {
     fn datums(&self) -> Self::DatumIter<'_> {
         std::iter::empty()
     }
+}
+
+pub fn empty() -> Empty {
+    Empty(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Once<D>(D);
+
+impl<D: ToDatumRef + std::fmt::Debug + Eq> Row2 for Once<D> {
+    type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
+    where
+        Self: 'a;
+
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        [self.0.to_datum_ref()][index]
+    }
+
+    fn len(&self) -> usize {
+        1
+    }
+
+    fn datums(&self) -> Self::DatumIter<'_> {
+        std::iter::once(self.0.to_datum_ref())
+    }
+}
+
+pub fn once<D: ToDatumRef>(datum: D) -> Once<D> {
+    Once(datum)
 }

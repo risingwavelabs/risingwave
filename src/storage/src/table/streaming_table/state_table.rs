@@ -27,7 +27,7 @@ use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
-use risingwave_common::row::{CompactedRow, Row, Row2, RowDeserializer, RowExt};
+use risingwave_common::row::{self, CompactedRow, Row, Row2, RowDeserializer, RowExt};
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -795,7 +795,7 @@ fn get_second<T, U>(arg: StorageResult<(T, U)>) -> StorageResult<U> {
 impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table.
     pub async fn iter(&self) -> StorageResult<RowStream<'_, S>> {
-        self.iter_with_pk_prefix(Row::empty()).await
+        self.iter_with_pk_prefix(row::empty()).await
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
