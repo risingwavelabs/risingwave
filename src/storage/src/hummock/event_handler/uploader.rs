@@ -765,13 +765,9 @@ mod tests {
         Fut: UploadOutputFuture,
         F: UploadFn<Fut>,
     {
-        let upload_fn = Arc::new(upload_fn);
         UploaderContext::new(
             initial_pinned_version(),
-            Arc::new(move |payload, task_info| {
-                let upload_fn = upload_fn.clone();
-                spawn(upload_fn(payload, task_info))
-            }),
+            Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
             BufferTracker::for_test(),
         )
     }
@@ -781,13 +777,9 @@ mod tests {
         Fut: UploadOutputFuture,
         F: UploadFn<Fut>,
     {
-        let upload_fn = Arc::new(upload_fn);
         HummockUploader::new(
             initial_pinned_version(),
-            Arc::new(move |payload, task_info| {
-                let upload_fn = upload_fn.clone();
-                spawn(upload_fn(payload, task_info))
-            }),
+            Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
             BufferTracker::for_test(),
         )
     }
