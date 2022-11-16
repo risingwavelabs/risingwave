@@ -57,7 +57,6 @@ use risingwave_pb::batch_plan::exchange_info::{
 use risingwave_pb::batch_plan::ExchangeInfo;
 
 use super::super::plan_node::*;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
