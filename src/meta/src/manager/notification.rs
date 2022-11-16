@@ -20,7 +20,7 @@ use risingwave_pb::hummock::CompactTask;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use tokio::sync::mpsc::{self, UnboundedSender};
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 use tonic::Status;
 
 use crate::manager::cluster::WorkerKey;
@@ -44,6 +44,7 @@ struct Task {
     operation: Operation,
     info: Info,
     version: Option<NotificationVersion>,
+    callback_tx: Option<oneshot::Sender<()>>,
 }
 
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
@@ -75,6 +76,7 @@ where
                     &task.info,
                     task.version.unwrap_or_default(),
                 );
+                task.callback_tx.map(|tx| tx.send(()).unwrap());
             }
         });
 
@@ -88,60 +90,64 @@ where
 
     /// Add a notification to the waiting queue and return immediately.
     #[inline(always)]
-    fn notify_asynchronously(
-        &self,
-        target: SubscribeType,
-        operation: Operation,
-        info: Info,
-        version: Option<NotificationVersion>,
-    ) {
+    fn notify_asynchronously(&self, target: SubscribeType, operation: Operation, info: Info) {
         let task = Task {
             target,
             operation,
             info,
-            version,
+            version: None,
+            callback_tx: None,
         };
         self.task_tx.send(task).unwrap();
     }
 
     /// Add a notification to the waiting queue and increase version.
-    async fn notify_with_version(
+    async fn notify(
         &self,
         target: SubscribeType,
         operation: Operation,
         info: Info,
     ) -> NotificationVersion {
+        // We need to wait for callback_rx here. Because we want to ensure that the meta snapshot
+        // with notification version (suppose "x") is sent after the normal notification with
+        // version "x".
+        let (callback_tx, callback_rx) = oneshot::channel();
         let mut version_core = self.current_version.lock().await;
         version_core.increase_version(&*self.meta_store).await;
-        self.notify_asynchronously(target, operation, info, Some(version_core.version()));
+        let task = Task {
+            target,
+            operation,
+            info,
+            version: Some(version_core.version()),
+            callback_tx: Some(callback_tx),
+        };
+        self.task_tx.send(task).unwrap();
+        callback_rx.await.unwrap();
         version_core.version()
     }
 
     pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Frontend, operation, info)
-            .await
+        self.notify(SubscribeType::Frontend, operation, info).await
     }
 
     pub async fn notify_hummock(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Hummock, operation, info)
-            .await
+        self.notify(SubscribeType::Hummock, operation, info).await
     }
 
     pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Compactor, operation, info)
-            .await
+        self.notify(SubscribeType::Compactor, operation, info).await
     }
 
     /// Without version increasing, we can only use it when we can determine the order of
     /// `MetaSnapshot` and normal notifications in `ObserverManager::wait_init_notification`.
-    pub fn notify_frontend_without_version(&self, operation: Operation, info: Info) {
-        self.notify_asynchronously(SubscribeType::Frontend, operation, info, None);
+    pub fn notify_frontend_asynchronously(&self, operation: Operation, info: Info) {
+        self.notify_asynchronously(SubscribeType::Frontend, operation, info);
     }
 
     /// Without version increasing, we can only use it when we can determine the order of
     /// `MetaSnapshot` and normal notifications in `ObserverManager::wait_init_notification`.
-    pub fn notify_hummock_without_version(&self, operation: Operation, info: Info) {
-        self.notify_asynchronously(SubscribeType::Hummock, operation, info, None);
+    pub fn notify_hummock_asynchronously(&self, operation: Operation, info: Info) {
+        self.notify_asynchronously(SubscribeType::Hummock, operation, info);
     }
 
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
