@@ -19,7 +19,7 @@ use risingwave_common::util::ordered::OrderedRowSerde;
 
 pub fn serialize_pk(pk: impl Row2, serializer: &OrderedRowSerde) -> Vec<u8> {
     let mut result = vec![];
-    serializer.serialize_datum_refs(pk.datums(), &mut result);
+    serializer.serialize_datum_refs(pk.iter(), &mut result);
     result
 }
 
@@ -29,7 +29,7 @@ pub fn serialize_pk_with_vnode(
     vnode: VirtualNode,
 ) -> Vec<u8> {
     let mut result = vnode.to_be_bytes().to_vec();
-    serializer.serialize_datum_refs(pk.datums(), &mut result);
+    serializer.serialize_datum_refs(pk.iter(), &mut result);
     result
 }
 

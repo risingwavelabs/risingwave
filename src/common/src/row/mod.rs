@@ -26,7 +26,7 @@ use crate::types::{hash_datum_ref, to_datum_ref, Datum, DatumRef, ToDatumRef, To
 use crate::util::value_encoding;
 
 pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
-    type DatumIter<'a>: Iterator<Item = DatumRef<'a>>
+    type Iter<'a>: Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
 
@@ -38,10 +38,10 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
         self.len() == 0
     }
 
-    fn datums(&self) -> Self::DatumIter<'_>;
+    fn iter(&self) -> Self::Iter<'_>;
 
     fn to_owned_row(&self) -> Row {
-        Row(self.datums().map(|d| d.to_owned_datum()).collect())
+        Row(self.iter().map(|d| d.to_owned_datum()).collect())
     }
 
     fn into_owned_row(self) -> Row {
@@ -50,7 +50,7 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
 
     fn value_serialize(&self) -> Vec<u8> {
         let mut buf = Vec::new();
-        for datum in self.datums() {
+        for datum in self.iter() {
             value_encoding::serialize_datum_ref(&datum, &mut buf);
         }
         buf
@@ -58,7 +58,7 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
 
     fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
         let mut hasher = hash_builder.build_hasher();
-        for datum in self.datums() {
+        for datum in self.iter() {
             hash_datum_ref(datum, &mut hasher);
         }
         HashCode(hasher.finish())
@@ -98,13 +98,13 @@ pub struct Chain<R1, R2> {
 
 impl<R1: Row2, R2: Row2> PartialEq for Chain<R1, R2> {
     fn eq(&self, other: &Self) -> bool {
-        self.datums().eq(other.datums())
+        self.iter().eq(other.iter())
     }
 }
 impl<R1: Row2, R2: Row2> Eq for Chain<R1, R2> {}
 
 impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
-    type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         R1: 'a,
         R2: 'a;
@@ -125,8 +125,8 @@ impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
         self.r1.is_empty() && self.r2.is_empty()
     }
 
-    fn datums(&self) -> Self::DatumIter<'_> {
-        self.r1.datums().chain(self.r2.datums())
+    fn iter(&self) -> Self::Iter<'_> {
+        self.r1.iter().chain(self.r2.iter())
     }
 
     fn value_serialize(&self) -> Vec<u8> {
@@ -145,13 +145,13 @@ pub struct Project<'i, R> {
 
 impl<'i, R: Row2> PartialEq for Project<'i, R> {
     fn eq(&self, other: &Self) -> bool {
-        self.datums().eq(other.datums())
+        self.iter().eq(other.iter())
     }
 }
 impl<'i, R: Row2> Eq for Project<'i, R> {}
 
 impl<'i, R: Row2> Row2 for Project<'i, R> {
-    type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         R: 'a,
         'i: 'a;
@@ -164,7 +164,7 @@ impl<'i, R: Row2> Row2 for Project<'i, R> {
         self.indices.len()
     }
 
-    fn datums(&self) -> Self::DatumIter<'_> {
+    fn iter(&self) -> Self::Iter<'_> {
         self.indices.iter().map(|&i| self.row.datum_at(i))
     }
 }
@@ -183,8 +183,8 @@ macro_rules! deref_forward_row {
             (**self).is_empty()
         }
 
-        fn datums(&self) -> Self::DatumIter<'_> {
-            (**self).datums()
+        fn iter(&self) -> Self::Iter<'_> {
+            (**self).iter()
         }
 
         fn to_owned_row(&self) -> Row {
@@ -202,7 +202,7 @@ macro_rules! deref_forward_row {
 }
 
 impl<R: Row2> Row2 for &R {
-    type DatumIter<'a> = R::DatumIter<'a>
+    type Iter<'a> = R::Iter<'a>
     where
         Self: 'a;
 
@@ -210,7 +210,7 @@ impl<R: Row2> Row2 for &R {
 }
 
 impl<R: Row2> Row2 for Box<R> {
-    type DatumIter<'a> = R::DatumIter<'a>
+    type Iter<'a> = R::Iter<'a>
     where
         Self: 'a;
 
@@ -222,7 +222,7 @@ impl<R: Row2> Row2 for Box<R> {
 }
 
 impl Row2 for &[Datum] {
-    type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
 
@@ -234,13 +234,13 @@ impl Row2 for &[Datum] {
         self.as_ref().len()
     }
 
-    fn datums(&self) -> Self::DatumIter<'_> {
+    fn iter(&self) -> Self::Iter<'_> {
         Iterator::map(self.as_ref().iter(), to_datum_ref)
     }
 }
 
 impl Row2 for &[DatumRef<'_>] {
-    type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
 
@@ -252,13 +252,13 @@ impl Row2 for &[DatumRef<'_>] {
         <[DatumRef<'_>]>::len(self)
     }
 
-    fn datums(&self) -> Self::DatumIter<'_> {
-        self.iter().copied()
+    fn iter(&self) -> Self::Iter<'_> {
+        <[DatumRef<'_>]>::iter(self).copied()
     }
 }
 
 impl Row2 for Row {
-    type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
 
@@ -270,7 +270,7 @@ impl Row2 for Row {
         self.0.len()
     }
 
-    fn datums(&self) -> Self::DatumIter<'_> {
+    fn iter(&self) -> Self::Iter<'_> {
         Iterator::map(self.0.iter(), to_datum_ref)
     }
 
@@ -284,7 +284,7 @@ impl Row2 for Row {
 }
 
 impl Row2 for RowRef<'_> {
-    type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
 
@@ -296,7 +296,7 @@ impl Row2 for RowRef<'_> {
         RowRef::size(self)
     }
 
-    fn datums(&self) -> Self::DatumIter<'_> {
+    fn iter(&self) -> Self::Iter<'_> {
         RowRef::values(self)
     }
 }
@@ -305,7 +305,7 @@ impl Row2 for RowRef<'_> {
 pub struct Empty(());
 
 impl Row2 for Empty {
-    type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
 
@@ -317,7 +317,7 @@ impl Row2 for Empty {
         0
     }
 
-    fn datums(&self) -> Self::DatumIter<'_> {
+    fn iter(&self) -> Self::Iter<'_> {
         std::iter::empty()
     }
 }
@@ -330,7 +330,7 @@ pub fn empty() -> Empty {
 pub struct Once<D>(D);
 
 impl<D: ToDatumRef> Row2 for Once<D> {
-    type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
 
@@ -342,7 +342,7 @@ impl<D: ToDatumRef> Row2 for Once<D> {
         1
     }
 
-    fn datums(&self) -> Self::DatumIter<'_> {
+    fn iter(&self) -> Self::Iter<'_> {
         std::iter::once(self.0.to_datum_ref())
     }
 }

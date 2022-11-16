@@ -27,6 +27,7 @@ use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
+// TODO(row trait): rename to `OwnedRow`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Row(pub Vec<Datum>);
 
@@ -137,14 +138,17 @@ impl Row {
     }
 
     /// Return number of cells in the row.
+    // TODO(row trait): use `Row::len` instead.
     pub fn size(&self) -> usize {
         self.0.len()
     }
 
+    // TODO(row trait): use `Row::chain` with `row::once` instead.
     pub fn push(&mut self, value: Datum) {
         self.0.push(value);
     }
 
+    // TODO(row trait): use `Row::iter` instead.
     pub fn values(&self) -> impl Iterator<Item = &Datum> {
         self.0.iter()
     }
