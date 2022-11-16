@@ -10,7 +10,7 @@ import {
   workerTypeFromJSON,
   workerTypeToJSON,
 } from "./common";
-import { CompactionGroup, HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
+import { HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
 import { ConnectorSplits } from "./source";
 import {
   Dispatcher,
@@ -383,7 +383,6 @@ export interface MetaSnapshot {
   hummockVersion: HummockVersion | undefined;
   parallelUnitMappings: ParallelUnitMapping[];
   hummockSnapshot: HummockSnapshot | undefined;
-  compactionGroups: CompactionGroup[];
   views: View[];
 }
 
@@ -1464,7 +1463,6 @@ function createBaseMetaSnapshot(): MetaSnapshot {
     hummockVersion: undefined,
     parallelUnitMappings: [],
     hummockSnapshot: undefined,
-    compactionGroups: [],
     views: [],
   };
 }
@@ -1485,12 +1483,7 @@ export const MetaSnapshot = {
         ? object.parallelUnitMappings.map((e: any) => ParallelUnitMapping.fromJSON(e))
         : [],
       hummockSnapshot: isSet(object.hummockSnapshot) ? HummockSnapshot.fromJSON(object.hummockSnapshot) : undefined,
-      compactionGroups: Array.isArray(object?.compactionGroups)
-        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
-        : [],
-      views: Array.isArray(object?.views)
-        ? object.views.map((e: any) => View.fromJSON(e))
-        : [],
+      views: Array.isArray(object?.views) ? object.views.map((e: any) => View.fromJSON(e)) : [],
     };
   },
 
@@ -1545,11 +1538,6 @@ export const MetaSnapshot = {
     }
     message.hummockSnapshot !== undefined &&
       (obj.hummockSnapshot = message.hummockSnapshot ? HummockSnapshot.toJSON(message.hummockSnapshot) : undefined);
-    if (message.compactionGroups) {
-      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
-    } else {
-      obj.compactionGroups = [];
-    }
     if (message.views) {
       obj.views = message.views.map((e) => e ? View.toJSON(e) : undefined);
     } else {
@@ -1575,7 +1563,6 @@ export const MetaSnapshot = {
     message.hummockSnapshot = (object.hummockSnapshot !== undefined && object.hummockSnapshot !== null)
       ? HummockSnapshot.fromPartial(object.hummockSnapshot)
       : undefined;
-    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
     message.views = object.views?.map((e) => View.fromPartial(e)) || [];
     return message;
   },

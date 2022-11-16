@@ -16,8 +16,9 @@ use std::borrow::Cow;
 
 use itertools::Itertools;
 
-use crate::array::{Row, RowRef};
+use crate::array::RowRef;
 use crate::error::Result;
+use crate::row::Row;
 use crate::types::{
     deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
     DatumRef,

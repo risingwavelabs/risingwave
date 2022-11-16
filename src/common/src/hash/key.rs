@@ -33,9 +33,10 @@ use itertools::Itertools;
 
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, ListRef,
-    Row, StructRef,
+    StructRef,
 };
 use crate::collection::estimate_size::EstimateSize;
+use crate::row::Row;
 use crate::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
     OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode, VIRTUAL_NODE_COUNT,

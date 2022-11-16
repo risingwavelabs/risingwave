@@ -100,7 +100,7 @@ async fn build_tables<F: SstableWriterFactory>(
 ) {
     for i in RANGE {
         builder
-            .add_user_key(test_user_key_of(i), HummockValue::put(VALUE), 1)
+            .add_user_key(test_user_key_of(i).as_ref(), HummockValue::put(VALUE), 1)
             .await
             .unwrap();
     }

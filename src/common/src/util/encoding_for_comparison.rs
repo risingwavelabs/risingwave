@@ -14,8 +14,9 @@
 
 use itertools::Itertools;
 
-use crate::array::{ArrayImpl, DataChunk, Row};
+use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
+use crate::row::Row;
 use crate::types::{serialize_datum_ref_into, DataType, ScalarRefImpl};
 use crate::util::sort_util::{OrderPair, OrderType};
 
@@ -85,7 +86,8 @@ mod tests {
     use itertools::Itertools;
 
     use super::{encode_chunk, encode_row, encode_value};
-    use crate::array::{DataChunk, Row};
+    use crate::array::DataChunk;
+    use crate::row::Row;
     use crate::types::{DataType, ScalarImpl};
     use crate::util::sort_util::{OrderPair, OrderType};
 

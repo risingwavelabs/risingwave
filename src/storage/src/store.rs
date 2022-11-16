@@ -30,7 +30,7 @@ use crate::write_batch::WriteBatch;
 pub trait StaticSendSync = Send + Sync + 'static;
 
 pub trait NextFutureTrait<'a, Item> = Future<Output = StorageResult<Option<Item>>> + Send + 'a;
-pub trait StateStoreIter: Send + 'static {
+pub trait StateStoreIter: StaticSendSync {
     type Item: Send;
     type NextFuture<'a>: NextFutureTrait<'a, Self::Item>;
 
@@ -273,6 +273,7 @@ pub struct ReadOptions {
     /// If the `prefix_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Vec<u8>>,
+    pub ignore_range_tombstone: bool,
     pub check_bloom_filter: bool,
 
     pub retention_seconds: Option<u32>,
