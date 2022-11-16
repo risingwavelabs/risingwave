@@ -12,25 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use crate::config::{GeneratorConfig, NexmarkConfig};
-use crate::event::Event;
+use crate::event::*;
 
 /// Nexmark event generator.
 #[derive(Default, Clone, Debug)]
 pub struct EventGenerator {
-    config: GeneratorConfig,
+    cfg: GeneratorConfig,
     events_so_far: u64,
-    wall_clock_base_time: u64,
+    /// If Some, only the specified type of events will be generated.
+    type_filter: Option<EventType>,
+    elapsed_ms: u64,
 }
 
 impl EventGenerator {
     /// Create a new generator.
-    pub fn new(config: NexmarkConfig, events_so_far: u64, wall_clock_base_time: u64) -> Self {
+    pub fn new(config: NexmarkConfig) -> Self {
         EventGenerator {
-            config: config.into(),
-            events_so_far,
-            wall_clock_base_time,
+            cfg: config.into(),
+            events_so_far: 0,
+            type_filter: None,
+            elapsed_ms: 0,
         }
+    }
+
+    pub fn with_events_so_far(mut self, events_so_far: u64) -> Self {
+        self.events_so_far = events_so_far;
+        self
+    }
+
+    pub fn with_type_filter(mut self, type_: EventType) -> Self {
+        self.type_filter = Some(type_);
+        self
     }
 
     /// Return the number of events so far.
@@ -38,9 +53,9 @@ impl EventGenerator {
         self.events_so_far
     }
 
-    /// Return the wall clock base time in ms.
-    pub const fn wall_clock_base_time(&self) -> u64 {
-        self.wall_clock_base_time
+    /// Returns the amount of time elapsed since the base time to the last event timestamp.
+    pub fn elapsed(&self) -> Duration {
+        Duration::from_millis(self.elapsed_ms)
     }
 }
 
@@ -48,13 +63,17 @@ impl Iterator for EventGenerator {
     type Item = Event;
 
     fn next(&mut self) -> Option<Event> {
-        let (event, new_wall_clock_base_time) = Event::new(
-            self.events_so_far as usize,
-            &self.config,
-            self.wall_clock_base_time,
-        );
-        self.wall_clock_base_time = new_wall_clock_base_time;
-        self.events_so_far += 1;
-        Some(event)
+        loop {
+            let event_number = self.cfg.next_adjusted_event(self.events_so_far as usize);
+            let event_type = self.cfg.event_type(event_number);
+            self.events_so_far += 1;
+
+            if matches!(self.type_filter, Some(t) if t != event_type) {
+                continue;
+            }
+            let event = Event::new(event_number, &self.cfg);
+            self.elapsed_ms = event.timestamp() - self.cfg.base_time;
+            return Some(event);
+        }
     }
 }

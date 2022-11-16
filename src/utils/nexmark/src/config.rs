@@ -34,6 +34,7 @@ use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::ops::Deref;
 
+use crate::event::EventType;
 use crate::utils::{build_channel_url_map, get_base_url};
 
 pub const CHANNEL_NUMBER: usize = 10_000;
@@ -103,8 +104,6 @@ pub struct NexmarkConfig {
     pub auction_proportion: usize,
     /// Bid Proportion.
     pub bid_proportion: usize,
-    /// Proportion Denominator.
-    pub proportion_denominator: usize,
     /// We start the ids at specific values to help ensure the queries find a
     /// match even on small synthesized dataset sizes.
     pub first_auction_id: usize,
@@ -145,9 +144,6 @@ pub struct NexmarkConfig {
 /// Default configuration.
 impl Default for NexmarkConfig {
     fn default() -> Self {
-        let person_proportion = 1;
-        let auction_proportion = 3;
-        let bid_proportion = 46;
         Self {
             active_people: 1000,
             in_flight_auctions: 100,
@@ -166,10 +162,9 @@ impl Default for NexmarkConfig {
             hot_seller_ratio_2: 100,
             hot_auction_ratio_2: 100,
             hot_bidder_ratio_2: 100,
-            person_proportion,
-            auction_proportion,
-            bid_proportion,
-            proportion_denominator: person_proportion + auction_proportion + bid_proportion,
+            person_proportion: 1,
+            auction_proportion: 3,
+            bid_proportion: 46,
             first_auction_id: 1000,
             first_person_id: 1000,
             first_category_id: 10,
@@ -190,6 +185,13 @@ impl Default for NexmarkConfig {
             next_rate: 10_000,
             us_per_unit: 1_000_000,
         }
+    }
+}
+
+impl NexmarkConfig {
+    /// Returns the proportion denominator.
+    pub const fn proportion_denominator(&self) -> usize {
+        self.person_proportion + self.auction_proportion + self.bid_proportion
     }
 }
 
@@ -281,7 +283,7 @@ impl From<NexmarkConfig> for GeneratorConfig {
 }
 
 impl GeneratorConfig {
-    /// Returns a new event timestamp.
+    /// Returns the timestamp of event.
     pub fn event_timestamp(&self, event_number: usize) -> u64 {
         if self.inter_event_delays.len() == 1 {
             return self.base_time
@@ -313,6 +315,18 @@ impl GeneratorConfig {
         let n = self.out_of_order_group_size;
         let event_number = self.first_event_number + events_so_far;
         (event_number / n) * n + (event_number * 953) % n
+    }
+
+    /// Returns the event type.
+    pub fn event_type(&self, event_number: usize) -> EventType {
+        let rem = event_number % self.proportion_denominator();
+        if rem < self.person_proportion {
+            EventType::Person
+        } else if rem < self.person_proportion + self.auction_proportion {
+            EventType::Auction
+        } else {
+            EventType::Bid
+        }
     }
 }
 

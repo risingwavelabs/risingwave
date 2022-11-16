@@ -44,7 +44,7 @@ use crate::utils::NexmarkRng;
 type Id = usize;
 
 /// The type of a Nexmark event.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EventType {
     Person,
@@ -66,31 +66,31 @@ pub enum Event {
 
 impl Event {
     /// Creates a new event randomly.
-    pub(crate) fn new(
-        events_so_far: usize,
-        cfg: &GeneratorConfig,
-        wall_clock_base_time: u64,
-    ) -> (Event, u64) {
-        let rem = cfg.next_adjusted_event(events_so_far) % cfg.proportion_denominator;
-        let timestamp = cfg.event_timestamp(cfg.next_adjusted_event(events_so_far));
-        let new_wall_clock_base_time = timestamp - cfg.base_time + wall_clock_base_time;
-        let id = cfg.first_event_id + cfg.next_adjusted_event(events_so_far);
-        let mut rng = SmallRng::seed_from_u64(id as u64);
-        let event = if rem < cfg.person_proportion {
-            Event::Person(Person::new(id, timestamp, &mut rng, cfg))
-        } else if rem < cfg.person_proportion + cfg.auction_proportion {
-            Event::Auction(Auction::new(events_so_far, id, timestamp, &mut rng, cfg))
-        } else {
-            Event::Bid(Bid::new(id, timestamp, &mut rng, cfg))
-        };
-        (event, new_wall_clock_base_time)
+    pub(crate) fn new(event_number: usize, cfg: &GeneratorConfig) -> Self {
+        let id = cfg.first_event_id + event_number;
+        let timestamp = cfg.event_timestamp(event_number);
+        match cfg.event_type(event_number) {
+            EventType::Person => Event::Person(Person::new(id, timestamp, cfg)),
+            EventType::Auction => Event::Auction(Auction::new(id, timestamp, cfg)),
+            EventType::Bid => Event::Bid(Bid::new(id, timestamp, cfg)),
+        }
     }
 
-    pub fn event_type(&self) -> EventType {
+    /// Returns the type of this event.
+    pub const fn event_type(&self) -> EventType {
         match self {
             Event::Person(_) => EventType::Person,
             Event::Auction(_) => EventType::Auction,
             Event::Bid(_) => EventType::Bid,
+        }
+    }
+
+    /// Returns the timestamp of this event.
+    pub const fn timestamp(&self) -> u64 {
+        match self {
+            Event::Person(e) => e.date_time,
+            Event::Auction(e) => e.date_time,
+            Event::Bid(e) => e.date_time,
         }
     }
 }
@@ -120,7 +120,8 @@ pub struct Person {
 
 impl Person {
     /// Creates a new `Person` event.
-    fn new(id: usize, time: u64, rng: &mut SmallRng, cfg: &GeneratorConfig) -> Self {
+    pub(crate) fn new(id: usize, time: u64, cfg: &GeneratorConfig) -> Self {
+        let rng = &mut SmallRng::seed_from_u64(id as u64);
         let id = Self::last_id(id, cfg) + cfg.first_person_id;
         let name = format!(
             "{} {}",
@@ -161,11 +162,8 @@ impl Person {
     }
 
     fn last_id(id: usize, nex: &GeneratorConfig) -> Id {
-        let epoch = id / nex.proportion_denominator;
-        let mut offset = id % nex.proportion_denominator;
-        if nex.person_proportion <= offset {
-            offset = nex.person_proportion - 1;
-        }
+        let epoch = id / nex.proportion_denominator();
+        let offset = (id % nex.proportion_denominator()).max(nex.person_proportion - 1);
         epoch * nex.person_proportion + offset
     }
 }
@@ -197,20 +195,15 @@ pub struct Auction {
 }
 
 impl Auction {
-    fn new(
-        events_so_far: usize,
-        id: usize,
-        time: u64,
-        rng: &mut SmallRng,
-        cfg: &GeneratorConfig,
-    ) -> Self {
+    pub(crate) fn new(id: usize, time: u64, cfg: &GeneratorConfig) -> Self {
+        let rng = &mut SmallRng::seed_from_u64(id as u64);
+        let expires = time + Self::next_length(id, rng, time, cfg);
         let id = Self::last_id(id, cfg) + cfg.first_auction_id;
         let item_name = rng.gen_string(20);
         let description = rng.gen_string(100);
         let initial_bid = rng.gen_price();
 
         let reserve = initial_bid + rng.gen_price();
-        let expires = time + Self::next_length(events_so_far, rng, time, cfg);
         let mut seller = if rng.gen_range(0..cfg.hot_seller_ratio) > 0 {
             (Person::last_id(id, cfg) / cfg.hot_seller_ratio_2) * cfg.hot_seller_ratio_2
         } else {
@@ -247,8 +240,8 @@ impl Auction {
     }
 
     fn last_id(id: usize, nex: &GeneratorConfig) -> Id {
-        let mut epoch = id / nex.proportion_denominator;
-        let mut offset = id % nex.proportion_denominator;
+        let mut epoch = id / nex.proportion_denominator();
+        let mut offset = id % nex.proportion_denominator();
         if offset < nex.person_proportion {
             epoch -= 1;
             offset = nex.auction_proportion - 1;
@@ -260,16 +253,11 @@ impl Auction {
         epoch * nex.auction_proportion + offset
     }
 
-    fn next_length(
-        events_so_far: usize,
-        rng: &mut SmallRng,
-        time: u64,
-        cfg: &GeneratorConfig,
-    ) -> u64 {
-        let current_event = cfg.next_adjusted_event(events_so_far);
+    fn next_length(id: usize, rng: &mut SmallRng, time: u64, cfg: &GeneratorConfig) -> u64 {
+        let event_number = id - cfg.first_event_id;
         let events_for_auctions =
-            (cfg.in_flight_auctions * cfg.proportion_denominator) / cfg.auction_proportion;
-        let future_auction = cfg.event_timestamp(current_event + events_for_auctions);
+            (cfg.in_flight_auctions * cfg.proportion_denominator()) / cfg.auction_proportion;
+        let future_auction = cfg.event_timestamp(event_number + events_for_auctions);
 
         let horizon = future_auction - time;
         1 + rng.gen_range(0..max(horizon * 2, 1))
@@ -297,7 +285,8 @@ pub struct Bid {
 }
 
 impl Bid {
-    fn new(id: usize, time: u64, rng: &mut SmallRng, nex: &GeneratorConfig) -> Self {
+    pub(crate) fn new(id: usize, time: u64, nex: &GeneratorConfig) -> Self {
+        let rng = &mut SmallRng::seed_from_u64(id as u64);
         let auction = if 0 < rng.gen_range(0..nex.hot_auction_ratio) {
             (Auction::last_id(id, nex) / nex.hot_auction_ratio_2) * nex.hot_auction_ratio_2
         } else {
@@ -338,26 +327,12 @@ impl Bid {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     use super::*;
-    use crate::config::{NexmarkConfig, NEXMARK_BASE_TIME};
 
     #[test]
     fn test_event() {
-        let config = GeneratorConfig::from(NexmarkConfig::default());
-
-        let wall_clock_base_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-
-        let (event_1, _) = Event::new(0, &config, wall_clock_base_time);
-        let (event_2, _) = Event::new(0, &config, NEXMARK_BASE_TIME);
-        assert_eq!(event_1, event_2);
-
         assert_eq!(
-            event_1,
+            Event::new(0, &GeneratorConfig::default()),
             Event::Person(Person {
                 id: 1000,
                 name: "vicky noris".into(),
