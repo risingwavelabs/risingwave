@@ -312,20 +312,16 @@ impl RequiredDist {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn enforce_stream_if_not_satisfies(
-        &self,
-        plan: stream::PlanRef,
-    ) -> Result<stream::PlanRef> {
+    pub fn enforce_stream_if_not_satisfies(&self, plan: stream::PlanRef) -> stream::PlanRef {
         if !plan.distribution().satisfies(self) {
             // FIXME(st1page);
-            Ok(stream::Exchange {
+            stream::Exchange {
                 dist: self.to_dist(),
                 input: plan,
             }
-            .into())
+            .into()
         } else {
-            Ok(plan)
+            plan
         }
     }
 
@@ -369,33 +365,6 @@ impl RequiredDist {
             }
             RequiredDist::PhysicalDist(dist) => dist.clone(),
         }
-    }
-
-    pub fn enforce_stream_if_not_satisfies(&self, plan: stream::PlanRef) -> stream::PlanRef {
-        if !plan.distribution().satisfies(self) {
-            self.enforce_stream(plan)
-        } else {
-            plan
-        }
-    }
-
-    /// can be only called by `enforce_stream_if_not_satisfies`, insert exchange to satisfy the
-    /// Distribution of a stream plan
-    fn enforce_stream(&self, plan: stream::PlanRef) -> stream::PlanRef {
-        let dist = match self {
-            // all the distribution satisfy the Any, and the function can be only called by
-            // `enforce_if_not_satisfies`
-            RequiredDist::Any => unreachable!(),
-            // TODO: add round robin distributed type
-            RequiredDist::AnyShard => Distribution::HashShard(plan.logical_pk().to_vec()),
-            RequiredDist::ShardByKey(required_keys) => {
-                Distribution::HashShard(required_keys.ones().collect())
-            }
-            RequiredDist::PhysicalDist(dist) => dist.clone(),
-        };
-        // FIXME(st1page);
-        let inner = stream::Exchange { dist, input: plan };
-        inner.into()
     }
 }
 
