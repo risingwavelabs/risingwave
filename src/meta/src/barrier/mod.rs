@@ -556,9 +556,7 @@ where
             // is an advance optimization. Besides if another barrier comes immediately,
             // it may send a same epoch and fail the epoch check.
             if info.nothing_to_do() {
-                let mut notifiers = notifiers;
-                notifiers.iter_mut().for_each(Notifier::notify_to_send);
-                notifiers.iter_mut().for_each(Notifier::notify_collected);
+                notifiers.into_iter().for_each(Notifier::notify_all);
                 continue;
             }
             let prev_epoch = state.in_flight_prev_epoch;
@@ -814,7 +812,7 @@ where
                         .map(|grouped| {
                             let sst = grouped.sst.expect("field not None");
                             sst_to_worker.insert(sst.id, resp.worker_id);
-                            (grouped.compaction_group_id, sst)
+                            LocalSstableInfo::new(grouped.compaction_group_id, sst)
                         })
                         .collect_vec();
                     synced_ssts.append(&mut t);

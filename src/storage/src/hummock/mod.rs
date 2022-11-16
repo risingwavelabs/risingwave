@@ -14,13 +14,15 @@
 
 //! Hummock is the state store of the streaming system.
 
+use std::ops::Deref;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
+use arc_swap::ArcSwap;
 use bytes::Bytes;
-#[cfg(any(test, feature = "test"))]
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::HummockVersion;
@@ -28,8 +30,6 @@ use risingwave_pb::hummock::{pin_version_response, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::log::error;
-
-use super::hummock::store::state_store::HummockStorage as HummockStorageV2;
 
 mod block_cache;
 pub use block_cache::*;
@@ -77,7 +77,6 @@ pub use validator::*;
 use value::*;
 
 use self::iterator::{BackwardUserIterator, HummockIterator, UserIterator};
-use self::key::user_key;
 pub use self::sstable_store::*;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
@@ -94,10 +93,9 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
-use crate::hummock::store::state_store::HummockStorageIterator;
-#[cfg(any(test, feature = "test"))]
-use crate::hummock::store::version::HummockReadVersion;
+use crate::hummock::store::version::{HummockReadVersion, HummockVersionReader};
 use crate::monitor::StoreLocalStatistic;
+use crate::store::ReadOptions;
 
 struct HummockStorageShutdownGuard {
     shutdown_sender: UnboundedSender<HummockEvent>,
@@ -115,27 +113,27 @@ impl Drop for HummockStorageShutdownGuard {
 /// Hummock is the state store backend.
 #[derive(Clone)]
 pub struct HummockStorage {
-    local_version_manager: LocalVersionManagerRef,
-
-    filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-
     hummock_event_sender: UnboundedSender<HummockEvent>,
 
-    _shutdown_guard: Arc<HummockStorageShutdownGuard>,
+    // TODO: replace it with version mapping
+    read_version: Arc<RwLock<HummockReadVersion>>,
 
-    storage_core: HummockStorageV2,
+    context: Arc<Context>,
+
+    buffer_tracker: BufferTracker,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 
     seal_epoch: Arc<AtomicU64>,
 
-    /// Statistics
-    _stats: Arc<StateStoreMetrics>,
+    pinned_version: Arc<ArcSwap<PinnedVersion>>,
 
-    _sstable_id_manager: SstableIdManagerRef,
+    hummock_version_reader: HummockVersionReader,
+
+    _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
     #[cfg(not(madsim))]
-    _tracing: Arc<risingwave_tracing::RwTracingService>,
+    tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
 impl HummockStorage {
@@ -197,10 +195,10 @@ impl HummockStorage {
         );
 
         let hummock_event_handler = HummockEventHandler::new(
-            local_version_manager.clone(),
+            local_version_manager,
             event_rx,
             pinned_version,
-            compactor_context,
+            compactor_context.clone(),
         );
 
         let read_version = hummock_event_handler.read_version();
@@ -208,38 +206,20 @@ impl HummockStorage {
         #[cfg(not(madsim))]
         let tracing = Arc::new(risingwave_tracing::RwTracingService::new());
 
-        let storage_core = HummockStorageV2::new(
-            options.clone(),
-            sstable_store.clone(),
-            hummock_meta_client.clone(),
-            stats.clone(),
-            read_version,
-            event_tx.clone(),
-            hummock_event_handler
-                .buffer_tracker()
-                .get_memory_limiter()
-                .clone(),
-            sstable_id_manager.clone(),
-            #[cfg(not(madsim))]
-            tracing.clone(),
-        )
-        .expect("storage_core mut be init");
-
         let instance = Self {
-            local_version_manager,
-            filter_key_extractor_manager,
-            _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
-                shutdown_sender: event_tx.clone(),
-            }),
-            storage_core,
+            read_version,
+            context: compactor_context,
+            buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             seal_epoch: hummock_event_handler.sealed_epoch(),
-            hummock_event_sender: event_tx,
-            _stats: stats,
-            _sstable_id_manager: sstable_id_manager,
-
+            hummock_event_sender: event_tx.clone(),
+            pinned_version: hummock_event_handler.pinned_version(),
+            hummock_version_reader: HummockVersionReader::new(sstable_store, stats.clone()),
+            _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
+                shutdown_sender: event_tx,
+            }),
             #[cfg(not(madsim))]
-            _tracing: tracing,
+            tracing,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -248,23 +228,23 @@ impl HummockStorage {
     }
 
     pub fn sstable_store(&self) -> SstableStoreRef {
-        self.storage_core.sstable_store()
+        self.context.sstable_store.clone()
     }
 
     pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
-        self.storage_core.sstable_id_manager()
+        &self.context.sstable_id_manager
     }
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
-        &self.filter_key_extractor_manager
+        &self.context.filter_key_extractor_manager
     }
 
     pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
-        self.storage_core.get_memory_limiter()
+        self.buffer_tracker.get_memory_limiter().clone()
     }
 
     pub fn get_pinned_version(&self) -> PinnedVersion {
-        self.storage_core.read_version().read().committed().clone()
+        self.pinned_version.load().deref().deref().clone()
     }
 }
 
@@ -281,7 +261,7 @@ impl HummockStorage {
             .unwrap();
 
         loop {
-            if self.storage_core.read_version().read().committed().id() >= version_id {
+            if self.pinned_version.load().id() >= version_id {
                 break;
             }
             yield_now().await
@@ -291,7 +271,7 @@ impl HummockStorage {
     pub async fn wait_version(&self, version: HummockVersion) {
         use tokio::task::yield_now;
         loop {
-            if self.storage_core.read_version().read().committed().id() >= version.id {
+            if self.pinned_version.load().id() >= version.id {
                 break;
             }
             yield_now().await
@@ -299,7 +279,7 @@ impl HummockStorage {
     }
 
     pub fn get_shared_buffer_size(&self) -> usize {
-        self.local_version_manager.get_shared_buffer_size()
+        self.buffer_tracker.get_buffer_size()
     }
 
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
@@ -319,26 +299,32 @@ impl HummockStorage {
         .await
     }
 
-    pub fn get_read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
-        self.storage_core.read_version()
-    }
-
     pub fn options(&self) -> &Arc<StorageConfig> {
-        self.storage_core.options()
+        &self.context.options
     }
 }
 
 pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
     sstable_info: &SstableInfo,
-    internal_key: &[u8],
-    check_bloom_filter: bool,
+    full_key: FullKey<&[u8]>,
+    read_options: &ReadOptions,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
-    let ukey = user_key(internal_key);
-    if check_bloom_filter && !hit_sstable_bloom_filter(sstable.value(), ukey, local_stats) {
+    let ukey = &full_key.user_key;
+    let delete_epoch = if read_options.ignore_range_tombstone {
+        None
+    } else {
+        get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
+    };
+    if read_options.check_bloom_filter
+        && !hit_sstable_bloom_filter(sstable.value(), ukey.encode().as_slice(), local_stats)
+    {
+        if delete_epoch.is_some() {
+            return Ok(Some(HummockValue::Delete));
+        }
         return Ok(None);
     }
 
@@ -349,17 +335,30 @@ pub async fn get_from_sstable_info(
         sstable_store_ref.clone(),
         Arc::new(SstableIteratorReadOptions::default()),
     );
-    iter.seek(internal_key).await?;
+    iter.seek(full_key).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
+        if delete_epoch.is_some() {
+            return Ok(Some(HummockValue::Delete));
+        }
         return Ok(None);
     }
 
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
-    let value = match key::user_key(iter.key()) == ukey {
-        true => Some(iter.value().to_bytes()),
-        false => None,
+    let value = if iter.key().user_key == *ukey {
+        if delete_epoch
+            .map(|epoch| epoch >= iter.key().epoch)
+            .unwrap_or(false)
+        {
+            Some(HummockValue::Delete)
+        } else {
+            Some(iter.value().to_bytes())
+        }
+    } else if delete_epoch.is_some() {
+        Some(HummockValue::Delete)
+    } else {
+        None
     };
     iter.collect_local_statistic(local_stats);
 
@@ -368,11 +367,11 @@ pub async fn get_from_sstable_info(
 
 pub fn hit_sstable_bloom_filter(
     sstable_info_ref: &Sstable,
-    key: &[u8],
+    user_key: &[u8],
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
-    let surely_not_have = sstable_info_ref.surely_not_have_user_key(key);
+    let surely_not_have = sstable_info_ref.surely_not_have_user_key(user_key);
 
     if surely_not_have {
         local_stats.bloom_filter_true_negative_count += 1;
@@ -385,31 +384,32 @@ pub fn hit_sstable_bloom_filter(
 pub async fn get_from_order_sorted_uncommitted_data(
     sstable_store_ref: SstableStoreRef,
     order_sorted_uncommitted_data: OrderSortedUncommittedData,
-    internal_key: &[u8],
+    full_key: FullKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
-    key: &[u8],
-    check_bloom_filter: bool,
+    read_options: &ReadOptions,
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
-    let epoch = key::get_epoch(internal_key);
+    let epoch = full_key.epoch;
     for data_list in order_sorted_uncommitted_data {
         for data in data_list {
             match data {
                 UncommittedData::Batch(batch) => {
                     assert!(batch.epoch() <= epoch, "batch'epoch greater than epoch");
-                    if let Some(data) = get_from_batch(&batch, key, local_stats) {
+                    if let Some(data) =
+                        get_from_batch(&batch, full_key.user_key.table_key, local_stats)
+                    {
                         return Ok((Some(data), table_counts));
                     }
                 }
 
-                UncommittedData::Sst((_, sstable_info)) => {
+                UncommittedData::Sst(LocalSstableInfo { sst_info, .. }) => {
                     table_counts += 1;
 
                     if let Some(data) = get_from_sstable_info(
                         sstable_store_ref.clone(),
-                        &sstable_info,
-                        internal_key,
-                        check_bloom_filter,
+                        &sst_info,
+                        full_key,
+                        read_options,
                         local_stats,
                     )
                     .await?
@@ -426,10 +426,13 @@ pub async fn get_from_order_sorted_uncommitted_data(
 /// Get `user_value` from `SharedBufferBatch`
 pub fn get_from_batch(
     batch: &SharedBufferBatch,
-    key: &[u8],
+    table_key: TableKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
-    batch.get(key).map(|v| {
+    if batch.check_delete_by_range(table_key) {
+        return Some(HummockValue::Delete);
+    }
+    batch.get(table_key).map(|v| {
         local_stats.get_shared_buffer_hit_counts += 1;
         v
     })

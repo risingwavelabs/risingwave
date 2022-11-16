@@ -15,8 +15,9 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use risingwave_common::array::{Op, RowDeserializer, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::RowDeserializer;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
@@ -332,7 +333,8 @@ mod tests {
             &[DataType::Int64, DataType::Int64],
             &[OrderType::Ascending, OrderType::Ascending],
             &[0, 1],
-        );
+        )
+        .await;
 
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(
@@ -415,7 +417,8 @@ mod tests {
             &[DataType::Int64, DataType::Int64],
             &[OrderType::Ascending, OrderType::Ascending],
             &[0, 1],
-        );
+        )
+        .await;
 
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(

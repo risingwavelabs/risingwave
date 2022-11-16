@@ -29,8 +29,13 @@ const OP: &str = "type";
 #[derive(Debug)]
 pub struct MaxwellParser;
 
+#[async_trait::async_trait]
 impl SourceParser for MaxwellParser {
-    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+    async fn parse(
+        &self,
+        payload: &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
         let mut payload_mut = payload.to_vec();
         let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;

@@ -53,7 +53,7 @@ pub fn print_table_catalog(table: &TableCatalog) {
     println!("{:#?}", table);
 }
 
-pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
+pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
     StateTable::new_with_distribution(
         hummock,
         table.id,
@@ -67,6 +67,7 @@ pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> Stat
         Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
         table.value_indices.clone(),
     )
+    .await
 }
 
 pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StorageTable<S> {

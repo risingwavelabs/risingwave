@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{valid_table_name, IndexId, TableId, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::{valid_table_name, IndexId, TableId};
 use risingwave_pb::catalog::{
     Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
     Table as ProstTable, View as ProstView,
@@ -69,7 +69,6 @@ impl SchemaCatalog {
     }
 
     pub fn create_sys_table(&mut self, sys_table: SystemCatalog) {
-        assert_eq!(self.name, PG_CATALOG_SCHEMA_NAME);
         self.system_table_by_name
             .try_insert(sys_table.name.clone(), sys_table)
             .unwrap();
@@ -228,6 +227,10 @@ impl SchemaCatalog {
 
     pub fn iter_sink(&self) -> impl Iterator<Item = &Arc<SinkCatalog>> {
         self.sink_by_name.values()
+    }
+
+    pub fn iter_view(&self) -> impl Iterator<Item = &Arc<ViewCatalog>> {
+        self.view_by_name.values()
     }
 
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {

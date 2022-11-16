@@ -457,9 +457,6 @@ impl PlanRoot {
                 self.schema = plan.schema().clone();
                 plan.to_stream_with_dist_required(&self.required_dist)
             }
-            Convention::Stream => self
-                .required_dist
-                .enforce_if_not_satisfies(self.plan.clone(), &Order::any()),
             _ => unreachable!(),
         }?;
 

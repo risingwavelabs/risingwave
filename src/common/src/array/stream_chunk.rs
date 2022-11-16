@@ -19,8 +19,10 @@ use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
 use super::{ArrayResult, DataChunkTestExt};
 use crate::array::column::Column;
-use crate::array::{DataChunk, Row, Vis};
+use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
+use crate::row::Row;
+use crate::types::to_text::ToText;
 use crate::types::DataType;
 
 /// `Op` represents three operations in `StreamChunk`.
@@ -242,7 +244,7 @@ impl StreamChunk {
             for datum in row_ref.values() {
                 let str = match datum {
                     None => "".to_owned(), // NULL
-                    Some(scalar) => scalar.to_string(),
+                    Some(scalar) => scalar.to_text(),
                 };
                 cells.push(Cell::new(&str));
             }

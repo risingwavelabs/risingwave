@@ -28,6 +28,13 @@ impl Planner {
         match set_expr {
             BoundSetExpr::Select(s) => self.plan_select(*s, extra_order_exprs),
             BoundSetExpr::Values(v) => self.plan_values(*v),
+            BoundSetExpr::Query(q) => Ok(self.plan_query(*q)?.into_subplan()),
+            BoundSetExpr::SetOperation {
+                op,
+                all,
+                left,
+                right,
+            } => self.plan_set_operation(op, all, *left, *right),
         }
     }
 }

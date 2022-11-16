@@ -16,12 +16,15 @@ use std::convert::TryFrom;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use parse_display::Display;
+use bytes::{Buf, BufMut, Bytes};
+use num_traits::Float;
+use parse_display::{Display, FromStr};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
 use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
+use crate::error::BoxedError;
+
 mod native_type;
 mod ops;
 mod scalar_impl;
@@ -37,11 +40,14 @@ pub use scalar_impl::*;
 pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;
+mod postgres_type;
 pub mod struct_type;
+pub mod to_binary;
+pub mod to_text;
 
 mod ordered_float;
 
-use chrono::{Datelike, Timelike};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 pub use chrono_wrapper::{
     NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,
 };
@@ -55,6 +61,8 @@ use postgres_types::{IsNull, ToSql, Type};
 use strum_macros::EnumDiscriminants;
 
 use self::struct_type::StructType;
+use self::to_binary::ToBinary;
+use self::to_text::ToText;
 use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
     StructValue,
@@ -76,41 +84,63 @@ pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
 
 /// `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
 /// but without data fields.
-#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, EnumDiscriminants)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, EnumDiscriminants, FromStr)]
 #[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
 #[strum_discriminants(vis(pub))]
 pub enum DataType {
     #[display("boolean")]
+    #[from_str(regex = "(?i)^bool$|^boolean$")]
     Boolean,
     #[display("smallint")]
+    #[from_str(regex = "(?i)^smallint$|^int2$")]
     Int16,
     #[display("integer")]
+    #[from_str(regex = "(?i)^integer$|^int$|^int4$")]
     Int32,
     #[display("bigint")]
+    #[from_str(regex = "(?i)^bigint$|^int8$")]
     Int64,
     #[display("real")]
+    #[from_str(regex = "(?i)^real$|^float4$")]
     Float32,
     #[display("double precision")]
+    #[from_str(regex = "(?i)^double precision$|^float8$")]
     Float64,
     #[display("numeric")]
+    #[from_str(regex = "(?i)^numeric$|^decimal$")]
     Decimal,
     #[display("date")]
+    #[from_str(regex = "(?i)^date$")]
     Date,
     #[display("varchar")]
+    #[from_str(regex = "(?i)^varchar$")]
     Varchar,
     #[display("time without time zone")]
+    #[from_str(regex = "(?i)^time$|^time without time zone$")]
     Time,
     #[display("timestamp without time zone")]
+    #[from_str(regex = "(?i)^timestamp$|^timestamp without time zone$")]
     Timestamp,
     #[display("timestamp with time zone")]
+    #[from_str(regex = "(?i)^timestamptz$|^timestamp with time zone$")]
     Timestampz,
     #[display("interval")]
+    #[from_str(regex = "(?i)^interval$")]
     Interval,
     #[display("{0}")]
+    #[from_str(ignore)]
     Struct(Arc<StructType>),
     #[display("{datatype}[]")]
     List { datatype: Box<DataType> },
+}
+
+impl std::str::FromStr for Box<DataType> {
+    type Err = BoxedError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Box::new(DataType::from_str(s)?))
+    }
 }
 
 impl DataTypeName {
@@ -201,6 +231,20 @@ impl From<&ProstDataType> for DataType {
 }
 
 impl DataType {
+    pub const BOOLEAN: DataType = DataType::Boolean;
+    pub const DATE: DataType = DataType::Date;
+    pub const DECIMAL: DataType = DataType::Decimal;
+    pub const FLOAT32: DataType = DataType::Float32;
+    pub const FLOAT64: DataType = DataType::Float64;
+    pub const INT16: DataType = DataType::Int16;
+    pub const INT32: DataType = DataType::Int32;
+    pub const INT64: DataType = DataType::Int64;
+    pub const INTERVAL: DataType = DataType::Interval;
+    pub const TIME: DataType = DataType::Time;
+    pub const TIMESTAMP: DataType = DataType::Timestamp;
+    pub const TIMESTAMPZ: DataType = DataType::Timestampz;
+    pub const VARCHAR: DataType = DataType::Varchar;
+
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
         match self {
@@ -319,6 +363,37 @@ impl DataType {
             .into(),
         )
     }
+
+    /// WARNING: Currently this should only be used in `WatermarkFilterExecutor`. Please be careful
+    /// if you want to use this.
+    pub fn min(&self) -> ScalarImpl {
+        match self {
+            DataType::Int16 => ScalarImpl::Int16(i16::MIN),
+            DataType::Int32 => ScalarImpl::Int32(i32::MIN),
+            DataType::Int64 => ScalarImpl::Int64(i64::MIN),
+            DataType::Float32 => ScalarImpl::Float32(OrderedF32::neg_infinity()),
+            DataType::Float64 => ScalarImpl::Float64(OrderedF64::neg_infinity()),
+            DataType::Boolean => ScalarImpl::Bool(false),
+            DataType::Varchar => ScalarImpl::Utf8("".to_string()),
+            DataType::Date => ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::MIN)),
+            DataType::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper(NaiveTime::from_hms(0, 0, 0))),
+            DataType::Timestamp => {
+                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::MIN))
+            }
+            // FIXME(yuhao): Add a timestampz scalar.
+            DataType::Timestampz => ScalarImpl::Int64(i64::MIN),
+            DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
+            DataType::Interval => ScalarImpl::Interval(IntervalUnit::MIN),
+            DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
+                data_types
+                    .fields
+                    .iter()
+                    .map(|data_type| Some(data_type.min()))
+                    .collect_vec(),
+            )),
+            DataType::List { .. } => ScalarImpl::List(ListValue::new(vec![])),
+        }
+    }
 }
 
 /// `Scalar` is a trait over all possible owned types in the evaluation
@@ -374,6 +449,9 @@ pub trait ScalarRef<'a>:
 
     /// Convert `ScalarRef` to an owned scalar.
     fn to_owned_scalar(&self) -> Self::ScalarType;
+
+    /// A wrapped hash function to get the hash value for this scaler.
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H);
 }
 
 /// `for_all_scalar_variants` includes all variants of our scalar types. If you added a new scalar
@@ -411,23 +489,26 @@ macro_rules! for_all_scalar_variants {
 macro_rules! scalar_impl_enum {
     ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
-        #[derive(Debug, Display, Clone, PartialEq, Eq)]
+        #[derive(Debug, Clone, PartialEq, Eq)]
         pub enum ScalarImpl {
-            $( #[display("{0}")] $variant_name($scalar) ),*
+            $( $variant_name($scalar) ),*
         }
 
         /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
         /// framework.
-        #[derive(Debug, Display, Copy, Clone, PartialEq, Eq)]
+        #[derive(Debug, Copy, Clone, PartialEq, Eq)]
         pub enum ScalarRefImpl<'scalar> {
-            $( #[display("{0}")] $variant_name($scalar_ref) ),*
+            $( $variant_name($scalar_ref) ),*
         }
     };
 }
 
 for_all_scalar_variants! { scalar_impl_enum }
 
-/// Implement `PartialOrd` and `Ord` for `ScalarImpl` and `ScalarRefImpl` with macro.
+/// Implement [`PartialOrd`] and [`Ord`] for [`ScalarImpl`] and [`ScalarRefImpl`].
+///
+/// Scalars of different types are not comparable. For this case, `partial_cmp` returns `None` and
+/// `cmp` will panic.
 macro_rules! scalar_impl_partial_ord {
     ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         impl PartialOrd for ScalarImpl {
@@ -495,7 +576,7 @@ pub fn serialize_datum_ref_not_null_into(
         .serialize(serializer)
 }
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
+// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 // TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_into(
     datum: &Datum,
@@ -511,7 +592,7 @@ pub fn serialize_datum_into(
     Ok(())
 }
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
+// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 pub fn serialize_datum_not_null_into(
     datum: &Datum,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
@@ -522,7 +603,7 @@ pub fn serialize_datum_not_null_into(
         .serialize(serializer)
 }
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
+// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 pub fn deserialize_datum_from(
     ty: &DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
@@ -535,7 +616,7 @@ pub fn deserialize_datum_from(
     }
 }
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
+// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 pub fn deserialize_datum_not_null_from(
     ty: &DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
@@ -687,84 +768,66 @@ macro_rules! impl_scalar_impl_ref_conversion {
 
 for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
 
-/// Should behave the same as [`crate::array::Array::hash_at`] for non-null items.
-#[expect(clippy::derive_hash_xor_eq)]
-impl Hash for ScalarImpl {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        macro_rules! impl_all_hash {
-            ($({ $variant_type:ty, $scalar_type:ident } ),*) => {
+/// Implement [`Hash`] for [`ScalarImpl`] and [`ScalarRefImpl`] with `hash_scalar`.
+///
+/// Should behave the same as [`crate::array::Array::hash_at`].
+macro_rules! scalar_impl_hash {
+    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+        impl Hash for ScalarRefImpl<'_> {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
                 match self {
-                    // Primitive types
-                    $( Self::$scalar_type(inner) => {
-                        NativeType::hash_wrapper(inner, state);
-                    }, )*
-                    Self::Interval(interval) => interval.hash(state),
-                    Self::NaiveDate(naivedate) => naivedate.hash(state),
-                    Self::NaiveTime(naivetime) => naivetime.hash(state),
-                    Self::NaiveDateTime(naivedatetime) => naivedatetime.hash(state),
-
-                    // Manually implemented
-                    Self::Bool(b) => b.hash(state),
-                    Self::Utf8(s) => state.write(s.as_bytes()),
-                    Self::Decimal(decimal) => decimal.normalize().hash(state),
-                    Self::Struct(v) => v.hash(state), // TODO: check if this is consistent with `StructArray::hash_at`
-                    Self::List(v) => v.hash(state),   // TODO: check if this is consistent with `ListArray::hash_at`
+                    $( Self::$variant_name(inner) => inner.hash_scalar(state), )*
                 }
-            };
+            }
         }
-        for_all_native_types! { impl_all_hash }
-    }
+
+        #[expect(clippy::derive_hash_xor_eq)]
+        impl Hash for ScalarImpl {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                match self {
+                    $( Self::$variant_name(inner) => inner.as_scalar_ref().hash_scalar(state), )*
+                }
+            }
+        }
+    };
 }
+
+for_all_scalar_variants! { scalar_impl_hash }
 
 /// Feeds the raw scalar of `datum` to the given `state`, which should behave the same as
-/// [`crate::array::Array::hash_at`]. NULL value will be carefully handled.
+/// [`crate::array::Array::hash_at`], where NULL value will be carefully handled.
 ///
-/// Caveats: this relies on the above implementation of [`Hash`].
+/// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
+/// type alias of `Datum = Option<_>`, we should manually implement [`std::hash::Hash`] for
+/// [`Datum`] in the future when it becomes a newtype. (#477)
+#[inline(always)]
 pub fn hash_datum(datum: &Datum, state: &mut impl std::hash::Hasher) {
-    match datum {
-        Some(scalar) => scalar.hash(state),
-        None => NULL_VAL_FOR_HASH.hash(state),
-    }
+    hash_datum_ref(to_datum_ref(datum), state)
 }
 
-pub fn display_datum_ref(d: DatumRef<'_>) -> String {
-    match d {
-        Some(s) => format!("{}", s),
-        None => "NULL".to_string(),
+/// Feeds the raw scalar reference of `datum_ref` to the given `state`, which should behave the same
+/// as [`crate::array::Array::hash_at`], where NULL value will be carefully handled.
+///
+/// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
+/// type alias of `DatumRef = Option<_>`, we should manually implement [`std::hash::Hash`] for
+/// [`DatumRef`] in the future when it becomes a newtype. (#477)
+#[inline(always)]
+pub fn hash_datum_ref(datum_ref: DatumRef<'_>, state: &mut impl std::hash::Hasher) {
+    match datum_ref {
+        Some(scalar_ref) => scalar_ref.hash(state),
+        None => NULL_VAL_FOR_HASH.hash(state),
     }
 }
 
 impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
-    pub fn binary_serialize(&self) -> Bytes {
-        let ty = &Type::ANY;
-        let mut output = BytesMut::new();
-        match self {
-            Self::Int64(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Float32(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Float64(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Utf8(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Bool(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Int16(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Int32(v) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Decimal(Decimal::Normalized(v)) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Decimal(Decimal::NaN | Decimal::PositiveInf | Decimal::NegativeInf) => {
-                output.reserve(8);
-                output.put_u16(0);
-                output.put_i16(0);
-                output.put_u16(0xC000);
-                output.put_i16(0);
-                IsNull::No
-            }
-            Self::NaiveDate(v) => v.0.to_sql(ty, &mut output).unwrap(),
-            Self::NaiveDateTime(v) => v.0.to_sql(ty, &mut output).unwrap(),
-            Self::NaiveTime(v) => v.0.to_sql(ty, &mut output).unwrap(),
-            Self::Struct(_) => todo!("Don't support struct serialization yet"),
-            Self::List(_) => todo!("Don't support list serialization yet"),
-            Self::Interval(v) => v.to_sql(ty, &mut output).unwrap(),
-        };
-        output.freeze()
+    pub fn binary_format(&self) -> Bytes {
+        self.to_binary().unwrap()
+    }
+
+    pub fn text_format(&self) -> String {
+        self.to_text()
     }
 
     /// Serialize the scalar.
@@ -931,12 +994,16 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
 
 #[cfg(test)]
 mod tests {
+    use std::hash::{BuildHasher, Hasher};
     use std::ops::Neg;
 
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use itertools::Itertools;
     use rand::thread_rng;
+    use strum::IntoEnumIterator;
 
     use super::*;
+    use crate::util::hash_util::Crc32FastBuilder;
 
     fn serialize_datum_not_null_into_vec(data: i64) -> Vec<u8> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
@@ -960,7 +1027,7 @@ mod tests {
     }
 
     #[test]
-    fn test_issue_2057_ordered_float_memcomparable() {
+    fn test_issue_legacy_2057_ordered_float_memcomparable() {
         use num_traits::*;
         use rand::seq::SliceRandom;
 
@@ -1027,5 +1094,276 @@ mod tests {
             vec!["i".to_string(), "j".to_string()],
         );
         assert_eq!(format!("{}", d), "struct<i integer,j varchar>".to_string());
+    }
+
+    #[test]
+    fn test_hash_implementation() {
+        fn test(datum: Datum, data_type: DataType) {
+            assert!(literal_type_match(&data_type, datum.as_ref()));
+
+            let mut builder = data_type.create_array_builder(6);
+            for _ in 0..3 {
+                builder.append_null();
+                builder.append_datum(&datum);
+            }
+            let array = builder.finish();
+
+            let hash_from_array = {
+                let mut state = Crc32FastBuilder.build_hasher();
+                array.hash_at(3, &mut state);
+                state.finish()
+            };
+
+            let hash_from_datum = {
+                let mut state = Crc32FastBuilder.build_hasher();
+                hash_datum(&datum, &mut state);
+                state.finish()
+            };
+
+            let hash_from_datum_ref = {
+                let mut state = Crc32FastBuilder.build_hasher();
+                hash_datum_ref(to_datum_ref(&datum), &mut state);
+                state.finish()
+            };
+
+            assert_eq!(hash_from_array, hash_from_datum);
+            assert_eq!(hash_from_datum, hash_from_datum_ref);
+        }
+
+        for name in DataTypeName::iter() {
+            let (scalar, data_type) = match name {
+                DataTypeName::Boolean => (ScalarImpl::Bool(true), DataType::Boolean),
+                DataTypeName::Int16 => (ScalarImpl::Int16(233), DataType::Int16),
+                DataTypeName::Int32 => (ScalarImpl::Int32(233333), DataType::Int32),
+                DataTypeName::Int64 => (ScalarImpl::Int64(233333333333), DataType::Int64),
+                DataTypeName::Float32 => (ScalarImpl::Float32(23.33.into()), DataType::Float32),
+                DataTypeName::Float64 => (
+                    ScalarImpl::Float64(23.333333333333.into()),
+                    DataType::Float64,
+                ),
+                DataTypeName::Decimal => (
+                    ScalarImpl::Decimal("233.33".parse().unwrap()),
+                    DataType::Decimal,
+                ),
+                DataTypeName::Date => (
+                    ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::from_ymd(2333, 3, 3))),
+                    DataType::Date,
+                ),
+                DataTypeName::Varchar => (ScalarImpl::Utf8("233".to_string()), DataType::Varchar),
+                DataTypeName::Time => (
+                    ScalarImpl::NaiveTime(NaiveTimeWrapper(NaiveTime::from_hms(2, 3, 3))),
+                    DataType::Time,
+                ),
+                DataTypeName::Timestamp => (
+                    ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::from_timestamp(
+                        23333333, 2333,
+                    ))),
+                    DataType::Timestamp,
+                ),
+                DataTypeName::Timestampz => (ScalarImpl::Int64(233333333), DataType::Timestampz),
+                DataTypeName::Interval => (
+                    ScalarImpl::Interval(IntervalUnit::new(2, 3, 3333)),
+                    DataType::Interval,
+                ),
+                DataTypeName::Struct => (
+                    ScalarImpl::Struct(StructValue::new(vec![
+                        ScalarImpl::Int64(233).into(),
+                        ScalarImpl::Float64(23.33.into()).into(),
+                    ])),
+                    DataType::Struct(
+                        StructType::new(vec![
+                            (DataType::Int64, "a".to_string()),
+                            (DataType::Float64, "b".to_string()),
+                        ])
+                        .into(),
+                    ),
+                ),
+                DataTypeName::List => (
+                    ScalarImpl::List(ListValue::new(vec![
+                        ScalarImpl::Int64(233).into(),
+                        ScalarImpl::Int64(2333).into(),
+                    ])),
+                    DataType::List {
+                        datatype: Box::new(DataType::Int64),
+                    },
+                ),
+            };
+
+            test(Some(scalar), data_type.clone());
+            test(None, data_type);
+        }
+    }
+
+    #[test]
+    fn test_data_type_from_str() {
+        assert_eq!(DataType::from_str("bool").unwrap(), DataType::Boolean);
+        assert_eq!(DataType::from_str("boolean").unwrap(), DataType::Boolean);
+        assert_eq!(DataType::from_str("BOOL").unwrap(), DataType::Boolean);
+        assert_eq!(DataType::from_str("BOOLEAN").unwrap(), DataType::Boolean);
+
+        assert_eq!(DataType::from_str("int2").unwrap(), DataType::Int16);
+        assert_eq!(DataType::from_str("smallint").unwrap(), DataType::Int16);
+        assert_eq!(DataType::from_str("INT2").unwrap(), DataType::Int16);
+        assert_eq!(DataType::from_str("SMALLINT").unwrap(), DataType::Int16);
+
+        assert_eq!(DataType::from_str("int4").unwrap(), DataType::Int32);
+        assert_eq!(DataType::from_str("integer").unwrap(), DataType::Int32);
+        assert_eq!(DataType::from_str("int4").unwrap(), DataType::Int32);
+        assert_eq!(DataType::from_str("INT4").unwrap(), DataType::Int32);
+        assert_eq!(DataType::from_str("INTEGER").unwrap(), DataType::Int32);
+        assert_eq!(DataType::from_str("INT").unwrap(), DataType::Int32);
+
+        assert_eq!(DataType::from_str("int8").unwrap(), DataType::Int64);
+        assert_eq!(DataType::from_str("bigint").unwrap(), DataType::Int64);
+        assert_eq!(DataType::from_str("INT8").unwrap(), DataType::Int64);
+        assert_eq!(DataType::from_str("BIGINT").unwrap(), DataType::Int64);
+
+        assert_eq!(DataType::from_str("float4").unwrap(), DataType::Float32);
+        assert_eq!(DataType::from_str("real").unwrap(), DataType::Float32);
+        assert_eq!(DataType::from_str("FLOAT4").unwrap(), DataType::Float32);
+        assert_eq!(DataType::from_str("REAL").unwrap(), DataType::Float32);
+
+        assert_eq!(DataType::from_str("float8").unwrap(), DataType::Float64);
+        assert_eq!(
+            DataType::from_str("double precision").unwrap(),
+            DataType::Float64
+        );
+        assert_eq!(DataType::from_str("FLOAT8").unwrap(), DataType::Float64);
+        assert_eq!(
+            DataType::from_str("DOUBLE PRECISION").unwrap(),
+            DataType::Float64
+        );
+
+        assert_eq!(DataType::from_str("decimal").unwrap(), DataType::Decimal);
+        assert_eq!(DataType::from_str("DECIMAL").unwrap(), DataType::Decimal);
+        assert_eq!(DataType::from_str("numeric").unwrap(), DataType::Decimal);
+        assert_eq!(DataType::from_str("NUMERIC").unwrap(), DataType::Decimal);
+
+        assert_eq!(DataType::from_str("date").unwrap(), DataType::Date);
+        assert_eq!(DataType::from_str("DATE").unwrap(), DataType::Date);
+
+        assert_eq!(DataType::from_str("varchar").unwrap(), DataType::Varchar);
+        assert_eq!(DataType::from_str("VARCHAR").unwrap(), DataType::Varchar);
+
+        assert_eq!(DataType::from_str("time").unwrap(), DataType::Time);
+        assert_eq!(
+            DataType::from_str("time without time zone").unwrap(),
+            DataType::Time
+        );
+        assert_eq!(DataType::from_str("TIME").unwrap(), DataType::Time);
+        assert_eq!(
+            DataType::from_str("TIME WITHOUT TIME ZONE").unwrap(),
+            DataType::Time
+        );
+
+        assert_eq!(
+            DataType::from_str("timestamp").unwrap(),
+            DataType::Timestamp
+        );
+        assert_eq!(
+            DataType::from_str("timestamp without time zone").unwrap(),
+            DataType::Timestamp
+        );
+        assert_eq!(
+            DataType::from_str("TIMESTAMP").unwrap(),
+            DataType::Timestamp
+        );
+        assert_eq!(
+            DataType::from_str("TIMESTAMP WITHOUT TIME ZONE").unwrap(),
+            DataType::Timestamp
+        );
+
+        assert_eq!(
+            DataType::from_str("timestamptz").unwrap(),
+            DataType::Timestampz
+        );
+        assert_eq!(
+            DataType::from_str("timestamp with time zone").unwrap(),
+            DataType::Timestampz
+        );
+        assert_eq!(
+            DataType::from_str("TIMESTAMPTZ").unwrap(),
+            DataType::Timestampz
+        );
+        assert_eq!(
+            DataType::from_str("TIMESTAMP WITH TIME ZONE").unwrap(),
+            DataType::Timestampz
+        );
+
+        assert_eq!(DataType::from_str("interval").unwrap(), DataType::Interval);
+        assert_eq!(DataType::from_str("INTERVAL").unwrap(), DataType::Interval);
+
+        assert_eq!(
+            DataType::from_str("int2[]").unwrap(),
+            DataType::List {
+                datatype: Box::new(DataType::Int16)
+            }
+        );
+        assert_eq!(
+            DataType::from_str("int[]").unwrap(),
+            DataType::List {
+                datatype: Box::new(DataType::Int32)
+            }
+        );
+        assert_eq!(
+            DataType::from_str("int8[]").unwrap(),
+            DataType::List {
+                datatype: Box::new(DataType::Int64)
+            }
+        );
+        assert_eq!(
+            DataType::from_str("float4[]").unwrap(),
+            DataType::List {
+                datatype: Box::new(DataType::Float32)
+            }
+        );
+        assert_eq!(
+            DataType::from_str("float8[]").unwrap(),
+            DataType::List {
+                datatype: Box::new(DataType::Float64)
+            }
+        );
+        assert_eq!(
+            DataType::from_str("decimal[]").unwrap(),
+            DataType::List {
+                datatype: Box::new(DataType::Decimal)
+            }
+        );
+        assert_eq!(
+            DataType::from_str("varchar[]").unwrap(),
+            DataType::List {
+                datatype: Box::new(DataType::Varchar)
+            }
+        );
+        assert_eq!(
+            DataType::from_str("date[]").unwrap(),
+            DataType::List {
+                datatype: Box::new(DataType::Date)
+            }
+        );
+        assert_eq!(
+            DataType::from_str("time[]").unwrap(),
+            DataType::List {
+                datatype: Box::new(DataType::Time)
+            }
+        );
+        assert_eq!(
+            DataType::from_str("timestamp[]").unwrap(),
+            DataType::List {
+                datatype: Box::new(DataType::Timestamp)
+            }
+        );
+        assert_eq!(
+            DataType::from_str("timestamptz[]").unwrap(),
+            DataType::List {
+                datatype: Box::new(DataType::Timestampz)
+            }
+        );
+        assert_eq!(
+            DataType::from_str("interval[]").unwrap(),
+            DataType::List {
+                datatype: Box::new(DataType::Interval)
+            }
+        );
     }
 }

@@ -18,10 +18,11 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prometheus::Histogram;
-use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
@@ -308,19 +309,15 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             .into_iter()
             .partition(|x| x.pk_prefix.size() == table.pk_indices().len());
 
+        let mut data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
         // Point Get
-        let point_gets = select_all(point_gets.into_iter().map(|point_get| {
+        for point_get in point_gets {
             let table = table.clone();
             let histogram = histogram.clone();
-            Box::pin(Self::execute_point_get(table, point_get, epoch, histogram))
-        }));
-
-        // Merge point get rows into chunk
-        let mut data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
-        #[for_await]
-        for row in point_gets {
-            if let Some(chunk) = data_chunk_builder.append_one_row_from_datums(row?.values()) {
-                yield chunk;
+            if let Some(row) = Self::execute_point_get(table, point_get, epoch, histogram).await? {
+                if let Some(chunk) = data_chunk_builder.append_one_row_from_datums(row.values()) {
+                    yield chunk;
+                }
             }
         }
         if let Some(chunk) = data_chunk_builder.consume_all() {
@@ -341,13 +338,12 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         }
     }
 
-    #[try_stream(ok = Row, error = RwError)]
     async fn execute_point_get(
         table: Arc<StorageTable<S>>,
         scan_range: ScanRange,
         epoch: u64,
         histogram: Option<Histogram>,
-    ) {
+    ) -> Result<Option<Row>> {
         let pk_prefix = scan_range.pk_prefix;
         assert!(pk_prefix.size() == table.pk_indices().len());
 
@@ -362,9 +358,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             timer.observe_duration()
         }
 
-        if let Some(row) = row {
-            yield row;
-        }
+        Ok(row)
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
@@ -417,8 +411,8 @@ mod tests {
     use std::collections::Bound::Unbounded;
 
     use futures::StreamExt;
-    use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
+    use risingwave_common::row::Row;
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
@@ -446,7 +440,8 @@ mod tests {
             column_descs.clone(),
             order_types.clone(),
             pk_indices.clone(),
-        );
+        )
+        .await;
         let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
         let value_indices: Vec<usize> = vec![0, 1, 2];
         let table = StorageTable::new_partial(

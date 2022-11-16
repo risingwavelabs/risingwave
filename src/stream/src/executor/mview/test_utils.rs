@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
@@ -38,7 +38,8 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
         column_descs.clone(),
         order_types,
         pk_indices,
-    );
+    )
+    .await;
     let table = StorageTable::for_test(
         state_store.clone(),
         TableId::from(0x42),

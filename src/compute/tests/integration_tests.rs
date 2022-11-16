@@ -25,11 +25,12 @@ use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
+use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::row::Row;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
@@ -131,7 +132,8 @@ async fn test_table_materialize() -> StreamResult<()> {
     let state_table = SourceStateTableHandler::from_table_catalog(
         &default_source_internal_table(0x2333),
         MemoryStateStore::new(),
-    );
+    )
+    .await;
     let stream_source = SourceExecutor::new(
         ActorContext::create(0x3f3f3f),
         source_builder,
@@ -159,6 +161,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         all_column_ids.clone(),
         2,
     )
+    .await
     .boxed()
     .execute();
 
@@ -178,6 +181,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         source_manager.clone(),
         insert_inner,
         "InsertExecutor".to_string(),
+        vec![], // ignore insertion order
     ));
 
     tokio::spawn(async move {
@@ -383,7 +387,8 @@ async fn test_row_seq_scan() -> Result<()> {
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0_usize],
-    );
+    )
+    .await;
     let table = StorageTable::for_test(
         memory_state_store.clone(),
         TableId::from(0x42),

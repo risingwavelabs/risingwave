@@ -186,7 +186,7 @@ impl ToDistributedBatch for BatchHashJoin {
                     .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
                 left = left.to_distributed_with_required(&Order::any(), &left_dist)?;
             }
-            Distribution::UpstreamHashShard(_) => {
+            Distribution::UpstreamHashShard(_, _) => {
                 left = left.to_distributed_with_required(
                     &Order::any(),
                     &RequiredDist::shard_by_key(
@@ -202,7 +202,7 @@ impl ToDistributedBatch for BatchHashJoin {
                         );
                         right = right_dist.enforce_if_not_satisfies(right, &Order::any())?
                     }
-                    Distribution::UpstreamHashShard(_) => {
+                    Distribution::UpstreamHashShard(_, _) => {
                         left =
                             RequiredDist::hash_shard(&self.eq_join_predicate().left_eq_indexes())
                                 .enforce_if_not_satisfies(left, &Order::any())?;
