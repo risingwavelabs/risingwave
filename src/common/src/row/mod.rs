@@ -13,12 +13,12 @@
 // limitations under the License.
 
 mod compacted_row;
-mod vec_datum;
+mod owned_row;
 
 use std::hash::{BuildHasher, Hasher};
 
 pub use compacted_row::CompactedRow;
-pub use vec_datum::{Row, RowDeserializer};
+pub use owned_row::{Row, RowDeserializer};
 
 use crate::array::RowRef;
 use crate::hash::HashCode;
