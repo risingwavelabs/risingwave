@@ -175,6 +175,51 @@ impl AvroParser {
 
         Ok(data_type)
     }
+
+    async fn parse_inner(
+        &self,
+        payload: &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
+        // parse payload to avro value
+        // if use confluent schema, get writer schema from confluent schema registry
+        let avro_value = if let Some(resolver) = &self.schema_resolver {
+            let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
+            let writer_schema = resolver.get(schema_id).await?;
+            from_avro_datum(writer_schema.as_ref(), &mut raw_payload, Some(&self.schema))
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
+        } else {
+            let mut reader = Reader::with_schema(&self.schema, payload)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+            match reader.next() {
+                Some(Ok(v)) => v,
+                Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
+                None => {
+                    return Err(RwError::from(ProtocolError(
+                        "avro parse unexpected eof".to_string(),
+                    )))
+                }
+            }
+        };
+        // parse the valur to rw value
+        if let Value::Record(fields) = avro_value {
+            writer.insert(|column| {
+                let tuple = fields.iter().find(|val| column.name.eq(&val.0)).unwrap();
+                from_avro_value(tuple.1.clone()).map_err(|e| {
+                    tracing::error!(
+                        "failed to process value ({}): {}",
+                        String::from_utf8_lossy(payload),
+                        e
+                    );
+                    e
+                })
+            })
+        } else {
+            Err(RwError::from(ProtocolError(
+                "avro parse unexpected value".to_string(),
+            )))
+        }
+    }
 }
 
 /// Convert Avro value to datum.For now, support the following [Avro type](https://avro.apache.org/docs/current/spec.html).
@@ -269,46 +314,7 @@ impl SourceParser for AvroParser {
         'b: 'a,
         'c: 'a,
     {
-        // parse payload to avro value
-        // if use confluent schema, get writer schema from confluent schema registry
-        async move {
-            let avro_value = if let Some(resolver) = &self.schema_resolver {
-                let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
-                let writer_schema = resolver.get(schema_id).await?;
-                from_avro_datum(writer_schema.as_ref(), &mut raw_payload, Some(&self.schema))
-                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
-            } else {
-                let mut reader = Reader::with_schema(&self.schema, payload)
-                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-                match reader.next() {
-                    Some(Ok(v)) => v,
-                    Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
-                    None => {
-                        return Err(RwError::from(ProtocolError(
-                            "avro parse unexpected eof".to_string(),
-                        )))
-                    }
-                }
-            };
-            // parse the valur to rw value
-            if let Value::Record(fields) = avro_value {
-                writer.insert(|column| {
-                    let tuple = fields.iter().find(|val| column.name.eq(&val.0)).unwrap();
-                    from_avro_value(tuple.1.clone()).map_err(|e| {
-                        tracing::error!(
-                            "failed to process value ({}): {}",
-                            String::from_utf8_lossy(payload),
-                            e
-                        );
-                        e
-                    })
-                })
-            } else {
-                Err(RwError::from(ProtocolError(
-                    "avro parse unexpected value".to_string(),
-                )))
-            }
-        }
+        self.parse_inner(payload, writer)
     }
 }
 

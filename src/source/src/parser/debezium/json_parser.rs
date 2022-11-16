@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
+use futures::future::ready;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use serde_derive::{Deserialize, Serialize};
@@ -39,6 +40,69 @@ pub struct Payload {
 #[derive(Debug)]
 pub struct DebeziumJsonParser;
 
+impl DebeziumJsonParser {
+    fn parse_inner(
+        &self,
+        payload: &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
+        let event: DebeziumEvent = serde_json::from_slice(payload)
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+        let mut payload = event.payload;
+
+        match payload.op.as_str() {
+            DEBEZIUM_UPDATE_OP => {
+                let before = payload.before.as_mut().ok_or_else(|| {
+            RwError::from(ProtocolError(
+                "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
+            ))
+        })?;
+
+                let after = payload.after.as_mut().ok_or_else(|| {
+                    RwError::from(ProtocolError(
+                        "after is missing for updating event".to_string(),
+                    ))
+                })?;
+
+                writer.update(|column| {
+                    let before = json_parse_value(&column.data_type, before.get(&column.name))?;
+                    let after = json_parse_value(&column.data_type, after.get(&column.name))?;
+
+                    Ok((before, after))
+                })
+            }
+            DEBEZIUM_CREATE_OP | DEBEZIUM_READ_OP => {
+                let after = payload.after.as_ref().ok_or_else(|| {
+                    RwError::from(ProtocolError(
+                        "after is missing for creating event".to_string(),
+                    ))
+                })?;
+
+                writer.insert(|column| {
+                    json_parse_value(&column.data_type, after.get(&column.name)).map_err(Into::into)
+                })
+            }
+            DEBEZIUM_DELETE_OP => {
+                let before = payload.before.as_ref().ok_or_else(|| {
+                    RwError::from(ProtocolError(
+                        "before is missing for delete event".to_string(),
+                    ))
+                })?;
+
+                writer.delete(|column| {
+                    json_parse_value(&column.data_type, before.get(&column.name))
+                        .map_err(Into::into)
+                })
+            }
+            _ => Err(RwError::from(ProtocolError(format!(
+                "unknown debezium op: {}",
+                payload.op
+            )))),
+        }
+    }
+}
+
 impl SourceParser for DebeziumJsonParser {
     type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
 
@@ -51,62 +115,6 @@ impl SourceParser for DebeziumJsonParser {
         'b: 'a,
         'c: 'a,
     {
-        async move {
-            let event: DebeziumEvent = serde_json::from_slice(payload)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-            let mut payload = event.payload;
-
-            match payload.op.as_str() {
-                DEBEZIUM_UPDATE_OP => {
-                    let before = payload.before.as_mut().ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
-                    ))
-                })?;
-
-                    let after = payload.after.as_mut().ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "after is missing for updating event".to_string(),
-                        ))
-                    })?;
-
-                    writer.update(|column| {
-                        let before = json_parse_value(&column.data_type, before.get(&column.name))?;
-                        let after = json_parse_value(&column.data_type, after.get(&column.name))?;
-
-                        Ok((before, after))
-                    })
-                }
-                DEBEZIUM_CREATE_OP | DEBEZIUM_READ_OP => {
-                    let after = payload.after.as_ref().ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "after is missing for creating event".to_string(),
-                        ))
-                    })?;
-
-                    writer.insert(|column| {
-                        json_parse_value(&column.data_type, after.get(&column.name))
-                            .map_err(Into::into)
-                    })
-                }
-                DEBEZIUM_DELETE_OP => {
-                    let before = payload.before.as_ref().ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "before is missing for delete event".to_string(),
-                        ))
-                    })?;
-
-                    writer.delete(|column| {
-                        json_parse_value(&column.data_type, before.get(&column.name))
-                            .map_err(Into::into)
-                    })
-                }
-                _ => Err(RwError::from(ProtocolError(format!(
-                    "unknown debezium op: {}",
-                    payload.op
-                )))),
-            }
-        }
+        ready(self.parse_inner(payload, writer))
     }
 }
