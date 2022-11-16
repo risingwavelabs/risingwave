@@ -60,7 +60,7 @@ pub struct StateTable<S: StateStore> {
     mem_table: MemTable,
 
     /// State store backend.
-    store: S::Local,
+    local_store: S::Local,
 
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
@@ -204,7 +204,7 @@ impl<S: StateStore> StateTable<S> {
         Self {
             table_id,
             mem_table: MemTable::new(),
-            store: local_state_store,
+            local_store: local_state_store,
             pk_serde,
             row_deserializer: RowDeserializer::new(data_types),
             pk_indices: pk_indices.to_vec(),
@@ -306,7 +306,7 @@ impl<S: StateStore> StateTable<S> {
         Self {
             table_id,
             mem_table: MemTable::new(),
-            store: local_state_store,
+            local_store: local_state_store,
             pk_serde,
             row_deserializer: RowDeserializer::new(data_types),
             pk_indices,
@@ -457,7 +457,7 @@ impl<S: StateStore> StateTable<S> {
                     ignore_range_tombstone: false,
                 };
                 if let Some(storage_row_bytes) = self
-                    .store
+                    .local_store
                     .get(&serialized_pk, self.epoch(), read_options)
                     .await?
                 {
@@ -648,7 +648,7 @@ impl<S: StateStore> StateTable<S> {
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
-        let mut write_batch = self.store.start_write_batch(WriteOptions {
+        let mut write_batch = self.local_store.start_write_batch(WriteOptions {
             epoch,
             table_id: self.table_id(),
         });
@@ -696,7 +696,7 @@ impl<S: StateStore> StateTable<S> {
             table_id: self.table_id,
             ignore_range_tombstone: false,
         };
-        let stored_value = self.store.get(key, epoch, read_options).await?;
+        let stored_value = self.local_store.get(key, epoch, read_options).await?;
 
         if let Some(stored_value) = stored_value {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
@@ -728,7 +728,7 @@ impl<S: StateStore> StateTable<S> {
             table_id: self.table_id,
             ignore_range_tombstone: false,
         };
-        let stored_value = self.store.get(key, epoch, read_options).await?;
+        let stored_value = self.local_store.get(key, epoch, read_options).await?;
 
         if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
@@ -762,7 +762,7 @@ impl<S: StateStore> StateTable<S> {
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
         };
-        let stored_value = self.store.get(key, epoch, read_options).await?;
+        let stored_value = self.local_store.get(key, epoch, read_options).await?;
 
         if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
@@ -960,7 +960,7 @@ impl<S: StateStore> StateTable<S> {
 
         // Storage iterator.
         let storage_iter = StorageIterInner::<S::Local>::new(
-            &self.store,
+            &self.local_store,
             epoch,
             key_range,
             read_options,
