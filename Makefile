@@ -7,12 +7,12 @@ build-devcont:
 	docker build -t rwk8scont -f k8s_workflow/Dockerfile_base .
 
 # You may need to change the memory settings in Docker Desktop > Settings > Resources > Advanced
-# builds all risingwave containers
+# Only builds the risingwave contaienr
 build-docker:
 	mkdir -p docker_target
 	mkdir -p docker_bin
 	docker run --memory=13g --cpus="7" -v ${PWD}/src:/risingwave/src -v ${PWD}/docker_bin:/risingwave/bin -v ${PWD}/docker_target:/risingwave/target -v ${PWD}/k8s_workflow:/risingwave/k8s_workflow --workdir /risingwave rwk8scont /bin/bash -c "./k8s_workflow/compile.sh"
-	./k8s_workflow/build.sh
+	./k8s_workflow/build.sh -c risingwave 
 
 k8s-frontend-node: build-docker
 	bash -c "docker save risingwave | docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io images import --all-platforms -"
