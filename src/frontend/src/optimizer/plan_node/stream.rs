@@ -156,6 +156,7 @@ impl_plan_tree_node_v2_for_stream_binary_node_with_core_delegating!(
 );
 #[derive(Debug, Clone)]
 pub struct Exchange {
+    pub dist: Distribution,
     pub input: PlanRef,
 }
 impl_plan_tree_node_v2_for_stream_unary_node!(Exchange, input);

@@ -25,11 +25,12 @@ use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
+use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::row::Row;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
@@ -180,6 +181,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         source_manager.clone(),
         insert_inner,
         "InsertExecutor".to_string(),
+        vec![], // ignore insertion order
     ));
 
     tokio::spawn(async move {
