@@ -34,19 +34,21 @@ use tracing::trace;
 
 use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
-use crate::keyspace::ExtractTableKeyIterator;
 use crate::row_serde::row_serde_util::{
     parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
-use crate::table::{compute_vnode, Distribution, TableIter};
+use crate::table::{compute_vnode, Distribution, ExtractTableKeyIterator, TableIter};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format, and is used in batch mode.
 #[derive(Clone)]
 pub struct StorageTable<S: StateStore> {
+    /// Id for this table.
+    table_id: TableId,
+
     /// The keyspace that the pk and value of the original table has.
     keyspace: Keyspace<S>,
 
@@ -198,6 +200,7 @@ impl<S: StateStore> StorageTable<S> {
 
         let keyspace = Keyspace::table_root(store, table_id);
         Self {
+            table_id,
             keyspace,
             schema,
             pk_serializer,
@@ -259,10 +262,11 @@ impl<S: StateStore> StorageTable<S> {
             check_bloom_filter: self.dist_key_indices == key_indices,
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
-            table_id: self.keyspace.table_id(),
+            table_id: self.table_id,
         };
         if let Some(value) = self
             .keyspace
+            .state_store()
             .get(&serialized_pk, epoch, read_options)
             .await?
         {
@@ -337,7 +341,7 @@ impl<S: StateStore> StorageTable<S> {
                     check_bloom_filter,
                     ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
-                    table_id: self.keyspace.table_id(),
+                    table_id: self.table_id,
                 };
                 let iter = StorageTableIterInner::<S>::new(
                     &self.keyspace,
@@ -450,7 +454,7 @@ impl<S: StateStore> StorageTable<S> {
         {
             trace!(
                 "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
-                self.keyspace.table_id(),
+                self.table_id,
                 pk_prefix,
                 self.dist_key_indices,
                 pk_prefix_indices
@@ -464,7 +468,7 @@ impl<S: StateStore> StorageTable<S> {
 
         trace!(
             "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
-            self.keyspace.table_id(),
+            self.table_id,
             prefix_hint,
             start_key,
             end_key,
@@ -527,10 +531,16 @@ impl<S: StateStore> StorageTableIterInner<S> {
         B: AsRef<[u8]> + Send,
     {
         let raw_epoch = epoch.get_epoch();
+        let range = (
+            raw_key_range.start_bound().map(|b| b.as_ref().to_vec()),
+            raw_key_range.end_bound().map(|b| b.as_ref().to_vec()),
+        );
         keyspace.state_store().try_wait_epoch(epoch).await?;
         let iter = keyspace
-            .iter_with_range(raw_key_range, raw_epoch, read_options)
+            .state_store()
+            .iter(range, raw_epoch, read_options)
             .await?;
+        let iter = ExtractTableKeyIterator { iter };
         let iter = Self {
             iter,
             mapping,

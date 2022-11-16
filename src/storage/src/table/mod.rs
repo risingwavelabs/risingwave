@@ -17,6 +17,8 @@ pub mod streaming_table;
 
 use std::sync::{Arc, LazyLock};
 
+use bytes::Bytes;
+use futures::Future;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
@@ -24,8 +26,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
+use risingwave_hummock_sdk::key::FullKey;
 
 use crate::error::StorageResult;
+use crate::StateStoreIter;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
 
@@ -103,6 +107,29 @@ pub trait TableIter: Send {
             Ok(None)
         } else {
             Ok(Some(chunk))
+        }
+    }
+}
+
+pub struct ExtractTableKeyIterator<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + 'static> {
+    pub iter: I,
+}
+
+impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> StateStoreIter
+    for ExtractTableKeyIterator<I>
+{
+    type Item = (Vec<u8>, Bytes);
+
+    type NextFuture<'a> =
+        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            Ok(self
+                .iter
+                .next()
+                .await?
+                .map(|(key, value)| (key.user_key.table_key.0, value)))
         }
     }
 }
