@@ -18,35 +18,25 @@ use std::sync::Arc;
 use enum_as_inner::EnumAsInner;
 use risingwave_common::config::StorageConfig;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_object_store::object::{
     parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
 };
 
 use crate::error::StorageResult;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    HummockStorage, HummockStorageV1, SstableStore, TieredCache, TieredCacheMetricsBuilder,
+    HummockStorage, HummockStorageV1, MemoryLimiter, SstableIdManagerRef, SstableStore,
+    TieredCache, TieredCacheMetricsBuilder,
 };
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
-#[cfg(debug_assertions)]
-use crate::store_impl::boxed_state_store::BoxDynamicDispatchedStateStore;
 use crate::StateStore;
 
-#[cfg(not(debug_assertions))]
-pub type HummockStorageType = HummockStorage;
-#[cfg(debug_assertions)]
-pub type HummockStorageType = BoxDynamicDispatchedStateStore;
-
-#[cfg(not(debug_assertions))]
-pub type HummockStorageV1Type = HummockStorageV1;
-#[cfg(debug_assertions)]
-pub type HummockStorageV1Type = BoxDynamicDispatchedStateStore;
-
-#[cfg(not(debug_assertions))]
-pub type MemoryStateStoreType = MemoryStateStore;
-#[cfg(debug_assertions)]
-pub type MemoryStateStoreType = BoxDynamicDispatchedStateStore;
+pub type HummockStorageType = impl StateStore + AsHummockTrait;
+pub type HummockStorageV1Type = impl StateStore + AsHummockTrait;
+pub type MemoryStateStoreType = impl StateStore + AsHummockTrait;
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -69,52 +59,105 @@ pub enum StateStoreImpl {
 }
 
 impl StateStoreImpl {
+    fn in_memory(
+        state_store: MemoryStateStore,
+        state_store_metrics: Arc<StateStoreMetrics>,
+    ) -> Self {
+        let inner = {
+            #[cfg(not(debug_assertions))]
+            {
+                state_store
+            }
+            #[cfg(debug_assertions)]
+            {
+                use crate::store_impl::boxed_state_store::BoxDynamicDispatchedStateStore;
+                Box::new(state_store) as BoxDynamicDispatchedStateStore
+            }
+        };
+
+        Self::MemoryStateStore(inner.monitored(state_store_metrics))
+    }
+
+    pub fn hummock(
+        state_store: HummockStorage,
+        state_store_metrics: Arc<StateStoreMetrics>,
+    ) -> Self {
+        let inner = {
+            #[cfg(not(debug_assertions))]
+            {
+                state_store
+            }
+            #[cfg(debug_assertions)]
+            {
+                use crate::store_impl::boxed_state_store::BoxDynamicDispatchedStateStore;
+                Box::new(state_store) as BoxDynamicDispatchedStateStore
+            }
+        };
+
+        Self::HummockStateStore(inner.monitored(state_store_metrics))
+    }
+
+    pub fn hummock_v1(
+        state_store: HummockStorageV1,
+        state_store_metrics: Arc<StateStoreMetrics>,
+    ) -> Self {
+        let inner = {
+            #[cfg(not(debug_assertions))]
+            {
+                state_store
+            }
+            #[cfg(debug_assertions)]
+            {
+                use crate::store_impl::boxed_state_store::BoxDynamicDispatchedStateStore;
+                Box::new(state_store) as BoxDynamicDispatchedStateStore
+            }
+        };
+
+        Self::HummockStateStoreV1(inner.monitored(state_store_metrics))
+    }
+
     pub fn shared_in_memory_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
-        #[cfg(not(debug_assertions))]
-        {
-            Self::MemoryStateStore(MemoryStateStore::shared().monitored(state_store_metrics))
-        }
-        #[cfg(debug_assertions)]
-        {
-            Self::MemoryStateStore(
-                (Box::new(MemoryStateStore::shared()) as BoxDynamicDispatchedStateStore)
-                    .monitored(state_store_metrics),
-            )
-        }
+        Self::in_memory(MemoryStateStore::shared(), state_store_metrics)
     }
 
     pub fn for_test() -> Self {
-        #[cfg(not(debug_assertions))]
+        Self::in_memory(
+            MemoryStateStore::new(),
+            Arc::new(StateStoreMetrics::unused()),
+        )
+    }
+
+    pub fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
         {
-            Self::MemoryStateStore(
-                MemoryStateStore::new().monitored(Arc::new(StateStoreMetrics::unused())),
-            )
-        }
-        #[cfg(debug_assertions)]
-        {
-            Self::MemoryStateStore(
-                (Box::new(MemoryStateStore::new()) as BoxDynamicDispatchedStateStore)
-                    .monitored(Arc::new(StateStoreMetrics::unused())),
-            )
+            match self {
+                StateStoreImpl::HummockStateStore(hummock) => Some(
+                    hummock
+                        .inner()
+                        .as_hummock_trait()
+                        .expect("should be hummock"),
+                ),
+                StateStoreImpl::HummockStateStoreV1(hummock) => Some(
+                    hummock
+                        .inner()
+                        .as_hummock_trait()
+                        .expect("should be hummock"),
+                ),
+                _ => None,
+            }
         }
     }
 
     pub fn as_hummock(&self) -> Option<&HummockStorage> {
-        #[cfg(not(debug_assertions))]
-        {
-            match self {
-                StateStoreImpl::HummockStateStore(hummock) => Some(hummock.inner()),
-                _ => None,
-            }
-        }
-        #[cfg(debug_assertions)]
-        {
-            match self {
-                StateStoreImpl::HummockStateStore(hummock) => {
-                    Some(hummock.inner().as_hummock().expect("should be hummock"))
-                }
-                _ => None,
-            }
+        match self {
+            StateStoreImpl::HummockStateStore(hummock) => Some(
+                hummock
+                    .inner()
+                    .as_hummock_trait()
+                    .expect("should be hummock")
+                    .as_hummock()
+                    .expect("should be hummock"),
+            ),
+            _ => None,
         }
     }
 }
@@ -236,17 +279,7 @@ impl StateStoreImpl {
                     )
                     .await?;
 
-                    #[cfg(not(debug_assertions))]
-                    {
-                        StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
-                    }
-                    #[cfg(debug_assertions)]
-                    {
-                        StateStoreImpl::HummockStateStore(
-                            (Box::new(inner) as BoxDynamicDispatchedStateStore)
-                                .monitored(state_store_stats),
-                        )
-                    }
+                    StateStoreImpl::hummock(inner, state_store_stats)
                 } else {
                     let inner = HummockStorageV1::new(
                         config.clone(),
@@ -257,17 +290,7 @@ impl StateStoreImpl {
                     )
                     .await?;
 
-                    #[cfg(not(debug_assertions))]
-                    {
-                        StateStoreImpl::HummockStateStoreV1(inner.monitored(state_store_stats))
-                    }
-                    #[cfg(debug_assertions)]
-                    {
-                        StateStoreImpl::HummockStateStoreV1(
-                            (Box::new(inner) as BoxDynamicDispatchedStateStore)
-                                .monitored(state_store_stats),
-                        )
-                    }
+                    StateStoreImpl::hummock_v1(inner, state_store_stats)
                 }
             }
 
@@ -283,6 +306,79 @@ impl StateStoreImpl {
     }
 }
 
+/// This trait is for aligning some common methods of hummock v1 and v2 for external use
+pub trait HummockTrait {
+    fn sstable_id_manager(&self) -> &SstableIdManagerRef;
+    fn sstable_store(&self) -> SstableStoreRef;
+    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef;
+    fn get_memory_limiter(&self) -> Arc<MemoryLimiter>;
+    fn as_hummock(&self) -> Option<&HummockStorage>;
+}
+
+impl HummockTrait for HummockStorage {
+    fn sstable_id_manager(&self) -> &SstableIdManagerRef {
+        self.sstable_id_manager()
+    }
+
+    fn sstable_store(&self) -> SstableStoreRef {
+        self.sstable_store()
+    }
+
+    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
+        self.filter_key_extractor_manager()
+    }
+
+    fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
+        self.get_memory_limiter()
+    }
+
+    fn as_hummock(&self) -> Option<&HummockStorage> {
+        Some(self)
+    }
+}
+impl HummockTrait for HummockStorageV1 {
+    fn sstable_id_manager(&self) -> &SstableIdManagerRef {
+        self.sstable_id_manager()
+    }
+
+    fn sstable_store(&self) -> SstableStoreRef {
+        self.sstable_store()
+    }
+
+    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
+        self.filter_key_extractor_manager()
+    }
+
+    fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
+        self.get_memory_limiter()
+    }
+
+    fn as_hummock(&self) -> Option<&HummockStorage> {
+        None
+    }
+}
+
+pub trait AsHummockTrait {
+    fn as_hummock_trait(&self) -> Option<&dyn HummockTrait>;
+}
+
+impl AsHummockTrait for HummockStorage {
+    fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
+        Some(self)
+    }
+}
+
+impl AsHummockTrait for HummockStorageV1 {
+    fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
+        Some(self)
+    }
+}
+
+impl AsHummockTrait for MemoryStateStore {
+    fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
+        None
+    }
+}
 #[cfg(debug_assertions)]
 pub mod boxed_state_store {
     use std::future::Future;
@@ -294,14 +390,13 @@ pub mod boxed_state_store {
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
-    use crate::hummock::{HummockStorage, HummockStorageV1};
-    use crate::memory::MemoryStateStore;
     use crate::storage_value::StorageValue;
     use crate::store::{
         EmptyFutureTrait, GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, LocalStateStore,
         NextFutureTrait, ReadOptions, StateStoreRead, StateStoreWrite, StaticSendSync,
         SyncFutureTrait, SyncResult, WriteOptions,
     };
+    use crate::store_impl::{AsHummockTrait, HummockTrait};
     use crate::{StateStore, StateStoreIter};
 
     // For StateStoreIter
@@ -499,43 +594,32 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedStateStoreCloneBox {
         fn clone_box(&self) -> BoxDynamicDispatchedStateStore;
     }
-    pub trait AsHummock {
-        fn as_hummock(&self) -> Option<&HummockStorage>;
-    }
-    impl AsHummock for MemoryStateStore {
-        fn as_hummock(&self) -> Option<&HummockStorage> {
-            None
-        }
-    }
-    impl AsHummock for HummockStorageV1 {
-        fn as_hummock(&self) -> Option<&HummockStorage> {
-            None
-        }
-    }
-    impl AsHummock for HummockStorage {
-        fn as_hummock(&self) -> Option<&HummockStorage> {
-            Some(self)
-        }
-    }
+
     pub trait DynamicDispatchedStateStore:
         DynamicDispatchedStateStoreCloneBox
         + DynamicDispatchedStateStoreRead
         + DynamicDispatchedStateStoreExt
-        + AsHummock
+        + AsHummockTrait
     {
     }
     impl<
             S: DynamicDispatchedStateStoreCloneBox
                 + DynamicDispatchedStateStoreRead
                 + DynamicDispatchedStateStoreExt
-                + AsHummock,
+                + AsHummockTrait,
         > DynamicDispatchedStateStore for S
     {
     }
 
-    impl<S: StateStore + AsHummock> DynamicDispatchedStateStoreCloneBox for S {
+    impl<S: StateStore + AsHummockTrait> DynamicDispatchedStateStoreCloneBox for S {
         fn clone_box(&self) -> BoxDynamicDispatchedStateStore {
             Box::new(self.clone())
+        }
+    }
+
+    impl AsHummockTrait for BoxDynamicDispatchedStateStore {
+        fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
+            self.deref().as_hummock_trait()
         }
     }
 
