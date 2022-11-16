@@ -84,14 +84,14 @@
 - input: SELECT 1e6
   formatted_sql: SELECT 1e6
   formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(ScientificNumber { value: "1", exponent: "6" }))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(ScientificNumber { coefficient: "1", exponent: "6" }))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
 
 - input: SELECT 1.25E6
   formatted_sql: SELECT 1.25e6
   formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(ScientificNumber { value: "1.25", exponent: "6" }))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(ScientificNumber { coefficient: "1.25", exponent: "6" }))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
 
 - input: SELECT 1e-6
   formatted_sql: SELECT 1e-6
   formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(ScientificNumber { value: "1", exponent: "-6" }))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(ScientificNumber { coefficient: "1", exponent: "-6" }))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
