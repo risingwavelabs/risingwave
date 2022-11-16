@@ -151,8 +151,6 @@ where
             };
         }
 
-        tracing::error!(actor_id = id, "actor exit without stop barrier");
-
         Ok(())
     }
 }

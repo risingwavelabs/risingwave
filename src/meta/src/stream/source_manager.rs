@@ -172,36 +172,36 @@ where
                 }
             };
 
-            let discovered_splits = handle.discovered_splits().await.unwrap();
+            if let Some(discovered_splits) = handle.discovered_splits().await {
+                for fragment_id in fragment_ids {
+                    let actor_ids = match self
+                        .fragment_manager
+                        .get_running_actors_of_fragment(*fragment_id)
+                        .await
+                    {
+                        Ok(actor_ids) => actor_ids,
+                        Err(err) => {
+                            tracing::warn!("Failed to get the actor of the fragment {}, maybe the fragment doesn't exist anymore", err.to_string());
+                            continue;
+                        }
+                    };
 
-            for fragment_id in fragment_ids {
-                let actor_ids = match self
-                    .fragment_manager
-                    .get_running_actors_of_fragment(*fragment_id)
-                    .await
-                {
-                    Ok(actor_ids) => actor_ids,
-                    Err(err) => {
-                        tracing::warn!("Failed to get the actor of the fragment {}, maybe the fragment doesn't exist anymore", err.to_string());
-                        continue;
+                    let prev_actor_splits: HashMap<_, _> = actor_ids
+                        .into_iter()
+                        .map(|actor_id| {
+                            (
+                                actor_id,
+                                self.actor_splits
+                                    .get(&actor_id)
+                                    .cloned()
+                                    .unwrap_or_default(),
+                            )
+                        })
+                        .collect();
+
+                    if let Some(change) = diff_splits(prev_actor_splits, &discovered_splits) {
+                        split_assignment.insert(*fragment_id, change);
                     }
-                };
-
-                let prev_actor_splits: HashMap<_, _> = actor_ids
-                    .into_iter()
-                    .map(|actor_id| {
-                        (
-                            actor_id,
-                            self.actor_splits
-                                .get(&actor_id)
-                                .cloned()
-                                .unwrap_or_default(),
-                        )
-                    })
-                    .collect();
-
-                if let Some(change) = diff_splits(prev_actor_splits, &discovered_splits) {
-                    split_assignment.insert(*fragment_id, change);
                 }
             }
         }
