@@ -56,12 +56,12 @@ impl OrderedRowSerde {
         self.serialize_datum_refs(row.iter(), append_to)
     }
 
-    // TODO(row trait): remove this.
+    /// TODO(row trait): remove this.
     pub fn serialize_ref(&self, row_ref: RowRef<'_>, append_to: &mut Vec<u8>) {
         self.serialize(row_ref, append_to)
     }
 
-    // TODO(row trait): use `OrderedRowSerde::serialize` instead.
+    /// TODO(row trait): use `OrderedRowSerde::serialize` instead.
     pub fn serialize_datums<'a>(
         &self,
         datums: impl Iterator<Item = &'a Datum>,
@@ -75,7 +75,7 @@ impl OrderedRowSerde {
         }
     }
 
-    // TODO(row trait): use `OrderedRowSerde::serialize` instead.
+    /// TODO(row trait): use `OrderedRowSerde::serialize` instead.
     pub fn serialize_datum_refs<'a>(
         &self,
         datum_refs: impl Iterator<Item = DatumRef<'a>>,
