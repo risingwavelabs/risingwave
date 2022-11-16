@@ -1,4 +1,0 @@
-Compiling risingwave_ctl v0.2.0-alpha (/risingwave/src/ctl)
-   Compiling risingwave_cmd_all v0.2.0-alpha (/risingwave/src/cmd_all)
-   Compiling risingwave_cmd v0.2.0-alpha (/risingwave/src/cmd)
-    Finished release [optimized + debuginfo] target(s) in 64m 48s
