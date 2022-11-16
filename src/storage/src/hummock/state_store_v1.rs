@@ -124,7 +124,7 @@ impl HummockStorageV1 {
 
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
-        let encoded_user_key = UserKey::for_test(read_options.table_id, table_key).encode();
+        let encoded_user_key = UserKey::new(read_options.table_id, table_key).encode();
         // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
         // read/write path.
         assert!(pinned_version.is_valid());
@@ -298,6 +298,12 @@ impl HummockStorageV1 {
             user_key_range.1.as_ref().map(UserKey::encode),
         );
         assert!(pinned_version.is_valid());
+        // encode once
+        let bloom_filter_key = if let Some(prefix) = read_options.prefix_hint.as_ref() {
+            Some(UserKey::new(read_options.table_id, TableKey(prefix)).encode())
+        } else {
+            None
+        };
         for level in pinned_version.levels(table_id) {
             let table_infos = prune_ssts(level.table_infos.iter(), table_id, &table_key_range);
             if table_infos.is_empty() {
@@ -323,7 +329,7 @@ impl HummockStorageV1 {
 
                 let mut sstables = vec![];
                 for sstable_info in pruned_sstables {
-                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
+                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref() {
                         let sstable = self
                             .sstable_store
                             .sstable(sstable_info, &mut local_stats)
@@ -332,9 +338,7 @@ impl HummockStorageV1 {
 
                         if hit_sstable_bloom_filter(
                             sstable.value(),
-                            UserKey::for_test(read_options.table_id, bloom_filter_key)
-                                .encode()
-                                .as_slice(),
+                            bloom_filter_key.as_slice(),
                             &mut local_stats,
                         ) {
                             sstables.push((*sstable_info).clone());
@@ -358,14 +362,14 @@ impl HummockStorageV1 {
                         .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
-                        if !hit_sstable_bloom_filter(
+                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref()
+                        && !hit_sstable_bloom_filter(
                             sstable.value(),
-                            bloom_filter_key,
+                            bloom_filter_key.as_slice(),
                             &mut local_stats,
-                        ) {
-                            continue;
-                        }
+                        )
+                    {
+                        continue;
                     }
 
                     overlapped_iters.push(HummockIteratorUnion::Fourth(
