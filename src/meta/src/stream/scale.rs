@@ -63,9 +63,6 @@ pub(crate) struct RescheduleContext {
     actor_status: BTreeMap<ActorId, ActorStatus>,
     /// Meta information of all `Fragment`, used to find the `Fragment`'s `Actor`
     fragment_map: HashMap<FragmentId, Fragment>,
-    /// The downstream list of `Fragment`, which will be embedded in `FragmentManager` in the
-    /// future
-    downstream_fragment_id_map: HashMap<FragmentId, HashSet<FragmentId>>,
     /// Indexes for all `Worker`s
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     /// Index of all `Actor` upstreams, specific to `Dispatcher`
@@ -76,7 +73,6 @@ pub(crate) struct RescheduleContext {
     no_shuffle_target_fragment_ids: HashSet<FragmentId>,
     /// Source fragments in NoShuffle relation
     no_shuffle_source_fragment_ids: HashSet<FragmentId>,
-
     // index for dispatcher type from upstream fragment to downstream fragment
     fragment_dispatcher_map: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
 }
@@ -363,19 +359,12 @@ where
 
         let mut fragment_dispatcher_map = HashMap::new();
 
-        // Index the downstream fragment
-        let mut downstream_fragment_id_map = HashMap::new();
         for actor in actor_map.values() {
             // Question(peng): will a fragment use multiple different dispatchers to connect to the
             // same downstream fragment?
             for dispatcher in &actor.dispatcher {
                 for downstream_actor_id in &dispatcher.downstream_actor_id {
                     if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
-                        downstream_fragment_id_map
-                            .entry(actor.fragment_id as FragmentId)
-                            .or_insert_with(HashSet::new)
-                            .insert(downstream_actor.fragment_id as FragmentId);
-
                         fragment_dispatcher_map
                             .entry(actor.fragment_id)
                             .or_insert(HashMap::new())
@@ -447,10 +436,10 @@ where
             // correspondence, so we need to clone the reschedule plan to the downstream of all
             // cascading relations.
             if no_shuffle_source_fragment_ids.contains(fragment_id) {
-                let mut queue: VecDeque<_> = downstream_fragment_id_map
+                let mut queue: VecDeque<_> = fragment_dispatcher_map
                     .get(fragment_id)
                     .unwrap()
-                    .iter()
+                    .keys()
                     .cloned()
                     .collect();
 
@@ -459,10 +448,9 @@ where
                         continue;
                     }
 
-                    if let Some(downstream_fragment_ids) =
-                        downstream_fragment_id_map.get(&downstream_id)
+                    if let Some(downstream_fragments) = fragment_dispatcher_map.get(&downstream_id)
                     {
-                        queue.extend(downstream_fragment_ids);
+                        queue.extend(downstream_fragments.keys().cloned());
                     }
 
                     no_shuffle_reschedule.insert(
@@ -545,7 +533,6 @@ where
             actor_map,
             actor_status,
             fragment_map,
-            downstream_fragment_id_map,
             worker_nodes,
             upstream_dispatchers,
             stream_source_fragment_ids,
@@ -712,8 +699,8 @@ where
                 .try_insert(*fragment_id, fragment_bitmap)
                 .unwrap();
 
-            if let Some(downstream_fragment_ids) = ctx.downstream_fragment_id_map.get(fragment_id) {
-                for downstream_fragment_id in downstream_fragment_ids {
+            if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(fragment_id) {
+                for downstream_fragment_id in downstream_fragments.keys() {
                     arrange_no_shuffle_relation(
                         ctx,
                         downstream_fragment_id,
@@ -735,10 +722,8 @@ where
             if ctx.no_shuffle_source_fragment_ids.contains(fragment_id)
                 && !ctx.no_shuffle_target_fragment_ids.contains(fragment_id)
             {
-                if let Some(downstream_fragment_ids) =
-                    ctx.downstream_fragment_id_map.get(fragment_id)
-                {
-                    for downstream_fragment_id in downstream_fragment_ids {
+                if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(fragment_id) {
+                    for downstream_fragment_id in downstream_fragments.keys() {
                         arrange_no_shuffle_relation(
                             &ctx,
                             downstream_fragment_id,
@@ -1018,23 +1003,22 @@ where
                 }
             }
 
-            let downstream_fragment_id = if let Some(downstream_fragment_ids) =
-                ctx.downstream_fragment_id_map.get(&fragment_id)
-            {
-                // Skip NoShuffle fragments' downstream
-                if ctx
-                    .no_shuffle_source_fragment_ids
-                    .contains(&fragment.fragment_id)
-                {
-                    None
+            let downstream_fragment_id =
+                if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(&fragment_id) {
+                    // Skip NoShuffle fragments' downstream
+                    if ctx
+                        .no_shuffle_source_fragment_ids
+                        .contains(&fragment.fragment_id)
+                    {
+                        None
+                    } else {
+                        let downstream_fragment_id =
+                            downstream_fragments.iter().exactly_one().unwrap().0;
+                        Some(*downstream_fragment_id as FragmentId)
+                    }
                 } else {
-                    let downstream_fragment_id =
-                        downstream_fragment_ids.iter().exactly_one().unwrap();
-                    Some(*downstream_fragment_id as FragmentId)
-                }
-            } else {
-                None
-            };
+                    None
+                };
 
             let mut vnode_bitmap_updates = fragment_actor_bitmap.remove(&fragment_id).unwrap();
 
