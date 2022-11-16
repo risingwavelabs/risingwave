@@ -76,7 +76,9 @@ where
                     &task.info,
                     task.version.unwrap_or_default(),
                 );
-                task.callback_tx.map(|tx| tx.send(()).unwrap());
+                if let Some(tx) = task.callback_tx {
+                    tx.send(()).unwrap()
+                }
             }
         });
 
