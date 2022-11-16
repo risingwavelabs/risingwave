@@ -27,7 +27,6 @@ cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features "static
 echo -e "\tdone building"
 
 
-echo "moving to /risingwave/bin ..." 
 components=(
   "risingwave"
   "compute-node"
@@ -35,16 +34,7 @@ components=(
   "frontend"
   "compactor"
 )
-for component in "${components[@]}"
-do
-  echo -e "\tmoving ${component}..."
-  mv /risingwave/target/release/${component} /risingwave/bin/
-done
-echo -e "\tdone moving"
 
-# TODO: Only clean if parameter is passed
-# echo "cargo clean..."
-# cargo clean
 
 echo "compressing debug section..." # disable this with a flag 
 for component in "${components[@]}"
@@ -55,4 +45,15 @@ done
 echo -e "\tdone compressing"
 
 
+echo "moving to /risingwave/bin ..." 
+for component in "${components[@]}"
+do
+  echo -e "\tmoving ${component}..."
+  mv /risingwave/target/release/${component} /risingwave/bin/
+done
+echo -e "\tdone moving"
+
+# TODO: Only clean if parameter is passed
+# echo "cargo clean..."
+# cargo clean
 
