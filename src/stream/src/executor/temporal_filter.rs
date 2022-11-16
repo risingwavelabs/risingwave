@@ -323,13 +323,14 @@ impl<S: StateStore> TemporalFilterExecutor<S> {
                     time_millis = Epoch::from(barrier.epoch.curr).as_unix_millis();
                     if barrier.is_update() {
                         sync_expr = None;
+                        self.state_table.commit_no_data_expected(barrier.epoch);
                     } else {
                         sync_expr = Some(dynamic_cond(time_millis)?);
                         for stream_chunk in self.sync(sync_expr.as_ref().unwrap())? {
                             yield Message::Chunk(stream_chunk);
                         }
+                        self.state_table.commit(barrier.epoch).await?;
                     }
-                    self.state_table.commit(barrier.epoch).await?;
                     // Update the vnode bitmap for the state table if asked. Also update the buffer.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         let prev_vnode_bitmap =
