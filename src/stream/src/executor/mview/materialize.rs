@@ -198,7 +198,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                         }
 
                                         self.materialize_cache
-                                            .insert(key, Some(CompactedRow::new(row)));
+                                            .insert(key, Some(CompactedRow{row}));
                                     }
                                     RowOp::Delete(old_row) => {
                                         if let Some(cache_row) =
@@ -239,7 +239,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                             );
                                         }
                                         self.materialize_cache
-                                            .insert(key, Some(CompactedRow::new(new_row)));
+                                            .insert(key, Some(CompactedRow{row: new_row}));
                                     }
                                 }
                             }
