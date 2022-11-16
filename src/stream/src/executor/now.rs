@@ -91,15 +91,23 @@ impl<S: StateStore> NowExecutor<S> {
         let mut last_timestamp = state_row.and_then(|row| row[0].clone());
 
         while let Some(barrier) = barrier_receiver.recv().await {
-            if !barrier.is_update() {
+            let mut timestamp = None;
+            let should_update = if barrier.is_update() {
+                false
+            } else {
                 let time_millis = Epoch::from(barrier.epoch.curr).as_unix_millis();
-                let timestamp = Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                timestamp = Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                     NaiveDateTime::from_timestamp(
                         (time_millis / 1000) as i64,
                         (time_millis % 1000 * 1_000_000) as u32,
                     ),
                 )));
 
+                last_timestamp.as_ref().map_or(true, |last_timestamp| {
+                    last_timestamp <= timestamp.as_ref().unwrap()
+                })
+            };
+            if should_update {
                 let mut data_chunk_builder = DataChunkBuilder::new(
                     self.schema().data_types(),
                     if last_timestamp.is_some() { 2 } else { 1 },
