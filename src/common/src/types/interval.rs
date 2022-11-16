@@ -51,6 +51,13 @@ const DAY_MS: i64 = 86400000;
 const MONTH_MS: i64 = 30 * DAY_MS;
 
 impl IntervalUnit {
+    /// Smallest interval value.
+    pub const MIN: Self = Self {
+        months: i32::MIN,
+        days: i32::MIN,
+        ms: i64::MIN,
+    };
+
     pub fn new(months: i32, days: i32, ms: i64) -> Self {
         IntervalUnit { months, days, ms }
     }
@@ -285,11 +292,194 @@ impl IntervalUnit {
         self > &Self::new(0, 0, 0)
     }
 
-    pub fn min() -> Self {
-        Self {
-            months: i32::MIN,
-            days: i32::MIN,
-            ms: i64::MIN,
+    /// Truncate the interval to the precision of milliseconds.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::IntervalUnit;
+    /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
+    /// assert_eq!(
+    ///     interval.truncate_millis().to_string(),
+    ///     "5 years 1 mon 25 days 23:22:57.123"
+    /// );
+    /// ```
+    pub const fn truncate_millis(self) -> Self {
+        // for now it's just an identity function.
+        // it will take effect once microseconds precision is supported.
+        // https://github.com/risingwavelabs/risingwave/issues/4514
+        IntervalUnit {
+            months: self.months,
+            days: self.days,
+            ms: self.ms,
+        }
+    }
+
+    /// Truncate the interval to the precision of seconds.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::IntervalUnit;
+    /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
+    /// assert_eq!(
+    ///     interval.truncate_second().to_string(),
+    ///     "5 years 1 mon 25 days 23:22:57"
+    /// );
+    /// ```
+    pub const fn truncate_second(self) -> Self {
+        IntervalUnit {
+            months: self.months,
+            days: self.days,
+            ms: self.ms / 1000 * 1000,
+        }
+    }
+
+    /// Truncate the interval to the precision of minutes.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::IntervalUnit;
+    /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
+    /// assert_eq!(
+    ///     interval.truncate_minute().to_string(),
+    ///     "5 years 1 mon 25 days 23:22:00"
+    /// );
+    /// ```
+    pub const fn truncate_minute(self) -> Self {
+        IntervalUnit {
+            months: self.months,
+            days: self.days,
+            ms: self.ms / 1000 / 60 * 1000 * 60,
+        }
+    }
+
+    /// Truncate the interval to the precision of hours.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::IntervalUnit;
+    /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
+    /// assert_eq!(
+    ///     interval.truncate_hour().to_string(),
+    ///     "5 years 1 mon 25 days 23:00:00"
+    /// );
+    /// ```
+    pub const fn truncate_hour(self) -> Self {
+        IntervalUnit {
+            months: self.months,
+            days: self.days,
+            ms: self.ms / 1000 / 60 / 60 * 1000 * 60 * 60,
+        }
+    }
+
+    /// Truncate the interval to the precision of days.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::IntervalUnit;
+    /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
+    /// assert_eq!(interval.truncate_day().to_string(), "5 years 1 mon 25 days");
+    /// ```
+    pub const fn truncate_day(self) -> Self {
+        IntervalUnit {
+            months: self.months,
+            days: self.days,
+            ms: 0,
+        }
+    }
+
+    /// Truncate the interval to the precision of months.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::IntervalUnit;
+    /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
+    /// assert_eq!(interval.truncate_month().to_string(), "5 years 1 mon");
+    /// ```
+    pub const fn truncate_month(self) -> Self {
+        IntervalUnit {
+            months: self.months,
+            days: 0,
+            ms: 0,
+        }
+    }
+
+    /// Truncate the interval to the precision of quarters.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::IntervalUnit;
+    /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
+    /// assert_eq!(interval.truncate_quarter().to_string(), "5 years");
+    /// ```
+    pub const fn truncate_quarter(self) -> Self {
+        IntervalUnit {
+            months: self.months / 3 * 3,
+            days: 0,
+            ms: 0,
+        }
+    }
+
+    /// Truncate the interval to the precision of years.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::IntervalUnit;
+    /// let interval: IntervalUnit = "5 years 1 mon 25 days 23:22:57.123".parse().unwrap();
+    /// assert_eq!(interval.truncate_year().to_string(), "5 years");
+    /// ```
+    pub const fn truncate_year(self) -> Self {
+        IntervalUnit {
+            months: self.months / 12 * 12,
+            days: 0,
+            ms: 0,
+        }
+    }
+
+    /// Truncate the interval to the precision of decades.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::IntervalUnit;
+    /// let interval: IntervalUnit = "15 years 1 mon 25 days 23:22:57.123".parse().unwrap();
+    /// assert_eq!(interval.truncate_decade().to_string(), "10 years");
+    /// ```
+    pub const fn truncate_decade(self) -> Self {
+        IntervalUnit {
+            months: self.months / 12 / 10 * 12 * 10,
+            days: 0,
+            ms: 0,
+        }
+    }
+
+    /// Truncate the interval to the precision of centuries.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::IntervalUnit;
+    /// let interval: IntervalUnit = "115 years 1 mon 25 days 23:22:57.123".parse().unwrap();
+    /// assert_eq!(interval.truncate_century().to_string(), "100 years");
+    /// ```
+    pub const fn truncate_century(self) -> Self {
+        IntervalUnit {
+            months: self.months / 12 / 100 * 12 * 100,
+            days: 0,
+            ms: 0,
+        }
+    }
+
+    /// Truncate the interval to the precision of millenniums.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::IntervalUnit;
+    /// let interval: IntervalUnit = "1115 years 1 mon 25 days 23:22:57.123".parse().unwrap();
+    /// assert_eq!(interval.truncate_millennium().to_string(), "1000 years");
+    /// ```
+    pub const fn truncate_millennium(self) -> Self {
+        IntervalUnit {
+            months: self.months / 12 / 1000 * 12 * 1000,
+            days: 0,
+            ms: 0,
         }
     }
 }
@@ -465,10 +655,6 @@ impl Display for IntervalUnit {
         let years = self.months / 12;
         let months = self.months % 12;
         let days = self.days;
-        let hours = self.ms / 1000 / 3600;
-        let minutes = (self.ms / 1000 / 60) % 60;
-        let seconds = self.ms % 60000 / 1000;
-        let mut secs_fract = self.ms % 1000;
         let mut v = SmallVec::<[String; 4]>::new();
         if years == 1 {
             v.push(format!("{years} year"));
@@ -485,15 +671,20 @@ impl Display for IntervalUnit {
         } else if days != 0 {
             v.push(format!("{days} days"));
         }
-        let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
-        if secs_fract != 0 {
-            write!(format_time, ".{:03}", secs_fract)?;
-            while secs_fract % 10 == 0 {
-                secs_fract /= 10;
-                format_time.pop();
+        if self.ms != 0 || self.months == 0 && self.days == 0 {
+            let hours = self.ms / 1000 / 3600;
+            let minutes = (self.ms / 1000 / 60) % 60;
+            let seconds = self.ms % 60000 / 1000;
+            let secs_fract = self.ms % 1000;
+            let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
+            if secs_fract != 0 {
+                write!(format_time, ".{:03}", secs_fract)?;
+                while format_time.ends_with('0') {
+                    format_time.pop();
+                }
             }
+            v.push(format_time);
         }
-        v.push(format_time);
         Display::fmt(&v.join(" "), f)
     }
 }
@@ -901,9 +1092,16 @@ mod tests {
 
     #[test]
     fn test_to_string() {
-        let interval =
-            IntervalUnit::new(-14, 3, 11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233);
-        assert_eq!(interval.to_string(), "-1 years -2 mons 3 days 11:45:14.233");
+        assert_eq!(
+            IntervalUnit::new(-14, 3, 11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233)
+                .to_string(),
+            "-1 years -2 mons 3 days 11:45:14.233"
+        );
+        assert_eq!(
+            IntervalUnit::new(-14, 3, 0).to_string(),
+            "-1 years -2 mons 3 days"
+        );
+        assert_eq!(IntervalUnit::default().to_string(), "00:00:00");
     }
 
     #[test]

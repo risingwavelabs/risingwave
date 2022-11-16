@@ -16,6 +16,7 @@ use std::cmp;
 
 use bytes::Bytes;
 
+use super::key;
 use super::key_cmp::KeyComparator;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -50,6 +51,7 @@ impl KeyRange {
 pub trait KeyRangeCommon {
     fn full_key_overlap(&self, other: &Self) -> bool;
     fn full_key_extend(&mut self, other: &Self);
+    fn user_key_overlap(&self, other: &Self) -> bool;
 }
 
 #[macro_export]
@@ -82,6 +84,15 @@ macro_rules! impl_key_range_common {
                 {
                     self.right = other.right.clone();
                 }
+            }
+
+            fn user_key_overlap(&self, other: &Self) -> bool {
+                (self.end_bound_inf()
+                    || other.start_bound_inf()
+                    || key::user_key(&self.right) >= key::user_key(&other.left))
+                    && (other.end_bound_inf()
+                        || self.start_bound_inf()
+                        || key::user_key(&other.right) >= key::user_key(&self.left))
             }
         }
     };

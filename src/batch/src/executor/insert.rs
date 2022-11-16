@@ -38,6 +38,7 @@ pub struct InsertExecutor {
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
+    column_idxs: Vec<usize>,
 }
 
 impl InsertExecutor {
@@ -46,6 +47,7 @@ impl InsertExecutor {
         source_manager: TableSourceManagerRef,
         child: BoxedExecutor,
         identity: String,
+        column_idxs: Vec<usize>,
     ) -> Self {
         Self {
             table_id,
@@ -55,6 +57,7 @@ impl InsertExecutor {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
             identity,
+            column_idxs,
         }
     }
 }
@@ -77,6 +80,7 @@ impl InsertExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
+
         let source = source_desc.source.as_table().expect("not table source");
         let row_id_index = source_desc.row_id_index;
 
@@ -90,6 +94,16 @@ impl InsertExecutor {
 
             let (mut columns, _) = data_chunk.into_parts();
 
+            // No need to check for duplicate columns. This is already validated in binder
+            if !&self.column_idxs.is_sorted() {
+                let mut ordered_cols: Vec<Column> = Vec::with_capacity(len);
+                for idx in &self.column_idxs {
+                    ordered_cols.push(columns[*idx].clone());
+                }
+                columns = ordered_cols
+            }
+
+            // if user did not specify primary ID then we need to add a col it
             if let Some(row_id_index) = row_id_index {
                 let mut builder = I64ArrayBuilder::new(len);
                 for _ in 0..len {
@@ -138,12 +152,18 @@ impl BoxedExecutorBuilder for InsertExecutor {
         )?;
 
         let table_id = TableId::new(insert_node.table_source_id);
+        let column_idxs = insert_node
+            .column_idxs
+            .iter()
+            .map(|&i| i as usize)
+            .collect();
 
         Ok(Box::new(Self::new(
             table_id,
             source.context().source_manager(),
             child,
             source.plan_node().get_identity().clone(),
+            column_idxs,
         )))
     }
 }
@@ -227,6 +247,7 @@ mod tests {
             source_manager.clone(),
             Box::new(mock_executor),
             "InsertExecutor".to_string(),
+            vec![], // Ignoring insertion order
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();
@@ -288,6 +309,7 @@ mod tests {
                 ReadOptions {
                     prefix_hint: None,
                     check_bloom_filter: false,
+                    ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },

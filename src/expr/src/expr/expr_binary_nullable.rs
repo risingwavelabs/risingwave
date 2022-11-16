@@ -14,11 +14,14 @@
 
 //! For expression that only accept two nullable arguments as input.
 
+use std::sync::Arc;
+
+use itertools::{multizip, Itertools};
 use risingwave_common::array::*;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_pb::expr::expr_node::Type;
 
-use super::BoxedExpression;
+use super::{BoxedExpression, Expression};
 use crate::expr::template::BinaryNullableExpression;
 use crate::vector_op::array_access::array_access;
 use crate::vector_op::cmp::{
@@ -62,6 +65,129 @@ macro_rules! gen_nullable_cmp_impl {
     };
 }
 
+pub struct BinaryShortCircuitExpression {
+    expr_ia1: BoxedExpression,
+    expr_ia2: BoxedExpression,
+    expr_type: Type,
+}
+
+impl std::fmt::Debug for BinaryShortCircuitExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BinaryShortCircuitExpression")
+            .field("expr_ia1", &self.expr_ia1)
+            .field("expr_ia2", &self.expr_ia2)
+            .field("expr_type", &self.expr_type)
+            .finish()
+    }
+}
+
+impl Expression for BinaryShortCircuitExpression {
+    fn return_type(&self) -> DataType {
+        DataType::Boolean
+    }
+
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let init_vis = input.vis();
+        let mut input = input.clone();
+        let len = input.capacity();
+        let mut children_array = Vec::with_capacity(2);
+        for child in [&self.expr_ia1, &self.expr_ia2] {
+            let res = child.eval_checked(&input)?;
+            let res_bool = res.as_bool();
+            let orig_vis = input.vis();
+            let res_vis: Vis = match self.expr_type {
+                // For `Or` operator, if res of left part is not null and is true, we do not want to
+                // calculate right part because the result must be true.
+                Type::Or => (!(res_bool.to_bitmap())).into(),
+                // For `And` operator, If res of left part is not null and is false, we do not want
+                // to calculate right part because the result must be false.
+                Type::And => (res_bool.to_bitmap() | !res_bool.null_bitmap()).into(),
+                _ => unimplemented!(),
+            };
+            let new_vis = orig_vis & res_vis;
+            input.set_vis(new_vis);
+            children_array.push(res);
+        }
+        let mut builder =
+            <BoolArray as Array>::Builder::with_meta(len, (&self.return_type()).into());
+        match self.expr_type {
+            Type::Or => {
+                for (((v_ia1, v_ia2), init_visible), final_visible) in multizip((
+                    children_array[0].as_bool().iter(),
+                    children_array[1].as_bool().iter(),
+                ))
+                .zip_eq(init_vis.iter())
+                .zip_eq(input.vis().iter())
+                {
+                    if init_visible {
+                        builder.append(if final_visible {
+                            or(v_ia1, v_ia2)?
+                        } else {
+                            Some(true)
+                        });
+                    } else {
+                        builder.append_null()
+                    }
+                }
+            }
+            Type::And => {
+                for (((v_ia1, v_ia2), init_visible), final_visible) in multizip((
+                    children_array[0].as_bool().iter(),
+                    children_array[1].as_bool().iter(),
+                ))
+                .zip_eq(init_vis.iter())
+                .zip_eq(input.vis().iter())
+                {
+                    if init_visible {
+                        builder.append(if final_visible {
+                            and(v_ia1, v_ia2)?
+                        } else {
+                            Some(false)
+                        });
+                    } else {
+                        builder.append_null()
+                    }
+                }
+            }
+            _ => unimplemented!(),
+        }
+        Ok(Arc::new(builder.finish().into()))
+    }
+
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
+        let ret_ia1 = self.expr_ia1.eval_row(input)?.map(|x| x.into_bool());
+        match self.expr_type {
+            Type::Or => {
+                if ret_ia1 == Some(true) {
+                    return Ok(Some(true.to_scalar_value()));
+                }
+            }
+            Type::And => {
+                if ret_ia1 == Some(false) {
+                    return Ok(Some(false.to_scalar_value()));
+                }
+            }
+            _ => unimplemented!(),
+        }
+        let ret_ia2 = self.expr_ia2.eval_row(input)?.map(|x| x.into_bool());
+        match self.expr_type {
+            Type::Or => Ok(or(ret_ia1, ret_ia2)?.map(|x| x.to_scalar_value())),
+            Type::And => Ok(and(ret_ia1, ret_ia2)?.map(|x| x.to_scalar_value())),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl BinaryShortCircuitExpression {
+    pub fn new(expr_ia1: BoxedExpression, expr_ia2: BoxedExpression, expr_type: Type) -> Self {
+        Self {
+            expr_ia1,
+            expr_ia2,
+            expr_type,
+        }
+    }
+}
+
 pub fn new_nullable_binary_expr(
     expr_type: Type,
     ret: DataType,
@@ -70,12 +196,8 @@ pub fn new_nullable_binary_expr(
 ) -> Result<BoxedExpression> {
     let expr = match expr_type {
         Type::ArrayAccess => build_array_access_expr(ret, l, r),
-        Type::And => Box::new(
-            BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _>::new(l, r, ret, and),
-        ),
-        Type::Or => Box::new(
-            BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _>::new(l, r, ret, or),
-        ),
+        Type::And => Box::new(BinaryShortCircuitExpression::new(l, r, expr_type)),
+        Type::Or => Box::new(BinaryShortCircuitExpression::new(l, r, expr_type)),
         Type::IsDistinctFrom => new_distinct_from_expr(l, r, ret)?,
         Type::IsNotDistinctFrom => new_not_distinct_from_expr(l, r, ret)?,
         tp => {
@@ -175,7 +297,7 @@ pub fn new_not_distinct_from_expr(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::Row;
+    use risingwave_common::row::Row;
     use risingwave_common::types::Scalar;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type;
