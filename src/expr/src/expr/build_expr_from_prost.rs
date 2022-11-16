@@ -21,7 +21,7 @@ use crate::expr::expr_binary_bytes::{
     new_ltrim_characters, new_repeat, new_rtrim_characters, new_substr_start, new_to_char,
     new_trim_characters,
 };
-use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default};
+use crate::expr::expr_binary_nonnull::{new_binary_expr, new_date_trunc_expr, new_like_default};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_quaternary_bytes::new_overlay_for_exp;
 use crate::expr::expr_ternary_bytes::{
@@ -169,6 +169,19 @@ pub fn build_replace_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let from_str = expr_build_from_prost(&children[1])?;
     let to_str = expr_build_from_prost(&children[2])?;
     Ok(new_replace_expr(s, from_str, to_str, ret_type))
+}
+
+pub fn build_date_trunc_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_children_and_return_type(prost)?;
+    ensure!(children.len() == 2 || children.len() == 3);
+    let field = expr_build_from_prost(&children[0])?;
+    let source = expr_build_from_prost(&children[1])?;
+    let time_zone = if let Some(child) = children.get(2) {
+        Some((expr_build_from_prost(child)?, expr_build_from_prost(child)?))
+    } else {
+        None
+    };
+    Ok(new_date_trunc_expr(ret_type, field, source, time_zone))
 }
 
 pub fn build_length_expr(prost: &ExprNode) -> Result<BoxedExpression> {

@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 use bytes::BytesMut;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::KeyComparator;
 
 use super::KeyPrefix;
 use crate::hummock::BlockHolder;
@@ -54,9 +54,19 @@ impl BlockIterator {
         self.next_inner();
     }
 
+    pub fn try_next(&mut self) -> bool {
+        assert!(self.is_valid());
+        self.try_next_inner()
+    }
+
     pub fn prev(&mut self) {
         assert!(self.is_valid());
         self.prev_inner();
+    }
+
+    pub fn try_prev(&mut self) -> bool {
+        assert!(self.is_valid());
+        self.try_prev_inner()
     }
 
     pub fn key(&self) -> &[u8] {
@@ -107,14 +117,24 @@ impl BlockIterator {
         self.entry_len = 0;
     }
 
-    /// Moves to the next entry.
+    /// Moving to the next entry
     ///
-    /// Note: Ensures that the current state is valid.
+    /// Note: The current state may be invalid if there is no more data to read
     fn next_inner(&mut self) {
+        if !self.try_next_inner() {
+            self.invalidate();
+        }
+    }
+
+    /// Try moving to the next entry.
+    ///
+    /// The current state will still be valid if there is no more data to read.
+    ///
+    /// Return: true is the iterator is advanced and false otherwise.
+    fn try_next_inner(&mut self) -> bool {
         let offset = self.offset + self.entry_len;
         if offset >= self.block.len() {
-            self.invalidate();
-            return;
+            return false;
         }
         let prefix = self.decode_prefix_at(offset);
         self.key.truncate(prefix.overlap_len());
@@ -128,12 +148,13 @@ impl BlockIterator {
         {
             self.restart_point_index += 1;
         }
+        true
     }
 
     /// Moves forward until reaching the first that equals or larger than the given `key`.
     fn next_until_key(&mut self, key: &[u8]) {
         while self.is_valid()
-            && VersionedComparator::compare_key(&self.key[..], key) == Ordering::Less
+            && KeyComparator::compare_encoded_full_key(&self.key[..], key) == Ordering::Less
         {
             self.next_inner();
         }
@@ -142,7 +163,7 @@ impl BlockIterator {
     /// Moves backward until reaching the first key that equals or smaller than the given `key`.
     fn prev_until_key(&mut self, key: &[u8]) {
         while self.is_valid()
-            && VersionedComparator::compare_key(&self.key[..], key) == Ordering::Greater
+            && KeyComparator::compare_encoded_full_key(&self.key[..], key) == Ordering::Greater
         {
             self.prev_inner();
         }
@@ -156,13 +177,23 @@ impl BlockIterator {
         }
     }
 
-    /// Moves to the previous entry.
+    /// Moving to the previous entry
     ///
-    /// Note: Ensure that the current state is valid.
+    /// Note: The current state may be invalid if there is no more data to read
     fn prev_inner(&mut self) {
-        if self.offset == 0 {
+        if !self.try_prev_inner() {
             self.invalidate();
-            return;
+        }
+    }
+
+    /// Try moving to the previous entry.
+    ///
+    /// The current state will still be valid if there is no more data to read.
+    ///
+    /// Return: true is the iterator is advanced and false otherwise.
+    fn try_prev_inner(&mut self) -> bool {
+        if self.offset == 0 {
+            return false;
         }
         if self.block.restart_point(self.restart_point_index) as usize == self.offset {
             self.restart_point_index -= 1;
@@ -170,6 +201,7 @@ impl BlockIterator {
         let origin_offset = self.offset;
         self.seek_restart_point_by_index(self.restart_point_index);
         self.next_until_prev_offset(origin_offset);
+        true
     }
 
     /// Decodes [`KeyPrefix`] at given offset.
@@ -184,7 +216,7 @@ impl BlockIterator {
             .search_restart_partition_point(|&probe| {
                 let prefix = self.decode_prefix_at(probe as usize);
                 let probe_key = &self.block.data()[prefix.diff_key_range()];
-                match VersionedComparator::compare_key(probe_key, key) {
+                match KeyComparator::compare_encoded_full_key(probe_key, key) {
                     Ordering::Less | Ordering::Equal => true,
                     Ordering::Greater => false,
                 }

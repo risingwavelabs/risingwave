@@ -24,9 +24,10 @@ use async_stack_trace::StackTrace;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
-use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk, Vis};
+use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
+use risingwave_common::row::{Row, RowDeserializer};
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -39,7 +40,7 @@ use tracing::trace;
 
 use super::mem_table::{MemTable, MemTableIter, RowOp};
 use crate::error::{StorageError, StorageResult};
-use crate::keyspace::StripPrefixIterator;
+use crate::keyspace::ExtractTableKeyIterator;
 use crate::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
@@ -153,7 +154,7 @@ impl<S: StateStore> StateTable<S> {
             .collect_vec();
 
         let local_state_store = store.new_local(table_id).await;
-        let keyspace = Keyspace::table_root(local_state_store, &table_id);
+        let keyspace = Keyspace::table_root(local_state_store, table_id);
 
         let pk_data_types = pk_indices
             .iter()
@@ -273,7 +274,7 @@ impl<S: StateStore> StateTable<S> {
         value_indices: Vec<usize>,
     ) -> Self {
         let local_state_store = store.new_local(table_id).await;
-        let keyspace = Keyspace::table_root(local_state_store, &table_id);
+        let keyspace = Keyspace::table_root(local_state_store, table_id);
 
         let pk_data_types = pk_indices
             .iter()
@@ -422,6 +423,7 @@ impl<S: StateStore> StateTable<S> {
                     check_bloom_filter: self.dist_key_indices == key_indices,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.keyspace.table_id(),
+                    ignore_range_tombstone: false,
                 };
                 if let Some(storage_row_bytes) = self
                     .keyspace
@@ -603,6 +605,7 @@ impl<S: StateStore> StateTable<S> {
     /// just specially used by those state table read-only and after the call the data
     /// in the epoch will be visible
     pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
+        assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
         self.update_epoch(new_epoch);
     }
@@ -659,6 +662,7 @@ impl<S: StateStore> StateTable<S> {
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.keyspace.table_id(),
+            ignore_range_tombstone: false,
         };
         let stored_value = self.keyspace.get(key, epoch, read_options).await?;
 
@@ -690,6 +694,7 @@ impl<S: StateStore> StateTable<S> {
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.keyspace.table_id(),
+            ignore_range_tombstone: false,
         };
         let stored_value = self.keyspace.get(key, epoch, read_options).await?;
 
@@ -720,6 +725,7 @@ impl<S: StateStore> StateTable<S> {
     ) -> StorageResult<()> {
         let read_options = ReadOptions {
             prefix_hint: None,
+            ignore_range_tombstone: false,
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.keyspace.table_id(),
@@ -915,6 +921,7 @@ impl<S: StateStore> StateTable<S> {
         let read_options = ReadOptions {
             prefix_hint,
             check_bloom_filter,
+            ignore_range_tombstone: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.keyspace.table_id(),
         };
@@ -1055,7 +1062,7 @@ where
 
 struct StorageIterInner<S: LocalStateStore> {
     /// An iterator that returns raw bytes from storage.
-    iter: StripPrefixIterator<S::Iter>,
+    iter: ExtractTableKeyIterator<S::Iter>,
 
     deserializer: RowDeserializer,
 }

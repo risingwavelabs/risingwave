@@ -22,9 +22,9 @@ use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
+use risingwave_common::row::{Row, RowDeserializer};
 use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -34,7 +34,7 @@ use tracing::trace;
 
 use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
-use crate::keyspace::StripPrefixIterator;
+use crate::keyspace::ExtractTableKeyIterator;
 use crate::row_serde::row_serde_util::{
     parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
@@ -196,7 +196,7 @@ impl<S: StateStore> StorageTable<S> {
             })
             .collect_vec();
 
-        let keyspace = Keyspace::table_root(store, &table_id);
+        let keyspace = Keyspace::table_root(store, table_id);
         Self {
             keyspace,
             schema,
@@ -258,6 +258,7 @@ impl<S: StateStore> StorageTable<S> {
             prefix_hint: None,
             check_bloom_filter: self.dist_key_indices == key_indices,
             retention_seconds: self.table_option.retention_seconds,
+            ignore_range_tombstone: false,
             table_id: self.keyspace.table_id(),
         };
         if let Some(value) = self
@@ -334,6 +335,7 @@ impl<S: StateStore> StorageTable<S> {
                 let read_options = ReadOptions {
                     prefix_hint,
                     check_bloom_filter,
+                    ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.keyspace.table_id(),
                 };
@@ -503,7 +505,7 @@ impl<S: StateStore> StorageTable<S> {
 /// [`StorageTableIterInner`] iterates on the storage table.
 struct StorageTableIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
-    iter: StripPrefixIterator<S::Iter>,
+    iter: ExtractTableKeyIterator<S::Iter>,
 
     mapping: Arc<ColumnMapping>,
 

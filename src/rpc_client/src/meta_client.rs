@@ -391,6 +391,7 @@ impl MetaClient {
         let join_handle = tokio::spawn(async move {
             let mut min_interval_ticker = tokio::time::interval(min_interval);
             let mut max_interval_ticker = tokio::time::interval(max_interval);
+            max_interval_ticker.reset();
             loop {
                 tokio::select! {
                     biased;

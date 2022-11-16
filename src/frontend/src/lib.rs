@@ -28,6 +28,7 @@
 #![feature(once_cell)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
+#![feature(macro_metavar_expr)]
 #![recursion_limit = "256"]
 
 #[macro_use]
