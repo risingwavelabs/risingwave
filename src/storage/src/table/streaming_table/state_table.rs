@@ -27,7 +27,7 @@ use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
-use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
+use risingwave_common::row::{CompactedRow, Row, Row2, RowDeserializer, RowExt};
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -357,11 +357,11 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Get the vnode value with given (prefix of) primary key
-    fn compute_prefix_vnode(&self, pk_prefix: &Row) -> VirtualNode {
-        let prefix_len = pk_prefix.0.len();
+    fn compute_prefix_vnode(&self, pk_prefix: impl Row2) -> VirtualNode {
+        let prefix_len = pk_prefix.len();
         if let Some(vnode_col_idx_in_pk) = self.vnode_col_idx_in_pk {
-            let vnode = pk_prefix.0.get(vnode_col_idx_in_pk).unwrap();
-            vnode.clone().unwrap().into_int16() as _
+            let vnode = pk_prefix.datum_at(vnode_col_idx_in_pk).unwrap();
+            vnode.into_int16() as _
         } else {
             // For streaming, the given prefix must be enough to calculate the vnode
             assert!(self.dist_key_in_pk_indices.iter().all(|&d| d < prefix_len));
@@ -508,12 +508,16 @@ impl<S: StateStore> StateTable<S> {
 
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
-    pub fn insert(&mut self, value: Row) {
-        let pk = value.by_indices(self.pk_indices());
+    pub fn insert(&mut self, value: impl Row2) {
+        let pk = (&value).project(self.pk_indices());
 
         let key_bytes =
             serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
-        let value_bytes = value.serialize(&self.value_indices);
+        let value_bytes = if let Some(value_indices) = self.value_indices.as_ref() {
+            value.project(&value_indices).value_serialize()
+        } else {
+            value.value_serialize()
+        };
         self.mem_table
             .insert(key_bytes, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));

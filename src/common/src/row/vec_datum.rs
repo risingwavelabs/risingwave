@@ -103,6 +103,7 @@ impl Row {
     /// [`crate::util::ordered::OrderedRow`]
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
+    // TODO(row trait): use `Row::value_serialize` instead.
     pub fn serialize(&self, value_indices: &Option<Vec<usize>>) -> Vec<u8> {
         let mut result = vec![];
         // value_indices is None means serializing each `Datum` in sequence, otherwise only
@@ -147,11 +148,13 @@ impl Row {
         self.0.iter()
     }
 
+    // TODO(row trait): use `Row::chain` instead.
     pub fn concat(&self, values: impl IntoIterator<Item = Datum>) -> Row {
         Row::new(self.values().cloned().chain(values).collect())
     }
 
     /// Hash row data all in one
+    // TODO(row trait): use `Row::hash` instead.
     pub fn hash_row<H>(&self, hash_builder: &H) -> HashCode
     where
         H: BuildHasher,
@@ -164,6 +167,7 @@ impl Row {
     }
 
     /// Compute hash value of a row on corresponding indices.
+    // TODO(row trait): use `Row::project` then `Row::hash` instead.
     pub fn hash_by_indices<H>(&self, hash_indices: &[usize], hash_builder: &H) -> HashCode
     where
         H: BuildHasher,
@@ -178,11 +182,13 @@ impl Row {
     /// Get an owned `Row` by the given `indices` from current row.
     ///
     /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
+    // TODO(row trait): use `Row::project` instead.
     pub fn by_indices(&self, indices: &[usize]) -> Row {
         Row(indices.iter().map(|&idx| self.0[idx].clone()).collect_vec())
     }
 
     /// Get a reference to the datums in the row by the given `indices`.
+    // TODO(row trait): use `Row::project` instead.
     pub fn datums_by_indices<'a>(&'a self, indices: &'a [usize]) -> impl Iterator<Item = &Datum> {
         indices.iter().map(|&idx| &self.0[idx])
     }

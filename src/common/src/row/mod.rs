@@ -15,13 +15,17 @@
 mod compacted_row;
 mod vec_datum;
 
+use std::hash::{BuildHasher, Hasher};
+
 pub use compacted_row::CompactedRow;
 pub use vec_datum::{Row, RowDeserializer};
 
 use crate::array::RowRef;
-use crate::types::{to_datum_ref, Datum, DatumRef, ToOwnedDatum};
+use crate::hash::HashCode;
+use crate::types::{hash_datum_ref, to_datum_ref, Datum, DatumRef, ToOwnedDatum};
+use crate::util::value_encoding;
 
-pub trait Row2: Sized {
+pub trait Row2: Sized + std::fmt::Debug {
     type DatumIter<'a>: Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
@@ -38,6 +42,22 @@ pub trait Row2: Sized {
 
     fn into_owned_row(self) -> Row {
         self.to_owned_row()
+    }
+
+    fn value_serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        for datum in self.datums() {
+            value_encoding::serialize_datum_ref(&datum, &mut buf);
+        }
+        buf
+    }
+
+    fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
+        let mut hasher = hash_builder.build_hasher();
+        for datum in self.datums() {
+            hash_datum_ref(datum, &mut hasher);
+        }
+        HashCode(hasher.finish())
     }
 }
 
@@ -56,16 +76,17 @@ pub trait RowExt: Row2 {
         })
     }
 
-    fn map<'i>(self, indices: &'i [usize]) -> Map<'i, Self>
+    fn project<'i>(self, indices: &'i [usize]) -> Project<'i, Self>
     where
         Self: Sized,
     {
-        assert_row(Map { row: self, indices })
+        assert_row(Project { row: self, indices })
     }
 }
 
 impl<R: Row2> RowExt for R {}
 
+#[derive(Debug)]
 pub struct Chain<R1, R2> {
     r1: R1,
     r2: R2,
@@ -94,12 +115,13 @@ impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
     }
 }
 
-pub struct Map<'i, R> {
+#[derive(Debug)]
+pub struct Project<'i, R> {
     row: R,
     indices: &'i [usize],
 }
 
-impl<'i, R: Row2> Row2 for Map<'i, R> {
+impl<'i, R: Row2> Row2 for Project<'i, R> {
     type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         R: 'a,
