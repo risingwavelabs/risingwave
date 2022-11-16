@@ -80,49 +80,77 @@ impl Rule for OverAggToTopNRule {
             predicate.clone().split_disjoint(&rank_col)
         };
 
-        // TODO: support multiple complex rank predicates.
         // Currently rank [ < | <= | > | >= ] N is used to implement group topn.
         // While rank = 1 is used to implement deduplication.
         let (limit, offset) = {
-            if rank_pred.conjunctions.len() != 1 {
-                tracing::error!("Multiple complex rank predicates is not supported yet.");
+            // rank >= lb
+            let mut lb = vec![];
+            // rank <= ub
+            let mut ub = vec![];
+            // rank == eq
+            let mut eq = vec![];
+
+            for cond in rank_pred.conjunctions {
+                if let Some((input_ref, cmp, v)) = cond.as_comparison_const() {
+                    assert_eq!(input_ref.index, window_func_pos);
+                    let v = v
+                        .cast_implicit(DataType::Int64)
+                        .ok()?
+                        .eval_row_const()
+                        .ok()??;
+                    let v = *v.as_int64();
+                    // Note: rank functions start from 1
+                    match cmp {
+                        ExprType::LessThanOrEqual => ub.push(v),
+                        ExprType::LessThan => ub.push(v - 1),
+                        ExprType::GreaterThan => lb.push(v + 1),
+                        ExprType::GreaterThanOrEqual => lb.push(v),
+                        _ => unreachable!(),
+                    }
+                } else if let Some((input_ref, v)) = cond.as_eq_const() {
+                    assert_eq!(input_ref.index, window_func_pos);
+                    let v = v
+                        .cast_implicit(DataType::Int64)
+                        .ok()?
+                        .eval_row_const()
+                        .ok()??;
+                    let v = *v.as_int64();
+                    eq.push(v);
+                } else {
+                    tracing::error!("Failed to optimize complex rank predicate {:?}", cond);
+                    return None;
+                }
+            }
+
+            if eq.len() > 1
+                || lb.len() > 1
+                || ub.len() > 1
+                || (!eq.is_empty() && (!lb.is_empty() || !ub.is_empty()))
+            {
+                tracing::error!("Failed to optimize multiple complex rank predicates");
                 return None;
             }
-            if let Some((input_ref, cmp, v)) = rank_pred.conjunctions[0].as_comparison_const() {
-                assert_eq!(input_ref.index, window_func_pos);
-                let v = v
-                    .cast_implicit(DataType::Int64)
-                    .ok()?
-                    .eval_row_const()
-                    .ok()??;
-                let v = *v.as_int64();
-                // Note: rank functions start from 1
-                match cmp {
-                    ExprType::LessThanOrEqual => (v.max(0) as u64, 0),
-                    ExprType::LessThan => ((v - 1).max(0) as u64, 0),
-                    ExprType::GreaterThan => (LIMIT_ALL_COUNT, v.max(0) as u64),
-                    ExprType::GreaterThanOrEqual => (LIMIT_ALL_COUNT, (v - 1).max(0) as u64),
-                    _ => unreachable!(),
-                }
-            } else if let Some((input_ref, v)) = rank_pred.conjunctions[0].as_eq_const() {
-                assert_eq!(input_ref.index, window_func_pos);
-                let v = v
-                    .cast_implicit(DataType::Int64)
-                    .ok()?
-                    .eval_row_const()
-                    .ok()??;
-                let v = *v.as_int64();
-                if v == 1 {
+            if !eq.is_empty() {
+                if eq[0] == 1 {
                     (1, 0)
                 } else {
+                    tracing::error!("Failed to optimize complex rank predicate rank={}", eq[0]);
                     return None;
                 }
             } else {
-                return None;
+                let lb = lb.into_iter().next();
+                let ub = ub.into_iter().next();
+                match (lb, ub) {
+                    (Some(lb), Some(ub)) => ((ub - lb + 1).max(0) as u64, (lb - 1).max(0) as u64),
+                    (Some(lb), None) => (LIMIT_ALL_COUNT, (lb - 1).max(0) as u64),
+                    (None, Some(ub)) => (ub.max(0) as u64, 0),
+                    (None, None) => unreachable!(),
+                }
             }
         };
 
         if offset > 0 && with_ties {
+            tracing::error!("Failed to optimize with ties and offset");
             return None;
         }
 
