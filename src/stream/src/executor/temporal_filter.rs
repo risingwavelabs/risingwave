@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::ops::{Bound, Deref};
+use std::ops::Deref;
 
 use chrono::NaiveDateTime;
 use futures::StreamExt;
@@ -35,6 +35,7 @@ use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use super::utils::get_rowstreams_by_new_vnodes;
 use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
     PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
@@ -184,22 +185,9 @@ impl<S: StateStore> TemporalFilterExecutor<S> {
             });
         }
 
-        // Read data with vnodes that are newly owned by this executor from state store. This is
-        // performed both on initialization and on scaling.
-        let newly_owned_vnodes = if let Some(prev_vnode_bitmap) = prev_vnode_bitmap {
-            Bitmap::bit_saturate_subtract(curr_vnode_bitmap, prev_vnode_bitmap)
-        } else {
-            curr_vnode_bitmap.to_owned()
-        };
-        let mut values_per_vnode = Vec::new();
-        for owned_vnode in newly_owned_vnodes.ones() {
-            let value_iter = self
-                .state_table
-                .iter_with_pk_range(&(Bound::Unbounded, Bound::Unbounded), owned_vnode as _)
+        let values_per_vnode =
+            get_rowstreams_by_new_vnodes(prev_vnode_bitmap, curr_vnode_bitmap, &self.state_table)
                 .await?;
-            let value_iter = Box::pin(value_iter);
-            values_per_vnode.push(value_iter);
-        }
         if !values_per_vnode.is_empty() {
             let mut stream = select_all(values_per_vnode);
             while let Some(storage_result) = stream.next().await {
