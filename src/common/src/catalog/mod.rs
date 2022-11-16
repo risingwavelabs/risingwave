@@ -28,9 +28,9 @@ use parse_display::Display;
 pub use physical_table::*;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
-use crate::array::Row;
 pub use crate::config::constant::hummock;
 use crate::error::Result;
+use crate::row::Row;
 
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";

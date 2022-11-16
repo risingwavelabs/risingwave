@@ -7,9 +7,9 @@ import "plan_common.proto";
 
 option optimize_for = SPEED;
 
-// The rust prost library always treats uint64 as required and message as optional.
-// In order to allow `row_id_index` as optional field in `StreamSourceInfo` and `TableSourceInfo`,
-// we wrap uint64 inside this message.
+// The rust prost library always treats uint64 as required and message as
+// optional. In order to allow `row_id_index` as optional field in
+// `StreamSourceInfo` and `TableSourceInfo`, we wrap uint64 inside this message.
 message ColumnIndex {
   uint64 index = 1;
 }
@@ -17,6 +17,8 @@ message ColumnIndex {
 message StreamSourceInfo {
   plan_common.RowFormatType row_format = 1;
   string row_schema_location = 2;
+  bool use_schema_registry = 3;
+  string proto_message_name = 4;
 }
 
 message TableSourceInfo {}
@@ -26,11 +28,13 @@ message Source {
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
-  // The column index of row ID. If the primary key is specified by the user, this will be `None`.
+  // The column index of row ID. If the primary key is specified by the user,
+  // this will be `None`.
   ColumnIndex row_id_index = 5;
   // Columns of the source.
   repeated plan_common.ColumnCatalog columns = 6;
-  // Column id of the primary key specified by the user. If the user does not specify a primary key, the vector will be empty.
+  // Column id of the primary key specified by the user. If the user does not
+  // specify a primary key, the vector will be empty.
   repeated int32 pk_column_ids = 7;
   // Properties specified by the user in WITH clause.
   map<string, string> properties = 8;
@@ -86,12 +90,15 @@ message Table {
   uint32 owner = 15;
   map<string, string> properties = 16;
   uint32 fragment_id = 17;
-  // an optional column index which is the vnode of each row computed by the table's consistent hash distribution
+  // an optional column index which is the vnode of each row computed by the
+  // table's consistent hash distribution
   ColumnIndex vnode_col_idx = 18;
-  // The column indices which are stored in the state store's value with row-encoding.
-  // Currently is not supported yet and expected to be `[0..columns.len()]`.
+  // The column indices which are stored in the state store's value with
+  // row-encoding. Currently is not supported yet and expected to be
+  // `[0..columns.len()]`.
   repeated int32 value_indices = 19;
   string definition = 20;
+  bool handle_pk_conflict = 21;
 }
 
 message View {

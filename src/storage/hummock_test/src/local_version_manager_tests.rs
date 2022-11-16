@@ -314,7 +314,7 @@ async fn test_update_uncommitted_ssts() {
             epoch_uncommitted_ssts
                 .first()
                 .unwrap()
-                .1
+                .sst_info
                 .key_range
                 .as_ref()
                 .unwrap()
@@ -325,7 +325,7 @@ async fn test_update_uncommitted_ssts() {
             epoch_uncommitted_ssts
                 .last()
                 .unwrap()
-                .1
+                .sst_info
                 .key_range
                 .as_ref()
                 .unwrap()
@@ -375,7 +375,7 @@ async fn test_update_uncommitted_ssts() {
             epoch_uncommitted_ssts
                 .first()
                 .unwrap()
-                .1
+                .sst_info
                 .key_range
                 .as_ref()
                 .unwrap()
@@ -386,7 +386,7 @@ async fn test_update_uncommitted_ssts() {
             epoch_uncommitted_ssts
                 .last()
                 .unwrap()
-                .1
+                .sst_info
                 .key_range
                 .as_ref()
                 .unwrap()

@@ -20,11 +20,11 @@ use risingwave_hummock_sdk::HummockEpoch;
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
     Backward, BackwardUserIteratorType, DirectedUserIterator, DirectedUserIteratorBuilder,
-    HummockIterator, UserIteratorPayloadType,
+    ForwardMergeRangeIterator, HummockIterator, UserIteratorPayloadType,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BackwardSstableIterator, HummockResult};
+use crate::hummock::{BackwardSstableIterator, DeleteRangeAggregator, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 /// [`BackwardUserIterator`] can be used by user directly.
@@ -307,6 +307,8 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator<BackwardUserIteratorTy
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
+        // TODO: support backward delete range filter.
+        _delete_range_iter: DeleteRangeAggregator<ForwardMergeRangeIterator>,
     ) -> DirectedUserIterator {
         let iterator = UnorderedMergeIteratorInner::new(iterator_iter.into_iter());
         DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(
