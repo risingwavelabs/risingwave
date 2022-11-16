@@ -125,6 +125,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
+        DateTrunc => build_date_trunc_expr(prost),
 
         // Dedicated types
         In => InExpression::try_from(prost).map(Expression::boxed),
