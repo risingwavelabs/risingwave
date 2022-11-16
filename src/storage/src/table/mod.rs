@@ -112,7 +112,7 @@ pub trait TableIter: Send {
 }
 
 pub struct ExtractTableKeyIterator<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + 'static> {
-    pub iter: I,
+    iter: I,
 }
 
 impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> StateStoreIter

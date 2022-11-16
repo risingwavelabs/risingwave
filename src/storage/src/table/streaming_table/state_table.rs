@@ -62,9 +62,6 @@ pub struct StateTable<S: StateStore> {
     /// State store backend.
     store: S::Local,
 
-    /// Storage backend.
-    // store: S::Local,
-
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
 
