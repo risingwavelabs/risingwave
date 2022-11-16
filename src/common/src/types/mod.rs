@@ -383,7 +383,7 @@ impl DataType {
             // FIXME(yuhao): Add a timestampz scalar.
             DataType::Timestampz => ScalarImpl::Int64(i64::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
-            DataType::Interval => ScalarImpl::Interval(IntervalUnit::min()),
+            DataType::Interval => ScalarImpl::Interval(IntervalUnit::MIN),
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
                     .fields
