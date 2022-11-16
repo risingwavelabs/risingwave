@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
@@ -26,6 +26,12 @@ pub struct BoundInsert {
     /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
 
+    /// User defined columns in which to insert
+    /// Is equal to [0, 2, 1] for insert statement
+    /// create table t1 (v1 int, v2 int, v3 int); insert into t1 (v1, v3, v2) values (5, 6, 7);
+    /// Empty if user does not define insert columns
+    pub column_idxs: Vec<usize>,
+
     pub source: BoundQuery,
 
     /// Used as part of an extra `Project` when the column types of `source` query does not match
@@ -37,20 +43,20 @@ impl Binder {
     pub(super) fn bind_insert(
         &mut self,
         source_name: ObjectName,
-        _columns: Vec<Ident>,
+        columns: Vec<Ident>,
         source: Query,
     ) -> Result<BoundInsert> {
         let (schema_name, source_name) =
             Self::resolve_schema_qualified_name(&self.db_name, source_name)?;
         let table_source = self.bind_table_source(schema_name.as_deref(), &source_name)?;
 
-        let expected_types = table_source
+        let expected_types: Vec<DataType> = table_source
             .columns
             .iter()
             .map(|c| c.data_type.clone())
             .collect();
 
-        // When the column types of `source` query does not match `expected_types`, casting is
+        // When the column types of `source` query do not match `expected_types`, casting is
         // needed.
         //
         // In PG, when the `source` is a `VALUES` without order / limit / offset, special treatment
@@ -81,7 +87,7 @@ impl Binder {
                 offset: None,
                 fetch: None,
             } if order.is_empty() => {
-                let values = self.bind_values(values, Some(expected_types))?;
+                let values = self.bind_values(values, Some(expected_types.clone()))?;
                 let body = BoundSetExpr::Values(values.into());
                 (
                     BoundQuery {
@@ -101,7 +107,7 @@ impl Binder {
                 let cast_exprs = match expected_types == actual_types {
                     true => vec![],
                     false => Self::cast_on_insert(
-                        expected_types,
+                        &expected_types,
                         actual_types
                             .into_iter()
                             .enumerate()
@@ -113,10 +119,51 @@ impl Binder {
             }
         };
 
+        let mut target_table_col_idxs: Vec<usize> = vec![];
+        'outer: for query_column in &columns {
+            let column_name = &query_column.value;
+            for (col_idx, table_column) in table_source.columns.iter().enumerate() {
+                if column_name.eq_ignore_ascii_case(table_column.name.as_str()) {
+                    target_table_col_idxs.push(col_idx);
+                    continue 'outer;
+                }
+            }
+            // Invalid column name found
+            return Err(RwError::from(ErrorCode::BindError(format!(
+                "Column {} not found in table {}",
+                column_name, table_source.name
+            ))));
+        }
+
+        // validate that query has a value for each target column, if target columns are used
+        // create table t1 (v1 int, v2 int);
+        // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
+        // insert into t1 (v1) values (5, 6);         // ...less target columns than values
+        let (eq_len, msg) = match target_table_col_idxs.len().cmp(&expected_types.len()) {
+            std::cmp::Ordering::Equal => (true, ""),
+            std::cmp::Ordering::Greater => (false, "INSERT has more target columns than values"),
+            std::cmp::Ordering::Less => (false, "INSERT has less target columns than values"),
+        };
+        if !eq_len && !target_table_col_idxs.is_empty() {
+            return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
+        }
+
+        // Check if column was used multiple times in query e.g.
+        // insert into t1 (v1, v1) values (1, 5);
+        let mut uniq_cols = target_table_col_idxs.clone();
+        uniq_cols.sort_unstable();
+        uniq_cols.dedup();
+        if target_table_col_idxs.len() != uniq_cols.len() {
+            return Err(RwError::from(ErrorCode::BindError(
+                "Column specified more than once".to_string(),
+            )));
+        }
+
         let insert = BoundInsert {
             table_source,
             source,
             cast_exprs,
+            column_idxs: target_table_col_idxs,
         };
 
         Ok(insert)
@@ -125,7 +172,7 @@ impl Binder {
     /// Cast a list of `exprs` to corresponding `expected_types` IN ASSIGNMENT CONTEXT. Make sure
     /// you understand the difference of implicit, assignment and explicit cast before reusing it.
     pub(super) fn cast_on_insert(
-        expected_types: Vec<DataType>,
+        expected_types: &Vec<DataType>,
         exprs: Vec<ExprImpl>,
     ) -> Result<Vec<ExprImpl>> {
         let msg = match expected_types.len().cmp(&exprs.len()) {
@@ -133,7 +180,7 @@ impl Binder {
                 return exprs
                     .into_iter()
                     .zip_eq(expected_types)
-                    .map(|(e, t)| e.cast_assign(t))
+                    .map(|(e, t)| e.cast_assign(t.clone()))
                     .try_collect();
             }
             std::cmp::Ordering::Less => "INSERT has more expressions than target columns",

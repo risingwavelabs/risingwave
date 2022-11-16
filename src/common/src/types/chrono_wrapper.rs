@@ -16,7 +16,7 @@ use std::hash::Hash;
 use std::io::Write;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
 use postgres_types::{ToSql, Type};
 
 use super::to_binary::ToBinary;
@@ -241,6 +241,225 @@ impl NaiveDateTimeWrapper {
                 anyhow::anyhow!("Failed to deserialize date time, reason: {:?}", e)
             })?);
         Self::from_protobuf(nanos)
+    }
+
+    /// Truncate the timestamp to the precision of microseconds.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts).truncate_micros().to_string(),
+    ///     "2001-05-16 20:38:40.123456"
+    /// );
+    /// ```
+    pub fn truncate_micros(self) -> Self {
+        NaiveDateTimeWrapper::new(
+            self.0
+                .with_nanosecond(self.0.nanosecond() / 1000 * 1000)
+                .unwrap(),
+        )
+    }
+
+    /// Truncate the timestamp to the precision of milliseconds.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts).truncate_millis().to_string(),
+    ///     "2001-05-16 20:38:40.123"
+    /// );
+    /// ```
+    pub fn truncate_millis(self) -> Self {
+        NaiveDateTimeWrapper::new(
+            self.0
+                .with_nanosecond(self.0.nanosecond() / 1_000_000 * 1_000_000)
+                .unwrap(),
+        )
+    }
+
+    /// Truncate the timestamp to the precision of seconds.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts).truncate_second().to_string(),
+    ///     "2001-05-16 20:38:40"
+    /// );
+    /// ```
+    pub fn truncate_second(self) -> Self {
+        NaiveDateTimeWrapper::new(self.0.with_nanosecond(0).unwrap())
+    }
+
+    /// Truncate the timestamp to the precision of minutes.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts).truncate_minute().to_string(),
+    ///     "2001-05-16 20:38:00"
+    /// );
+    /// ```
+    pub fn truncate_minute(self) -> Self {
+        NaiveDateTimeWrapper::new(self.0.date().and_hms(self.0.hour(), self.0.minute(), 0))
+    }
+
+    /// Truncate the timestamp to the precision of hours.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts).truncate_hour().to_string(),
+    ///     "2001-05-16 20:00:00"
+    /// );
+    /// ```
+    pub fn truncate_hour(self) -> Self {
+        NaiveDateTimeWrapper::new(self.0.date().and_hms(self.0.hour(), 0, 0))
+    }
+
+    /// Truncate the timestamp to the precision of days.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts).truncate_day().to_string(),
+    ///     "2001-05-16 00:00:00"
+    /// );
+    /// ```
+    pub fn truncate_day(self) -> Self {
+        NaiveDateTimeWrapper::new(self.0.date().and_hms(0, 0, 0))
+    }
+
+    /// Truncate the timestamp to the precision of weeks.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts).truncate_week().to_string(),
+    ///     "2001-05-14 00:00:00"
+    /// );
+    /// ```
+    pub fn truncate_week(self) -> Self {
+        NaiveDateTimeWrapper::new(
+            self.0
+                .date()
+                .week(Weekday::Mon)
+                .first_day()
+                .and_hms(0, 0, 0),
+        )
+    }
+
+    /// Truncate the timestamp to the precision of months.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts).truncate_month().to_string(),
+    ///     "2001-05-01 00:00:00"
+    /// );
+    /// ```
+    pub fn truncate_month(self) -> Self {
+        NaiveDateTimeWrapper::new(self.0.date().with_day(1).unwrap().and_hms(0, 0, 0))
+    }
+
+    /// Truncate the timestamp to the precision of quarters.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts).truncate_quarter().to_string(),
+    ///     "2001-04-01 00:00:00"
+    /// );
+    /// ```
+    pub fn truncate_quarter(self) -> Self {
+        NaiveDateTimeWrapper::new(
+            NaiveDate::from_ymd(self.0.year(), self.0.month0() / 3 * 3 + 1, 1).and_hms(0, 0, 0),
+        )
+    }
+
+    /// Truncate the timestamp to the precision of years.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts).truncate_year().to_string(),
+    ///     "2001-01-01 00:00:00"
+    /// );
+    /// ```
+    pub fn truncate_year(self) -> Self {
+        NaiveDateTimeWrapper::new(NaiveDate::from_ymd(self.0.year(), 1, 1).and_hms(0, 0, 0))
+    }
+
+    /// Truncate the timestamp to the precision of decades.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts).truncate_decade().to_string(),
+    ///     "2000-01-01 00:00:00"
+    /// );
+    /// ```
+    pub fn truncate_decade(self) -> Self {
+        NaiveDateTimeWrapper::new(
+            NaiveDate::from_ymd(self.0.year() / 10 * 10, 1, 1).and_hms(0, 0, 0),
+        )
+    }
+
+    /// Truncate the timestamp to the precision of centuries.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "3202-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts).truncate_century().to_string(),
+    ///     "3201-01-01 00:00:00"
+    /// );
+    /// ```
+    pub fn truncate_century(self) -> Self {
+        NaiveDateTimeWrapper::new(
+            NaiveDate::from_ymd((self.0.year() - 1) / 100 * 100 + 1, 1, 1).and_hms(0, 0, 0),
+        )
+    }
+
+    /// Truncate the timestamp to the precision of millenniums.
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::NaiveDateTimeWrapper;
+    /// let ts = "3202-05-16T20:38:40.123456789".parse().unwrap();
+    /// assert_eq!(
+    ///     NaiveDateTimeWrapper::new(ts)
+    ///         .truncate_millennium()
+    ///         .to_string(),
+    ///     "3001-01-01 00:00:00"
+    /// );
+    /// ```
+    pub fn truncate_millennium(self) -> Self {
+        NaiveDateTimeWrapper::new(
+            NaiveDate::from_ymd((self.0.year() - 1) / 1000 * 1000 + 1, 1, 1).and_hms(0, 0, 0),
+        )
     }
 }
 

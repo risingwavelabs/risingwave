@@ -24,9 +24,10 @@ use async_stack_trace::StackTrace;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
-use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk, Vis};
+use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
+use risingwave_common::row::{Row, RowDeserializer};
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -604,6 +605,7 @@ impl<S: StateStore> StateTable<S> {
     /// just specially used by those state table read-only and after the call the data
     /// in the epoch will be visible
     pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
+        assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
         self.update_epoch(new_epoch);
     }
