@@ -69,6 +69,7 @@ mod lookup_union;
 mod managed_state;
 mod merge;
 mod mview;
+mod now;
 mod project;
 mod project_set;
 mod rearranged_chain;
