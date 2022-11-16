@@ -134,6 +134,7 @@ impl<S: StateStore> RangeCache<S> {
             ranges_to_fetch
         } else {
             self.range = Some(range.clone());
+            self.cache = HashMap::new();
             vec![range.clone()]
         };
 
@@ -194,6 +195,7 @@ impl<S: StateStore> RangeCache<S> {
             }
         }
         self.vnodes = new_vnodes;
+        self.range = None;
         old_vnodes
     }
 

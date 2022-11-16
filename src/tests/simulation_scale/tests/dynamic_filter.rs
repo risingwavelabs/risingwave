@@ -57,8 +57,8 @@ async fn test_dynamic_filter() -> Result<()> {
         .unwrap();
 
     let id = fragment.id();
-    //
-    // cluster.reschedule(format!("{id}-[1,2,3]")).await?;
+
+    cluster.reschedule(format!("{id}-[1,2,3]")).await?;
     sleep(Duration::from_secs(3)).await;
 
     cluster.run(SELECT).await?.assert_result_eq("");
@@ -70,7 +70,7 @@ async fn test_dynamic_filter() -> Result<()> {
     // 2
     // 3
 
-    // cluster.reschedule(format!("{id}-[4,5]+[1,2,3]")).await?;
+    cluster.reschedule(format!("{id}-[4,5]+[1,2,3]")).await?;
     sleep(Duration::from_secs(3)).await;
     cluster.run(SELECT).await?.assert_result_eq("1\n2\n3");
 
@@ -80,7 +80,7 @@ async fn test_dynamic_filter() -> Result<()> {
     cluster.run(SELECT).await?.assert_result_eq("3");
     // 3
 
-    // cluster.reschedule(format!("{id}-[1,2,3]+[4,5]")).await?;
+    cluster.reschedule(format!("{id}-[1,2,3]+[4,5]")).await?;
     sleep(Duration::from_secs(3)).await;
     cluster.run(SELECT).await?.assert_result_eq("3");
 
@@ -91,7 +91,7 @@ async fn test_dynamic_filter() -> Result<()> {
     // 2
     // 3
     //
-    // cluster.reschedule(format!("{id}+[1,2,3]")).await?;
+    cluster.reschedule(format!("{id}+[1,2,3]")).await?;
     sleep(Duration::from_secs(3)).await;
     cluster.run(SELECT).await?.assert_result_eq("2\n3");
 

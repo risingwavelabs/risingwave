@@ -51,7 +51,6 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     comparator: ExprNodeType,
     range_cache: RangeCache<S>,
     right_table: StateTable<S>,
-    is_right_table_writer: bool,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time.
@@ -70,7 +69,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         comparator: ExprNodeType,
         mut state_table_l: StateTable<S>,
         mut state_table_r: StateTable<S>,
-        is_right_table_writer: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         vnodes: Arc<Bitmap>,
@@ -90,7 +88,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             comparator,
             range_cache: RangeCache::new(state_table_l, usize::MAX, vnodes),
             right_table: state_table_r,
-            is_right_table_writer,
             metrics,
             schema,
             chunk_size,
@@ -378,7 +375,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         }
                     }
 
-                    if self.is_right_table_writer {
+                    // Only write the RHS value if this actor is in charge of vnode 0
+                    if self.range_cache.state_table.vnode_bitmap().is_set(0) {
                         if last_committed_epoch_row != current_epoch_row {
                             // If both `None`, then this branch is inactive.
                             // Hence, at least one is `Some`, hence at least one update.
