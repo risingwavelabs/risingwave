@@ -76,7 +76,7 @@ if [[ $p == false ]]; then
   cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features "static-link static-log-level"
 else
   echo "building ${p}..."
-  cargo build -p ${p} --release --features "static-link static-log-level"
+  cargo build -p ${p} --release
 fi
 
 echo -e "\tdone building"
