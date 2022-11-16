@@ -39,7 +39,7 @@ pub struct MaxwellEvent {
 pub struct MaxwellParser;
 
 impl MaxwellParser {
-    async fn parse_inner(
+    fn parse_inner(
         &self,
         payload: &[u8],
         writer: SourceStreamChunkRowWriter<'_>,
