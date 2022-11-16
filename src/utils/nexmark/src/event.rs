@@ -69,7 +69,7 @@ impl Event {
         let timestamp = cfg.event_timestamp(event_number);
         match cfg.event_type(event_number) {
             EventType::Person => Event::Person(Person::new(id, timestamp, cfg)),
-            EventType::Auction => Event::Auction(Auction::new(id, timestamp, cfg)),
+            EventType::Auction => Event::Auction(Auction::new(event_number, id, timestamp, cfg)),
             EventType::Bid => Event::Bid(Bid::new(id, timestamp, cfg)),
         }
     }
@@ -193,15 +193,15 @@ pub struct Auction {
 }
 
 impl Auction {
-    pub(crate) fn new(id: usize, time: u64, cfg: &GeneratorConfig) -> Self {
+    pub(crate) fn new(event_number: usize, id: usize, time: u64, cfg: &GeneratorConfig) -> Self {
         let rng = &mut SmallRng::seed_from_u64(id as u64);
-        let expires = time + Self::next_length(id, rng, time, cfg);
         let id = Self::last_id(id, cfg) + cfg.first_auction_id;
         let item_name = rng.gen_string(20);
         let description = rng.gen_string(100);
         let initial_bid = rng.gen_price();
 
         let reserve = initial_bid + rng.gen_price();
+        let expires = time + Self::next_length(event_number, rng, time, cfg);
         let mut seller = if rng.gen_range(0..cfg.hot_seller_ratio) > 0 {
             (Person::last_id(id, cfg) / cfg.hot_seller_ratio_2) * cfg.hot_seller_ratio_2
         } else {
@@ -251,8 +251,12 @@ impl Auction {
         epoch * nex.auction_proportion + offset
     }
 
-    fn next_length(id: usize, rng: &mut SmallRng, time: u64, cfg: &GeneratorConfig) -> u64 {
-        let event_number = id - cfg.first_event_id;
+    fn next_length(
+        event_number: usize,
+        rng: &mut SmallRng,
+        time: u64,
+        cfg: &GeneratorConfig,
+    ) -> u64 {
         let events_for_auctions =
             (cfg.in_flight_auctions * cfg.proportion_denominator) / cfg.auction_proportion;
         let future_auction = cfg.event_timestamp(event_number + events_for_auctions);
