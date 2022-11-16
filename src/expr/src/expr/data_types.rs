@@ -168,6 +168,18 @@ macro_rules! varchar {
 pub(crate) use varchar;
 
 #[macro_export]
+macro_rules! bytea {
+    ($macro:ident) => {
+        $macro! {
+            risingwave_common::types::DataType::Bytea,
+            risingwave_common::array::Utf8Array
+        }
+    };
+}
+
+pub(crate) use bytea;
+
+#[macro_export]
 macro_rules! time {
     ($macro:ident) => {
         $macro! {

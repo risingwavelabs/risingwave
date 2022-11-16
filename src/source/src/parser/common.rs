@@ -154,6 +154,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             .ok_or_else(|| anyhow!("expect decimal"))?
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
+        DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
         DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
         DataType::Timestamp => match v {

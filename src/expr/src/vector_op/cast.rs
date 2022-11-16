@@ -13,15 +13,19 @@
 // limitations under the License.
 
 use std::any::type_name;
+use std::fmt::Write;
 use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use num_traits::ToPrimitive;
 use postgres_types::ToSql;
 use risingwave_common::array::{Array, ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::types::struct_type::StructType;
+use regex::Regex;
+use risingwave_common::array::{Array, ListRef, ListValue};
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
@@ -44,6 +48,12 @@ const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expe
 const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
 const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
+const PARSE_ERROR_STR_TO_BYTEA: &str =
+    "Can't cast string to bytea (expected format is \\x[0-9]|[a-fA-F] as hexadecimal)";
+lazy_static! {
+    static ref REGEX_FOR_HEXADECIMAL: Regex =
+        Regex::new(r"\\?\b(([x])?([0-9a-fA-F]+|[0-9]+))\b").unwrap();
+}
 
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
@@ -175,6 +185,26 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
         E14..E17 => Ok(t),           // us
         E17.. => Ok(t / 1_000),      // ns
         _ => Err(ExprError::Parse(ERROR_INT_TO_TIMESTAMP)),
+    }
+}
+
+#[inline(always)]
+pub fn str_to_bytea(elem: &str) -> Result<String> {
+    // Valid whether a Hex decimal string.
+    if !REGEX_FOR_HEXADECIMAL.is_match(elem) {
+        Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA))
+    } else if elem.starts_with("\\x") {
+        // e.g. \x prefix just return as lowercase.
+        Ok(elem.to_ascii_lowercase())
+    } else {
+        let mut s = String::with_capacity(2 * elem.len());
+        // Postgres requires a \x prefix.
+        write!(s, "\\x").unwrap();
+        for byte in elem.as_bytes() {
+            // Lowercase.
+            write!(s, "{:02x}", byte).unwrap();
+        }
+        Ok(s)
     }
 }
 
@@ -367,6 +397,7 @@ macro_rules! for_all_cast_variants {
             { varchar, float64, str_parse },
             { varchar, decimal, str_parse },
             { varchar, boolean, str_to_bool },
+            { varchar, bytea, str_to_bytea },
             // `str_to_list` requires `target_elem_type` and is handled elsewhere
 
             { boolean, varchar, bool_to_varchar },
@@ -831,6 +862,15 @@ mod tests {
         assert!(str_to_list("{}}", &DataType::Int32).is_err());
         assert!(str_to_list("{{1, 2, 3}, {4, 5, 6}", &DataType::Int32).is_err());
         assert!(str_to_list("{{1, 2, 3}, 4, 5, 6}}", &DataType::Int32).is_err());
+    }
+
+    #[test]
+    fn test_bytea() {
+        assert!(str_to_bytea("fgh").is_err());
+        assert_eq!(str_to_bytea("\\xDEADBeef").unwrap(), "\\xdeadbeef");
+        assert_eq!(str_to_bytea("1234").unwrap(), "\\x31323334");
+        assert_eq!(str_to_bytea("12CD").unwrap(), "\\x31324344");
+        assert_eq!(str_to_bytea("\\x12CD").unwrap(), "\\x12cd");
     }
 
     #[test]

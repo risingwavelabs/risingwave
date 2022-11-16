@@ -1,0 +1,36 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE bytes(i bytea);
+
+statement error
+INSERT INTO bytes VALUES ('fgh');
+
+statement error
+INSERT INTO bytes VALUES ('0xfgh');
+
+statement ok
+INSERT INTO bytes VALUES ('\xDEADBeef');
+
+statement ok
+INSERT INTO bytes VALUES ('1234');
+
+statement ok
+INSERT INTO bytes VALUES ('12CD');
+
+statement ok
+INSERT INTO bytes VALUES ('\x12CD');
+
+query T rowsort
+select * from bytes;
+----
+\xdeadbeef
+\x31323334
+\x31324344
+\x12cd
+
+statement ok
+drop table bytes;
+
+
