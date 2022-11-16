@@ -118,6 +118,46 @@ impl<'i, R: Row2> Row2 for Map<'i, R> {
     }
 }
 
+macro_rules! deref_forward_row {
+    () => {
+        fn datum_at(&self, index: usize) -> DatumRef<'_> {
+            (**self).datum_at(index)
+        }
+
+        fn len(&self) -> usize {
+            (**self).len()
+        }
+
+        fn datums(&self) -> Self::DatumIter<'_> {
+            (**self).datums()
+        }
+
+        fn to_owned_row(&self) -> Row {
+            (**self).to_owned_row()
+        }
+    };
+}
+
+impl<R: Row2> Row2 for &R {
+    type DatumIter<'a> = R::DatumIter<'a>
+    where
+        Self: 'a;
+
+    deref_forward_row!();
+}
+
+impl<R: Row2> Row2 for Box<R> {
+    type DatumIter<'a> = R::DatumIter<'a>
+    where
+        Self: 'a;
+
+    deref_forward_row!();
+
+    fn into_owned_row(self) -> Row {
+        (*self).into_owned_row()
+    }
+}
+
 impl Row2 for &[Datum] {
     type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
