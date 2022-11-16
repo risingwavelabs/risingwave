@@ -55,7 +55,7 @@ impl LevelHandler {
         self.compacting_files.contains_key(sst_id)
     }
 
-    pub fn pending_compact_get(
+    pub fn pending_task_id_by_sst(
         &self,
         sst_id: &HummockSstableId,
     ) -> Option<HummockCompactionTaskId> {
