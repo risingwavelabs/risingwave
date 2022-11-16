@@ -80,57 +80,54 @@ impl<S: StateStore> NowExecutor<S> {
 
         #[for_await]
         for msg in input {
-            match msg? {
-                Message::Barrier(barrier) => {
-                    if !barrier.is_update() {
-                        let time_millis = Epoch::from(barrier.epoch.curr).as_unix_millis();
-                        let timestamp = Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                            NaiveDateTime::from_timestamp(
-                                (time_millis / 1000) as i64,
-                                (time_millis % 1000 * 1_000_000) as u32,
-                            ),
-                        )));
+            if let Message::Barrier(barrier) = msg? {
+                if !barrier.is_update() {
+                    let time_millis = Epoch::from(barrier.epoch.curr).as_unix_millis();
+                    let timestamp = Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                        NaiveDateTime::from_timestamp(
+                            (time_millis / 1000) as i64,
+                            (time_millis % 1000 * 1_000_000) as u32,
+                        ),
+                    )));
 
-                        let mut data_chunk_builder = DataChunkBuilder::new(
-                            self.schema().data_types(),
-                            if last_timestamp.is_some() { 2 } else { 1 },
-                        );
-                        if last_timestamp.is_some() {
-                            let chunk_popped = data_chunk_builder
-                                .append_one_row_from_datums([&last_timestamp].into_iter());
-                            debug_assert!(chunk_popped.is_none());
-                        }
-                        let data_chunk = data_chunk_builder
-                            .append_one_row_from_datums([&timestamp].into_iter())
-                            .unwrap();
-                        let mut ops = if last_timestamp.is_some() {
-                            vec![Op::Delete]
-                        } else {
-                            vec![]
-                        };
-                        ops.push(Op::Insert);
-                        let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-                        yield Message::Chunk(stream_chunk);
-
-                        yield Message::Watermark(Watermark::new(
-                            0,
-                            timestamp.as_ref().unwrap().clone(),
-                        ));
-
-                        if last_timestamp.is_some() {
-                            self.state_table.delete(Row::new(vec![last_timestamp]));
-                        }
-                        self.state_table.insert(Row::new(vec![timestamp.clone()]));
-                        last_timestamp = timestamp;
-
-                        self.state_table.commit(barrier.epoch).await?;
-                    } else {
-                        self.state_table.commit_no_data_expected(barrier.epoch);
+                    let mut data_chunk_builder = DataChunkBuilder::new(
+                        self.schema().data_types(),
+                        if last_timestamp.is_some() { 2 } else { 1 },
+                    );
+                    if last_timestamp.is_some() {
+                        let chunk_popped = data_chunk_builder
+                            .append_one_row_from_datums([&last_timestamp].into_iter());
+                        debug_assert!(chunk_popped.is_none());
                     }
+                    let data_chunk = data_chunk_builder
+                        .append_one_row_from_datums([&timestamp].into_iter())
+                        .unwrap();
+                    let mut ops = if last_timestamp.is_some() {
+                        vec![Op::Delete]
+                    } else {
+                        vec![]
+                    };
+                    ops.push(Op::Insert);
+                    let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+                    yield Message::Chunk(stream_chunk);
 
-                    yield Message::Barrier(barrier);
+                    yield Message::Watermark(Watermark::new(
+                        0,
+                        timestamp.as_ref().unwrap().clone(),
+                    ));
+
+                    if last_timestamp.is_some() {
+                        self.state_table.delete(Row::new(vec![last_timestamp]));
+                    }
+                    self.state_table.insert(Row::new(vec![timestamp.clone()]));
+                    last_timestamp = timestamp;
+
+                    self.state_table.commit(barrier.epoch).await?;
+                } else {
+                    self.state_table.commit_no_data_expected(barrier.epoch);
                 }
-                _ => {}
+
+                yield Message::Barrier(barrier);
             }
         }
     }
