@@ -20,7 +20,6 @@ use crate::source::SplitEnumerator;
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct CdcSplitEnumerator {
     source_id: u32,
-    split_num: i32,
 }
 
 #[async_trait]
@@ -29,23 +28,18 @@ impl SplitEnumerator for CdcSplitEnumerator {
     type Split = CdcSplit;
 
     async fn new(props: CdcProperties) -> anyhow::Result<CdcSplitEnumerator> {
-        // FIXME: currently only support single split for CDC source
-        let split_num = 1;
         Ok(Self {
             source_id: props.source_id,
-            split_num,
         })
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<CdcSplit>> {
-        let mut splits = vec![];
-        for _i in 0..self.split_num {
-            splits.push(CdcSplit {
-                split_num: self.split_num,
-                source_id: self.source_id,
-                start_offset: None,
-            });
-        }
+        // CDC source only supports single split
+        let splits = vec![CdcSplit {
+            split_num: 1,
+            source_id: self.source_id,
+            start_offset: None,
+        }];
         Ok(splits)
     }
 }
