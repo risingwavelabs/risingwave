@@ -45,7 +45,7 @@ use crate::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use crate::storage_value::StorageValue;
-use crate::store::{LocalStateStore, ReadOptions, StateStoreIterExt, WriteOptions};
+use crate::store::{LocalStateStore, ReadOptions, WriteOptions};
 use crate::table::streaming_table::mem_table::MemTableError;
 use crate::table::{compute_chunk_vnode, compute_vnode, Distribution};
 use crate::{Keyspace, StateStore, StateStoreIter};
@@ -314,7 +314,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: Default::default(),
             disable_sanity_check: false,
             vnode_col_idx_in_pk: None,
-            value_indices: value_indices,
+            value_indices,
             epoch: None,
         }
     }
