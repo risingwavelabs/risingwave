@@ -476,6 +476,7 @@ mod tests {
             vnode_col_idx: None,
             value_indices: vec![0],
             definition: "".into(),
+            handle_pk_conflict: false,
         }
     }
 
