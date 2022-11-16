@@ -963,20 +963,6 @@ where
 
             let fragment = ctx.fragment_map.get(&fragment_id).unwrap();
 
-            // scale upstream
-
-            // hash - (ids, mapping)
-            // simple - (ids)?
-            // no_shuffle - _
-            // broadcast - (ids)
-
-            // hash - hash    -> Some(xxx)
-            // hash - single  -> None
-            // no_shuffle - _ -> None
-            // broadcast - _  -> None
-
-            // fragment.upstream_fragment_ids.
-
             let in_degree_types: HashSet<_> = fragment
                 .upstream_fragment_ids
                 .iter()
@@ -1031,13 +1017,6 @@ where
                     }
                 }
             }
-
-            println!(
-                "frag {} ups ids {:?}, mapping {}",
-                fragment_id,
-                upstream_fragment_dispatcher_set,
-                upstream_dispatcher_mapping.is_some()
-            );
 
             let downstream_fragment_id = if let Some(downstream_fragment_ids) =
                 ctx.downstream_fragment_id_map.get(&fragment_id)
@@ -1098,13 +1077,6 @@ where
                     actor_splits,
                 },
             );
-        }
-
-        for (a, b) in &reschedule_fragment {
-            println!("for fragment {}", a);
-            println!("\tadded   {:?}", b.added_actors);
-            println!("\tremoved {:?}", b.removed_actors);
-            println!("\tupstream ids {:?}", b.upstream_fragment_dispatcher_ids);
         }
 
         let mut fragment_created_actors = HashMap::new();

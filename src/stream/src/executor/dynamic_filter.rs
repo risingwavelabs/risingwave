@@ -492,7 +492,6 @@ mod tests {
             comparator,
             mem_state_l,
             mem_state_r,
-            true,
             Arc::new(StreamingMetrics::unused()),
             1024,
             fallback.vnodes,
