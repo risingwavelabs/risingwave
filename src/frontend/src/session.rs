@@ -70,6 +70,9 @@ use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterIm
 use crate::user::UserId;
 use crate::utils::WithOptions;
 use crate::{FrontendConfig, FrontendOpts, PgResponseStream, TableCatalog};
+use crate::health_service::HealthServiceImpl;
+use risingwave_pb::health::health_server::HealthServer;
+
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
@@ -347,6 +350,16 @@ impl FrontendEnv {
         if opts.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
+
+        let health_srv = HealthServiceImpl::new();
+        let host = opts.health_check_addr.clone();
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(HealthServer::new(health_srv))
+                .serve(host.parse().unwrap())
+                .await
+                .unwrap();
+        });
 
         Ok((
             Self {
