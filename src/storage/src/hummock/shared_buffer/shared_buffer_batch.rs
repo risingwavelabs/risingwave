@@ -50,20 +50,35 @@ pub(crate) struct SharedBufferBatchInner {
 impl SharedBufferBatchInner {
     fn new(
         payload: Vec<SharedBufferItem>,
-        range_tombstone_list: Vec<DeleteRangeTombstone>,
+        mut range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
         let mut largest_table_key = vec![];
-        for tombstone in &range_tombstone_list {
-            // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary of
-            // `SharedBufferBatch` because it just expands an useless query and does not affect
-            // correctness.
-            if largest_table_key.lt(&tombstone.end_user_key.table_key.0) {
-                largest_table_key.clear();
-                largest_table_key.extend_from_slice(&tombstone.end_user_key.table_key.0);
+        if !range_tombstone_list.is_empty() {
+            range_tombstone_list.sort();
+            let mut range_tombstones: Vec<DeleteRangeTombstone> = vec![];
+            for tombstone in range_tombstone_list {
+                // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary
+                // of `SharedBufferBatch` because it just expands an useless query
+                // and does not affect correctness.
+                if largest_table_key.lt(&tombstone.end_user_key.table_key.0) {
+                    largest_table_key.clear();
+                    largest_table_key.extend_from_slice(&tombstone.end_user_key.table_key.0);
+                }
+                if let Some(last) = range_tombstones.last_mut() {
+                    if last.end_user_key.gt(&tombstone.start_user_key) {
+                        if last.end_user_key.lt(&tombstone.end_user_key) {
+                            last.end_user_key = tombstone.end_user_key;
+                        }
+                        continue;
+                    }
+                }
+                range_tombstones.push(tombstone);
             }
+            range_tombstone_list = range_tombstones;
         }
+
         if let Some(item) = payload.last() {
             if item.0.gt(&largest_table_key) {
                 largest_table_key.clear();

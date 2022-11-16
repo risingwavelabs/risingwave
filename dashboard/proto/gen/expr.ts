@@ -47,6 +47,7 @@ export const ExprNode_Type = {
   TUMBLE_START: "TUMBLE_START",
   TO_TIMESTAMP: "TO_TIMESTAMP",
   AT_TIME_ZONE: "AT_TIME_ZONE",
+  DATE_TRUNC: "DATE_TRUNC",
   /** CAST - other functions */
   CAST: "CAST",
   SUBSTR: "SUBSTR",
@@ -203,6 +204,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 105:
     case "AT_TIME_ZONE":
       return ExprNode_Type.AT_TIME_ZONE;
+    case 106:
+    case "DATE_TRUNC":
+      return ExprNode_Type.DATE_TRUNC;
     case 201:
     case "CAST":
       return ExprNode_Type.CAST;
@@ -421,6 +425,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "TO_TIMESTAMP";
     case ExprNode_Type.AT_TIME_ZONE:
       return "AT_TIME_ZONE";
+    case ExprNode_Type.DATE_TRUNC:
+      return "DATE_TRUNC";
     case ExprNode_Type.CAST:
       return "CAST";
     case ExprNode_Type.SUBSTR:
