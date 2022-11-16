@@ -111,6 +111,7 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
             .clone();
         let meta_snapshot = MetaSnapshot {
             hummock_version: Some(hummock_version),
+            version: Some(Default::default()),
             ..Default::default()
         };
 

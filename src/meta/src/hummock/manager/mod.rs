@@ -1122,7 +1122,7 @@ where
                 if !deterministic_mode {
                     self.env
                         .notification_manager()
-                        .notify_hummock_asynchronously(
+                        .notify_hummock_without_version(
                             Operation::Add,
                             Info::HummockVersionDeltas(
                                 risingwave_pb::hummock::HummockVersionDeltas {
@@ -1397,7 +1397,7 @@ where
 
         self.env
             .notification_manager()
-            .notify_hummock_asynchronously(
+            .notify_hummock_without_version(
                 Operation::Add,
                 Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                     version_deltas: vec![versioning
@@ -1647,13 +1647,13 @@ where
 
         self.env
             .notification_manager()
-            .notify_frontend_asynchronously(
+            .notify_frontend_without_version(
                 Operation::Update, // Frontends don't care about operation.
                 Info::HummockSnapshot(snapshot),
             );
         self.env
             .notification_manager()
-            .notify_hummock_asynchronously(
+            .notify_hummock_without_version(
                 Operation::Add,
                 Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                     version_deltas: vec![versioning
@@ -1692,7 +1692,7 @@ where
         tracing::trace!("new current epoch {}", max_current_epoch);
         self.env
             .notification_manager()
-            .notify_frontend_asynchronously(
+            .notify_frontend_without_version(
                 Operation::Update, // Frontends don't care about operation.
                 Info::HummockSnapshot(HummockSnapshot {
                     committed_epoch: prev_snapshot.committed_epoch,

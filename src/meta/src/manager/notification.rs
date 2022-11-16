@@ -132,11 +132,15 @@ where
             .await
     }
 
-    pub fn notify_frontend_asynchronously(&self, operation: Operation, info: Info) {
+    /// Without version increasing, we can only use it when we can determine the order of
+    /// `MetaSnapshot` and normal notifications in `ObserverManager::wait_init_notification`.
+    pub fn notify_frontend_without_version(&self, operation: Operation, info: Info) {
         self.notify_asynchronously(SubscribeType::Frontend, operation, info, None);
     }
 
-    pub fn notify_hummock_asynchronously(&self, operation: Operation, info: Info) {
+    /// Without version increasing, we can only use it when we can determine the order of
+    /// `MetaSnapshot` and normal notifications in `ObserverManager::wait_init_notification`.
+    pub fn notify_hummock_without_version(&self, operation: Operation, info: Info) {
         self.notify_asynchronously(SubscribeType::Hummock, operation, info, None);
     }
 
