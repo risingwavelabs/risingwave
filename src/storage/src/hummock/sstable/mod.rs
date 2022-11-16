@@ -69,12 +69,7 @@ pub struct DeleteRangeTombstone {
 
 impl PartialOrd for DeleteRangeTombstone {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        let ret = self
-            .start_user_key
-            .cmp(&other.start_user_key)
-            .then_with(|| self.end_user_key.cmp(&other.end_user_key))
-            .then_with(|| other.sequence.cmp(&self.sequence));
-        Some(ret)
+        Some(self.cmp(other))
     }
 }
 
@@ -82,7 +77,7 @@ impl Ord for DeleteRangeTombstone {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.start_user_key
             .cmp(&other.start_user_key)
-            .then_with(|| other.end_user_key.cmp(&self.end_user_key))
+            .then_with(|| self.end_user_key.cmp(&other.end_user_key))
             .then_with(|| other.sequence.cmp(&self.sequence))
     }
 }

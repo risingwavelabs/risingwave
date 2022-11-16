@@ -81,11 +81,8 @@ impl DeleteRangeAggregatorBuilder {
         while let Some(Reverse(tombstone)) = tombstone_index.pop() {
             for last in sorted_tombstones.iter_mut().rev() {
                 if last.end_user_key.gt(&tombstone.end_user_key) {
-                    let new_tombstone = DeleteRangeTombstone::new(
-                        tombstone.end_user_key.clone(),
-                        last.end_user_key.clone(),
-                        last.sequence,
-                    );
+                    let mut new_tombstone = last.clone();
+                    new_tombstone.start_user_key = tombstone.end_user_key.clone();
                     last.end_user_key = tombstone.end_user_key.clone();
                     tombstone_index.push(Reverse(new_tombstone));
                 } else {
@@ -400,6 +397,7 @@ mod tests {
 
     use rand::Rng;
     use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::TableKey;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -538,6 +536,7 @@ mod tests {
             let left: u64 = rng.gen_range(0..100);
             let right: u64 = left + rng.gen_range(0..100) + 1;
             let tombstone = DeleteRangeTombstone::new(
+                TableId::default(),
                 left.to_be_bytes().to_vec(),
                 right.to_be_bytes().to_vec(),
                 sequence,
@@ -547,7 +546,10 @@ mod tests {
         }
         builder.add_tombstone(origin.clone());
         let agg = builder.build(0, false);
-        let split_ranges = agg.get_tombstone_between(b"", b"");
+        let split_ranges = agg.get_tombstone_between(
+            &UserKey::new(TableId::default(), TableKey(b"")),
+            &UserKey::new(TableId::default(), TableKey(b"")),
+        );
         assert!(split_ranges.len() > origin.len());
         let mut sequence_index: HashMap<u64, Vec<DeleteRangeTombstone>> = HashMap::default();
         for tombstone in split_ranges {
