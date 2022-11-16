@@ -20,7 +20,7 @@ use risingwave_pb::hummock::CompactTask;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use tokio::sync::mpsc::{self, UnboundedSender};
-use tokio::sync::{oneshot, Mutex, MutexGuard};
+use tokio::sync::Mutex;
 use tonic::Status;
 
 use crate::manager::cluster::WorkerKey;
@@ -41,16 +41,19 @@ pub enum LocalNotification {
 #[derive(Debug)]
 struct Task {
     target: SubscribeType,
-    callback_tx: Option<oneshot::Sender<NotificationVersion>>,
     operation: Operation,
     info: Info,
+    version: Option<NotificationVersion>,
 }
 
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
 pub struct NotificationManager<S> {
-    core: Arc<Mutex<NotificationManagerCore<S>>>,
+    core: Arc<Mutex<NotificationManagerCore>>,
     /// Sender used to add a notification into the waiting queue.
     task_tx: UnboundedSender<Task>,
+    /// The current notification version.
+    current_version: Mutex<Version>,
+    meta_store: Arc<S>,
 }
 
 impl<S> NotificationManager<S>
@@ -60,73 +63,81 @@ where
     pub async fn new(meta_store: Arc<S>) -> Self {
         // notification waiting queue.
         let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
-        let core = Arc::new(Mutex::new(NotificationManagerCore::new(meta_store).await));
+        let core = Arc::new(Mutex::new(NotificationManagerCore::new()));
         let core_clone = core.clone();
 
         tokio::spawn(async move {
             while let Some(task) = task_rx.recv().await {
                 let mut guard = core.lock().await;
-                guard.notify(task.target, task.operation, &task.info).await;
-                if let Some(tx) = task.callback_tx {
-                    tx.send(guard.current_version.version()).unwrap();
-                }
+                guard.notify(
+                    task.target,
+                    task.operation,
+                    &task.info,
+                    task.version.unwrap_or_default(),
+                );
             }
         });
 
         Self {
             core: core_clone,
             task_tx,
+            current_version: Mutex::new(Version::new(&*meta_store).await),
+            meta_store,
         }
     }
 
-    /// Add a notification to the waiting queue and return immediately
-    pub fn notify_asynchronously(&self, target: SubscribeType, operation: Operation, info: Info) {
+    /// Add a notification to the waiting queue and return immediately.
+    #[inline(always)]
+    fn notify_asynchronously(
+        &self,
+        target: SubscribeType,
+        operation: Operation,
+        info: Info,
+        version: Option<NotificationVersion>,
+    ) {
         let task = Task {
             target,
-            callback_tx: None,
             operation,
             info,
+            version,
         };
         self.task_tx.send(task).unwrap();
     }
 
-    /// Add a notification to the waiting queue, and will not return until the notification is
-    /// sent successfully
-    async fn notify(
+    /// Add a notification to the waiting queue and increase version.
+    async fn notify_with_version(
         &self,
         target: SubscribeType,
         operation: Operation,
         info: Info,
     ) -> NotificationVersion {
-        let (callback_tx, callback_rx) = oneshot::channel();
-        let task = Task {
-            target,
-            callback_tx: Some(callback_tx),
-            operation,
-            info,
-        };
-        self.task_tx.send(task).unwrap();
-        callback_rx.await.unwrap()
-    }
-
-    pub fn notify_frontend_asynchronously(&self, operation: Operation, info: Info) {
-        self.notify_asynchronously(SubscribeType::Frontend, operation, info);
+        let mut version_core = self.current_version.lock().await;
+        version_core.increase_version(&*self.meta_store).await;
+        self.notify_asynchronously(target, operation, info, Some(version_core.version()));
+        version_core.version()
     }
 
     pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(SubscribeType::Frontend, operation, info).await
+        self.notify_with_version(SubscribeType::Frontend, operation, info)
+            .await
     }
 
     pub async fn notify_hummock(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(SubscribeType::Hummock, operation, info).await
+        self.notify_with_version(SubscribeType::Hummock, operation, info)
+            .await
     }
 
     pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(SubscribeType::Compactor, operation, info).await
+        self.notify_with_version(SubscribeType::Compactor, operation, info)
+            .await
+    }
+
+    pub fn notify_frontend_asynchronously(&self, operation: Operation, info: Info) {
+        self.notify_asynchronously(SubscribeType::Frontend, operation, info, None);
     }
 
     pub fn notify_hummock_asynchronously(&self, operation: Operation, info: Info) {
-        self.notify_asynchronously(SubscribeType::Hummock, operation, info);
+        self.notify_asynchronously(SubscribeType::Hummock, operation, info, None);
     }
 
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
@@ -167,7 +178,7 @@ where
             SubscribeType::Frontend => &mut core_guard.frontend_senders,
             SubscribeType::Hummock => &mut core_guard.hummock_senders,
             SubscribeType::Compactor => &mut core_guard.compactor_senders,
-            _ => unreachable!(),
+            SubscribeType::Unspecified => unreachable!(),
         };
 
         senders.insert(worker_key, sender);
@@ -179,16 +190,11 @@ where
     }
 
     pub async fn current_version(&self) -> NotificationVersion {
-        let core_guard = self.core.lock().await;
-        core_guard.current_version()
-    }
-
-    pub async fn core_guard(&self) -> MutexGuard<'_, NotificationManagerCore<S>> {
-        self.core.lock().await
+        self.current_version.lock().await.version()
     }
 }
 
-pub struct NotificationManagerCore<S> {
+struct NotificationManagerCore {
     /// The notification sender to frontends.
     frontend_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to nodes that subscribes the hummock.
@@ -197,37 +203,30 @@ pub struct NotificationManagerCore<S> {
     compactor_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to local subscribers.
     local_senders: Vec<UnboundedSender<LocalNotification>>,
-
-    /// The current notification version.
-    current_version: Version,
-    meta_store: Arc<S>,
 }
 
-impl<S> NotificationManagerCore<S>
-where
-    S: MetaStore,
-{
-    async fn new(meta_store: Arc<S>) -> Self {
+impl NotificationManagerCore {
+    fn new() -> Self {
         Self {
             frontend_senders: HashMap::new(),
             hummock_senders: HashMap::new(),
             compactor_senders: HashMap::new(),
             local_senders: vec![],
-            current_version: Version::new(&*meta_store).await,
-            meta_store,
         }
     }
 
-    async fn notify(&mut self, subscribe_type: SubscribeType, operation: Operation, info: &Info) {
-        self.current_version
-            .increase_version(&*self.meta_store)
-            .await
-            .unwrap();
+    fn notify(
+        &mut self,
+        subscribe_type: SubscribeType,
+        operation: Operation,
+        info: &Info,
+        version: NotificationVersion,
+    ) {
         let senders = match subscribe_type {
             SubscribeType::Frontend => &mut self.frontend_senders,
             SubscribeType::Hummock => &mut self.hummock_senders,
             SubscribeType::Compactor => &mut self.compactor_senders,
-            _ => unreachable!(),
+            SubscribeType::Unspecified => unreachable!(),
         };
 
         senders.retain(|worker_key, sender| {
@@ -236,7 +235,7 @@ where
                     status: None,
                     operation: operation as i32,
                     info: Some(info.clone()),
-                    version: self.current_version.version(),
+                    version,
                 }))
                 .inspect_err(|err| {
                     tracing::warn!(
@@ -248,9 +247,5 @@ where
                 })
                 .is_ok()
         });
-    }
-
-    pub fn current_version(&self) -> NotificationVersion {
-        self.current_version.version()
     }
 }

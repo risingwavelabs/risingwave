@@ -16,7 +16,6 @@ use itertools::Itertools;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{ParallelUnitMapping, WorkerNode, WorkerType};
-use risingwave_pb::hummock::HummockVersion;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -91,13 +90,6 @@ where
         (nodes, notification_version)
     }
 
-    async fn get_hummock_version_snapshot(&self) -> (HummockVersion, NotificationVersion) {
-        let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
-        let hummock_version = hummock_manager_guard.current_version.clone();
-        let notification_version = self.env.notification_manager().current_version().await;
-        (hummock_version, notification_version)
-    }
-
     async fn get_tables_and_creating_tables_snapshot(&self) -> (Vec<Table>, NotificationVersion) {
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
         let mut tables = catalog_guard.database.list_tables();
@@ -109,7 +101,6 @@ where
     async fn compactor_subscribe(&self, tx: UnboundedSender<Notification>) {
         let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await;
 
-        let notification_core = self.env.notification_manager().core_guard().await;
         tx.send(Ok(SubscribeResponse {
             status: None,
             operation: Operation::Snapshot as i32,
@@ -121,7 +112,7 @@ where
                 }),
                 ..Default::default()
             })),
-            version: notification_core.current_version(),
+            version: self.env.notification_manager().current_version().await,
         }))
         .unwrap()
     }
@@ -135,7 +126,6 @@ where
 
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
-        let notification_core = self.env.notification_manager().core_guard().await;
         tx.send(Ok(SubscribeResponse {
             status: None,
             operation: Operation::Snapshot as i32,
@@ -155,20 +145,23 @@ where
                     catalog_version,
                     parallel_unit_mapping_version,
                     worker_node_version,
-                    ..Default::default()
                 }),
                 ..Default::default()
             })),
-            version: notification_core.current_version(),
+            version: self.env.notification_manager().current_version().await,
         }))
         .unwrap();
     }
 
     async fn hummock_subscribe(&self, tx: UnboundedSender<Notification>) {
         let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await;
-        let (hummock_version, hummock_version_version) = self.get_hummock_version_snapshot().await;
+        let hummock_version = self
+            .hummock_manager
+            .get_read_guard()
+            .await
+            .current_version
+            .clone();
 
-        let notification_core = self.env.notification_manager().core_guard().await;
         tx.send(Ok(SubscribeResponse {
             status: None,
             operation: Operation::Snapshot as i32,
@@ -177,12 +170,11 @@ where
                 hummock_version: Some(hummock_version),
                 version: Some(SnapshotVersion {
                     catalog_version,
-                    hummock_version_version,
                     ..Default::default()
                 }),
                 ..Default::default()
             })),
-            version: notification_core.current_version(),
+            version: self.env.notification_manager().current_version().await,
         }))
         .unwrap()
     }

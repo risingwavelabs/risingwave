@@ -102,6 +102,14 @@ where
             }
         };
 
+        let max_notification_version = init_notification.version.max(
+            notification_vec
+                .iter()
+                .map(|notification| notification.version)
+                .max()
+                .unwrap_or_default(),
+        );
+
         let Info::Snapshot(info) = init_notification.info.as_ref().unwrap() else {
             unreachable!();
         };
@@ -110,7 +118,6 @@ where
             catalog_version,
             parallel_unit_mapping_version,
             worker_node_version,
-            hummock_version_version,
         } = info.version.clone().unwrap();
 
         notification_vec.retain_mut(|notification| match notification.info.as_ref().unwrap() {
@@ -124,19 +131,25 @@ where
             | Info::User(_) => notification.version > catalog_version,
             Info::ParallelUnitMapping(_) => notification.version > parallel_unit_mapping_version,
             Info::Node(_) => notification.version > worker_node_version,
-            Info::HummockVersionDeltas(_) => notification.version > hummock_version_version,
+            Info::HummockVersionDeltas(version_delta) => {
+                version_delta.version_deltas[0].id > info.hummock_version.as_ref().unwrap().id
+            }
             Info::HummockSnapshot(_) => true,
             Info::Snapshot(_) => unreachable!(),
         });
 
-        init_notification.version -= notification_vec.len() as u64;
+        let init_notification_version = max_notification_version - notification_vec.len() as u64;
+        init_notification.version = init_notification_version;
         self.observer_states
             .handle_initialization_notification(init_notification);
 
-        notification_vec.into_iter().for_each(|mut notification| {
-            notification.version += 1;
-            self.observer_states.handle_notification(notification);
-        });
+        notification_vec
+            .into_iter()
+            .enumerate()
+            .for_each(|(index, mut notification)| {
+                notification.version = init_notification_version + index as u64 + 1;
+                self.observer_states.handle_notification(notification);
+            });
     }
 
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and

@@ -31,7 +31,6 @@ use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
-use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
 use risingwave_storage::error::StorageResult;
@@ -104,27 +103,22 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
             )
             .await;
 
-        let (hummock_version, hummock_version_version) = {
-            let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
-            let hummock_version = hummock_manager_guard.current_version.clone();
-            let notification_version = self.notification_manager.current_version().await;
-            (hummock_version, notification_version)
-        };
+        let hummock_version = self
+            .hummock_manager
+            .get_read_guard()
+            .await
+            .current_version
+            .clone();
         let meta_snapshot = MetaSnapshot {
             hummock_version: Some(hummock_version),
-            version: Some(SnapshotVersion {
-                hummock_version_version,
-                ..Default::default()
-            }),
             ..Default::default()
         };
 
-        let notification_manager_core = self.notification_manager.core_guard().await;
         tx.send(Ok(SubscribeResponse {
             status: None,
             operation: Operation::Snapshot as i32,
             info: Some(Info::Snapshot(meta_snapshot)),
-            version: notification_manager_core.current_version(),
+            version: self.notification_manager.current_version().await,
         }))
         .unwrap();
 

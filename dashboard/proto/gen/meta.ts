@@ -391,7 +391,6 @@ export interface MetaSnapshot_SnapshotVersion {
   catalogVersion: number;
   parallelUnitMappingVersion: number;
   workerNodeVersion: number;
-  hummockVersionVersion: number;
 }
 
 export interface SubscribeResponse {
@@ -1586,7 +1585,7 @@ export const MetaSnapshot = {
 };
 
 function createBaseMetaSnapshot_SnapshotVersion(): MetaSnapshot_SnapshotVersion {
-  return { catalogVersion: 0, parallelUnitMappingVersion: 0, workerNodeVersion: 0, hummockVersionVersion: 0 };
+  return { catalogVersion: 0, parallelUnitMappingVersion: 0, workerNodeVersion: 0 };
 }
 
 export const MetaSnapshot_SnapshotVersion = {
@@ -1597,7 +1596,6 @@ export const MetaSnapshot_SnapshotVersion = {
         ? Number(object.parallelUnitMappingVersion)
         : 0,
       workerNodeVersion: isSet(object.workerNodeVersion) ? Number(object.workerNodeVersion) : 0,
-      hummockVersionVersion: isSet(object.hummockVersionVersion) ? Number(object.hummockVersionVersion) : 0,
     };
   },
 
@@ -1607,8 +1605,6 @@ export const MetaSnapshot_SnapshotVersion = {
     message.parallelUnitMappingVersion !== undefined &&
       (obj.parallelUnitMappingVersion = Math.round(message.parallelUnitMappingVersion));
     message.workerNodeVersion !== undefined && (obj.workerNodeVersion = Math.round(message.workerNodeVersion));
-    message.hummockVersionVersion !== undefined &&
-      (obj.hummockVersionVersion = Math.round(message.hummockVersionVersion));
     return obj;
   },
 
@@ -1617,7 +1613,6 @@ export const MetaSnapshot_SnapshotVersion = {
     message.catalogVersion = object.catalogVersion ?? 0;
     message.parallelUnitMappingVersion = object.parallelUnitMappingVersion ?? 0;
     message.workerNodeVersion = object.workerNodeVersion ?? 0;
-    message.hummockVersionVersion = object.hummockVersionVersion ?? 0;
     return message;
   },
 };
