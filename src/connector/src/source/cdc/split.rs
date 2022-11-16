@@ -20,11 +20,10 @@ use crate::source::{SplitId, SplitMetaData};
 
 /// The states of a CDC split, which will be persisted to checkpoint.
 /// The offset will be updated when received a new chunk, see `StreamChunkWithState`.
-/// FIXME: currently we only support single split for CDC source
+/// CDC source only has single split
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct CdcSplit {
     pub source_id: u32,
-    pub split_num: i32,
     pub start_offset: Option<String>,
 }
 
@@ -43,15 +42,14 @@ impl SplitMetaData for CdcSplit {
 }
 
 impl CdcSplit {
-    pub fn new(source_id: u32, split_num: i32, start_offset: String) -> CdcSplit {
+    pub fn new(source_id: u32, start_offset: String) -> CdcSplit {
         Self {
             source_id,
-            split_num,
             start_offset: Some(start_offset),
         }
     }
 
     pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        Self::new(self.source_id, self.split_num, start_offset)
+        Self::new(self.source_id, start_offset)
     }
 }

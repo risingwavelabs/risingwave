@@ -88,6 +88,9 @@ impl CdcSplitReader {
         while let Some(event_res) = cdc_stream.next().await {
             match event_res {
                 Ok(GetEventStreamResponse { events, .. }) => {
+                    if events.is_empty() {
+                        continue;
+                    }
                     let mut msgs = Vec::with_capacity(events.len());
                     for event in events {
                         msgs.push(SourceMessage::from(event));

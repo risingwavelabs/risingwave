@@ -36,7 +36,6 @@ impl SplitEnumerator for CdcSplitEnumerator {
     async fn list_splits(&mut self) -> anyhow::Result<Vec<CdcSplit>> {
         // CDC source only supports single split
         let splits = vec![CdcSplit {
-            split_num: 1,
             source_id: self.source_id,
             start_offset: None,
         }];
