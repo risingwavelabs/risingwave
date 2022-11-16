@@ -321,7 +321,7 @@ impl RequiredDist {
         if !plan.distribution().satisfies(self) {
             // FIXME(st1page);
             Ok(stream::Exchange {
-                dist: self.to_dist(&plan),
+                dist: self.to_dist(),
                 input: plan,
             }
             .into())
@@ -347,7 +347,7 @@ impl RequiredDist {
     }
 
     fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
-        let dist = self.to_dist(&plan);
+        let dist = self.to_dist();
         match plan.convention() {
             Convention::Batch => BatchExchange::new(plan, required_order.clone(), dist).into(),
             Convention::Stream => StreamExchange::new(plan, dist).into(),
@@ -355,13 +355,13 @@ impl RequiredDist {
         }
     }
 
-    fn to_dist(&self, plan: &impl GenericPlanRef) -> Distribution {
+    fn to_dist(&self) -> Distribution {
         match self {
             // all the distribution satisfy the Any, and the function can be only called by
             // `enforce_if_not_satisfies`
             RequiredDist::Any => unreachable!(),
             // TODO: add round robin distributed type
-            RequiredDist::AnyShard => Distribution::HashShard(plan.logical_pk().to_vec()),
+            RequiredDist::AnyShard => todo!(),
             RequiredDist::ShardByKey(required_keys) => {
                 Distribution::HashShard(required_keys.ones().collect())
             }
