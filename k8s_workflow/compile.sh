@@ -16,6 +16,7 @@ usage() {
         echo "-c    Run cargo clean. Default is false"
         echo "-o    Optimize. Compress debug section. Default is false"
         echo "-o    Move binaries to /risingwave/bin/{binaryname}. Default is false"
+        echo "-p    Build ONE specific package. By default this script builds risingwave_cmd AND risingwave_cmd_all"
         echo "-h    Show this help message"
     } 1>&2
 
@@ -26,8 +27,9 @@ c=false
 t=false
 o=false 
 m=false
+p=false
 
-while getopts ":tcohm" o; do
+while getopts ":p:tcohm" o; do
     case "${o}" in
         t)
             t=true
@@ -40,6 +42,9 @@ while getopts ":tcohm" o; do
             ;;
         m)
             m=true
+            ;;
+        p)
+            p=${OPTARG}
             ;;
         h)
             usage
@@ -66,9 +71,14 @@ if [[ $t == true ]]; then
 fi
 
 
+if [[ $p == false ]]; then 
+  echo "building risingwave_cmd and risingwave_cmd_all..."
+  cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features "static-link static-log-level"
+else
+  echo "building ${p}..."
+  cargo build -p ${p} --release --features "static-link static-log-level"
+fi
 
-echo "building risingwave_cmd and risingwave_cmd_all..."
-cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features "static-link static-log-level"
 echo -e "\tdone building"
 
 
