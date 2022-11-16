@@ -40,7 +40,7 @@ use crate::row_serde::row_serde_util::{
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
 use crate::table::{compute_vnode, Distribution, ExtractTableKeyIterator, TableIter};
-use crate::{Keyspace, StateStore, StateStoreIter};
+use crate::{StateStore, StateStoreIter};
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format, and is used in batch mode.
@@ -49,8 +49,8 @@ pub struct StorageTable<S: StateStore> {
     /// Id for this table.
     table_id: TableId,
 
-    /// The keyspace that the pk and value of the original table has.
-    keyspace: Keyspace<S>,
+    /// State store backend.
+    store: S,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
     /// RowSeqScanExecutor.
@@ -198,10 +198,9 @@ impl<S: StateStore> StorageTable<S> {
             })
             .collect_vec();
 
-        let keyspace = Keyspace::table_root(store, table_id);
         Self {
             table_id,
-            keyspace,
+            store,
             schema,
             pk_serializer,
             mapping: Arc::new(mapping),
@@ -246,10 +245,7 @@ impl<S: StateStore> StorageTable<S> {
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<Row>> {
         let epoch = wait_epoch.get_epoch();
-        self.keyspace
-            .state_store()
-            .try_wait_epoch(wait_epoch)
-            .await?;
+        self.store.try_wait_epoch(wait_epoch).await?;
         let serialized_pk =
             serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode_by_pk(pk));
         assert!(pk.size() <= self.pk_indices.len());
@@ -264,12 +260,7 @@ impl<S: StateStore> StorageTable<S> {
             ignore_range_tombstone: false,
             table_id: self.table_id,
         };
-        if let Some(value) = self
-            .keyspace
-            .state_store()
-            .get(&serialized_pk, epoch, read_options)
-            .await?
-        {
+        if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
             let full_row = self.row_deserializer.deserialize(value)?;
             let result_row = self.mapping.project(full_row);
             Ok(Some(result_row))
@@ -344,7 +335,7 @@ impl<S: StateStore> StorageTable<S> {
                     table_id: self.table_id,
                 };
                 let iter = StorageTableIterInner::<S>::new(
-                    &self.keyspace,
+                    &self.store,
                     self.mapping.clone(),
                     self.row_deserializer.clone(),
                     raw_key_range,
@@ -519,7 +510,7 @@ struct StorageTableIterInner<S: StateStore> {
 impl<S: StateStore> StorageTableIterInner<S> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
-        keyspace: &Keyspace<S>,
+        store: &S,
         mapping: Arc<ColumnMapping>,
         row_deserializer: Arc<RowDeserializer>,
         raw_key_range: R,
@@ -535,11 +526,8 @@ impl<S: StateStore> StorageTableIterInner<S> {
             raw_key_range.start_bound().map(|b| b.as_ref().to_vec()),
             raw_key_range.end_bound().map(|b| b.as_ref().to_vec()),
         );
-        keyspace.state_store().try_wait_epoch(epoch).await?;
-        let iter = keyspace
-            .state_store()
-            .iter(range, raw_epoch, read_options)
-            .await?;
+        store.try_wait_epoch(epoch).await?;
+        let iter = store.iter(range, raw_epoch, read_options).await?;
         let iter = ExtractTableKeyIterator { iter };
         let iter = Self {
             iter,

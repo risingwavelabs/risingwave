@@ -47,7 +47,7 @@ use crate::storage_value::StorageValue;
 use crate::store::{LocalStateStore, ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
 use crate::table::streaming_table::mem_table::MemTableError;
 use crate::table::{compute_chunk_vnode, compute_vnode, Distribution, ExtractTableKeyIterator};
-use crate::{Keyspace, StateStore, StateStoreIter};
+use crate::{StateStore, StateStoreIter};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
@@ -59,8 +59,8 @@ pub struct StateTable<S: StateStore> {
     /// Buffer row operations.
     mem_table: MemTable,
 
-    /// write into state store.
-    keyspace: Keyspace<S::Local>,
+    /// State store backend.
+    store: S::Local,
 
     /// Storage backend.
     // store: S::Local,
@@ -159,7 +159,6 @@ impl<S: StateStore> StateTable<S> {
             .collect_vec();
 
         let local_state_store = store.new_local(table_id).await;
-        let keyspace = Keyspace::table_root(local_state_store, table_id);
 
         let pk_data_types = pk_indices
             .iter()
@@ -208,7 +207,7 @@ impl<S: StateStore> StateTable<S> {
         Self {
             table_id,
             mem_table: MemTable::new(),
-            keyspace,
+            store: local_state_store,
             pk_serde,
             row_deserializer: RowDeserializer::new(data_types),
             pk_indices: pk_indices.to_vec(),
@@ -279,7 +278,6 @@ impl<S: StateStore> StateTable<S> {
         value_indices: Option<Vec<usize>>,
     ) -> Self {
         let local_state_store = store.new_local(table_id).await;
-        let keyspace = Keyspace::table_root(local_state_store, table_id);
 
         let pk_data_types = pk_indices
             .iter()
@@ -311,7 +309,7 @@ impl<S: StateStore> StateTable<S> {
         Self {
             table_id,
             mem_table: MemTable::new(),
-            keyspace,
+            store: local_state_store,
             pk_serde,
             row_deserializer: RowDeserializer::new(data_types),
             pk_indices,
@@ -462,8 +460,7 @@ impl<S: StateStore> StateTable<S> {
                     ignore_range_tombstone: false,
                 };
                 if let Some(storage_row_bytes) = self
-                    .keyspace
-                    .state_store()
+                    .store
                     .get(&serialized_pk, self.epoch(), read_options)
                     .await?
                 {
@@ -654,7 +651,7 @@ impl<S: StateStore> StateTable<S> {
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
-        let mut write_batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+        let mut write_batch = self.store.start_write_batch(WriteOptions {
             epoch,
             table_id: self.table_id(),
         });
@@ -702,11 +699,7 @@ impl<S: StateStore> StateTable<S> {
             table_id: self.table_id,
             ignore_range_tombstone: false,
         };
-        let stored_value = self
-            .keyspace
-            .state_store()
-            .get(key, epoch, read_options)
-            .await?;
+        let stored_value = self.store.get(key, epoch, read_options).await?;
 
         if let Some(stored_value) = stored_value {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
@@ -738,11 +731,7 @@ impl<S: StateStore> StateTable<S> {
             table_id: self.table_id,
             ignore_range_tombstone: false,
         };
-        let stored_value = self
-            .keyspace
-            .state_store()
-            .get(key, epoch, read_options)
-            .await?;
+        let stored_value = self.store.get(key, epoch, read_options).await?;
 
         if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
@@ -776,11 +765,7 @@ impl<S: StateStore> StateTable<S> {
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
         };
-        let stored_value = self
-            .keyspace
-            .state_store()
-            .get(key, epoch, read_options)
-            .await?;
+        let stored_value = self.store.get(key, epoch, read_options).await?;
 
         if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
@@ -978,7 +963,7 @@ impl<S: StateStore> StateTable<S> {
 
         // Storage iterator.
         let storage_iter = StorageIterInner::<S::Local>::new(
-            &self.keyspace,
+            &self.store,
             epoch,
             key_range,
             read_options,
@@ -1119,16 +1104,13 @@ struct StorageIterInner<S: LocalStateStore> {
 
 impl<S: LocalStateStore> StorageIterInner<S> {
     async fn new(
-        keyspace: &Keyspace<S>,
+        store: &S,
         epoch: u64,
         raw_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
         deserializer: RowDeserializer,
     ) -> StorageResult<Self> {
-        let iter = keyspace
-            .state_store()
-            .iter(raw_key_range, epoch, read_options)
-            .await?;
+        let iter = store.iter(raw_key_range, epoch, read_options).await?;
         let iter = ExtractTableKeyIterator { iter };
         let iter = Self { iter, deserializer };
         Ok(iter)
