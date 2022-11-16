@@ -26,9 +26,6 @@ use crate::source::base::{SourceMessage, SplitReader};
 use crate::source::cdc::CdcProperties;
 use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
 
-// FIXME: put the connector node addr to config file
-const CDC_NODE_ENDPOINT: &str = "127.0.0.1:60061";
-
 pub struct CdcSplitReader {
     source_id: u64,
     props: CdcProperties,
@@ -70,7 +67,7 @@ impl CdcSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(self) {
         let props = &self.props;
-        let cdc_client = CdcClient::new(HostAddr::from_str(CDC_NODE_ENDPOINT)?).await?;
+        let cdc_client = CdcClient::new(HostAddr::from_str(&props.connector_node_addr)?).await?;
         let cdc_stream = cdc_client
             .get_event_stream(
                 self.source_id,

@@ -82,6 +82,10 @@ pub struct ComputeNodeOpts {
     /// Enable managed lru cache, or use local lru cache.
     #[clap(long)]
     pub enable_managed_cache: bool,
+
+    /// Endpoint of the connector node
+    #[clap(long, default_value = "127.0.0.1:60061")]
+    pub connector_node_addr: String,
 }
 
 use std::future::Future;

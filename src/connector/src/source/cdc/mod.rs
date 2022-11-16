@@ -26,6 +26,8 @@ pub const CDC_CONNECTOR: &str = "cdc";
 #[derive(Clone, Debug, Deserialize)]
 pub struct CdcProperties {
     #[serde(default)]
+    pub connector_node_addr: String,
+    #[serde(default)]
     pub source_id: u32,
     #[serde(default)]
     pub start_offset: String,

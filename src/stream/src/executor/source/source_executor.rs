@@ -751,6 +751,7 @@ mod tests {
             properties,
             ProstSourceInfo::StreamSource(stream_source_info),
             source_manager,
+            Default::default(),
         )
     }
 

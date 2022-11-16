@@ -219,6 +219,7 @@ pub async fn compute_node_serve(
     let stream_env = StreamEnvironment::new(
         source_mgr,
         client_addr.clone(),
+        opts.connector_node_addr,
         stream_config,
         worker_id,
         state_store,
