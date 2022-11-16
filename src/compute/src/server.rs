@@ -25,6 +25,8 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::compute::config_service_server::ConfigServiceServer;
+use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
@@ -48,8 +50,10 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
+use crate::rpc::service::health_service::HealthServiceImpl;
 use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
@@ -189,7 +193,7 @@ pub async fn compute_node_serve(
     };
 
     // Initialize the managers.
-    let batch_mgr = Arc::new(BatchManager::new(config.batch.worker_threads_num));
+    let batch_mgr = Arc::new(BatchManager::new(config.batch.clone()));
     let stream_mgr = Arc::new(LocalStreamManager::new(
         client_addr.clone(),
         state_store.clone(),
@@ -238,9 +242,11 @@ pub async fn compute_node_serve(
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv =
-        ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone(), exchange_srv_metrics);
+        ExchangeServiceImpl::new(batch_mgr.clone(), stream_mgr.clone(), exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
-    let monitor_srv = MonitorServiceImpl::new(stream_mgr, grpc_stack_trace_mgr.clone());
+    let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), grpc_stack_trace_mgr.clone());
+    let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
+    let health_srv = HealthServiceImpl::new();
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
@@ -255,6 +261,8 @@ pub async fn compute_node_serve(
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
             .add_service(MonitorServiceServer::new(monitor_srv))
+            .add_service(ConfigServiceServer::new(config_srv))
+            .add_service(HealthServer::new(health_srv))
             .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},

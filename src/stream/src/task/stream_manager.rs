@@ -347,6 +347,11 @@ impl LocalStreamManager {
         let mut core = self.core.lock().await;
         core.build_actors(actors, env).await
     }
+
+    pub async fn config(&self) -> StreamingConfig {
+        let core = self.core.lock().await;
+        core.config.clone()
+    }
 }
 
 fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
