@@ -122,14 +122,12 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
         )
         .await?;
 
-        if let StateStoreImpl::HummockStateStore(hummock_state_store) = state_store_impl {
+        if let Some(hummock_state_store) = state_store_impl.as_hummock() {
             Ok((
                 meta_client,
                 hummock_state_store
-                    .inner()
-                    .actual
                     .clone()
-                    .monitored(hummock_state_store.stats()),
+                    .monitored(metrics.state_store_metrics.clone()),
                 metrics,
             ))
         } else {

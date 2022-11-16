@@ -26,6 +26,7 @@
 #![warn(clippy::await_holding_lock)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(path_file_prefix)]
+#![feature(let_chains)]
 
 mod opts;
 

@@ -124,12 +124,16 @@ fn bench_json_parser(c: &mut Criterion) {
     let descs = get_descs();
     let parser = JsonParser {};
     let records = generate_all_json();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     c.bench_function("json_parser", |b| {
-        b.iter(|| {
+        b.to_async(&rt).iter(|| async {
             let mut builder = SourceStreamChunkBuilder::with_capacity(descs.clone(), NUM_RECORDS);
             for record in &records {
                 let writer = builder.row_writer();
-                parser.parse(record, writer).unwrap();
+                parser.parse(record, writer).await.unwrap();
             }
         })
     });

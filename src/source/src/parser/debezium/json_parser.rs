@@ -25,7 +25,6 @@ use crate::parser::common::json_parse_value;
 use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct DebeziumEvent {
     pub payload: Payload,
 }
@@ -40,8 +39,13 @@ pub struct Payload {
 #[derive(Debug)]
 pub struct DebeziumJsonParser;
 
+#[async_trait::async_trait]
 impl SourceParser for DebeziumJsonParser {
-    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+    async fn parse(
+        &self,
+        payload: &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
         let event: DebeziumEvent = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 

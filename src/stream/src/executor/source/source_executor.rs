@@ -211,6 +211,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .collect_vec();
 
         if !cache.is_empty() {
+            tracing::debug!(actor_id = self.ctx.id, state = ?cache, "take snapshot");
             self.split_state_store.take_snapshot(cache).await?
         }
         // commit anyway, even if no message saved
@@ -300,11 +301,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::info!(
-            "start actor {:?} with state {:?}",
-            self.ctx.id,
-            recover_state
-        );
+        tracing::info!(actor_id = self.ctx.id, state = ?recover_state, "start with state");
 
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
@@ -392,8 +389,10 @@ impl<S: StateStore> SourceExecutor<S> {
                                     .stream_source_splits
                                     .iter()
                                     .filter(|origin_split| &origin_split.id() == split)
-                                    .exactly_one()
-                                    .ok();
+                                    .at_most_one()
+                                    .unwrap_or_else(|_| {
+                                        panic!("multiple splits with same id `{split}`")
+                                    });
 
                                 origin_split_impl.map(|split_impl| {
                                     (split.clone(), split_impl.update(offset.clone()))
@@ -438,6 +437,12 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
             if let Some(target_state) = self.get_diff(Some(target_splits)).await? {
+                tracing::info!(
+                    actor_id = self.ctx.id,
+                    state = ?target_state,
+                    "apply split change"
+                );
+
                 self.replace_stream_reader_with_target_state(source_desc, stream, target_state)
                     .await?;
             }
@@ -760,7 +765,7 @@ mod tests {
         let pk_column_ids = vec![0];
         let stream_source_info = StreamSourceInfo {
             row_format: ProstRowFormatType::Json as i32,
-            row_schema_location: "".to_string(),
+            ..Default::default()
         };
         let source_manager = Arc::new(TableSourceManager::default());
         SourceDescBuilder::new(
@@ -831,6 +836,9 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids.clone(),
             2,
+            None,
+            0,
+            false,
         )
         .await
         .boxed()

@@ -38,8 +38,13 @@ fn ensure_not_null<'a, 'b: 'a>(value: &'a BorrowedValue<'b>) -> Option<&'a Borro
 #[derive(Debug)]
 pub struct DebeziumJsonParser;
 
+#[async_trait::async_trait]
 impl SourceParser for DebeziumJsonParser {
-    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+    async fn parse(
+        &self,
+        payload: &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
         let mut payload_mut = payload.to_vec();
         let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;

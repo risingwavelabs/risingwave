@@ -15,12 +15,11 @@
 use std::sync::LazyLock;
 
 use itertools::Itertools;
-use risingwave_common::array::Row;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 use crate::expr::cast_map_array;
-use crate::handler::util::data_type_to_type_oid;
 
 /// The catalog `pg_cast` stores data type conversion paths.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
@@ -41,12 +40,8 @@ pub static PG_CAST_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         .map(|(idx, (src, target, ctx))| {
             Row::new(vec![
                 Some(ScalarImpl::Int32(idx as i32)),
-                Some(ScalarImpl::Int32(
-                    data_type_to_type_oid(DataType::from(*src)).as_number(),
-                )),
-                Some(ScalarImpl::Int32(
-                    data_type_to_type_oid(DataType::from(*target)).as_number(),
-                )),
+                Some(ScalarImpl::Int32(DataType::from(*src).to_oid())),
+                Some(ScalarImpl::Int32(DataType::from(*target).to_oid())),
                 Some(ScalarImpl::Utf8(ctx.into())),
             ])
         })
