@@ -323,13 +323,13 @@ impl Row2 for Empty {
 }
 
 pub fn empty() -> Empty {
-    Empty(())
+    assert_row(Empty(()))
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Once<D>(D);
 
-impl<D: ToDatumRef + std::fmt::Debug + Eq> Row2 for Once<D> {
+impl<D: ToDatumRef> Row2 for Once<D> {
     type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
@@ -348,5 +348,5 @@ impl<D: ToDatumRef + std::fmt::Debug + Eq> Row2 for Once<D> {
 }
 
 pub fn once<D: ToDatumRef>(datum: D) -> Once<D> {
-    Once(datum)
+    assert_row(Once(datum))
 }

@@ -637,7 +637,7 @@ impl ToOwnedDatum for DatumRef<'_> {
     }
 }
 
-pub trait ToDatumRef {
+pub trait ToDatumRef: PartialEq + Eq + std::fmt::Debug {
     fn to_datum_ref(&self) -> DatumRef<'_>;
 }
 
