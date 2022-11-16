@@ -6,11 +6,12 @@ DOCKER_BUILDKIT = 1
 build-devcont: 
 	docker build -t rwk8scont -f k8s_workflow/Dockerfile_base .
 
+# You may need to change the memory settings in Docker Desktop > Settings > Resources > Advanced
 # builds all risingwave containers
 build-docker:
 	mkdir -p docker_target
 	mkdir -p docker_bin
-	docker run -v ${PWD}/src:/risingwave/src -v ${PWD}/docker_bin:/risingwave/bin -v ${PWD}/docker_target:/risingwave/target -v ${PWD}/k8s_workflow:/risingwave/k8s_workflow --workdir /risingwave rwk8scont /bin/bash -c "./k8s_workflow/compile.sh"
+	docker run --memory=13g --cpus="7" -v ${PWD}/src:/risingwave/src -v ${PWD}/docker_bin:/risingwave/bin -v ${PWD}/docker_target:/risingwave/target -v ${PWD}/k8s_workflow:/risingwave/k8s_workflow --workdir /risingwave rwk8scont /bin/bash -c "./k8s_workflow/compile.sh"
 	./k8s_workflow/build.sh
 
 k8s-frontend-node: build-docker
@@ -47,4 +48,11 @@ k8s-all: k8s-meta-node k8s-compactor-node k8s-frontend-node
 prune: 
 	docker system prune
 
+# remove docker build directories
+clean: 
+	sudo rm -rf docker_bin
+	sudo rm -rf docker_target
+	mkdir docker_bin
+	mkdir docker_target
 
+# If you get "Blocking waiting for file lock on build directory", please delete all other containers that still try to compile 
