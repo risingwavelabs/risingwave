@@ -16,7 +16,7 @@ use futures::{pin_mut, StreamExt};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::row::Row;
+use risingwave_common::row::{self, Row};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
@@ -752,7 +752,7 @@ async fn test_state_table_iter_with_pk_range() {
 
     let pk_range = (
         std::ops::Bound::Included(Row(vec![Some(2_i32.into())])),
-        std::ops::Bound::Unbounded,
+        std::ops::Bound::<row::Empty>::Unbounded,
     );
     let iter = state
         .iter_with_pk_range(&pk_range, DEFAULT_VNODE)

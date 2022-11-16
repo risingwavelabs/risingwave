@@ -25,7 +25,7 @@ use crate::hash::HashCode;
 use crate::types::{hash_datum_ref, to_datum_ref, Datum, DatumRef, ToOwnedDatum};
 use crate::util::value_encoding;
 
-pub trait Row2: Sized + std::fmt::Debug {
+pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     type DatumIter<'a>: Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
@@ -33,6 +33,10 @@ pub trait Row2: Sized + std::fmt::Debug {
     fn datum_at(&self, index: usize) -> DatumRef<'_>;
 
     fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     fn datums(&self) -> Self::DatumIter<'_>;
 
@@ -76,7 +80,7 @@ pub trait RowExt: Row2 {
         })
     }
 
-    fn project<'i>(self, indices: &'i [usize]) -> Project<'i, Self>
+    fn project(self, indices: &[usize]) -> Project<'_, Self>
     where
         Self: Sized,
     {
@@ -91,6 +95,13 @@ pub struct Chain<R1, R2> {
     r1: R1,
     r2: R2,
 }
+
+impl<R1: Row2, R2: Row2> PartialEq for Chain<R1, R2> {
+    fn eq(&self, other: &Self) -> bool {
+        self.datums().eq(other.datums())
+    }
+}
+impl<R1: Row2, R2: Row2> Eq for Chain<R1, R2> {}
 
 impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
     type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
@@ -110,6 +121,10 @@ impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
         self.r1.len() + self.r2.len()
     }
 
+    fn is_empty(&self) -> bool {
+        self.r1.is_empty() && self.r2.is_empty()
+    }
+
     fn datums(&self) -> Self::DatumIter<'_> {
         self.r1.datums().chain(self.r2.datums())
     }
@@ -120,6 +135,13 @@ pub struct Project<'i, R> {
     row: R,
     indices: &'i [usize],
 }
+
+impl<'i, R: Row2> PartialEq for Project<'i, R> {
+    fn eq(&self, other: &Self) -> bool {
+        self.datums().eq(other.datums())
+    }
+}
+impl<'i, R: Row2> Eq for Project<'i, R> {}
 
 impl<'i, R: Row2> Row2 for Project<'i, R> {
     type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
@@ -148,6 +170,10 @@ macro_rules! deref_forward_row {
 
         fn len(&self) -> usize {
             (**self).len()
+        }
+
+        fn is_empty(&self) -> bool {
+            (**self).is_empty()
         }
 
         fn datums(&self) -> Self::DatumIter<'_> {
@@ -186,7 +212,7 @@ impl Row2 for &[Datum] {
         Self: 'a;
 
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        to_datum_ref(&self.as_ref()[index])
+        to_datum_ref(&self[index])
     }
 
     fn len(&self) -> usize {
@@ -257,5 +283,26 @@ impl Row2 for RowRef<'_> {
 
     fn datums(&self) -> Self::DatumIter<'_> {
         RowRef::values(self)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Empty;
+
+impl Row2 for Empty {
+    type DatumIter<'a> = impl Iterator<Item = DatumRef<'a>>
+    where
+        Self: 'a;
+
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        [][index]
+    }
+
+    fn len(&self) -> usize {
+        0
+    }
+
+    fn datums(&self) -> Self::DatumIter<'_> {
+        std::iter::empty()
     }
 }

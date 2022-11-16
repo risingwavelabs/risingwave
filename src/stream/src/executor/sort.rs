@@ -21,7 +21,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
+use risingwave_common::row::{self, Row};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
@@ -276,7 +276,13 @@ impl<S: StateStore> SortExecutor<S> {
         {
             let value_iter = self
                 .state_table
-                .iter_with_pk_range(&(Bound::Unbounded, Bound::Unbounded), owned_vnode as _)
+                .iter_with_pk_range(
+                    &(
+                        Bound::<row::Empty>::Unbounded,
+                        Bound::<row::Empty>::Unbounded,
+                    ),
+                    owned_vnode as _,
+                )
                 .await?;
             let value_iter = Box::pin(value_iter);
             values_per_vnode.push(value_iter);
