@@ -37,8 +37,13 @@ pub struct MaxwellEvent {
 #[derive(Debug)]
 pub struct MaxwellParser;
 
+#[async_trait::async_trait]
 impl SourceParser for MaxwellParser {
-    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+    async fn parse(
+        &self,
+        payload: &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
         let event: MaxwellEvent = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
