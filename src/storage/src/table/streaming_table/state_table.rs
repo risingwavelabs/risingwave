@@ -45,7 +45,7 @@ use crate::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use crate::storage_value::StorageValue;
-use crate::store::{LocalStateStore, ReadOptions, WriteOptions};
+use crate::store::{LocalStateStore, ReadOptions, StateStoreIterExt, WriteOptions};
 use crate::table::streaming_table::mem_table::MemTableError;
 use crate::table::{compute_chunk_vnode, compute_vnode, Distribution};
 use crate::{Keyspace, StateStore, StateStoreIter};
@@ -225,7 +225,6 @@ impl<S: StateStore> StateTable<S> {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        let value_indices = (0..columns.len()).collect_vec();
         Self::new_with_distribution(
             store,
             table_id,
@@ -233,7 +232,7 @@ impl<S: StateStore> StateTable<S> {
             order_types,
             pk_indices,
             Distribution::fallback(),
-            value_indices,
+            None,
         )
         .await
     }
@@ -254,7 +253,7 @@ impl<S: StateStore> StateTable<S> {
             order_types,
             pk_indices,
             Distribution::fallback(),
-            value_indices,
+            Some(value_indices),
         )
         .await
     }
@@ -271,7 +270,7 @@ impl<S: StateStore> StateTable<S> {
             dist_key_indices,
             vnodes,
         }: Distribution,
-        value_indices: Vec<usize>,
+        value_indices: Option<Vec<usize>>,
     ) -> Self {
         let local_state_store = store.new_local(table_id).await;
         let keyspace = Keyspace::table_root(local_state_store, table_id);
@@ -282,10 +281,13 @@ impl<S: StateStore> StateTable<S> {
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
-        let data_types = value_indices
-            .iter()
-            .map(|idx| table_columns[*idx].data_type.clone())
-            .collect();
+        let data_types = match &value_indices {
+            Some(value_indices) => value_indices
+                .iter()
+                .map(|idx| table_columns[*idx].data_type.clone())
+                .collect(),
+            None => table_columns.iter().map(|c| c.data_type.clone()).collect(),
+        };
         let dist_key_in_pk_indices = dist_key_indices
             .iter()
             .map(|&di| {
@@ -312,7 +314,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: Default::default(),
             disable_sanity_check: false,
             vnode_col_idx_in_pk: None,
-            value_indices: Some(value_indices),
+            value_indices: value_indices,
             epoch: None,
         }
     }

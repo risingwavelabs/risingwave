@@ -178,74 +178,18 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 continue;
                             }
 
-                            // fill cache
-                            self.materialize_cache
-                                .fetch_keys(buffer.keys().map(|v| v.as_ref()), &self.state_table)
+                            let fixed_changes = self
+                                .materialize_cache
+                                .apply_changes(buffer, &self.state_table)
                                 .await?;
-                            // handle pk conflict
-                            let mut output = buffer.buffer.clone();
-                            for (key, row_op) in buffer.into_parts() {
-                                match row_op {
-                                    RowOp::Insert(row) => {
-                                        if let Some(cache_row) =
-                                            self.materialize_cache.force_get(&key)
-                                        {
-                                            // double insert
-                                            output.insert(
-                                                key.clone(),
-                                                RowOp::Update((cache_row.row.clone(), row.clone())),
-                                            );
-                                        }
 
-                                        self.materialize_cache
-                                            .insert(key, Some(CompactedRow { row }));
-                                    }
-                                    RowOp::Delete(old_row) => {
-                                        if let Some(cache_row) =
-                                            self.materialize_cache.force_get(&key)
-                                        {
-                                            if cache_row.row != old_row {
-                                                // delete a nonexistent value
-                                                output.insert(
-                                                    key.clone(),
-                                                    RowOp::Delete(cache_row.row.clone()),
-                                                );
-                                            }
-                                        } else {
-                                            // delete a nonexistent pk
-                                            output.remove(&key);
-                                        }
-                                        self.materialize_cache.insert(key, None);
-                                    }
-                                    RowOp::Update((old_row, new_row)) => {
-                                        if let Some(cache_row) =
-                                            self.materialize_cache.force_get(&key)
-                                        {
-                                            if cache_row.row != old_row {
-                                                // update a nonexistent old value
-                                                output.insert(
-                                                    key.clone(),
-                                                    RowOp::Update((
-                                                        cache_row.row.clone(),
-                                                        new_row.clone(),
-                                                    )),
-                                                );
-                                            }
-                                        } else {
-                                            // update a nonexistent pk
-                                            output.insert(
-                                                key.clone(),
-                                                RowOp::Insert(new_row.clone()),
-                                            );
-                                        }
-                                        self.materialize_cache
-                                            .insert(key, Some(CompactedRow { row: new_row }));
-                                    }
-                                }
+                            // TODO(st1page): when materialize partial columns(), we should
+                            // construct some columns in the pk
+                            if self.state_table.value_indices().is_some() {
+                                panic!("materialize executor with data check can not handle only materialize partial columns")
                             }
 
-                            // // construct output chunk
-                            match generator_output(output, data_types.clone())? {
+                            match generate_output(fixed_changes, data_types.clone())? {
                                 Some(output_chunk) => {
                                     self.state_table.write_chunk(output_chunk.clone());
                                     Message::Chunk(output_chunk)
@@ -275,15 +219,16 @@ impl<S: StateStore> MaterializeExecutor<S> {
 }
 
 /// Construct output `StreamChunk` from given buffer.
-fn generator_output(
-    output: HashMap<Vec<u8>, RowOp>,
+fn generate_output(
+    changes: Vec<(Vec<u8>, RowOp)>,
     data_types: Vec<DataType>,
 ) -> StreamExecutorResult<Option<StreamChunk>> {
     // construct output chunk
+    // TODO(st1page): when materialize partial columns(), we should construct some columns in the pk
     let mut new_ops: Vec<Op> = vec![];
     let mut new_rows: Vec<Vec<u8>> = vec![];
     let row_deserializer = RowDeserializer::new(data_types.clone());
-    for (_, row_op) in output {
+    for (_, row_op) in changes {
         match row_op {
             RowOp::Insert(value) => {
                 new_ops.push(Op::Insert);
@@ -471,7 +416,54 @@ impl MaterializeCache {
         Self { data: cache }
     }
 
-    pub async fn fetch_keys<'a, S: StateStore>(
+    pub async fn apply_changes<'a, S: StateStore>(
+        &mut self,
+        changes: MaterializeBuffer,
+        table: &StateTable<S>,
+    ) -> StreamExecutorResult<Vec<(Vec<u8>, RowOp)>> {
+        // fill cache
+        self.fetch_keys(changes.keys().map(|v| v.as_ref()), table)
+            .await?;
+
+        let mut fixed_changes = vec![];
+        // handle pk conflict
+        for (key, row_op) in changes.into_parts() {
+            match row_op {
+                RowOp::Insert(new_row) => {
+                    match self.force_get(&key) {
+                        Some(old_row) => fixed_changes.push((
+                            key.clone(),
+                            RowOp::Update((old_row.row.clone(), new_row.clone())),
+                        )),
+                        None => fixed_changes.push((key.clone(), RowOp::Insert(new_row.clone()))),
+                    };
+                    self.put(key, Some(CompactedRow { row: new_row }));
+                }
+                RowOp::Delete(_) => {
+                    match self.force_get(&key) {
+                        Some(old_row) => {
+                            fixed_changes.push((key.clone(), RowOp::Delete(old_row.row.clone())));
+                        }
+                        None => (), // delete a nonexistent value
+                    };
+                    self.put(key, None);
+                }
+                RowOp::Update((_, new_row)) => {
+                    match self.force_get(&key) {
+                        Some(old_row) => fixed_changes.push((
+                            key.clone(),
+                            RowOp::Update((old_row.row.clone(), new_row.clone())),
+                        )),
+                        None => fixed_changes.push((key.clone(), RowOp::Insert(new_row.clone()))),
+                    }
+                    self.put(key, Some(CompactedRow { row: new_row }));
+                }
+            }
+        }
+        Ok(fixed_changes)
+    }
+
+    async fn fetch_keys<'a, S: StateStore>(
         &mut self,
         keys: impl Iterator<Item = &'a [u8]>,
         table: &StateTable<S>,
@@ -498,17 +490,18 @@ impl MaterializeCache {
     }
 
     pub fn force_get(&mut self, key: &[u8]) -> &Option<CompactedRow> {
-        self.data.get(key).expect(&format!(
-            "the key {:?} has not been fetched in the materialize executor's cache ",
-            key
-        ))
+        self.data.get(key).unwrap_or_else(|| {
+            panic!(
+                "the key {:?} has not been fetched in the materialize executor's cache ",
+                key
+            )
+        })
     }
 
-    pub fn insert(&mut self, key: Vec<u8>, value: Option<CompactedRow>) {
+    pub fn put(&mut self, key: Vec<u8>, value: Option<CompactedRow>) {
         self.data.push(key, value);
     }
 }
-
 #[cfg(test)]
 mod tests {
 
