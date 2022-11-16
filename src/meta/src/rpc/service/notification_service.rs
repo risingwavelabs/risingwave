@@ -78,7 +78,7 @@ where
         &self,
     ) -> (Vec<ParallelUnitMapping>, NotificationVersion) {
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
-        let parallel_unit_mappings = fragment_guard.all_fragment_mappings().collect_vec();
+        let parallel_unit_mappings = fragment_guard.all_running_fragment_mappings().collect_vec();
         let notification_version = self.env.notification_manager().current_version().await;
         (parallel_unit_mappings, notification_version)
     }

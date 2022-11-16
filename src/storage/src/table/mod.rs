@@ -125,7 +125,11 @@ fn compute_vnode(row: &Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
 }
 
 /// Get vnode values with `indices` on the given `chunk`.
-fn compute_chunk_vnode(chunk: &DataChunk, indices: &[usize], vnodes: &Bitmap) -> Vec<VirtualNode> {
+pub fn compute_chunk_vnode(
+    chunk: &DataChunk,
+    indices: &[usize],
+    vnodes: &Bitmap,
+) -> Vec<VirtualNode> {
     if indices.is_empty() {
         vec![DEFAULT_VNODE; chunk.capacity()]
     } else {

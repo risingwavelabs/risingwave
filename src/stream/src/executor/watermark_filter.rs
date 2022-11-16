@@ -313,7 +313,7 @@ mod tests {
             order_types.to_vec(),
             pk_indices.to_vec(),
             Distribution::all_vnodes(vec![0]),
-            val_indices.to_vec(),
+            Some(val_indices.to_vec()),
         )
         .await
     }

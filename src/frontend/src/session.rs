@@ -794,7 +794,7 @@ impl Session<PgResponseStream> for SessionImpl {
             )));
         }
         let stmt = stmts.swap_remove(0);
-        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescripyor> is same as
+        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescriptor> is same as
         // result of run_statement().
         let rsp = match stmt {
             Statement::Query(_) => infer(self, stmt, sql).map_err(|e| {
@@ -865,6 +865,13 @@ impl Session<PgResponseStream> for SessionImpl {
                         DataType::VARCHAR.type_len(),
                     ),
                 ]
+            }
+            Statement::Explain { .. } => {
+                vec![PgFieldDescriptor::new(
+                    "QUERY PLAN".to_owned(),
+                    DataType::VARCHAR.to_oid(),
+                    DataType::VARCHAR.type_len(),
+                )]
             }
             _ => {
                 panic!("infer_return_type only support query statement");

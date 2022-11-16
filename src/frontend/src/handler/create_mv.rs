@@ -93,7 +93,7 @@ pub fn gen_create_mv_plan(
             .into());
         }
     }
-    let materialize = plan_root.gen_create_mv_plan(table_name, definition, col_names)?;
+    let materialize = plan_root.gen_create_mv_plan(table_name, definition, col_names, false)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
