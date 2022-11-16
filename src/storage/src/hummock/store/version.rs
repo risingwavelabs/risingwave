@@ -504,10 +504,10 @@ impl HummockVersionReader {
         }
         let mut staging_sst_iter_count = 0;
         // encode once
-        let prefix_hint = if let Some(prefix) = read_options.prefix_hint.as_ref() {
-            UserKey::new(read_options.table_id, TableKey(prefix)).encode()
+        let bloom_filter_key = if let Some(prefix) = read_options.prefix_hint.as_ref() {
+            Some(UserKey::new(read_options.table_id, TableKey(prefix)).encode())
         } else {
-            vec![]
+            None
         };
 
         for sstable_info in &uncommitted_ssts {
@@ -516,14 +516,15 @@ impl HummockVersionReader {
                 .sstable(sstable_info, &mut local_stats)
                 .in_span(Span::enter_with_local_parent("get_sstable"))
                 .await?;
-            if !prefix_hint.is_empty() {
+            if let Some(bloom_filter_key) = bloom_filter_key.as_ref() {
                 if !hit_sstable_bloom_filter(
                     table_holder.value(),
-                    prefix_hint.as_slice(),
+                    bloom_filter_key.as_slice(),
                     &mut local_stats,
                 ) {
                     continue;
                 }
+
                 if !table_holder.value().meta.range_tombstone_list.is_empty()
                     && !read_options.ignore_range_tombstone
                 {
@@ -619,10 +620,10 @@ impl HummockVersionReader {
                         .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if !prefix_hint.is_empty()
+                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref()
                         && !hit_sstable_bloom_filter(
                             sstable.value(),
-                            prefix_hint.as_slice(),
+                            bloom_filter_key.as_slice(),
                             &mut local_stats,
                         )
                     {

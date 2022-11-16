@@ -300,9 +300,9 @@ impl HummockStorageV1 {
         assert!(pinned_version.is_valid());
         // encode once
         let bloom_filter_key = if let Some(prefix) = read_options.prefix_hint.as_ref() {
-            UserKey::new(read_options.table_id, TableKey(prefix)).encode()
+            Some(UserKey::new(read_options.table_id, TableKey(prefix)).encode())
         } else {
-            vec![]
+            None
         };
         for level in pinned_version.levels(table_id) {
             let table_infos = prune_ssts(level.table_infos.iter(), table_id, &table_key_range);
@@ -329,7 +329,7 @@ impl HummockStorageV1 {
 
                 let mut sstables = vec![];
                 for sstable_info in pruned_sstables {
-                    if !bloom_filter_key.is_empty() {
+                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref() {
                         let sstable = self
                             .sstable_store
                             .sstable(sstable_info, &mut local_stats)
@@ -362,7 +362,7 @@ impl HummockStorageV1 {
                         .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if !bloom_filter_key.is_empty()
+                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref()
                         && !hit_sstable_bloom_filter(
                             sstable.value(),
                             bloom_filter_key.as_slice(),
