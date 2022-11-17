@@ -529,7 +529,8 @@ impl SstableWriter for BatchUploadWriter {
 
             // Add block cache.
             if CachePolicy::Fill == self.policy {
-                debug_assert!(!self.block_info.is_empty());
+                // The `block_info` may be empty when there is only range-tombstones, because we
+                //  store them in meta-block.
                 for (block_idx, block) in self.block_info.into_iter().enumerate() {
                     self.sstable_store.block_cache.insert(
                         self.sst_id,
@@ -715,7 +716,7 @@ mod tests {
         for i in x_range {
             let key = iter.key();
             let value = iter.value();
-            assert_eq!(key, iterator_test_key_of(i).as_slice());
+            assert_eq!(key, iterator_test_key_of(i).to_ref());
             assert_eq!(value, get_hummock_value(i).as_slice());
             iter.next().await.unwrap();
         }

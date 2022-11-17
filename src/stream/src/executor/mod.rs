@@ -26,7 +26,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum_to_bytes};
 use risingwave_connector::source::SplitImpl;
@@ -79,6 +79,7 @@ pub mod source;
 pub mod subtask;
 mod top_n;
 mod union;
+mod watermark_filter;
 mod wrapper;
 
 #[cfg(test)]
@@ -102,7 +103,6 @@ pub use hop_window::HopWindowExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
-pub use managed_state::join::JoinManagedCache;
 pub use merge::MergeExecutor;
 pub use mview::*;
 pub use project::ProjectExecutor;
@@ -116,6 +116,7 @@ pub use sort::SortExecutor;
 pub use source::*;
 pub use top_n::{AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor};
 pub use union::UnionExecutor;
+pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;
@@ -521,16 +522,13 @@ impl Barrier {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Watermark {
     col_idx: usize,
-    val: Datum,
+    val: ScalarImpl,
 }
 
 impl PartialOrd for Watermark {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         if self.col_idx == other.col_idx {
-            self.val
-                .as_ref()
-                .unwrap()
-                .partial_cmp(other.val.as_ref().unwrap())
+            self.val.partial_cmp(&other.val)
         } else {
             None
         }
@@ -545,11 +543,15 @@ impl Ord for Watermark {
 }
 
 impl Watermark {
+    pub fn new(col_idx: usize, val: ScalarImpl) -> Self {
+        Self { col_idx, val }
+    }
+
     pub fn to_protobuf(&self) -> ProstWatermark {
         ProstWatermark {
             col_idx: self.col_idx as _,
             val: Some(ProstDatum {
-                body: serialize_datum_to_bytes(self.val.as_ref()),
+                body: serialize_datum_to_bytes(Some(&self.val)),
             }),
         }
     }
@@ -560,7 +562,8 @@ impl Watermark {
     ) -> StreamExecutorResult<Self> {
         Ok(Watermark {
             col_idx: prost.col_idx as _,
-            val: deserialize_datum(&*prost.get_val()?.body, data_type)?,
+            // Should never receive a Null watermark value here
+            val: deserialize_datum(&*prost.get_val()?.body, data_type)?.unwrap(),
         })
     }
 }

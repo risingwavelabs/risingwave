@@ -4,6 +4,7 @@ package hummock;
 
 import "catalog.proto";
 import "common.proto";
+import "compactor.proto";
 
 option optimize_for = SPEED;
 
@@ -508,6 +509,13 @@ message RiseCtlUpdateCompactionConfigResponse {
   common.Status status = 1;
 }
 
+message SetCompactorRuntimeConfigRequest {
+  uint32 context_id = 1;
+  compactor.CompactorRuntimeConfig config = 2;
+}
+
+message SetCompactorRuntimeConfigResponse {}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -536,9 +544,8 @@ service HummockManagerService {
   rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
+  rpc SetCompactorRuntimeConfig(SetCompactorRuntimeConfigRequest) returns (SetCompactorRuntimeConfigResponse);
 }
-
-service CompactorService {}
 
 message CompactionConfig {
   enum CompactionMode {

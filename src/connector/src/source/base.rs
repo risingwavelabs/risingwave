@@ -206,6 +206,14 @@ pub fn spawn_data_generation_stream<T: Send + 'static>(
     stream: impl Stream<Item = T> + Send + 'static,
     buffer_size: usize,
 ) -> impl Stream<Item = T> + Send + 'static {
+    static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .thread_name("risingwave-data-generation")
+            .enable_all()
+            .build()
+            .expect("failed to build data-generation runtime")
+    });
+
     let (generation_tx, generation_rx) = mpsc::channel(buffer_size);
     RUNTIME.spawn(async move {
         pin_mut!(stream);
@@ -219,14 +227,6 @@ pub fn spawn_data_generation_stream<T: Send + 'static>(
 
     tokio_stream::wrappers::ReceiverStream::new(generation_rx)
 }
-
-static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .thread_name("risingwave-data-generation")
-        .enable_all()
-        .build()
-        .expect("failed to build data-generation runtime")
-});
 
 #[cfg(test)]
 mod tests {

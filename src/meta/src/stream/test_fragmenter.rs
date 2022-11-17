@@ -36,7 +36,7 @@ use risingwave_pb::stream_plan::{
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::CreateMaterializedViewContext;
+use crate::stream::CreateStreamingJobContext;
 use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
@@ -336,7 +336,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             table_id: 1,
             table: Some(make_internal_table(4, true)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
-            ignore_on_conflict: true,
+            handle_pk_conflict: false,
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
@@ -396,7 +396,7 @@ fn make_stream_graph() -> StreamFragmentGraph {
 async fn test_fragmenter() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
-    let mut ctx = CreateMaterializedViewContext::default();
+    let mut ctx = CreateStreamingJobContext::default();
     let graph = make_stream_graph();
 
     let actor_graph_builder =

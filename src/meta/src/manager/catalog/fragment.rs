@@ -45,30 +45,24 @@ pub struct FragmentManagerCore {
 }
 
 impl FragmentManagerCore {
-    /// List all fragment vnode mapping info.
-    pub fn all_fragment_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
-        self.table_fragments.values().flat_map(|table_fragments| {
-            table_fragments.fragments.values().map(|fragment| {
-                let parallel_unit_mapping = fragment
-                    .vnode_mapping
-                    .as_ref()
-                    .expect("no data distribution found");
-                ParallelUnitMapping {
-                    fragment_id: fragment.fragment_id,
-                    original_indices: parallel_unit_mapping.original_indices.clone(),
-                    data: parallel_unit_mapping.data.clone(),
-                }
+    /// List all fragment vnode mapping info that not in `State::Initial`.
+    pub fn all_running_fragment_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
+        self.table_fragments
+            .values()
+            .filter(|tf| tf.state() != State::Initial)
+            .flat_map(|table_fragments| {
+                table_fragments.fragments.values().map(|fragment| {
+                    let parallel_unit_mapping = fragment
+                        .vnode_mapping
+                        .as_ref()
+                        .expect("no data distribution found");
+                    ParallelUnitMapping {
+                        fragment_id: fragment.fragment_id,
+                        original_indices: parallel_unit_mapping.original_indices.clone(),
+                        data: parallel_unit_mapping.data.clone(),
+                    }
+                })
             })
-        })
-    }
-
-    pub fn all_internal_tables(&self) -> impl Iterator<Item = &u32> + '_ {
-        self.table_fragments.values().flat_map(|table_fragments| {
-            table_fragments
-                .fragments
-                .values()
-                .flat_map(|fragment| fragment.state_table_ids.iter())
-        })
     }
 }
 
@@ -186,6 +180,22 @@ where
             .context(format!("table_fragment not exist: id={}", table_id))?)
     }
 
+    pub async fn select_table_fragments_by_ids(
+        &self,
+        table_ids: &[TableId],
+    ) -> MetaResult<Vec<TableFragments>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut table_fragments = Vec::with_capacity(table_ids.len());
+        for table_id in table_ids {
+            table_fragments.push(
+                map.get(table_id)
+                    .cloned()
+                    .context(format!("table_fragment not exist: id={}", table_id))?,
+            );
+        }
+        Ok(table_fragments)
+    }
+
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
     /// state is `ActorState::Inactive` and the table fragments' state is `State::Initial`.
     pub async fn start_create_table_fragments(
@@ -203,13 +213,13 @@ where
         commit_meta!(self, table_fragments)
     }
 
-    /// Called after the barrier collection of `CreateMaterializedView` command, which updates the
-    /// materialized view's state from `State::Initial` to `State::Creating`, updates the
+    /// Called after the barrier collection of `CreateStreamingJob` command, which updates the
+    /// streaming job's state from `State::Initial` to `State::Creating`, updates the
     /// actors' state to `ActorState::Running`, besides also updates all dependent tables'
     /// downstream actors info.
     ///
     /// Note that the table fragments' state will be kept `Creating`, which is only updated when the
-    /// materialized view is completely created.
+    /// streaming job is completely created.
     pub async fn post_create_table_fragments(
         &self,
         table_id: &TableId,
@@ -253,7 +263,7 @@ where
         Ok(())
     }
 
-    /// Called after the finish of `CreateMaterializedView` command, i.e., materialized view is
+    /// Called after the finish of `CreateStreamingJob` command, i.e., streaming job is
     /// completely created, which updates the state from `Creating` to `Created`.
     pub async fn mark_table_fragments_created(&self, table_id: TableId) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
@@ -693,7 +703,7 @@ where
 
                 // Update the dispatcher of the upstream fragments.
                 for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
-                    // TODO: here we assume the upstream fragment is in the same materialized view
+                    // TODO: here we assume the upstream fragment is in the same streaming job
                     // as this fragment.
                     let upstream_fragment = table_fragment
                         .fragments

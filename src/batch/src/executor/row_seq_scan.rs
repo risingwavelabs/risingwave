@@ -18,10 +18,11 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prometheus::Histogram;
-use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
@@ -410,8 +411,8 @@ mod tests {
     use std::collections::Bound::Unbounded;
 
     use futures::StreamExt;
-    use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
+    use risingwave_common::row::Row;
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
@@ -439,7 +440,8 @@ mod tests {
             column_descs.clone(),
             order_types.clone(),
             pk_indices.clone(),
-        );
+        )
+        .await;
         let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
         let value_indices: Vec<usize> = vec![0, 1, 2];
         let table = StorageTable::new_partial(

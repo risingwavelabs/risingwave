@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 
 use super::{ColPrunable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::optimizer::plan_node::{BatchHashAgg, BatchUnion, LogicalAgg, PlanTreeNode};
@@ -34,6 +34,7 @@ pub struct LogicalUnion {
 impl LogicalUnion {
     pub fn new(all: bool, inputs: Vec<PlanRef>) -> Self {
         let ctx = inputs[0].ctx();
+        // Use first input as its schema
         let schema = inputs[0].schema().clone();
         let mut pk_indices = vec![];
         for input in &inputs {
@@ -123,11 +124,11 @@ impl ToBatch for LogicalUnion {
 
 impl ToStream for LogicalUnion {
     fn to_stream(&self) -> Result<PlanRef> {
-        todo!()
+        Err(ErrorCode::NotImplemented("Union for streaming query".to_string(), 2911.into()).into())
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        todo!()
+        Err(ErrorCode::NotImplemented("Union for streaming query".to_string(), 2911.into()).into())
     }
 }
 

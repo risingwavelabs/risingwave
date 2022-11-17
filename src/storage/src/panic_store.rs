@@ -17,6 +17,7 @@ use std::ops::Bound;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::storage_value::StorageValue;
@@ -65,6 +66,7 @@ impl StateStoreWrite for PanicStateStore {
     fn ingest_batch(
         &self,
         _kv_pairs: Vec<(Bytes, StorageValue)>,
+        _delete_ranges: Vec<(Bytes, Bytes)>,
         _write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
@@ -78,7 +80,7 @@ impl LocalStateStore for PanicStateStore {}
 impl StateStore for PanicStateStore {
     type Local = Self;
 
-    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + 'a;
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
     define_state_store_associated_type!();
 
@@ -114,7 +116,7 @@ impl StateStore for PanicStateStore {
 pub struct PanicStateStoreIter {}
 
 impl StateStoreIter for PanicStateStoreIter {
-    type Item = (Bytes, Bytes);
+    type Item = (FullKey<Vec<u8>>, Bytes);
 
     type NextFuture<'a> = impl NextFutureTrait<'a, Self::Item>;
 

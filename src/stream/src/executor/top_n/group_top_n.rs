@@ -17,9 +17,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -392,7 +393,8 @@ mod tests {
                 OrderType::Ascending,
             ],
             &[1, 2, 0],
-        );
+        )
+        .await;
         let top_n_executor = Box::new(
             GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
@@ -489,7 +491,8 @@ mod tests {
                 OrderType::Ascending,
             ],
             &[1, 2, 0],
-        );
+        )
+        .await;
         let top_n_executor = Box::new(
             GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
@@ -578,7 +581,8 @@ mod tests {
                 OrderType::Ascending,
             ],
             &[1, 2, 0],
-        );
+        )
+        .await;
         let top_n_executor = Box::new(
             GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,

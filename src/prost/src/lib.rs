@@ -24,6 +24,9 @@ pub mod catalog;
 #[cfg_attr(madsim, path = "sim/common.rs")]
 pub mod common;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/compute.rs")]
+pub mod compute;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/data.rs")]
 pub mod data;
 #[rustfmt::skip]
@@ -54,6 +57,9 @@ pub mod stream_service;
 #[cfg_attr(madsim, path = "sim/hummock.rs")]
 pub mod hummock;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/compactor.rs")]
+pub mod compactor;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/user.rs")]
 pub mod user;
 #[rustfmt::skip]
@@ -78,6 +84,9 @@ pub mod catalog_serde;
 #[rustfmt::skip]
 #[path = "common.serde.rs"]
 pub mod common_serde;
+#[rustfmt::skip]
+#[path = "compute.serde.rs"]
+pub mod compute_serde;
 #[rustfmt::skip]
 #[path = "data.serde.rs"]
 pub mod data_serde;
@@ -108,6 +117,9 @@ pub mod stream_service_serde;
 #[rustfmt::skip]
 #[path = "hummock.serde.rs"]
 pub mod hummock_serde;
+#[rustfmt::skip]
+#[path = "compactor.serde.rs"]
+pub mod compactor_serde;
 #[rustfmt::skip]
 #[path = "user.serde.rs"]
 pub mod user_serde;
