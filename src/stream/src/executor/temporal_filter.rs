@@ -63,7 +63,6 @@ pub struct TemporalFilterExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> TemporalFilterExecutor<S> {
-    #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
