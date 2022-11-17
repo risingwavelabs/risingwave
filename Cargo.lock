@@ -4930,7 +4930,6 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_storage",
- "risingwave_stream",
  "serde",
  "serde-value",
  "serde_json",
