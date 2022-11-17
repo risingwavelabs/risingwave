@@ -545,7 +545,10 @@ impl<S: StateStore> StateTable<S> {
     pub fn update(&mut self, old_value: impl Row2, new_value: impl Row2) {
         let old_pk = (&old_value).project(self.pk_indices());
         let new_pk = (&new_value).project(self.pk_indices());
-        debug_assert_eq!(old_pk.to_owned_row(), new_pk.to_owned_row());
+        debug_assert!(
+            Row2::eq(&old_pk, &new_pk),
+            "pk should not change: {old_pk:?} vs {new_pk:?}",
+        );
 
         let new_key_bytes =
             serialize_pk_with_vnode(&new_pk, &self.pk_serde, self.compute_prefix_vnode(&new_pk));

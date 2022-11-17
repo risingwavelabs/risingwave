@@ -19,6 +19,7 @@ mod once;
 mod owned_row;
 mod project;
 
+use std::cmp::Ordering;
 use std::hash::{BuildHasher, Hasher};
 
 use bytes::BufMut;
@@ -58,7 +59,7 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
         self.len() == 0
     }
 
-    /// Returns an iterator over the datum in the row, in [`DatumRef`] form.
+    /// Returns an iterator over the datums in the row, in [`DatumRef`] form.
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Converts the row into an owned [`Row`].
@@ -97,6 +98,18 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
             hash_datum_ref(datum, &mut hasher);
         }
         HashCode(hasher.finish())
+    }
+
+    /// Determines whether the datums of this row are equal to those of another.
+    #[inline]
+    fn eq(this: &Self, other: impl Row2) -> bool {
+        this.iter().eq(other.iter())
+    }
+
+    /// Lexicographically compares the datums of this row with those of another.
+    #[inline]
+    fn cmp(this: &Self, other: impl Row2) -> Ordering {
+        this.iter().cmp(other.iter())
     }
 }
 
@@ -164,6 +177,14 @@ macro_rules! deref_forward_row {
 
         fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
             (**self).hash(hash_builder)
+        }
+
+        fn eq(this: &Self, other: impl Row2) -> bool {
+            Row2::eq(&(**this), other)
+        }
+
+        fn cmp(this: &Self, other: impl Row2) -> Ordering {
+            Row2::cmp(&(**this), other)
         }
     };
 }
