@@ -5315,6 +5315,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
+ "risingwave_stream",
  "serde_json",
  "size",
  "tracing",

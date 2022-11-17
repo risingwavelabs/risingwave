@@ -20,6 +20,7 @@
 #![feature(result_option_inspect)]
 #![feature(generators)]
 #![feature(hash_drain_filter)]
+#![feature(type_alias_impl_trait)]
 
 use std::collections::HashMap;
 use std::fmt::Debug;

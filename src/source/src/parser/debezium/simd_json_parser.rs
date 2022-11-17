@@ -14,13 +14,14 @@
 
 use std::fmt::Debug;
 
+use futures::future::ready;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::operators::*;
 use crate::parser::common::simd_json_parse_value;
-use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -38,9 +39,8 @@ fn ensure_not_null<'a, 'b: 'a>(value: &'a BorrowedValue<'b>) -> Option<&'a Borro
 #[derive(Debug)]
 pub struct DebeziumJsonParser;
 
-#[async_trait::async_trait]
-impl SourceParser for DebeziumJsonParser {
-    async fn parse(
+impl DebeziumJsonParser {
+    fn parse_inner(
         &self,
         payload: &[u8],
         writer: SourceStreamChunkRowWriter<'_>,
@@ -123,5 +123,21 @@ impl SourceParser for DebeziumJsonParser {
                 op
             )))),
         }
+    }
+}
+
+impl SourceParser for DebeziumJsonParser {
+    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
+
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a,
+    {
+        ready(self.parse_inner(payload, writer))
     }
 }
