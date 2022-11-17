@@ -470,7 +470,6 @@ impl Parser {
                 })
             }
             Token::Number(_)
-            | Token::ScientificNumber { .. }
             | Token::SingleQuotedString(_)
             | Token::NationalStringLiteral(_)
             | Token::HexStringLiteral(_) => {
@@ -2040,13 +2039,6 @@ impl Parser {
                 _ => self.expected("a concrete value", Token::Word(w)),
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
-            Token::ScientificNumber {
-                coefficient,
-                exponent,
-            } => Ok(Value::ScientificNumber {
-                coefficient,
-                exponent,
-            }),
             Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),

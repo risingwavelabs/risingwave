@@ -25,10 +25,6 @@ impl Binder {
     pub fn bind_value(&mut self, value: Value) -> Result<Literal> {
         match value {
             Value::Number(s) => self.bind_number(s),
-            Value::ScientificNumber {
-                coefficient,
-                exponent,
-            } => self.bind_scientific_number(coefficient, exponent),
             Value::SingleQuotedString(s) => self.bind_string(s),
             Value::Boolean(b) => self.bind_bool(b),
             // Both null and string literal will be treated as `unknown` during type inference.
@@ -59,26 +55,17 @@ impl Binder {
             (Some(ScalarImpl::Int32(int_32)), DataType::Int32)
         } else if let Ok(int_64) = s.parse::<i64>() {
             (Some(ScalarImpl::Int64(int_64)), DataType::Int64)
-        } else {
+        } else if let Ok(decimal) = str_parse::<Decimal>(&s) {
             // Notice: when the length of decimal exceeds 29(>= 30), it will be rounded up.
-            let decimal = str_parse::<Decimal>(&s)?;
             (Some(ScalarImpl::Decimal(decimal)), DataType::Decimal)
+        } else if let Some(scientific) = Decimal::from_scientific(&s) {
+            (Some(ScalarImpl::Decimal(scientific)), DataType::Decimal)
+        } else {
+            return Err(RwError::from(ErrorCode::InternalError(format!(
+                "Unable to bind {s} to a number"
+            ))));
         };
         Ok(Literal::new(data, data_type))
-    }
-
-    fn bind_scientific_number(&mut self, value: String, exponent: String) -> Result<Literal> {
-        let exponent = exponent
-            .parse::<i32>()
-            .map_err(|e| RwError::from(ErrorCode::InternalError(e.to_string())))?;
-        let coefficient = value
-            .parse::<f64>()
-            .map_err(|e| RwError::from(ErrorCode::InternalError(e.to_string())))?;
-
-        let base: f64 = 10.0;
-        let result: f64 = coefficient * base.powi(exponent);
-
-        self.bind_number(result.to_string())
     }
 
     fn bind_interval(
@@ -196,7 +183,7 @@ impl Binder {
 mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
-    use risingwave_sqlparser::ast::Value::ScientificNumber;
+    use risingwave_sqlparser::ast::Value::Number;
 
     use crate::binder::test_utils::mock_binder;
     use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall};
@@ -253,36 +240,34 @@ mod tests {
 
         let mut binder = mock_binder();
         let values = vec![
-            ("1", "6"),
-            ("1.25", "6"),
-            ("1.25", "1"),
-            ("1", "-2"),
-            ("1.25", "-2"),
-            ("1", "15"),
+            ("1e6"),
+            ("1.25e6"),
+            ("1.25e1"),
+            ("1e-2"),
+            ("1.25e-2"),
+            ("1e15"),
         ];
         let data = vec![
-            Some(ScalarImpl::Int32(1000000)),
-            Some(ScalarImpl::Int32(1250000)),
+            Some(ScalarImpl::Decimal(Decimal::from_str("1000000").unwrap())),
+            Some(ScalarImpl::Decimal(Decimal::from_str("1250000").unwrap())),
             Some(ScalarImpl::Decimal(Decimal::from_str("12.5").unwrap())),
             Some(ScalarImpl::Decimal(Decimal::from_str("0.01").unwrap())),
             Some(ScalarImpl::Decimal(Decimal::from_str("0.0125").unwrap())),
-            Some(ScalarImpl::Int64(1000000000000000)),
+            Some(ScalarImpl::Decimal(
+                Decimal::from_str("1000000000000000").unwrap(),
+            )),
         ];
         let data_type = vec![
-            DataType::Int32,
-            DataType::Int32,
             DataType::Decimal,
             DataType::Decimal,
             DataType::Decimal,
-            DataType::Int64,
+            DataType::Decimal,
+            DataType::Decimal,
+            DataType::Decimal,
         ];
 
         for i in 0..values.len() {
-            let value = ScientificNumber {
-                coefficient: values[i].0.to_string(),
-                exponent: values[i].1.to_string(),
-            };
-            let res = binder.bind_value(value).unwrap();
+            let res = binder.bind_value(Number(values[i].to_string())).unwrap();
             let ans = Literal::new(data[i].clone(), data_type[i].clone());
             assert_eq!(res, ans);
         }
