@@ -1,7 +1,11 @@
 [package]
 name = "risingwave_compactor"
-version = "0.2.0-alpha"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -33,4 +37,4 @@ tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }
+workspace-hack = { path = "../../workspace-hack" }
