@@ -40,12 +40,10 @@ impl<S> BatchQueryExecutor<S>
 where
     S: StateStore,
 {
-    const DEFAULT_BATCH_SIZE: usize = 100;
-
-    pub fn new(table: StorageTable<S>, batch_size: Option<usize>, info: ExecutorInfo) -> Self {
+    pub fn new(table: StorageTable<S>, batch_size: usize, info: ExecutorInfo) -> Self {
         Self {
             table,
-            batch_size: batch_size.unwrap_or(Self::DEFAULT_BATCH_SIZE),
+            batch_size,
             info,
         }
     }
@@ -117,7 +115,7 @@ mod test {
             identity: "BatchQuery".to_owned(),
         };
 
-        let executor = Box::new(BatchQueryExecutor::new(table, Some(test_batch_size), info));
+        let executor = Box::new(BatchQueryExecutor::new(table, test_batch_size, info));
 
         let stream = executor.execute_with_epoch(u64::MAX);
         let mut batch_cnt = 0;
