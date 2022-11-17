@@ -39,6 +39,7 @@ const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
 const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
+const PARSE_ERROR_STR_TO_TIMESTAMPZ: &str = "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)";
 const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
 const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
@@ -151,7 +152,7 @@ fn parse_naive_time(s: &str) -> Result<NaiveTime> {
 pub fn str_to_timestampz(elem: &str) -> Result<i64> {
     elem.parse::<DateTime<Utc>>()
         .map(|ret| ret.timestamp_nanos() / 1000)
-        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))
+        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ))
 }
 
 /// Converts UNIX epoch time to timestamp in microseconds.
@@ -591,6 +592,10 @@ mod tests {
 
     #[test]
     fn parse_str() {
+        assert_eq!(
+            str_to_timestampz("2022-08-03 10:34:02Z").unwrap(),
+            str_to_timestampz("2022-08-03 02:34:02-08:00").unwrap()
+        );
         str_to_timestamp("1999-01-08 04:02").unwrap();
         str_to_timestamp("1999-01-08 04:05:06").unwrap();
         assert_eq!(
@@ -601,6 +606,12 @@ mod tests {
         str_to_time("04:05").unwrap();
         str_to_time("04:05:06").unwrap();
 
+        assert_eq!(
+            str_to_timestampz("1999-01-08 04:05:06")
+                .unwrap_err()
+                .to_string(),
+            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ).to_string()
+        );
         assert_eq!(
             str_to_timestamp("1999-01-08 04:05:06AA")
                 .unwrap_err()
