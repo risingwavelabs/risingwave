@@ -418,8 +418,8 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
     use risingwave_storage::table::Distribution;
+    use risingwave_stream::executor::table::state_table::StateTable;
 
     use crate::executor::{Executor, RowSeqScanExecutor, ScanRange};
 

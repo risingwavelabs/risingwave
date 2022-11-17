@@ -13,4 +13,3 @@
 // limitations under the License.
 
 pub mod mem_table;
-// pub mod state_table;
