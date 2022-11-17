@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::mem;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -119,160 +118,7 @@ where
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier.clone());
 
-        if to_backfill {
-            // The epoch used to snapshot read upstream mv.
-            let mut snapshot_read_epoch = init_epoch;
-
-            // Backfill Algorithm:
-            //
-            //   backfill_stream
-            //  /               \
-            // upstream       snapshot
-            //
-            // We construct a backfill stream with upstream as its left input and mv snapshot read
-            // stream as its right input. When a chunk comes from upstream, we will buffer it.
-            //
-            // When a checkpoint barrier comes from upstream:
-            //  - Update the `snapshot_read_epoch`.
-            //  - For each row of the upstream chunk buffer, forward it to downstream if its pk <=
-            //    `current_pos`, otherwise ignore it.
-            //  - reconstruct the whole backfill stream with upstream and new mv snapshot read
-            //    stream with the `snapshot_read_epoch`.
-            //
-            // When a chunk comes from snapshot, we forward it to the downstream and raise
-            // `current_pos`.
-            //
-            // When we reach the end of the snapshot read stream, it means backfill has been
-            // finished.
-            //
-            // Once the backfill loop ends, we forward the upstream directly to the downstream.
-            'backfill_loop: loop {
-                let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
-
-                let mut left_upstream = (&mut upstream).map(Either::Left);
-
-                let right_snapshot = Box::pin(
-                    Self::snapshot_read(&self.table, snapshot_read_epoch, self.current_pos.clone())
-                        .map(Either::Right),
-                );
-
-                // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
-                // comes.
-                let backfill_stream =
-                    select_with_strategy(&mut left_upstream, right_snapshot, |_: &mut ()| {
-                        stream::PollNext::Left
-                    });
-
-                #[for_await]
-                for either in backfill_stream {
-                    match either {
-                        Either::Left(msg) => {
-                            match msg? {
-                                Message::Barrier(barrier) => {
-                                    // If it is a checkpoint barrier, switch snapshot and consume
-                                    // upstream buffer chunk
-                                    let checkpoint = barrier.checkpoint;
-                                    if checkpoint {
-                                        // Consume upstream buffer chunk
-                                        for chunk in upstream_chunk_buffer.drain(..) {
-                                            if let Some(current_pos) = self.current_pos.as_ref() {
-                                                yield Message::Chunk(Self::mapping_chunk(
-                                                    Self::mark_chunk(
-                                                        chunk,
-                                                        current_pos,
-                                                        &table_pk_indices,
-                                                    ),
-                                                    &upstream_indices,
-                                                ));
-                                            }
-                                        }
-                                    }
-
-                                    // Update snapshot read epoch.
-                                    snapshot_read_epoch = barrier.epoch.prev;
-
-                                    yield Message::Barrier(barrier);
-
-                                    if checkpoint {
-                                        self.progress
-                                            .update(snapshot_read_epoch, snapshot_read_epoch);
-                                        // Break the for loop and start a new snapshot read stream.
-                                        break;
-                                    }
-                                }
-                                Message::Chunk(chunk) => {
-                                    // Buffer the upstream chunk.
-                                    upstream_chunk_buffer.push(chunk.compact());
-                                }
-                                Message::Watermark(_) => todo!(
-                                    "https://github.com/risingwavelabs/risingwave/issues/6042"
-                                ),
-                            }
-                        }
-                        Either::Right(msg) => {
-                            match msg? {
-                                None => {
-                                    // End of the snapshot read stream.
-                                    // We need to set current_pos to the maximum value or do not
-                                    // mark the chunk anymore, otherwise, we will ignore some rows
-                                    // in the buffer. Here we choose to never mark the chunk.
-                                    // Consume with the renaming stream buffer chunk without mark.
-                                    for chunk in upstream_chunk_buffer.drain(..) {
-                                        yield Message::Chunk(Self::mapping_chunk(
-                                            chunk,
-                                            &upstream_indices,
-                                        ));
-                                    }
-
-                                    // Finish backfill.
-                                    break 'backfill_loop;
-                                }
-                                Some(chunk) => {
-                                    // Raise the current position.
-                                    // As snapshot read streams are ordered by pk, so we can
-                                    // just use the last row to update `current_pos`.
-                                    self.current_pos = Some(
-                                        chunk
-                                            .rows()
-                                            .last()
-                                            .unwrap()
-                                            .1
-                                            .row_by_indices(&table_pk_indices),
-                                    );
-
-                                    yield Message::Chunk(Self::mapping_chunk(
-                                        chunk,
-                                        &self.upstream_indices,
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            let mut finish_on_barrier = |msg: &Message| {
-                if let Some(barrier) = msg.as_barrier() {
-                    self.progress.finish(barrier.epoch.curr);
-                }
-            };
-
-            tracing::debug!(
-                actor = self.actor_id,
-                "Backfill has already finished and forward messages directly to the downstream"
-            );
-
-            // Backfill has already finished.
-            // Forward messages directly to the downstream.
-            let upstream = upstream
-                .map(move |result| result.map(|msg| Self::mapping_message(msg, &upstream_indices)));
-            #[for_await]
-            for msg in upstream {
-                let msg: Message = msg?;
-                finish_on_barrier(&msg);
-                yield msg;
-            }
-        } else {
+        if !to_backfill {
             // Forward messages directly to the downstream.
             let upstream = upstream
                 .map(move |result| result.map(|msg| Self::mapping_message(msg, &upstream_indices)));
@@ -280,6 +126,160 @@ where
             for message in upstream {
                 yield message?;
             }
+            return Ok(());
+        }
+
+        // The epoch used to snapshot read upstream mv.
+        let mut snapshot_read_epoch = init_epoch;
+
+        // Backfill Algorithm:
+        //
+        //   backfill_stream
+        //  /               \
+        // upstream       snapshot
+        //
+        // We construct a backfill stream with upstream as its left input and mv snapshot read
+        // stream as its right input. When a chunk comes from upstream, we will buffer it.
+        //
+        // When a checkpoint barrier comes from upstream:
+        //  - Update the `snapshot_read_epoch`.
+        //  - For each row of the upstream chunk buffer, forward it to downstream if its pk <=
+        //    `current_pos`, otherwise ignore it.
+        //  - reconstruct the whole backfill stream with upstream and new mv snapshot read stream
+        //    with the `snapshot_read_epoch`.
+        //
+        // When a chunk comes from snapshot, we forward it to the downstream and raise
+        // `current_pos`.
+        //
+        // When we reach the end of the snapshot read stream, it means backfill has been
+        // finished.
+        //
+        // Once the backfill loop ends, we forward the upstream directly to the downstream.
+        'backfill_loop: loop {
+            let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+
+            let mut left_upstream = (&mut upstream).map(Either::Left);
+
+            let right_snapshot = Box::pin(
+                Self::snapshot_read(&self.table, snapshot_read_epoch, self.current_pos.clone())
+                    .map(Either::Right),
+            );
+
+            // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
+            // comes.
+            let backfill_stream =
+                select_with_strategy(&mut left_upstream, right_snapshot, |_: &mut ()| {
+                    stream::PollNext::Left
+                });
+
+            #[for_await]
+            for either in backfill_stream {
+                match either {
+                    Either::Left(msg) => {
+                        match msg? {
+                            Message::Barrier(barrier) => {
+                                // If it is a checkpoint barrier, switch snapshot and consume
+                                // upstream buffer chunk
+                                let checkpoint = barrier.checkpoint;
+                                if checkpoint {
+                                    // Consume upstream buffer chunk
+                                    for chunk in upstream_chunk_buffer.drain(..) {
+                                        if let Some(current_pos) = self.current_pos.as_ref() {
+                                            yield Message::Chunk(Self::mapping_chunk(
+                                                Self::mark_chunk(
+                                                    chunk,
+                                                    current_pos,
+                                                    &table_pk_indices,
+                                                ),
+                                                &upstream_indices,
+                                            ));
+                                        }
+                                    }
+                                }
+
+                                // Update snapshot read epoch.
+                                snapshot_read_epoch = barrier.epoch.prev;
+
+                                yield Message::Barrier(barrier);
+
+                                if checkpoint {
+                                    self.progress
+                                        .update(snapshot_read_epoch, snapshot_read_epoch);
+                                    // Break the for loop and start a new snapshot read stream.
+                                    break;
+                                }
+                            }
+                            Message::Chunk(chunk) => {
+                                // Buffer the upstream chunk.
+                                upstream_chunk_buffer.push(chunk.compact());
+                            }
+                            Message::Watermark(_) => {
+                                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                            }
+                        }
+                    }
+                    Either::Right(msg) => {
+                        match msg? {
+                            None => {
+                                // End of the snapshot read stream.
+                                // We need to set current_pos to the maximum value or do not
+                                // mark the chunk anymore, otherwise, we will ignore some rows
+                                // in the buffer. Here we choose to never mark the chunk.
+                                // Consume with the renaming stream buffer chunk without mark.
+                                for chunk in upstream_chunk_buffer.drain(..) {
+                                    yield Message::Chunk(Self::mapping_chunk(
+                                        chunk,
+                                        &upstream_indices,
+                                    ));
+                                }
+
+                                // Finish backfill.
+                                break 'backfill_loop;
+                            }
+                            Some(chunk) => {
+                                // Raise the current position.
+                                // As snapshot read streams are ordered by pk, so we can
+                                // just use the last row to update `current_pos`.
+                                self.current_pos = Some(
+                                    chunk
+                                        .rows()
+                                        .last()
+                                        .unwrap()
+                                        .1
+                                        .row_by_indices(&table_pk_indices),
+                                );
+
+                                yield Message::Chunk(Self::mapping_chunk(
+                                    chunk,
+                                    &self.upstream_indices,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut finish_on_barrier = |msg: &Message| {
+            if let Some(barrier) = msg.as_barrier() {
+                self.progress.finish(barrier.epoch.curr);
+            }
+        };
+
+        tracing::debug!(
+            actor = self.actor_id,
+            "Backfill has already finished and forward messages directly to the downstream"
+        );
+
+        // Backfill has already finished.
+        // Forward messages directly to the downstream.
+        let upstream = upstream
+            .map(move |result| result.map(|msg| Self::mapping_message(msg, &upstream_indices)));
+        #[for_await]
+        for msg in upstream {
+            let msg: Message = msg?;
+            finish_on_barrier(&msg);
+            yield msg;
         }
     }
 
@@ -329,7 +329,8 @@ where
         let chunk = chunk.compact();
         let (data, ops) = chunk.into_parts();
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
-        // TODO: The performance is bad here due to the allocation of every row. Improve this after #6404.
+        // TODO: The performance is bad here due to the allocation of every row. Improve this after
+        // #6404.
         for v in data
             .rows()
             .map(|row| &row.row_by_indices(table_pk_indices) <= current_pos)

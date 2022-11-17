@@ -118,6 +118,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .iter()
                     .map(|&k| k as usize)
                     .collect_vec();
+                // TODO: refactor it with from_table_catalog in the future.
                 let table = StorageTable::new_partial(
                     state_store,
                     table_id,
