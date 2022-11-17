@@ -15,6 +15,7 @@
 use super::Row2;
 use crate::types::DatumRef;
 
+/// Row for the [`project`](super::RowExt::project) method.
 #[derive(Debug)]
 pub struct Project<'i, R> {
     row: R,
@@ -56,7 +57,7 @@ impl<'i, R: Row2> Row2 for Project<'i, R> {
 }
 
 impl<'i, R: Row2> Project<'i, R> {
-    pub fn new(row: R, indices: &'i [usize]) -> Self {
+    pub(crate) fn new(row: R, indices: &'i [usize]) -> Self {
         if let Some(index) = indices.iter().find(|&&i| i >= row.len()) {
             panic!(
                 "index {} out of bounds for row of length {}",

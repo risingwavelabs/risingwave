@@ -21,6 +21,7 @@ mod project;
 
 use std::hash::{BuildHasher, Hasher};
 
+use bytes::BufMut;
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};
@@ -32,39 +33,57 @@ use crate::hash::HashCode;
 use crate::types::{hash_datum_ref, to_datum_ref, Datum, DatumRef, ToOwnedDatum};
 use crate::util::value_encoding;
 
+/// The trait for abstracting over a Row-like type.
 pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     type Iter<'a>: Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
 
+    /// Returns the [`DatumRef`] at the given `index`.
     fn datum_at(&self, index: usize) -> DatumRef<'_>;
 
+    /// Returns the [`DatumRef`] at the given `index` without bounds checking.
+    ///
+    /// # Safety
+    /// Calling this method with an out-of-bounds index is undefined behavior.
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_>;
 
+    /// Returns the number of datum in the row.
     fn len(&self) -> usize;
 
+    /// Returns `true` if the row contains no datum.
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Returns an iterator over the datum in the row, in [`DatumRef`] form.
     fn iter(&self) -> Self::Iter<'_>;
 
+    /// Converts the row into an owned [`Row`].
     fn to_owned_row(&self) -> Row {
         Row(self.iter().map(|d| d.to_owned_datum()).collect())
     }
 
+    /// Consumes `self` and converts it into an owned [`Row`].
     fn into_owned_row(self) -> Row {
         self.to_owned_row()
     }
 
-    fn value_serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
+    /// Serializes the row with value encoding, into the given `buf`.
+    fn value_serialize_into(&self, mut buf: impl BufMut) {
         for datum in self.iter() {
             value_encoding::serialize_datum_ref(&datum, &mut buf);
         }
+    }
+
+    /// Serializes the row with value encoding and returns the bytes.
+    fn value_serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        self.value_serialize_into(&mut buf);
         buf
     }
 
+    /// Returns the hash code of the row.
     fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
         let mut hasher = hash_builder.build_hasher();
         for datum in self.iter() {
@@ -78,7 +97,9 @@ const fn assert_row<R: Row2>(r: R) -> R {
     r
 }
 
+/// An extension trait for [`Row2`]s that provides a variety of convenient adapters.
 pub trait RowExt: Row2 {
+    /// Adapter for chaining two rows together.
     fn chain<R: Row2>(self, other: R) -> Chain<Self, R>
     where
         Self: Sized,
@@ -86,6 +107,10 @@ pub trait RowExt: Row2 {
         assert_row(Chain::new(self, other))
     }
 
+    /// Adapter for projecting a row onto a subset of its columns with the given `indices`.
+    ///
+    /// # Panics
+    /// Panics if `indices` contains an out-of-bounds index.
     fn project(self, indices: &[usize]) -> Project<'_, Self>
     where
         Self: Sized,
@@ -122,6 +147,10 @@ macro_rules! deref_forward_row {
             (**self).to_owned_row()
         }
 
+        fn value_serialize_into(&self, buf: impl BufMut) {
+            (**self).value_serialize_into(buf)
+        }
+
         fn value_serialize(&self) -> Vec<u8> {
             (**self).value_serialize()
         }
@@ -147,6 +176,7 @@ impl<R: Row2> Row2 for Box<R> {
 
     deref_forward_row!();
 
+    // Manually implemented in case `R` has a more efficient implementation.
     fn into_owned_row(self) -> Row {
         (*self).into_owned_row()
     }
@@ -170,7 +200,7 @@ impl Row2 for &[Datum] {
     }
 
     fn iter(&self) -> Self::Iter<'_> {
-        Iterator::map(self.as_ref().iter(), to_datum_ref)
+        self.as_ref().iter().map(to_datum_ref)
     }
 }
 
@@ -188,10 +218,10 @@ impl Row2 for &[DatumRef<'_>] {
     }
 
     fn len(&self) -> usize {
-        <[DatumRef<'_>]>::len(self)
+        self.as_ref().len()
     }
 
     fn iter(&self) -> Self::Iter<'_> {
-        <[DatumRef<'_>]>::iter(self).copied()
+        self.as_ref().iter().copied()
     }
 }

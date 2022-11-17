@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use bytes::BufMut;
+
 use super::Row2;
 use crate::types::DatumRef;
 
+/// Row for the [`chain`](super::RowExt::chain) method.
 #[derive(Debug)]
 pub struct Chain<R1, R2> {
     r1: R1,
@@ -63,16 +66,15 @@ impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
         self.r1.iter().chain(self.r2.iter())
     }
 
-    fn value_serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.extend(self.r1.value_serialize());
-        buf.extend(self.r2.value_serialize());
-        buf
+    // Manually implemented in case `R1` or `R2` has a more efficient implementation.
+    fn value_serialize_into(&self, mut buf: impl BufMut) {
+        buf.put_slice(&self.r1.value_serialize());
+        buf.put_slice(&self.r2.value_serialize());
     }
 }
 
 impl<R1, R2> Chain<R1, R2> {
-    pub fn new(r1: R1, r2: R2) -> Self {
+    pub(super) fn new(r1: R1, r2: R2) -> Self {
         Self { r1, r2 }
     }
 }

@@ -15,6 +15,7 @@
 use super::{assert_row, Row2};
 use crate::types::{DatumRef, ToDatumRef};
 
+/// Row for the [`once`] function.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Once<D>(D);
 
@@ -24,11 +25,11 @@ impl<D: ToDatumRef> Row2 for Once<D> {
         Self: 'a;
 
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        [self.0.to_datum_ref()][index]
+        [self.0.to_datum_ref()][index] // for better error messages
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        *[self.0.to_datum_ref()].get_unchecked(index)
+        *[self.0.to_datum_ref()].get_unchecked(index) // for better error messages
     }
 
     fn len(&self) -> usize {
@@ -40,6 +41,7 @@ impl<D: ToDatumRef> Row2 for Once<D> {
     }
 }
 
+/// Creates a row which contains a single [`Datum`](crate::types::Datum) or [`DatumRef`].
 pub fn once<D: ToDatumRef>(datum: D) -> Once<D> {
     assert_row(Once(datum))
 }
