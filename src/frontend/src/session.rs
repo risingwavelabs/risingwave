@@ -40,6 +40,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
@@ -57,6 +58,7 @@ use crate::expr::CorrelatedId;
 use crate::handler::handle;
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
+use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
 use crate::observer::FrontendObserverNode;
@@ -70,8 +72,6 @@ use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterIm
 use crate::user::UserId;
 use crate::utils::WithOptions;
 use crate::{FrontendConfig, FrontendOpts, PgResponseStream, TableCatalog};
-use crate::health_service::HealthServiceImpl;
-use risingwave_pb::health::health_server::HealthServer;
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
