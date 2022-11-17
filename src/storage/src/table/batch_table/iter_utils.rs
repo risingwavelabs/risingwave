@@ -17,7 +17,7 @@ use std::collections::BinaryHeap;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::Row;
+use risingwave_common::row::Row;
 
 use super::storage_table::PkAndRowStream;
 use crate::error::StorageError;

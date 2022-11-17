@@ -45,7 +45,7 @@ pub use chrono_array::{
 };
 pub use column_proto_readers::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
-pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
+pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::{ArrayImplIterator, ArrayIterator};
@@ -60,6 +60,7 @@ pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
 use crate::buffer::Bitmap;
+pub use crate::row::{Row, RowDeserializer};
 use crate::types::*;
 pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 

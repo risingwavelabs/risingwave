@@ -42,7 +42,8 @@ use std::sync::Arc;
 pub use agg::AggKind;
 pub use expr_input_ref::InputRefExpression;
 pub use expr_literal::*;
-use risingwave_common::array::{ArrayRef, DataChunk, Row};
+use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 
@@ -124,6 +125,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
+        DateTrunc => build_date_trunc_expr(prost),
 
         // Dedicated types
         In => InExpression::try_from(prost).map(Expression::boxed),

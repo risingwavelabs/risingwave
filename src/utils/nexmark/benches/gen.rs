@@ -12,9 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
-/// Executors need to serialize Row into `CompactedRow` before writing into cache.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct CompactedRow {
-    pub row: Vec<u8>,
+use criterion::{criterion_group, criterion_main, Criterion};
+use nexmark::EventGenerator;
+
+criterion_group!(benches, nexmark_generator);
+criterion_main!(benches);
+
+fn nexmark_generator(c: &mut Criterion) {
+    c.bench_function("nexmark_generate_event", |bencher| {
+        let mut gen = EventGenerator::default();
+        bencher.iter(|| gen.next())
+    });
 }

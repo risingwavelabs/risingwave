@@ -24,9 +24,10 @@ use async_stack_trace::StackTrace;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
-use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk, Vis};
+use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
+use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -224,7 +225,6 @@ impl<S: StateStore> StateTable<S> {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        let value_indices = (0..columns.len()).collect_vec();
         Self::new_with_distribution(
             store,
             table_id,
@@ -232,7 +232,7 @@ impl<S: StateStore> StateTable<S> {
             order_types,
             pk_indices,
             Distribution::fallback(),
-            value_indices,
+            None,
         )
         .await
     }
@@ -253,7 +253,7 @@ impl<S: StateStore> StateTable<S> {
             order_types,
             pk_indices,
             Distribution::fallback(),
-            value_indices,
+            Some(value_indices),
         )
         .await
     }
@@ -270,7 +270,7 @@ impl<S: StateStore> StateTable<S> {
             dist_key_indices,
             vnodes,
         }: Distribution,
-        value_indices: Vec<usize>,
+        value_indices: Option<Vec<usize>>,
     ) -> Self {
         let local_state_store = store.new_local(table_id).await;
         let keyspace = Keyspace::table_root(local_state_store, table_id);
@@ -281,10 +281,13 @@ impl<S: StateStore> StateTable<S> {
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
-        let data_types = value_indices
-            .iter()
-            .map(|idx| table_columns[*idx].data_type.clone())
-            .collect();
+        let data_types = match &value_indices {
+            Some(value_indices) => value_indices
+                .iter()
+                .map(|idx| table_columns[*idx].data_type.clone())
+                .collect(),
+            None => table_columns.iter().map(|c| c.data_type.clone()).collect(),
+        };
         let dist_key_in_pk_indices = dist_key_indices
             .iter()
             .map(|&di| {
@@ -311,7 +314,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: Default::default(),
             disable_sanity_check: false,
             vnode_col_idx_in_pk: None,
-            value_indices: Some(value_indices),
+            value_indices,
             epoch: None,
         }
     }
@@ -380,12 +383,24 @@ impl<S: StateStore> StateTable<S> {
         &self.pk_serde
     }
 
-    pub fn vnode_bitmap(&self) -> &Bitmap {
+    pub fn dist_key_indices(&self) -> &[usize] {
+        &self.dist_key_indices
+    }
+
+    pub fn vnodes(&self) -> &Arc<Bitmap> {
         &self.vnodes
+    }
+
+    pub fn value_indices(&self) -> &Option<Vec<usize>> {
+        &self.value_indices
     }
 
     pub fn is_dirty(&self) -> bool {
         self.mem_table.is_dirty()
+    }
+
+    pub fn vnode_bitmap(&self) -> &Bitmap {
+        &self.vnodes
     }
 }
 
@@ -395,21 +410,36 @@ const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
     pub async fn get_row<'a>(&'a self, pk: &'a Row) -> StorageResult<Option<Row>> {
+        let compacted_row: Option<CompactedRow> = self.get_compacted_row(pk).await?;
+        match compacted_row {
+            Some(compacted_row) => {
+                let row = self
+                    .row_deserializer
+                    .deserialize(compacted_row.row.as_ref())?;
+                Ok(Some(row))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Get a compacted row from state table.
+    pub async fn get_compacted_row<'a>(
+        &'a self,
+        pk: &'a Row,
+    ) -> StorageResult<Option<CompactedRow>> {
         let serialized_pk =
             serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
 
         match mem_table_res {
             Some(row_op) => match row_op {
-                RowOp::Insert(row_bytes) => {
-                    let row = self.row_deserializer.deserialize(row_bytes.as_ref())?;
-                    Ok(Some(row))
-                }
+                RowOp::Insert(row_bytes) => Ok(Some(CompactedRow {
+                    row: row_bytes.to_vec(),
+                })),
                 RowOp::Delete(_) => Ok(None),
-                RowOp::Update((_, row_bytes)) => {
-                    let row = self.row_deserializer.deserialize(row_bytes.as_ref())?;
-                    Ok(Some(row))
-                }
+                RowOp::Update((_, row_bytes)) => Ok(Some(CompactedRow {
+                    row: row_bytes.to_vec(),
+                })),
             },
             None => {
                 assert!(pk.size() <= self.pk_indices.len());
@@ -422,14 +452,16 @@ impl<S: StateStore> StateTable<S> {
                     check_bloom_filter: self.dist_key_indices == key_indices,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.keyspace.table_id(),
+                    ignore_range_tombstone: false,
                 };
                 if let Some(storage_row_bytes) = self
                     .keyspace
                     .get(&serialized_pk, self.epoch(), read_options)
                     .await?
                 {
-                    let row = self.row_deserializer.deserialize(storage_row_bytes)?;
-                    Ok(Some(row))
+                    Ok(Some(CompactedRow {
+                        row: storage_row_bytes.to_vec(),
+                    }))
                 } else {
                     Ok(None)
                 }
@@ -603,6 +635,7 @@ impl<S: StateStore> StateTable<S> {
     /// just specially used by those state table read-only and after the call the data
     /// in the epoch will be visible
     pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
+        assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
         self.update_epoch(new_epoch);
     }
@@ -659,6 +692,7 @@ impl<S: StateStore> StateTable<S> {
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.keyspace.table_id(),
+            ignore_range_tombstone: false,
         };
         let stored_value = self.keyspace.get(key, epoch, read_options).await?;
 
@@ -690,6 +724,7 @@ impl<S: StateStore> StateTable<S> {
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.keyspace.table_id(),
+            ignore_range_tombstone: false,
         };
         let stored_value = self.keyspace.get(key, epoch, read_options).await?;
 
@@ -720,6 +755,7 @@ impl<S: StateStore> StateTable<S> {
     ) -> StorageResult<()> {
         let read_options = ReadOptions {
             prefix_hint: None,
+            ignore_range_tombstone: false,
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.keyspace.table_id(),
@@ -915,6 +951,7 @@ impl<S: StateStore> StateTable<S> {
         let read_options = ReadOptions {
             prefix_hint,
             check_bloom_filter,
+            ignore_range_tombstone: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.keyspace.table_id(),
         };

@@ -27,8 +27,13 @@ pub struct JsonParser;
     target_feature = "neon",
     target_feature = "simd128"
 )))]
+#[async_trait::async_trait]
 impl SourceParser for JsonParser {
-    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+    async fn parse(
+        &self,
+        payload: &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
         use serde_json::Value;
 
         use crate::parser::common::json_parse_value;
@@ -54,8 +59,13 @@ impl SourceParser for JsonParser {
     target_feature = "neon",
     target_feature = "simd128"
 ))]
+#[async_trait::async_trait]
 impl SourceParser for JsonParser {
-    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+    async fn parse(
+        &self,
+        payload: &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
         use simd_json::{BorrowedValue, ValueAccess};
 
         use crate::parser::common::simd_json_parse_value;
@@ -90,8 +100,8 @@ mod tests {
 
     use crate::{JsonParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
-    #[test]
-    fn test_json_parser() {
+    #[tokio::test]
+    async fn test_json_parser() {
         let parser = JsonParser;
         let descs = vec![
             SourceColumnDesc::simple("i32", DataType::Int32, 0.into()),
@@ -113,7 +123,7 @@ mod tests {
             br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
         ] {
             let writer = builder.row_writer();
-            parser.parse(payload, writer).unwrap();
+            parser.parse(payload, writer).await.unwrap();
         }
 
         let chunk = builder.finish();
@@ -197,8 +207,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_json_parser_failed() {
+    #[tokio::test]
+    async fn test_json_parser_failed() {
         let parser = JsonParser;
         let descs = vec![
             SourceColumnDesc::simple("v1", DataType::Int32, 0.into()),
@@ -211,7 +221,7 @@ mod tests {
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
-            parser.parse(payload, writer).unwrap();
+            parser.parse(payload, writer).await.unwrap();
         }
 
         // Parse an incorrect record.
@@ -219,14 +229,14 @@ mod tests {
             let writer = builder.row_writer();
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#;
-            parser.parse(payload, writer).unwrap_err();
+            parser.parse(payload, writer).await.unwrap_err();
         }
 
         // Parse a correct record.
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
-            parser.parse(payload, writer).unwrap();
+            parser.parse(payload, writer).await.unwrap();
         }
 
         let chunk = builder.finish();
@@ -235,8 +245,8 @@ mod tests {
         assert_eq!(chunk.cardinality(), 2);
     }
 
-    #[test]
-    fn test_json_parse_struct() {
+    #[tokio::test]
+    async fn test_json_parse_struct() {
         let parser = JsonParser;
 
         let descs = vec![
@@ -285,7 +295,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
         {
             let writer = builder.row_writer();
-            parser.parse(payload, writer).unwrap();
+            parser.parse(payload, writer).await.unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();

@@ -54,15 +54,40 @@ impl SplitReader for KinesisSplitReader {
             SplitImpl::Kinesis(ks) => ks,
             split => return Err(anyhow!("expect KinesisSplit, got {:?}", split)),
         };
+
+        let start_position = match &split.start_position {
+            KinesisOffset::None => match &properties.scan_startup_mode {
+                None => KinesisOffset::Earliest,
+                Some(mode) => match mode.as_str() {
+                    "earliest" => KinesisOffset::Earliest,
+                    "latest" => KinesisOffset::Latest,
+                    "sequence_number" => {
+                        if let Some(seq) = &properties.seq_offset {
+                            KinesisOffset::SequenceNumber(seq.clone())
+                        } else {
+                            return Err(anyhow!("scan_startup_sequence_number is required"));
+                        }
+                    }
+                    _ => {
+                        return Err(anyhow!(
+                            "invalid scan_startup_mode, accept earliest/latest/sequence_number"
+                        ))
+                    }
+                },
+            },
+            start_position => start_position.to_owned(),
+        };
+
         let stream_name = properties.stream_name.clone();
         let client = build_client(properties).await?;
+
         Ok(Self {
             client,
             stream_name,
             shard_id: split.shard_id,
             shard_iter: None,
             latest_offset: None,
-            start_position: split.start_position,
+            start_position,
             end_position: split.end_position,
         })
     }
@@ -166,6 +191,8 @@ mod tests {
             endpoint: None,
             session_token: None,
             assume_role_external_id: None,
+            scan_startup_mode: None,
+            seq_offset: None,
         };
 
         let mut trim_horizen_reader = KinesisSplitReader::new(

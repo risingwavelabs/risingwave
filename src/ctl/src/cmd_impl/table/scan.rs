@@ -65,7 +65,7 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
         table.pk().iter().map(|x| x.direct.to_order()).collect(),
         table.pk().iter().map(|x| x.index).collect(),
         Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
-        table.value_indices.clone(),
+        Some(table.value_indices.clone()),
     )
     .await
 }
