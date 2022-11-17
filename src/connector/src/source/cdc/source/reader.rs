@@ -16,8 +16,9 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures::{pin_mut, StreamExt};
+use futures::pin_mut;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::cdc_service::{DbConnectorProperties, GetEventStreamResponse};
 use risingwave_rpc_client::CdcClient;
@@ -41,21 +42,19 @@ impl SplitReader for CdcSplitReader {
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         if let Some(splits) = state {
-            // expect only one split
-            debug_assert!(splits.len() == 1);
-            for split in &splits {
-                if let SplitImpl::Cdc(cdc_split) = split {
-                    return Ok(Self {
-                        source_id: cdc_split.source_id as u64,
-                        props,
-                    });
-                }
+            let split = splits
+                .into_iter()
+                .exactly_one()
+                .map_err(|e| anyhow!("failed to create cdc split reader: {e}"))?;
+
+            if let SplitImpl::Cdc(cdc_split) = split {
+                return Ok(Self {
+                    source_id: cdc_split.source_id as u64,
+                    props,
+                });
             }
         }
-
-        Err(anyhow!(
-            "failed to create SplitReader: invalid cdc split state"
-        ))
+        Err(anyhow!("failed to create cdc split reader: invalid state"))
     }
 
     fn into_stream(self) -> BoxSourceStream {
@@ -85,7 +84,8 @@ impl CdcSplitReader {
             )
             .await?;
         pin_mut!(cdc_stream);
-        while let Some(event_res) = cdc_stream.next().await {
+        #[for_await]
+        for event_res in cdc_stream {
             match event_res {
                 Ok(GetEventStreamResponse { events, .. }) => {
                     if events.is_empty() {
