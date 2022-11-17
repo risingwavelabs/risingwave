@@ -118,7 +118,7 @@ pub async fn handle_create_source(
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
     if row_id_index.is_none() && !is_materialized {
         return Err(ErrorCode::InvalidInputSyntax(
-            "The non-materilaized source do not support PRIMARY KEY constraint, please use \"CREATE MATERIALIZED SOURCE\" instead".to_owned(),
+            "The non-materialized source does not support PRIMARY KEY constraint, please use \"CREATE MATERIALIZED SOURCE\" instead".to_owned(),
         )
         .into());
     }
