@@ -17,7 +17,9 @@ use crate::types::DatumRef;
 
 /// Row for the [`empty`] function.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Empty(());
+pub struct Empty {
+    _private: (),
+}
 
 impl Row2 for Empty {
     type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
@@ -47,5 +49,5 @@ impl Row2 for Empty {
 
 /// Creates a row which contains no datums.
 pub fn empty() -> Empty {
-    assert_row(Empty(()))
+    assert_row(Empty { _private: () })
 }

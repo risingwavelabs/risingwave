@@ -633,6 +633,7 @@ pub trait ToOwnedDatum {
 }
 
 impl ToOwnedDatum for DatumRef<'_> {
+    #[inline(always)]
     fn to_owned_datum(self) -> Datum {
         self.map(ScalarRefImpl::into_scalar_impl)
     }
@@ -643,16 +644,19 @@ pub trait ToDatumRef: PartialEq + Eq + std::fmt::Debug {
 }
 
 impl ToDatumRef for Datum {
+    #[inline(always)]
     fn to_datum_ref(&self) -> DatumRef<'_> {
         to_datum_ref(self)
     }
 }
 impl ToDatumRef for &Datum {
+    #[inline(always)]
     fn to_datum_ref(&self) -> DatumRef<'_> {
         to_datum_ref(self)
     }
 }
 impl ToDatumRef for DatumRef<'_> {
+    #[inline(always)]
     fn to_datum_ref(&self) -> DatumRef<'_> {
         *self
     }
