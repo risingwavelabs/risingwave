@@ -36,12 +36,14 @@ use crate::{
 pub type BytesFullKey = FullKey<Bytes>;
 pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);
 
-pub trait RangeKv: Send + Sync + 'static {
+pub trait RangeKv: Clone + Send + Sync + 'static {
     fn range(
         &self,
         range: BytesFullKeyRange,
         limit: Option<usize>,
     ) -> Vec<(FullKey<Vec<u8>>, Option<Bytes>)>;
+
+    fn ingest_batch(&self, kv_pairs: impl Iterator<Item = (BytesFullKey, Option<Bytes>)>);
 }
 
 pub type BTreeMapRangeKv = Arc<RwLock<BTreeMap<BytesFullKey, Option<Bytes>>>>;
@@ -58,6 +60,13 @@ impl RangeKv for BTreeMapRangeKv {
             .take(limit)
             .map(|(key, value)| (key.to_ref().to_vec(), value.clone()))
             .collect()
+    }
+
+    fn ingest_batch(&self, kv_pairs: impl Iterator<Item = (BytesFullKey, Option<Bytes>)>) {
+        let mut inner = self.write();
+        for (key, value) in kv_pairs {
+            inner.insert(key, value);
+        }
     }
 }
 
@@ -145,6 +154,7 @@ mod batched_iter {
             let num_to_bytes = |k: i32| Bytes::from(k.to_string().as_bytes().to_vec());
             let num_to_full_key =
                 |k: i32| FullKey::new(TableId::default(), TableKey(num_to_bytes(k)), 0);
+            #[allow(clippy::mutable_key_type)]
             let map: BTreeMap<FullKey<Bytes>, Option<Bytes>> = key_range
                 .clone()
                 .map(|k| {
@@ -267,7 +277,9 @@ impl MemoryStateStore {
         static STORE: LazyLock<MemoryStateStore> = LazyLock::new(MemoryStateStore::new);
         STORE.clone()
     }
+}
 
+impl<R: RangeKv> RangeKvStateStore<R> {
     fn scan(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
@@ -301,8 +313,8 @@ impl MemoryStateStore {
     }
 }
 
-impl StateStoreRead for MemoryStateStore {
-    type Iter = MemoryStateStoreIter;
+impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
+    type Iter = RangeKvStateStoreIter<R>;
 
     define_state_store_read_associated_type!();
 
@@ -332,7 +344,7 @@ impl StateStoreRead for MemoryStateStore {
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
         async move {
-            Ok(MemoryStateStoreIter::new(
+            Ok(RangeKvStateStoreIter::new(
                 batched_iter::Iter::new(
                     self.inner.clone(),
                     to_full_key_range(read_options.table_id, key_range),
@@ -343,7 +355,7 @@ impl StateStoreRead for MemoryStateStore {
     }
 }
 
-impl StateStoreWrite for MemoryStateStore {
+impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
     define_state_store_write_associated_type!();
 
     fn ingest_batch(
@@ -354,23 +366,23 @@ impl StateStoreWrite for MemoryStateStore {
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
-            let mut inner = self.inner.write();
-            let mut size: usize = 0;
-            for (key, value) in kv_pairs {
-                size += key.len() + value.size();
-                inner.insert(
-                    FullKey::new(write_options.table_id, TableKey(key), epoch),
-                    value.user_value,
-                );
-            }
+            let mut size = 0;
+            self.inner
+                .ingest_batch(kv_pairs.into_iter().map(|(key, value)| {
+                    size += key.len() + value.size();
+                    (
+                        FullKey::new(write_options.table_id, TableKey(key), epoch),
+                        value.user_value,
+                    )
+                }));
             Ok(size)
         }
     }
 }
 
-impl LocalStateStore for MemoryStateStore {}
+impl<R: RangeKv> LocalStateStore for RangeKvStateStore<R> {}
 
-impl StateStore for MemoryStateStore {
+impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     type Local = Self;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
@@ -404,16 +416,16 @@ impl StateStore for MemoryStateStore {
     }
 }
 
-pub struct MemoryStateStoreIter {
-    inner: Fuse<batched_iter::Iter<BTreeMapRangeKv>>,
+pub struct RangeKvStateStoreIter<R: RangeKv> {
+    inner: Fuse<batched_iter::Iter<R>>,
 
     epoch: HummockEpoch,
 
     last_key: Option<UserKey<Vec<u8>>>,
 }
 
-impl MemoryStateStoreIter {
-    pub fn new(inner: batched_iter::Iter<BTreeMapRangeKv>, epoch: HummockEpoch) -> Self {
+impl<R: RangeKv> RangeKvStateStoreIter<R> {
+    pub fn new(inner: batched_iter::Iter<R>, epoch: HummockEpoch) -> Self {
         Self {
             inner: inner.fuse(),
             epoch,
@@ -422,7 +434,7 @@ impl MemoryStateStoreIter {
     }
 }
 
-impl StateStoreIter for MemoryStateStoreIter {
+impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
     type Item = (FullKey<Vec<u8>>, Bytes);
 
     type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
