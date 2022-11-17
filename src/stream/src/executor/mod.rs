@@ -110,6 +110,7 @@ pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;
 pub use mview::*;
+pub use now::NowExecutor;
 pub use project::ProjectExecutor;
 pub use project_set::*;
 pub use rearranged_chain::RearrangedChainExecutor;
@@ -236,6 +237,15 @@ impl Barrier {
         }
     }
 
+    pub fn with_prev_epoch_for_test(epoch: u64, prev_epoch: u64) -> Self {
+        Self {
+            epoch: EpochPair::new(epoch, prev_epoch),
+            checkpoint: true,
+            mutation: Default::default(),
+            passed_actors: Default::default(),
+        }
+    }
+
     #[must_use]
     pub fn with_mutation(self, mutation: Mutation) -> Self {
         Self {
@@ -280,9 +290,20 @@ impl Barrier {
         )
     }
 
+    /// Whether this barrier is for pause.
+    pub fn is_pause(&self) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Pause))
+    }
+
     /// Whether this barrier is for configuration change. Used for source executor initialization.
     pub fn is_update(&self) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Update { .. }))
+    }
+
+    /// Whether this barrier is for resume. Used for now executor to determine whether to yield a
+    /// chunk and a watermark before this barrier.
+    pub fn is_resume(&self) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Resume))
     }
 
     /// Returns the [`MergeUpdate`] if this barrier is to update the merge executors for the actor

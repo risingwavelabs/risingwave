@@ -16,24 +16,23 @@ use async_stack_trace::StackTrace;
 use chrono::NaiveDateTime;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, NaiveDateTimeWrapper, ScalarImpl};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
-    Barrier, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef, StreamExecutorError,
-    Watermark,
+    Barrier, BoxedMessageStream, Executor, Message, Mutation, PkIndices, PkIndicesRef,
+    StreamExecutorError, Watermark,
 };
+use crate::common::table::state_table::StateTable;
 
 pub struct NowExecutor<S: StateStore> {
     /// Receiver of barrier channel.
-    barrier_receiver: Option<UnboundedReceiver<Barrier>>,
+    barrier_receiver: UnboundedReceiver<Barrier>,
 
     pk_indices: PkIndices,
     identity: String,
@@ -42,7 +41,6 @@ pub struct NowExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> NowExecutor<S> {
-    #[allow(dead_code)]
     pub fn new(
         barrier_receiver: UnboundedReceiver<Barrier>,
         executor_id: u64,
@@ -55,8 +53,8 @@ impl<S: StateStore> NowExecutor<S> {
             type_name: String::default(),
         }]);
         Self {
-            barrier_receiver: Some(barrier_receiver),
-            pk_indices: vec![0],
+            barrier_receiver,
+            pk_indices: vec![],
             identity: format!("NowExecutor {:X}", executor_id),
             schema,
             state_table,
@@ -64,8 +62,13 @@ impl<S: StateStore> NowExecutor<S> {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn into_stream(mut self) {
-        let mut barrier_receiver = self.barrier_receiver.take().unwrap();
+    async fn into_stream(self) {
+        let Self {
+            mut barrier_receiver,
+            mut state_table,
+            schema,
+            ..
+        } = self;
 
         // Consume the first barrier message and initialize state table.
         let barrier = barrier_receiver
@@ -73,13 +76,15 @@ impl<S: StateStore> NowExecutor<S> {
             .stack_trace("now_executor_recv_first_barrier")
             .await
             .unwrap();
-        self.state_table.init_epoch(barrier.epoch);
+        let mut is_pausing = barrier.is_pause() || barrier.is_update();
+
+        state_table.init_epoch(barrier.epoch);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
         let state_row = {
-            let data_iter = self.state_table.iter().await?;
+            let data_iter = state_table.iter().await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
                 Some(state_row?)
@@ -91,35 +96,26 @@ impl<S: StateStore> NowExecutor<S> {
         let mut last_timestamp = state_row.and_then(|row| row[0].clone());
 
         while let Some(barrier) = barrier_receiver.recv().await {
-            let mut timestamp = None;
-            let should_update = if barrier.is_update() {
-                false
-            } else {
+            if !is_pausing {
                 let time_millis = Epoch::from(barrier.epoch.curr).as_unix_millis();
-                timestamp = Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                let timestamp = Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                     NaiveDateTime::from_timestamp(
                         (time_millis / 1000) as i64,
                         (time_millis % 1000 * 1_000_000) as u32,
                     ),
                 )));
 
-                last_timestamp.as_ref().map_or(true, |last_timestamp| {
-                    last_timestamp <= timestamp.as_ref().unwrap()
-                })
-            };
-            if should_update {
-                let mut data_chunk_builder = DataChunkBuilder::new(
-                    self.schema().data_types(),
-                    if last_timestamp.is_some() { 2 } else { 1 },
+                let data_chunk = DataChunk::from_rows(
+                    &if last_timestamp.is_some() {
+                        vec![
+                            Row::new(vec![last_timestamp.clone()]),
+                            Row::new(vec![timestamp.clone()]),
+                        ]
+                    } else {
+                        vec![Row::new(vec![timestamp.clone()])]
+                    },
+                    &schema.data_types(),
                 );
-                if last_timestamp.is_some() {
-                    let chunk_popped = data_chunk_builder
-                        .append_one_row_from_datums([&last_timestamp].into_iter());
-                    debug_assert!(chunk_popped.is_none());
-                }
-                let data_chunk = data_chunk_builder
-                    .append_one_row_from_datums([&timestamp].into_iter())
-                    .unwrap();
                 let mut ops = if last_timestamp.is_some() {
                     vec![Op::Delete]
                 } else {
@@ -129,17 +125,28 @@ impl<S: StateStore> NowExecutor<S> {
                 let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
                 yield Message::Chunk(stream_chunk);
 
-                yield Message::Watermark(Watermark::new(0, timestamp.as_ref().unwrap().clone()));
+                yield Message::Watermark(Watermark::new(
+                    0,
+                    DataType::TIMESTAMP,
+                    timestamp.as_ref().unwrap().clone(),
+                ));
 
                 if last_timestamp.is_some() {
-                    self.state_table.delete(Row::new(vec![last_timestamp]));
+                    state_table.delete(Row::new(vec![last_timestamp]));
                 }
-                self.state_table.insert(Row::new(vec![timestamp.clone()]));
+                state_table.insert(Row::new(vec![timestamp.clone()]));
                 last_timestamp = timestamp;
 
-                self.state_table.commit(barrier.epoch).await?;
+                state_table.commit(barrier.epoch).await?;
             } else {
-                self.state_table.commit_no_data_expected(barrier.epoch);
+                state_table.commit_no_data_expected(barrier.epoch);
+            }
+            if let Some(mutation) = barrier.mutation.as_deref() {
+                match mutation {
+                    Mutation::Pause | Mutation::Update { .. } => is_pausing = true,
+                    Mutation::Resume => is_pausing = false,
+                    _ => {}
+                }
             }
 
             yield Message::Barrier(barrier);
@@ -162,5 +169,133 @@ impl<S: StateStore> Executor for NowExecutor<S> {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use chrono::NaiveDateTime;
+    use futures::StreamExt;
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::types::{DataType, NaiveDateTimeWrapper, ScalarImpl};
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+
+    use super::NowExecutor;
+    use crate::common::table::state_table::StateTable;
+    use crate::executor::{Barrier, BoxedMessageStream, Executor, Message, PkIndices, Watermark};
+
+    #[tokio::test]
+    async fn test_now() {
+        let state_table = create_state_table().await;
+        let (tx, mut now_executor) = create_executor(state_table);
+
+        // Init barrier
+        tx.send(Barrier::new_test_barrier(1)).unwrap();
+
+        // Consume the barrier
+        now_executor.next().await.unwrap().unwrap();
+
+        tx.send(Barrier::with_prev_epoch_for_test(1 << 16, 1))
+            .unwrap();
+
+        // Consume the data chunk
+        let chunk_msg = now_executor.next().await.unwrap().unwrap();
+
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap().compact(),
+            StreamChunk::from_pretty(
+                " TS
+                + 2021-04-01T00:00:00.001"
+            )
+        );
+
+        // Consume the watermark
+        let watermark = now_executor.next().await.unwrap().unwrap();
+
+        assert_eq!(
+            watermark,
+            Message::Watermark(Watermark::new(
+                0,
+                DataType::TIMESTAMP,
+                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                    NaiveDateTime::from_str("2021-04-01T00:00:00.001").unwrap()
+                ))
+            ))
+        );
+
+        // Consume the barrier
+        now_executor.next().await.unwrap().unwrap();
+
+        tx.send(Barrier::with_prev_epoch_for_test(2 << 16, 1 << 16))
+            .unwrap();
+
+        // Consume the data chunk
+        let chunk_msg = now_executor.next().await.unwrap().unwrap();
+
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap().compact(),
+            StreamChunk::from_pretty(
+                " TS
+                - 2021-04-01T00:00:00.001
+                + 2021-04-01T00:00:00.002"
+            )
+        );
+
+        // Consume the watermark
+        let watermark = now_executor.next().await.unwrap().unwrap();
+
+        assert_eq!(
+            watermark,
+            Message::Watermark(Watermark::new(
+                0,
+                DataType::TIMESTAMP,
+                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                    NaiveDateTime::from_str("2021-04-01T00:00:00.002").unwrap()
+                ))
+            ))
+        );
+
+        // Consume the barrier
+        now_executor.next().await.unwrap().unwrap();
+    }
+
+    #[inline]
+    fn create_pk_indices() -> PkIndices {
+        vec![]
+    }
+
+    #[inline]
+    fn create_order_types() -> Vec<OrderType> {
+        vec![]
+    }
+
+    async fn create_state_table() -> StateTable<MemoryStateStore> {
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamp)];
+        let order_types = create_order_types();
+        let pk_indices = create_pk_indices();
+        StateTable::new_without_distribution(
+            memory_state_store,
+            table_id,
+            column_descs,
+            order_types,
+            pk_indices,
+        )
+        .await
+    }
+
+    fn create_executor(
+        state_table: StateTable<MemoryStateStore>,
+    ) -> (UnboundedSender<Barrier>, BoxedMessageStream) {
+        let (sender, barrier_receiver) = unbounded_channel();
+        let now_executor = NowExecutor::new(barrier_receiver, 1, state_table);
+        (sender, Box::new(now_executor).execute())
     }
 }
