@@ -31,7 +31,7 @@ use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::event_handler::HummockEvent;
