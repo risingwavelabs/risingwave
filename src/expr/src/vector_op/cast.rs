@@ -17,6 +17,7 @@ use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use itertools::Itertools;
 use num_traits::ToPrimitive;
 use postgres_types::ToSql;
 use risingwave_common::array::{Array, ListRef, ListValue, StructRef, StructValue};
@@ -423,8 +424,6 @@ macro_rules! for_all_cast_variants {
 // TODO(nanderstabel): optimize for multidimensional List. Depth can be given as a parameter to this
 // function.
 fn unnest(input: &str) -> Result<Vec<String>> {
-    use itertools::Itertools;
-
     // Trim input
     let trimmed = input.trim();
 
@@ -512,6 +511,7 @@ pub fn list_cast(
     ))
 }
 
+/// Cast struct of `source_elem_type` to `target_elem_type` by casting each element.
 pub fn struct_cast(
     input: StructRef<'_>,
     source_elem_type: &StructType,
@@ -521,8 +521,8 @@ pub fn struct_cast(
         input
             .fields_ref()
             .into_iter()
-            .zip(source_elem_type.fields.iter())
-            .zip(target_elem_type.fields.iter())
+            .zip_eq(source_elem_type.fields.iter())
+            .zip_eq(target_elem_type.fields.iter())
             .map(|((datum_ref, source_elem_type), target_elem_type)| {
                 datum_ref
                     .map(|scalar_ref| scalar_cast(scalar_ref, source_elem_type, target_elem_type))
@@ -544,7 +544,7 @@ fn scalar_cast(
 
     match (source_type, target_type) {
         (DataType::Struct(source_type), DataType::Struct(target_type)) => {
-            Ok(struct_cast(source.try_into()?, &*source_type, &*target_type)?.to_scalar_value())
+            Ok(struct_cast(source.try_into()?, source_type, target_type)?.to_scalar_value())
         }
         (
             DataType::List {
