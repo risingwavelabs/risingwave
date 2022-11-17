@@ -76,6 +76,7 @@ tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 twox-hash = "1"
 zstd = "0.11.2"
+sled = "0.34.7"
 
 [target.'cfg(not(madsim))'.dependencies]
 risingwave_tracing = { path = "../tracing" }

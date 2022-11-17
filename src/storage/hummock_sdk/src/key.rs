@@ -515,6 +515,15 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         buf
     }
 
+    pub fn encode_reverse_epoch(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(
+            TABLE_PREFIX_LEN + self.user_key.table_key.as_ref().len() + EPOCH_LEN,
+        );
+        self.user_key.encode_into(&mut buf);
+        buf.put_u64(u64::MAX - self.epoch);
+        buf
+    }
+
     pub fn is_empty(&self) -> bool {
         self.user_key.is_empty()
     }
@@ -534,6 +543,17 @@ impl<'a> FullKey<&'a [u8]> {
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
             epoch,
+        }
+    }
+
+    /// Construct a [`FullKey`] from a byte slice.
+    pub fn decode_reverse_epoch(slice: &'a [u8]) -> Self {
+        let epoch_pos = slice.len() - EPOCH_LEN;
+        let epoch = (&slice[epoch_pos..]).get_u64();
+
+        Self {
+            user_key: UserKey::decode(&slice[..epoch_pos]),
+            epoch: u64::MAX - epoch,
         }
     }
 

@@ -14,7 +14,6 @@
 
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::iter::Fuse;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, LazyLock};
@@ -41,9 +40,12 @@ pub trait RangeKv: Clone + Send + Sync + 'static {
         &self,
         range: BytesFullKeyRange,
         limit: Option<usize>,
-    ) -> Vec<(FullKey<Vec<u8>>, Option<Bytes>)>;
+    ) -> StorageResult<Vec<(FullKey<Vec<u8>>, Option<Bytes>)>>;
 
-    fn ingest_batch(&self, kv_pairs: impl Iterator<Item = (BytesFullKey, Option<Bytes>)>);
+    fn ingest_batch(
+        &self,
+        kv_pairs: impl Iterator<Item = (BytesFullKey, Option<Bytes>)>,
+    ) -> StorageResult<()>;
 }
 
 pub type BTreeMapRangeKv = Arc<RwLock<BTreeMap<BytesFullKey, Option<Bytes>>>>;
@@ -53,19 +55,120 @@ impl RangeKv for BTreeMapRangeKv {
         &self,
         range: BytesFullKeyRange,
         limit: Option<usize>,
-    ) -> Vec<(FullKey<Vec<u8>>, Option<Bytes>)> {
+    ) -> StorageResult<Vec<(FullKey<Vec<u8>>, Option<Bytes>)>> {
         let limit = limit.unwrap_or(usize::MAX);
-        self.read()
+        Ok(self
+            .read()
             .range(range)
             .take(limit)
             .map(|(key, value)| (key.to_ref().to_vec(), value.clone()))
-            .collect()
+            .collect())
     }
 
-    fn ingest_batch(&self, kv_pairs: impl Iterator<Item = (BytesFullKey, Option<Bytes>)>) {
+    fn ingest_batch(
+        &self,
+        kv_pairs: impl Iterator<Item = (BytesFullKey, Option<Bytes>)>,
+    ) -> StorageResult<()> {
         let mut inner = self.write();
         for (key, value) in kv_pairs {
             inner.insert(key, value);
+        }
+        Ok(())
+    }
+}
+
+pub mod sled {
+    use bytes::Bytes;
+    use risingwave_hummock_sdk::key::FullKey;
+
+    use crate::error::StorageResult;
+    use crate::memory::{BytesFullKey, BytesFullKeyRange, RangeKv, RangeKvStateStore};
+
+    #[derive(Clone)]
+    pub struct SledRangeKv {
+        inner: sled::Db,
+    }
+
+    impl SledRangeKv {
+        pub fn new(path: impl AsRef<std::path::Path>) -> Self {
+            SledRangeKv {
+                inner: sled::open(path).expect("open"),
+            }
+        }
+
+        pub fn new_temp() -> Self {
+            let path = tempfile::tempdir().expect("find temp dir").into_path();
+            SledRangeKv {
+                inner: sled::open(path).expect("open"),
+            }
+        }
+    }
+
+    const EMPTY: u8 = 1;
+    const NON_EMPTY: u8 = 0;
+
+    impl RangeKv for SledRangeKv {
+        fn range(
+            &self,
+            range: BytesFullKeyRange,
+            limit: Option<usize>,
+        ) -> StorageResult<Vec<(FullKey<Vec<u8>>, Option<Bytes>)>> {
+            let (left, right) = range;
+            let left = left.map(|key| key.to_ref().encode_reverse_epoch());
+            let right = right.map(|key| key.to_ref().encode_reverse_epoch());
+            let limit = limit.unwrap_or(usize::MAX);
+            let mut ret = vec![];
+            for result in self.inner.range((left, right)).take(limit) {
+                let (key, value) = result?;
+                let full_key = FullKey::decode_reverse_epoch(key.as_ref()).to_vec();
+                assert!(!value.is_empty());
+                let value = match value.as_ref() {
+                    [EMPTY] => None,
+                    [NON_EMPTY, rest @ ..] => Some(Bytes::from(Vec::from(rest))),
+                    _ => unreachable!(),
+                };
+                ret.push((full_key, value))
+            }
+            Ok(ret)
+        }
+
+        fn ingest_batch(
+            &self,
+            kv_pairs: impl Iterator<Item = (BytesFullKey, Option<Bytes>)>,
+        ) -> StorageResult<()> {
+            let mut batch = sled::Batch::default();
+            for (key, value) in kv_pairs {
+                let encoded_key = key.encode_reverse_epoch();
+                let key = sled::IVec::from(encoded_key);
+                let mut buffer =
+                    Vec::with_capacity(value.as_ref().map(|v| v.len()).unwrap_or_default() + 1);
+                if let Some(value) = value {
+                    buffer.push(NON_EMPTY);
+                    buffer.extend_from_slice(value.as_ref());
+                } else {
+                    buffer.push(EMPTY);
+                }
+                let value = sled::IVec::from(buffer);
+                batch.insert(key, value);
+            }
+            self.inner.apply_batch(batch)?;
+            Ok(())
+        }
+    }
+
+    pub type SledStateStore = RangeKvStateStore<SledRangeKv>;
+
+    impl SledStateStore {
+        pub fn new(path: impl AsRef<std::path::Path>) -> Self {
+            RangeKvStateStore {
+                inner: SledRangeKv::new(path),
+            }
+        }
+
+        pub fn new_temp() -> Self {
+            RangeKvStateStore {
+                inner: SledRangeKv::new_temp(),
+            }
         }
     }
 }
@@ -101,7 +204,7 @@ mod batched_iter {
         const BATCH_SIZE: usize = 256;
 
         /// Get the next batch of records and fill the `current` buffer.
-        fn refill(&mut self) {
+        fn refill(&mut self) -> StorageResult<()> {
             assert!(self.current.is_empty());
 
             let batch = self
@@ -109,7 +212,7 @@ mod batched_iter {
                 .range(
                     (self.range.0.clone(), self.range.1.clone()),
                     Some(Self::BATCH_SIZE),
-                )
+                )?
                 .into_iter()
                 .collect_vec();
 
@@ -122,20 +225,20 @@ mod batched_iter {
                 self.range.0 = Bound::Excluded(full_key);
             }
             self.current = batch.into_iter();
+            Ok(())
         }
     }
 
-    impl<R: RangeKv> Iterator for Iter<R> {
-        type Item = (FullKey<Vec<u8>>, Option<Bytes>);
-
-        fn next(&mut self) -> Option<Self::Item> {
+    impl<R: RangeKv> Iter<R> {
+        pub fn next(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Option<Bytes>)>> {
             match self.current.next() {
-                Some((key, value)) => Some((key.to_ref().to_vec(), value)),
+                Some((key, value)) => Ok(Some((key.to_ref().to_vec(), value))),
                 None => {
-                    self.refill();
-                    self.current
+                    self.refill()?;
+                    Ok(self
+                        .current
                         .next()
-                        .map(|(key, value)| (key.to_ref().to_vec(), value))
+                        .map(|(key, value)| (key.to_ref().to_vec(), value)))
                 }
             }
         }
@@ -147,24 +250,33 @@ mod batched_iter {
         use risingwave_hummock_sdk::key::FullKey;
 
         use super::*;
+        use crate::memory::sled::SledRangeKv;
 
         #[test]
-        fn test_iter_chaos() {
+        fn test_btreemap_iter_chaos() {
+            let map = Arc::new(RwLock::new(BTreeMap::new()));
+            test_iter_chaos_inner(map, 1000);
+        }
+
+        #[test]
+        fn test_sled_iter_chaos() {
+            let map = SledRangeKv::new_temp();
+            test_iter_chaos_inner(map, 100);
+        }
+
+        fn test_iter_chaos_inner(map: impl RangeKv, count: usize) {
             let key_range = 1..=10000;
             let num_to_bytes = |k: i32| Bytes::from(k.to_string().as_bytes().to_vec());
             let num_to_full_key =
                 |k: i32| FullKey::new(TableId::default(), TableKey(num_to_bytes(k)), 0);
             #[allow(clippy::mutable_key_type)]
-            let map: BTreeMap<FullKey<Bytes>, Option<Bytes>> = key_range
-                .clone()
-                .map(|k| {
-                    let key = num_to_full_key(k);
-                    let b = key.user_key.table_key.0.clone();
+            map.ingest_batch(key_range.clone().map(|k| {
+                let key = num_to_full_key(k);
+                let b = key.user_key.table_key.0.clone();
 
-                    (key, Some(b))
-                })
-                .collect();
-            let map = Arc::new(RwLock::new(map));
+                (key, Some(b))
+            }))
+            .unwrap();
 
             let rand_bound = || {
                 let key = rand::thread_rng().gen_range(key_range.clone());
@@ -176,7 +288,7 @@ mod batched_iter {
                 }
             };
 
-            for _ in 0..1000 {
+            for _ in 0..count {
                 let range = loop {
                     let range = (rand_bound(), rand_bound());
                     let (start, end) = (range.start_bound(), range.end_bound());
@@ -196,8 +308,15 @@ mod batched_iter {
                     }
                 };
 
-                let v1 = Iter::new(map.clone(), range.clone()).collect_vec();
-                let v2 = map.range(range, None);
+                let v1 = {
+                    let mut v = vec![];
+                    let mut iter = Iter::new(map.clone(), range.clone());
+                    while let Some((key, value)) = iter.next().unwrap() {
+                        v.push((key, value));
+                    }
+                    v
+                };
+                let v2 = map.range(range, None).unwrap();
 
                 // Items iterated from the batched iterator should be the same as normaliterator.
                 assert_eq!(v1, v2);
@@ -294,7 +413,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
         let mut last_user_key = None;
         for (key, value) in self
             .inner
-            .range(to_full_key_range(table_id, key_range), None)
+            .range(to_full_key_range(table_id, key_range), None)?
         {
             if key.epoch > epoch {
                 continue;
@@ -374,7 +493,7 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
                         FullKey::new(write_options.table_id, TableKey(key), epoch),
                         value.user_value,
                     )
-                }));
+                }))?;
             Ok(size)
         }
     }
@@ -417,7 +536,7 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
 }
 
 pub struct RangeKvStateStoreIter<R: RangeKv> {
-    inner: Fuse<batched_iter::Iter<R>>,
+    inner: batched_iter::Iter<R>,
 
     epoch: HummockEpoch,
 
@@ -427,7 +546,7 @@ pub struct RangeKvStateStoreIter<R: RangeKv> {
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
     pub fn new(inner: batched_iter::Iter<R>, epoch: HummockEpoch) -> Self {
         Self {
-            inner: inner.fuse(),
+            inner,
             epoch,
             last_key: None,
         }
@@ -441,7 +560,7 @@ impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            for (key, value) in self.inner.by_ref() {
+            while let Some((key, value)) = self.inner.next()? {
                 if key.epoch > self.epoch {
                     continue;
                 }
@@ -460,10 +579,21 @@ impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::memory::sled::SledStateStore;
 
     #[tokio::test]
-    async fn test_snapshot_isolation() {
+    async fn test_snapshot_isolation_memory() {
         let state_store = MemoryStateStore::new();
+        test_snapshot_isolation_inner(state_store).await;
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_isolation_sled() {
+        let state_store = SledStateStore::new_temp();
+        test_snapshot_isolation_inner(state_store).await;
+    }
+
+    async fn test_snapshot_isolation_inner(state_store: RangeKvStateStore<impl RangeKv>) {
         state_store
             .ingest_batch(
                 vec![
