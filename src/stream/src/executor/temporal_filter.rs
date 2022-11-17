@@ -400,7 +400,6 @@ mod tests {
             )
         );
 
-        // Init barrier
         tx.push_barrier_with_prev_epoch(1 << 16, false, 1);
 
         // Consume the data chunk
