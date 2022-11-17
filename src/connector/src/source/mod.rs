@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod base;
+pub mod cdc;
 pub mod datagen;
 pub mod dummy_connector;
 pub mod filesystem;

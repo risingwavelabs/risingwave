@@ -28,6 +28,9 @@ pub struct StreamEnvironment {
     /// Endpoint the stream manager listens on.
     server_addr: HostAddr,
 
+    /// Endpoint of the source connector node
+    connector_source_endpoint: String,
+
     /// Reference to the source manager.
     source_manager: TableSourceManagerRef,
 
@@ -45,12 +48,14 @@ impl StreamEnvironment {
     pub fn new(
         source_manager: TableSourceManagerRef,
         server_addr: HostAddr,
+        connector_source_endpoint: String,
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
     ) -> Self {
         StreamEnvironment {
             server_addr,
+            connector_source_endpoint,
             source_manager,
             config,
             worker_id,
@@ -64,6 +69,7 @@ impl StreamEnvironment {
         use risingwave_storage::monitor::StateStoreMetrics;
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
+            connector_source_endpoint: "127.0.0.1:60061".parse().unwrap(),
             source_manager: Arc::new(TableSourceManager::default()),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
@@ -95,5 +101,9 @@ impl StreamEnvironment {
 
     pub fn state_store(&self) -> StateStoreImpl {
         self.state_store.clone()
+    }
+
+    pub fn connector_source_endpoint(&self) -> String {
+        self.connector_source_endpoint.clone()
     }
 }
