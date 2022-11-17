@@ -7758,6 +7758,7 @@ dependencies = [
  "tikv-jemalloc-sys",
  "tikv-jemallocator",
  "time 0.3.15",
+ "tokio",
  "tokio-stream",
  "tokio-util",
  "tower",
@@ -7767,6 +7768,7 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber",
  "url",
+ "uuid",
 ]
 
 [[package]]
