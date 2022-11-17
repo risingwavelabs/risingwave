@@ -19,12 +19,14 @@ use risingwave_common::array::{
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
 
+use super::Expression;
 use crate::expr::expr_binary_bytes::new_concat_op;
 use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
+use crate::vector_op::date_trunc::{date_trunc_interval, date_trunc_timestamp};
 use crate::vector_op::extract::{
     extract_from_date, extract_from_timestamp, extract_from_timestampz,
 };
@@ -381,6 +383,59 @@ fn build_at_time_zone_expr(
         }
     };
     Ok(expr)
+}
+
+pub fn new_date_trunc_expr(
+    ret: DataType,
+    field: BoxedExpression,
+    source: BoxedExpression,
+    timezone: Option<(BoxedExpression, BoxedExpression)>,
+) -> BoxedExpression {
+    match source.return_type() {
+        DataType::Timestamp => BinaryExpression::<
+            Utf8Array,
+            NaiveDateTimeArray,
+            NaiveDateTimeArray,
+            _,
+        >::new(field, source, ret, date_trunc_timestamp).boxed(),
+        DataType::Timestampz => {
+            // timestampz AT TIME ZONE zone -> timestamp
+            // truncate(field, timestamp) -> timestamp
+            // timestamp AT TIME ZONE zone -> timestampz
+            let (timezone1, timezone2) = timezone
+                .expect("A time zone must be specified when processing timestamp with time zone");
+            let timestamp = BinaryExpression::<I64Array, Utf8Array, NaiveDateTimeArray, _>::new(
+                source,
+                timezone1,
+                DataType::Timestamp,
+                timestampz_at_time_zone,
+            ).boxed();
+            let truncated = BinaryExpression::<
+                Utf8Array,
+                NaiveDateTimeArray,
+                NaiveDateTimeArray,
+                _,
+            >::new(
+                field,
+                timestamp,
+                DataType::Timestamp,
+                date_trunc_timestamp,
+            ).boxed();
+            BinaryExpression::<NaiveDateTimeArray, Utf8Array, I64Array, _>::new(
+                truncated,
+                timezone2,
+                DataType::Timestampz,
+                timestamp_at_time_zone,
+            ).boxed()
+        }
+        DataType::Interval => BinaryExpression::<
+            Utf8Array,
+            IntervalArray,
+            IntervalArray,
+            _,
+        >::new(field, source, ret, date_trunc_interval).boxed(),
+        _ => panic!("source must be a value expression of type timestamp, timestamp with time zone, or interval."),
+    }
 }
 
 pub fn new_binary_expr(

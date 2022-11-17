@@ -123,6 +123,7 @@ impl TableCatalogBuilder {
                 .value_indices
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
+            handle_pk_conflict: false,
         }
     }
 

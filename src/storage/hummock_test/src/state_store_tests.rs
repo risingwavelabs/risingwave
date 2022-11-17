@@ -125,6 +125,7 @@ async fn test_basic_inner(
             &anchor,
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -140,6 +141,7 @@ async fn test_basic_inner(
             &Bytes::from("bb"),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -157,6 +159,7 @@ async fn test_basic_inner(
             &Bytes::from("ab"),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -187,6 +190,7 @@ async fn test_basic_inner(
             &anchor,
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -218,6 +222,7 @@ async fn test_basic_inner(
             &anchor,
             epoch3,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -234,6 +239,7 @@ async fn test_basic_inner(
             &Bytes::from("ff"),
             epoch3,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -250,6 +256,7 @@ async fn test_basic_inner(
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -267,6 +274,7 @@ async fn test_basic_inner(
             &anchor,
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -284,6 +292,7 @@ async fn test_basic_inner(
             &anchor,
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -300,6 +309,7 @@ async fn test_basic_inner(
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -317,6 +327,7 @@ async fn test_basic_inner(
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch3,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -342,6 +353,7 @@ async fn test_basic_inner(
             &Bytes::from("bb"),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -357,6 +369,7 @@ async fn test_basic_inner(
             &Bytes::from("dd"),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -557,6 +570,7 @@ async fn test_reload_storage() {
             &anchor,
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -574,6 +588,7 @@ async fn test_reload_storage() {
             &Bytes::from("ab"),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -604,6 +619,7 @@ async fn test_reload_storage() {
             &anchor,
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -621,6 +637,7 @@ async fn test_reload_storage() {
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -638,6 +655,7 @@ async fn test_reload_storage() {
             &anchor,
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -655,6 +673,7 @@ async fn test_reload_storage() {
             &anchor,
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -671,6 +690,7 @@ async fn test_reload_storage() {
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -714,6 +734,7 @@ async fn test_write_anytime_inner(
                         "aa".as_bytes(),
                         epoch,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -731,6 +752,7 @@ async fn test_write_anytime_inner(
                         "bb".as_bytes(),
                         epoch,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -748,6 +770,7 @@ async fn test_write_anytime_inner(
                         "cc".as_bytes(),
                         epoch,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -767,6 +790,7 @@ async fn test_write_anytime_inner(
                     ),
                     epoch,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         check_bloom_filter: false,
                         prefix_hint: None,
                         table_id: Default::default(),
@@ -830,6 +854,7 @@ async fn test_write_anytime_inner(
                         "aa".as_bytes(),
                         epoch,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -845,6 +870,7 @@ async fn test_write_anytime_inner(
                     "bb".as_bytes(),
                     epoch,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         check_bloom_filter: true,
                         prefix_hint: None,
                         table_id: Default::default(),
@@ -861,6 +887,7 @@ async fn test_write_anytime_inner(
                         "cc".as_bytes(),
                         epoch,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -879,6 +906,7 @@ async fn test_write_anytime_inner(
                     ),
                     epoch,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         check_bloom_filter: false,
                         prefix_hint: None,
                         table_id: Default::default(),
@@ -1031,6 +1059,7 @@ async fn test_delete_get_inner(
             "bb".as_bytes(),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -1115,6 +1144,7 @@ async fn test_multiple_epoch_sync_inner(
                         "bb".as_bytes(),
                         epoch1,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -1131,6 +1161,7 @@ async fn test_multiple_epoch_sync_inner(
                     "bb".as_bytes(),
                     epoch2,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         check_bloom_filter: true,
                         prefix_hint: None,
                         table_id: Default::default(),
@@ -1146,6 +1177,7 @@ async fn test_multiple_epoch_sync_inner(
                         "bb".as_bytes(),
                         epoch3,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -1426,6 +1458,7 @@ async fn test_table_id_filter() {
                         b"aa",
                         read_epoch,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: TableId::new(table_id),
@@ -1444,6 +1477,7 @@ async fn test_table_id_filter() {
                         b"bb",
                         read_epoch,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: TableId::new(table_id),
@@ -1461,6 +1495,7 @@ async fn test_table_id_filter() {
                     b"cc",
                     read_epoch,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         check_bloom_filter: true,
                         prefix_hint: None,
                         table_id: TableId::new(table_id),
@@ -1477,6 +1512,7 @@ async fn test_table_id_filter() {
                     (Unbounded, Unbounded),
                     read_epoch,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         check_bloom_filter: true,
                         prefix_hint: None,
                         table_id: TableId::new(table_id),

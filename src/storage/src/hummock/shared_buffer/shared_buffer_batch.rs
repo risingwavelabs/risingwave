@@ -23,10 +23,11 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{table_key, FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
 use crate::hummock::iterator::{
-    Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
+    Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
+    HummockIteratorDirection,
 };
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
@@ -39,7 +40,7 @@ pub type SharedBufferBatchId = u64;
 
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
-    delete_range_tombstones: Vec<DeleteRangeTombstone>,
+    range_tombstone_list: Vec<DeleteRangeTombstone>,
     largest_table_key: Vec<u8>,
     size: usize,
     _tracker: Option<MemoryTracker>,
@@ -49,21 +50,35 @@ pub(crate) struct SharedBufferBatchInner {
 impl SharedBufferBatchInner {
     fn new(
         payload: Vec<SharedBufferItem>,
-        delete_range_tombstones: Vec<DeleteRangeTombstone>,
+        mut range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
         let mut largest_table_key = vec![];
-        for tombstone in &delete_range_tombstones {
-            // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary of
-            // `SharedBufferBatch` because it just expands an useless query and does not affect
-            // correctness.
-            let end_table_key = table_key(&tombstone.end_user_key);
-            if largest_table_key.as_slice().lt(end_table_key) {
-                largest_table_key.clear();
-                largest_table_key.extend_from_slice(end_table_key);
+        if !range_tombstone_list.is_empty() {
+            range_tombstone_list.sort();
+            let mut range_tombstones: Vec<DeleteRangeTombstone> = vec![];
+            for tombstone in range_tombstone_list {
+                // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary
+                // of `SharedBufferBatch` because it just expands an useless query
+                // and does not affect correctness.
+                if largest_table_key.lt(&tombstone.end_user_key.table_key.0) {
+                    largest_table_key.clear();
+                    largest_table_key.extend_from_slice(&tombstone.end_user_key.table_key.0);
+                }
+                if let Some(last) = range_tombstones.last_mut() {
+                    if last.end_user_key.gt(&tombstone.start_user_key) {
+                        if last.end_user_key.lt(&tombstone.end_user_key) {
+                            last.end_user_key = tombstone.end_user_key;
+                        }
+                        continue;
+                    }
+                }
+                range_tombstones.push(tombstone);
             }
+            range_tombstone_list = range_tombstones;
         }
+
         if let Some(item) = payload.last() {
             if item.0.gt(&largest_table_key) {
                 largest_table_key.clear();
@@ -72,7 +87,7 @@ impl SharedBufferBatchInner {
         }
         SharedBufferBatchInner {
             payload,
-            delete_range_tombstones,
+            range_tombstone_list,
             size,
             largest_table_key,
             _tracker,
@@ -172,6 +187,22 @@ impl SharedBufferBatch {
         }
     }
 
+    pub fn check_delete_by_range(&self, table_key: TableKey<&[u8]>) -> bool {
+        if self.inner.range_tombstone_list.is_empty() {
+            return false;
+        }
+        let idx = self
+            .inner
+            .range_tombstone_list
+            .partition_point(|item| item.end_user_key.table_key.as_ref().le(table_key.as_ref()));
+        idx < self.inner.range_tombstone_list.len()
+            && self.inner.range_tombstone_list[idx]
+                .start_user_key
+                .table_key
+                .as_ref()
+                .le(table_key.as_ref())
+    }
+
     pub fn into_directed_iter<D: HummockIteratorDirection>(self) -> SharedBufferBatchIterator<D> {
         SharedBufferBatchIterator::<D>::new(self.inner, self.table_id, self.epoch)
     }
@@ -182,6 +213,10 @@ impl SharedBufferBatch {
 
     pub fn into_backward_iter(self) -> SharedBufferBatchIterator<Backward> {
         self.into_directed_iter()
+    }
+
+    pub fn delete_range_iter(&self) -> SharedBufferDeleteRangeIterator {
+        SharedBufferDeleteRangeIterator::new(self.inner.clone())
     }
 
     pub fn get_payload(&self) -> &[SharedBufferItem] {
@@ -199,29 +234,33 @@ impl SharedBufferBatch {
     /// return inclusive left endpoint, which means that all data in this batch should be larger or
     /// equal than this key.
     pub fn start_user_key(&self) -> UserKey<&[u8]> {
-        if !self.inner.delete_range_tombstones.is_empty()
+        if self.has_range_tombstone()
             && (self.inner.is_empty()
-                || table_key(
-                    self.inner
-                        .delete_range_tombstones
-                        .first()
-                        .unwrap()
-                        .start_user_key
-                        .as_slice(),
-                )
-                .le(&self.inner.first().unwrap().0))
-        {
-            UserKey::decode(
-                self.inner
-                    .delete_range_tombstones
+                || self
+                    .inner
+                    .range_tombstone_list
                     .first()
                     .unwrap()
                     .start_user_key
-                    .as_slice(),
-            )
+                    .table_key
+                    .0
+                    .as_slice()
+                    .le(&self.inner.first().unwrap().0))
+        {
+            self.inner
+                .range_tombstone_list
+                .first()
+                .unwrap()
+                .start_user_key
+                .as_ref()
         } else {
             UserKey::new(self.table_id, self.start_table_key())
         }
+    }
+
+    #[inline(always)]
+    pub fn has_range_tombstone(&self) -> bool {
+        !self.inner.range_tombstone_list.is_empty()
     }
 
     /// return inclusive right endpoint, which means that all data in this batch should be smaller
@@ -290,20 +329,18 @@ impl SharedBufferBatch {
     }
 
     pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
-        self.inner.delete_range_tombstones.clone()
+        self.inner.range_tombstone_list.clone()
     }
 
     #[cfg(test)]
     fn check_tombstone_prefix(table_id: TableId, tombstones: &[DeleteRangeTombstone]) {
         for tombstone in tombstones {
             assert_eq!(
-                UserKey::decode(&tombstone.start_user_key).table_id,
-                table_id,
+                tombstone.start_user_key.table_id, table_id,
                 "delete range tombstone in a shared buffer batch must begin with the same table id"
             );
             assert_eq!(
-                UserKey::decode(&tombstone.end_user_key).table_id,
-                table_id,
+                tombstone.end_user_key.table_id, table_id,
                 "delete range tombstone in a shared buffer batch must begin with the same table id"
             );
         }
@@ -423,10 +460,59 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 
     fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
 }
+pub struct SharedBufferDeleteRangeIterator {
+    inner: Arc<SharedBufferBatchInner>,
+    current_idx: usize,
+}
+
+impl SharedBufferDeleteRangeIterator {
+    pub(crate) fn new(inner: Arc<SharedBufferBatchInner>) -> Self {
+        Self {
+            inner,
+            current_idx: 0,
+        }
+    }
+}
+
+impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
+    fn start_user_key(&self) -> UserKey<&[u8]> {
+        self.inner.range_tombstone_list[self.current_idx]
+            .start_user_key
+            .as_ref()
+    }
+
+    fn end_user_key(&self) -> UserKey<&[u8]> {
+        self.inner.range_tombstone_list[self.current_idx]
+            .end_user_key
+            .as_ref()
+    }
+
+    fn current_epoch(&self) -> HummockEpoch {
+        self.inner.range_tombstone_list[self.current_idx].sequence
+    }
+
+    fn next(&mut self) {
+        self.current_idx += 1;
+    }
+
+    fn rewind(&mut self) {
+        self.current_idx = 0;
+    }
+
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
+        self.current_idx = self
+            .inner
+            .range_tombstone_list
+            .partition_point(|tombstone| tombstone.end_user_key.as_ref().le(&target_user_key));
+    }
+
+    fn is_valid(&self) -> bool {
+        self.current_idx < self.inner.range_tombstone_list.len()
+    }
+}
 
 #[cfg(test)]
 mod tests {
-
     use itertools::Itertools;
 
     use super::*;
@@ -658,6 +744,28 @@ mod tests {
             iter.next().await.unwrap();
         }
         assert!(!iter.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_shared_buffer_batch_delete_range() {
+        let epoch = 1;
+        let shared_buffer_items = vec![
+            (Bytes::from(b"aaa".to_vec()), Bytes::from(b"bbb".to_vec())),
+            (Bytes::from(b"ccc".to_vec()), Bytes::from(b"ddd".to_vec())),
+            (Bytes::from(b"ddd".to_vec()), Bytes::from(b"eee".to_vec())),
+        ];
+        let shared_buffer_batch = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            vec![],
+            shared_buffer_items,
+            Default::default(),
+            None,
+        )
+        .await;
+        assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"aaa")));
+        assert!(!shared_buffer_batch.check_delete_by_range(TableKey(b"bbb")));
+        assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"ddd")));
+        assert!(!shared_buffer_batch.check_delete_by_range(TableKey(b"eee")));
     }
 
     #[tokio::test]

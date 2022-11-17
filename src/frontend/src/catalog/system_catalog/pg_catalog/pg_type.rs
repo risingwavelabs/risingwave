@@ -15,7 +15,7 @@
 use std::sync::LazyLock;
 
 use itertools::Itertools;
-use risingwave_common::array::Row;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
