@@ -28,8 +28,10 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, user_key, FullKey, TableKey, TableKeyRange, UserKey,
 };
+use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::{can_concat, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
+use sync_point::sync_point;
 
 use super::memtable::{ImmId, ImmutableMemtable};
 use super::state_store::StagingDataIterator;
@@ -456,16 +458,14 @@ impl HummockVersionReader {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = user_key(
-                        &level.table_infos[table_info_idx]
-                            .key_range
-                            .as_ref()
-                            .unwrap()
-                            .right,
-                    )
-                    .cmp(encoded_user_key.as_ref());
+                    let ord = level.table_infos[table_info_idx]
+                        .key_range
+                        .as_ref()
+                        .unwrap()
+                        .compare_right_with_user_key(&encoded_user_key);
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
+                        sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_FILE");
                         continue;
                     }
 
@@ -518,22 +518,28 @@ impl HummockVersionReader {
             staging_iters.push(HummockIteratorUnion::First(imm.into_forward_iter()));
         }
         let mut staging_sst_iter_count = 0;
+        // encode once
+        let bloom_filter_key = if let Some(prefix) = read_options.prefix_hint.as_ref() {
+            Some(UserKey::new(read_options.table_id, TableKey(prefix)).encode())
+        } else {
+            None
+        };
+
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
                 .sstable_store
                 .sstable(sstable_info, &mut local_stats)
                 .in_span(Span::enter_with_local_parent("get_sstable"))
                 .await?;
-            if let Some(prefix) = read_options.prefix_hint.as_ref() {
+            if let Some(bloom_filter_key) = bloom_filter_key.as_ref() {
                 if !hit_sstable_bloom_filter(
                     table_holder.value(),
-                    UserKey::for_test(read_options.table_id, prefix)
-                        .encode()
-                        .as_slice(),
+                    bloom_filter_key.as_slice(),
                     &mut local_stats,
                 ) {
                     continue;
                 }
+
                 if !table_holder.value().meta.range_tombstone_list.is_empty()
                     && !read_options.ignore_range_tombstone
                 {
@@ -598,7 +604,7 @@ impl HummockVersionReader {
                     if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
                         if !hit_sstable_bloom_filter(
                             sstable.value(),
-                            UserKey::for_test(read_options.table_id, bloom_filter_key)
+                            UserKey::new(read_options.table_id, TableKey(bloom_filter_key))
                                 .encode()
                                 .as_slice(),
                             &mut local_stats,
@@ -629,16 +635,14 @@ impl HummockVersionReader {
                         .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
-                        if !hit_sstable_bloom_filter(
+                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref()
+                        && !hit_sstable_bloom_filter(
                             sstable.value(),
-                            UserKey::for_test(read_options.table_id, bloom_filter_key)
-                                .encode()
-                                .as_slice(),
+                            bloom_filter_key.as_slice(),
                             &mut local_stats,
-                        ) {
-                            continue;
-                        }
+                        )
+                    {
+                        continue;
                     }
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone

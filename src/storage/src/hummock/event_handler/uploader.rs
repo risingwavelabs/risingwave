@@ -784,6 +784,7 @@ mod tests {
             key_range: Some(KeyRange {
                 left: start_full_key.encode(),
                 right: end_full_key.encode(),
+                right_exclusive: true,
             }),
             file_size: 0,
             table_ids: vec![TEST_TABLE_ID.table_id],
