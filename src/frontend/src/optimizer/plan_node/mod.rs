@@ -475,7 +475,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
             , { Stream, GroupTopN }
-            , { Stream, Union}
+            , { Stream, Union }
         }
     };
 }

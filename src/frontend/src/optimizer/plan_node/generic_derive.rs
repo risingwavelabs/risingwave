@@ -401,8 +401,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
                 }
             }
         }
-        if self.source_col.is_some() {
-            pk_indices.push(self.source_col.unwrap())
+        if let Some(source_col) = self.source_col {
+            pk_indices.push(source_col)
         }
         Some(pk_indices)
     }
