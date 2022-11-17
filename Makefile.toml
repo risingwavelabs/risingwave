@@ -91,6 +91,16 @@ echo ""
 echo ""
 '''
 
+
+[tasks.ls]
+category = "Misc"
+description = "List all nodes in the cluster"
+script = '''
+#!/bin/bash
+set -e
+for node in $(ls ${PREFIX_LOG}); do echo $(basename $node .log)  ; done
+'''
+
 [tasks.check-logs]
 category = "Misc"
 description = "Check if there is panic in log or significant log size issue"
