@@ -218,26 +218,32 @@ impl Row2 for Row {
     where
         Self: 'a;
 
+    #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         to_datum_ref(&self[index])
     }
 
+    #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
         to_datum_ref(self.0.get_unchecked(index))
     }
 
+    #[inline]
     fn len(&self) -> usize {
         self.0.len()
     }
 
+    #[inline]
     fn iter(&self) -> Self::Iter<'_> {
         Iterator::map(self.0.iter(), to_datum_ref)
     }
 
+    #[inline]
     fn to_owned_row(&self) -> Row {
         self.clone()
     }
 
+    #[inline]
     fn into_owned_row(self) -> Row {
         self
     }

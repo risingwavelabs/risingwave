@@ -37,6 +37,7 @@ impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
         R1: 'a,
         R2: 'a;
 
+    #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         if index < self.r1.len() {
             // SAFETY: `index < self.r1.len()` implies the index is valid.
@@ -46,6 +47,7 @@ impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
         }
     }
 
+    #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
         if index < self.r1.len() {
             self.r1.datum_at_unchecked(index)
@@ -54,19 +56,23 @@ impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
         }
     }
 
+    #[inline]
     fn len(&self) -> usize {
         self.r1.len() + self.r2.len()
     }
 
+    #[inline]
     fn is_empty(&self) -> bool {
         self.r1.is_empty() && self.r2.is_empty()
     }
 
+    #[inline]
     fn iter(&self) -> Self::Iter<'_> {
         self.r1.iter().chain(self.r2.iter())
     }
 
     // Manually implemented in case `R1` or `R2` has a more efficient implementation.
+    #[inline]
     fn value_serialize_into(&self, mut buf: impl BufMut) {
         buf.put_slice(&self.r1.value_serialize());
         buf.put_slice(&self.r2.value_serialize());

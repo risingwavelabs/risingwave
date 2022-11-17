@@ -548,6 +548,7 @@ pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
 /// Convert a [`Datum`] to a [`DatumRef`].
 // TODO: use `ToDatumRef::to_datum_ref` instead.
+#[inline(always)]
 pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
     datum.as_ref().map(|d| d.as_scalar_ref_impl())
 }

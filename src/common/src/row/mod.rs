@@ -53,6 +53,7 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     fn len(&self) -> usize;
 
     /// Returns `true` if the row contains no datum.
+    #[inline]
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -61,16 +62,19 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Converts the row into an owned [`Row`].
+    #[inline]
     fn to_owned_row(&self) -> Row {
         Row(self.iter().map(|d| d.to_owned_datum()).collect())
     }
 
     /// Consumes `self` and converts it into an owned [`Row`].
+    #[inline]
     fn into_owned_row(self) -> Row {
         self.to_owned_row()
     }
 
     /// Serializes the row with value encoding, into the given `buf`.
+    #[inline]
     fn value_serialize_into(&self, mut buf: impl BufMut) {
         for datum in self.iter() {
             value_encoding::serialize_datum_ref(&datum, &mut buf);
@@ -78,6 +82,7 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     }
 
     /// Serializes the row with value encoding and returns the bytes.
+    #[inline]
     fn value_serialize(&self) -> Vec<u8> {
         let mut buf = Vec::new();
         self.value_serialize_into(&mut buf);
@@ -85,6 +90,7 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     }
 
     /// Returns the hash code of the row.
+    #[inline]
     fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
         let mut hasher = hash_builder.build_hasher();
         for datum in self.iter() {
@@ -188,18 +194,22 @@ impl Row2 for &[Datum] {
     where
         Self: 'a;
 
+    #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         to_datum_ref(&self[index])
     }
 
+    #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
         to_datum_ref(self.get_unchecked(index))
     }
 
+    #[inline]
     fn len(&self) -> usize {
         self.as_ref().len()
     }
 
+    #[inline]
     fn iter(&self) -> Self::Iter<'_> {
         self.as_ref().iter().map(to_datum_ref)
     }
@@ -210,18 +220,22 @@ impl Row2 for &[DatumRef<'_>] {
     where
         Self: 'a;
 
+    #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         self[index]
     }
 
+    #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
         *self.get_unchecked(index)
     }
 
+    #[inline]
     fn len(&self) -> usize {
         self.as_ref().len()
     }
 
+    #[inline]
     fn iter(&self) -> Self::Iter<'_> {
         self.as_ref().iter().copied()
     }

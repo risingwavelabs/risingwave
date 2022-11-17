@@ -24,18 +24,22 @@ impl<D: ToDatumRef> Row2 for Once<D> {
     where
         Self: 'a;
 
+    #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         [self.0.to_datum_ref()][index] // for better error messages
     }
 
+    #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
         *[self.0.to_datum_ref()].get_unchecked(index) // for better error messages
     }
 
+    #[inline]
     fn len(&self) -> usize {
         1
     }
 
+    #[inline]
     fn iter(&self) -> Self::Iter<'_> {
         std::iter::once(self.0.to_datum_ref())
     }

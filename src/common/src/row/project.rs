@@ -35,20 +35,24 @@ impl<'i, R: Row2> Row2 for Project<'i, R> {
         R: 'a,
         'i: 'a;
 
+    #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         // SAFETY: we have checked that `self.indices` are all valid in `RowExt::project`.
         unsafe { self.row.datum_at_unchecked(self.indices[index]) }
     }
 
+    #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
         self.row
             .datum_at_unchecked(*self.indices.get_unchecked(index))
     }
 
+    #[inline]
     fn len(&self) -> usize {
         self.indices.len()
     }
 
+    #[inline]
     fn iter(&self) -> Self::Iter<'_> {
         self.indices.iter().map(|&i|
                 // SAFETY: we have checked that `self.indices` are all valid in `RowExt::project`.

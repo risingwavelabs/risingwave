@@ -24,18 +24,22 @@ impl Row2 for Empty {
     where
         Self: 'a;
 
+    #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         [][index] // for better error messages
     }
 
+    #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
         *[].get_unchecked(index) // for better error messages
     }
 
+    #[inline]
     fn len(&self) -> usize {
         0
     }
 
+    #[inline]
     fn iter(&self) -> Self::Iter<'_> {
         std::iter::empty()
     }
