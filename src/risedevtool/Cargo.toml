@@ -15,7 +15,7 @@ clap = { version = "3", features = ["derive"] }
 console = "0.15"
 dialoguer = "0.10"
 enum-iterator = "1"
-indicatif = "0.16"
+indicatif = "0.17"
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = "0.10"
 kafka = { version = "0.9", default-features = false }
