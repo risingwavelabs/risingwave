@@ -31,6 +31,7 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
+use sync_point::sync_point;
 
 use super::memtable::{ImmId, ImmutableMemtable};
 use super::state_store::StagingDataIterator;
@@ -449,6 +450,7 @@ impl HummockVersionReader {
                         .compare_right_with_user_key(&encoded_user_key);
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
+                        sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_FILE");
                         continue;
                     }
 

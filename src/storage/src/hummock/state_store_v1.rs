@@ -30,6 +30,7 @@ use risingwave_hummock_sdk::key::{
     bound_table_key_range, map_table_key_range, next_key, user_key, FullKey, TableKey,
     TableKeyRange, UserKey,
 };
+use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 use tokio::sync::oneshot;
@@ -124,7 +125,7 @@ impl HummockStorageV1 {
 
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
-        let encoded_user_key = UserKey::for_test(read_options.table_id, table_key).encode();
+        let encoded_user_key = UserKey::new(read_options.table_id, table_key).encode();
         // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
         // read/write path.
         assert!(pinned_version.is_valid());
@@ -162,14 +163,11 @@ impl HummockStorageV1 {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = user_key(
-                        &level.table_infos[table_info_idx]
-                            .key_range
-                            .as_ref()
-                            .unwrap()
-                            .right,
-                    )
-                    .cmp(encoded_user_key.as_ref());
+                    let ord = level.table_infos[table_info_idx]
+                        .key_range
+                        .as_ref()
+                        .unwrap()
+                        .compare_right_with_user_key(&encoded_user_key);
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
                         continue;
