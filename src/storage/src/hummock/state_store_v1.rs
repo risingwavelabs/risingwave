@@ -30,6 +30,7 @@ use risingwave_hummock_sdk::key::{
     bound_table_key_range, map_table_key_range, next_key, user_key, FullKey, TableKey,
     TableKeyRange, UserKey,
 };
+use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 use tokio::sync::oneshot;
@@ -162,14 +163,11 @@ impl HummockStorageV1 {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = user_key(
-                        &level.table_infos[table_info_idx]
-                            .key_range
-                            .as_ref()
-                            .unwrap()
-                            .right,
-                    )
-                    .cmp(encoded_user_key.as_ref());
+                    let ord = level.table_infos[table_info_idx]
+                        .key_range
+                        .as_ref()
+                        .unwrap()
+                        .compare_right_with_user_key(&encoded_user_key);
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
                         continue;
@@ -502,11 +500,6 @@ impl StateStoreWrite for HummockStorageV1 {
     /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
     /// * Locally unique. There should not be two or more operations on the same key in one write
     ///   batch.
-    /// * Globally unique. The streaming operators should ensure that different operators won't
-    ///   operate on the same key. The operator operating on one keyspace should always wait for all
-    ///   changes to be committed before reading and writing new keys to the engine. That is because
-    ///   that the table with lower epoch might be committed after a table with higher epoch has
-    ///   been committed. If such case happens, the outcome is non-predictable.
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,

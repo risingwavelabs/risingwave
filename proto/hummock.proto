@@ -197,9 +197,12 @@ message UnpinSnapshotBeforeResponse {
   common.Status status = 1;
 }
 
+// When `right_exclusive=false`, it represents [left, right], of which both boundary are open. When `right_exclusive=true`,
+// it represents [left, right), of which right is exclusive.
 message KeyRange {
   bytes left = 1;
   bytes right = 2;
+  bool right_exclusive = 3;
 }
 
 message TableOption {
