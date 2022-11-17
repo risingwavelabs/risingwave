@@ -18,10 +18,10 @@ use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{ParallelUnitMapping, WorkerNode, WorkerType};
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse, SubscribeType};
+use risingwave_pb::meta::subscribe_response::Info;
+use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeType};
 use risingwave_pb::user::UserInfo;
-use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
@@ -98,26 +98,20 @@ where
         (tables, notification_version)
     }
 
-    async fn compactor_subscribe(&self, tx: UnboundedSender<Notification>) {
+    async fn compactor_subscribe(&self) -> MetaSnapshot {
         let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await;
 
-        tx.send(Ok(SubscribeResponse {
-            status: None,
-            operation: Operation::Snapshot as i32,
-            info: Some(Info::Snapshot(MetaSnapshot {
-                tables,
-                version: Some(SnapshotVersion {
-                    catalog_version,
-                    ..Default::default()
-                }),
+        MetaSnapshot {
+            tables,
+            version: Some(SnapshotVersion {
+                catalog_version,
                 ..Default::default()
-            })),
-            version: self.env.notification_manager().current_version().await,
-        }))
-        .unwrap()
+            }),
+            ..Default::default()
+        }
     }
 
-    async fn frontend_subscribe(&self, tx: UnboundedSender<Notification>) {
+    async fn frontend_subscribe(&self) -> MetaSnapshot {
         let ((databases, schemas, tables, sources, sinks, indexes, views), users, catalog_version) =
             self.get_catalog_snapshot().await;
         let (parallel_unit_mappings, parallel_unit_mapping_version) =
@@ -126,34 +120,28 @@ where
 
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
-        tx.send(Ok(SubscribeResponse {
-            status: None,
-            operation: Operation::Snapshot as i32,
-            info: Some(Info::Snapshot(MetaSnapshot {
-                databases,
-                schemas,
-                sources,
-                sinks,
-                tables,
-                indexes,
-                views,
-                users,
-                parallel_unit_mappings,
-                nodes,
-                hummock_snapshot,
-                version: Some(SnapshotVersion {
-                    catalog_version,
-                    parallel_unit_mapping_version,
-                    worker_node_version,
-                }),
-                ..Default::default()
-            })),
-            version: self.env.notification_manager().current_version().await,
-        }))
-        .unwrap();
+        MetaSnapshot {
+            databases,
+            schemas,
+            sources,
+            sinks,
+            tables,
+            indexes,
+            views,
+            users,
+            parallel_unit_mappings,
+            nodes,
+            hummock_snapshot,
+            version: Some(SnapshotVersion {
+                catalog_version,
+                parallel_unit_mapping_version,
+                worker_node_version,
+            }),
+            ..Default::default()
+        }
     }
 
-    async fn hummock_subscribe(&self, tx: UnboundedSender<Notification>) {
+    async fn hummock_subscribe(&self) -> MetaSnapshot {
         let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await;
         let hummock_version = self
             .hummock_manager
@@ -162,21 +150,15 @@ where
             .current_version
             .clone();
 
-        tx.send(Ok(SubscribeResponse {
-            status: None,
-            operation: Operation::Snapshot as i32,
-            info: Some(Info::Snapshot(MetaSnapshot {
-                tables,
-                hummock_version: Some(hummock_version),
-                version: Some(SnapshotVersion {
-                    catalog_version,
-                    ..Default::default()
-                }),
+        MetaSnapshot {
+            tables,
+            hummock_version: Some(hummock_version),
+            version: Some(SnapshotVersion {
+                catalog_version,
                 ..Default::default()
-            })),
-            version: self.env.notification_manager().current_version().await,
-        }))
-        .unwrap()
+            }),
+            ..Default::default()
+        }
     }
 }
 
@@ -196,28 +178,35 @@ where
         let host_address = req.get_host()?.clone();
         let subscribe_type = req.get_subscribe_type()?;
 
+        let worker_key = WorkerKey(host_address);
+
         let (tx, rx) = mpsc::unbounded_channel();
         self.env
             .notification_manager()
-            .insert_sender(subscribe_type, WorkerKey(host_address), tx.clone())
+            .insert_sender(subscribe_type, worker_key.clone(), tx)
             .await;
 
-        match subscribe_type {
-            SubscribeType::Compactor => self.compactor_subscribe(tx).await,
+        let meta_snapshot = match subscribe_type {
+            SubscribeType::Compactor => self.compactor_subscribe().await,
             SubscribeType::Frontend => {
                 self.hummock_manager
                     .pin_snapshot(req.get_worker_id())
                     .await?;
-                self.frontend_subscribe(tx).await;
+                self.frontend_subscribe().await
             }
             SubscribeType::Hummock => {
                 self.hummock_manager
                     .pin_version(req.get_worker_id())
                     .await?;
-                self.hummock_subscribe(tx).await;
+                self.hummock_subscribe().await
             }
             SubscribeType::Unspecified => unreachable!(),
         };
+
+        self.env
+            .notification_manager()
+            .notify_snapshot(worker_key, Info::Snapshot(meta_snapshot))
+            .await;
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }
