@@ -28,7 +28,7 @@ use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::state_table::StateTable;
+use super::table::state_table::StateTable;
 use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
     PkIndices, StreamExecutorResult, Watermark,

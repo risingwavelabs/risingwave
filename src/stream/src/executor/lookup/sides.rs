@@ -23,7 +23,7 @@ use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::{Barrier, Executor, Message, MessageStream};
 
 /// Join side of Lookup Executor's stream

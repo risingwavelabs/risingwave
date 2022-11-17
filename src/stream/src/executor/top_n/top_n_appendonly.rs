@@ -28,7 +28,7 @@ use super::TopNCache;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need

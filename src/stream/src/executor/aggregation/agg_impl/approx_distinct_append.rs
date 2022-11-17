@@ -26,7 +26,7 @@ use super::approx_distinct_utils::{
 };
 use crate::common::iter_state_table;
 use crate::executor::aggregation::table::TableStateImpl;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
 #[derive(Clone, Debug)]

@@ -18,7 +18,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderPair;
 
 use super::*;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::{LookupExecutor, LookupExecutorParams};
 
 pub struct LookupExecutorBuilder;

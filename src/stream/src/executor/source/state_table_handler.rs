@@ -28,7 +28,7 @@ use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder};
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
 pub struct SourceStateTableHandler<S: StateStore> {

@@ -24,7 +24,7 @@ use super::*;
 use crate::cache::LruManagerRef;
 use crate::executor::aggregation::{AggCall, AggStateStorage};
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
 
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {

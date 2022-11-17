@@ -17,7 +17,7 @@ use std::sync::Arc;
 use risingwave_common::util::sort_util::OrderPair;
 
 use super::*;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::GroupTopNExecutor;
 
 pub struct GroupTopNExecutorBuilder;

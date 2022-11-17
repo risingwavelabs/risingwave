@@ -17,7 +17,7 @@ use risingwave_common::bail;
 use risingwave_pb::expr::expr_node::Type::*;
 
 use super::*;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::DynamicFilterExecutor;
 
 pub struct DynamicFilterExecutorBuilder;

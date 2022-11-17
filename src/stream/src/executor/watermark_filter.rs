@@ -29,7 +29,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::filter::SimpleFilterExecutor;
-use super::state_table::StateTable;
+use super::table::state_table::StateTable;
 use super::{
     ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, StreamExecutorResult,
 };

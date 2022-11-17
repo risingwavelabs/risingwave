@@ -49,7 +49,7 @@ use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution
 use risingwave_storage::{Keyspace, StateStore, StateStoreIter};
 use tracing::trace;
 
-use super::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.

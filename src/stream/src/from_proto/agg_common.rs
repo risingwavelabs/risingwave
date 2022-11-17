@@ -25,7 +25,7 @@ use risingwave_pb::plan_common::OrderType as ProstOrderType;
 use super::*;
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{AggArgs, AggCall, AggStateStorage};
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 
 pub fn build_agg_call_from_prost(
     append_only: bool,

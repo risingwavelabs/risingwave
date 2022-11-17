@@ -35,7 +35,7 @@ use super::state_cache::string_agg::StringAgg;
 use super::state_cache::{CacheKey, GenericStateCache, StateCache};
 use super::AggCall;
 use crate::common::{iter_state_table, StateTableColumnMapping};
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Aggregation state as a materialization of input chunks.
@@ -299,7 +299,7 @@ mod tests {
     use super::MaterializedInputState;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::{AggArgs, AggCall};
-    use crate::executor::state_table::StateTable;
+    use crate::executor::table::state_table::StateTable;
     use crate::executor::StreamExecutorResult;
 
     fn create_chunk<S: StateStore>(

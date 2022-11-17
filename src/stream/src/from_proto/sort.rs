@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::SortExecutor;
 
 pub struct SortExecutorBuilder;

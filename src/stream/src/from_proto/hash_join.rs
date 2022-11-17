@@ -23,7 +23,7 @@ use super::*;
 use crate::cache::LruManagerRef;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::{ActorContextRef, PkIndices};
 
 pub struct HashJoinExecutorBuilder;

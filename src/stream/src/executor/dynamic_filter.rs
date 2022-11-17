@@ -34,7 +34,7 @@ use super::barrier_align::*;
 use super::error::StreamExecutorError;
 use super::managed_state::dynamic_filter::RangeCache;
 use super::monitor::StreamingMetrics;
-use super::state_table::StateTable;
+use super::table::state_table::StateTable;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };

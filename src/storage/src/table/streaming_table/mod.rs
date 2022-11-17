@@ -13,7 +13,4 @@
 // limitations under the License.
 
 pub mod mem_table;
-pub mod state_table;
-
-#[cfg(test)]
-pub mod test_streaming_table;
+// pub mod state_table;

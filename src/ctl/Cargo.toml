@@ -20,6 +20,7 @@ risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
+risingwave_stream = { path = "../stream" }
 risingwave_storage = { path = "../storage" }
 serde_json = "1"
 size = "0.2"

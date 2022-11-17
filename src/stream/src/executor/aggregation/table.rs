@@ -22,7 +22,7 @@ use risingwave_storage::StateStore;
 
 use super::agg_impl::AppendOnlyStreamingApproxCountDistinct;
 use super::AggCall;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
 #[async_trait::async_trait]

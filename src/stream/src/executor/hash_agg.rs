@@ -31,7 +31,7 @@ use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorage};
-use super::state_table::StateTable;
+use super::table::state_table::StateTable;
 use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::error::StreamResult;

@@ -34,7 +34,7 @@ use crate::cache::cache_may_stale;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 pub type GroupTopNExecutor<S, const WITH_TIES: bool> =

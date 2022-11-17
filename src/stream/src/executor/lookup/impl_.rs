@@ -29,7 +29,7 @@ use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::{Barrier, Executor, Message, PkIndices};
 
 /// Parameters for [`LookupExecutor`].

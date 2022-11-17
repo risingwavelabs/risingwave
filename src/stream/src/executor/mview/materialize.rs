@@ -33,7 +33,7 @@ use risingwave_storage::StateStore;
 
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::executor::error::StreamExecutorError;
-use crate::executor::state_table::StateTable;
+use crate::executor::table::state_table::StateTable;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
     Executor, ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,

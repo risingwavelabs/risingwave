@@ -35,7 +35,7 @@ use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
-use super::state_table::StateTable;
+use super::table::state_table::StateTable;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
