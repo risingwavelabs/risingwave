@@ -28,7 +28,6 @@ use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use self::JoinType::{FullOuter, LeftOuter, LeftSemi, RightAnti, RightOuter, RightSemi};
@@ -36,6 +35,7 @@ use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
+use super::state_table::StateTable;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };

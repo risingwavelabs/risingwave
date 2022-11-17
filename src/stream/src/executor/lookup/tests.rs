@@ -21,11 +21,11 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
+use crate::executor::state_table::StateTable;
 use crate::executor::test_utils::*;
 use crate::executor::{
     Barrier, BoxedMessageStream, Executor, MaterializeExecutor, Message, PkIndices,

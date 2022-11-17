@@ -22,9 +22,9 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use super::state_table::StateTable;
 use super::ActorContextRef;
 use crate::common::InfallibleExpression;
 use crate::executor::error::StreamExecutorResult;

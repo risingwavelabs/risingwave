@@ -26,7 +26,6 @@ use risingwave_common::types::{Datum, DatumRef, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 use smallvec::SmallVec;
 
@@ -36,6 +35,7 @@ use super::state_cache::string_agg::StringAgg;
 use super::state_cache::{CacheKey, GenericStateCache, StateCache};
 use super::AggCall;
 use crate::common::{iter_state_table, StateTableColumnMapping};
+use crate::executor::state_table::StateTable;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Aggregation state as a materialization of input chunks.
@@ -294,12 +294,12 @@ mod tests {
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
     use risingwave_storage::StateStore;
 
     use super::MaterializedInputState;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::{AggArgs, AggCall};
+    use crate::executor::state_table::StateTable;
     use crate::executor::StreamExecutorResult;
 
     fn create_chunk<S: StateStore>(

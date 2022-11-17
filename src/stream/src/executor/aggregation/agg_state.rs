@@ -19,7 +19,6 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
 use risingwave_common::row::Row;
 use risingwave_common::types::Datum;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
@@ -27,6 +26,7 @@ use super::table::TableState;
 use super::value::ValueState;
 use super::AggCall;
 use crate::common::StateTableColumnMapping;
+use crate::executor::state_table::StateTable;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Represents the persistent storage of aggregation state.

@@ -22,12 +22,12 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
 use risingwave_common::row::Row;
 use risingwave_common::types::Datum;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
 use super::AggCall;
 use crate::executor::error::StreamExecutorResult;
+use crate::executor::state_table::StateTable;
 use crate::executor::PkIndices;
 
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.

@@ -19,7 +19,6 @@ use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, ScalarImpl};
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::approx_distinct_utils::{
@@ -27,6 +26,7 @@ use super::approx_distinct_utils::{
 };
 use crate::common::iter_state_table;
 use crate::executor::aggregation::table::TableStateImpl;
+use crate::executor::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
 #[derive(Clone, Debug)]

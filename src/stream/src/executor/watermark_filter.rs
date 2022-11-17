@@ -25,11 +25,11 @@ use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::filter::SimpleFilterExecutor;
+use super::state_table::StateTable;
 use super::{
     ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, StreamExecutorResult,
 };

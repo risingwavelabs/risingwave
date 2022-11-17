@@ -76,6 +76,7 @@ mod simple;
 mod sink;
 mod sort;
 pub mod source;
+pub mod state_table;
 pub mod subtask;
 mod top_n;
 mod union;

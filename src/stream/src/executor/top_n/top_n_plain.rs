@@ -20,7 +20,6 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::utils::*;
@@ -28,6 +27,7 @@ use super::{TopNCache, TopNCacheTrait};
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
+use crate::executor::state_table::StateTable;
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data

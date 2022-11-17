@@ -155,11 +155,11 @@ pub mod agg_executor {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::AggKind;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
     use risingwave_storage::StateStore;
 
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::{AggCall, AggStateStorage};
+    use crate::executor::state_table::StateTable;
     use crate::executor::{
         ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices,
     };
@@ -326,8 +326,8 @@ pub mod top_n_executor {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
 
+    use crate::executor::state_table::StateTable;
     pub async fn create_in_memory_state_table(
         data_types: &[DataType],
         order_types: &[OrderType],

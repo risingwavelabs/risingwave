@@ -17,12 +17,12 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage,
 };
+use super::state_table::StateTable;
 use super::*;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup};

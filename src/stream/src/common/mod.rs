@@ -16,9 +16,9 @@ pub use builder::*;
 pub use column_mapping::*;
 pub use infallible_expr::*;
 use risingwave_common::row::Row;
-use risingwave_storage::table::streaming_table::state_table::{RowStream, StateTable};
 use risingwave_storage::StateStore;
 
+use crate::executor::state_table::{RowStream, StateTable};
 use crate::executor::StreamExecutorResult;
 
 mod builder;
