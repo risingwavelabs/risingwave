@@ -102,14 +102,6 @@ where
             }
         };
 
-        let max_notification_version = init_notification.version.max(
-            notification_vec
-                .iter()
-                .map(|notification| notification.version)
-                .max()
-                .unwrap_or_default(),
-        );
-
         let Info::Snapshot(info) = init_notification.info.as_ref().unwrap() else {
             unreachable!();
         };
@@ -138,7 +130,7 @@ where
             Info::Snapshot(_) => unreachable!(),
         });
 
-        let init_notification_version = max_notification_version - notification_vec.len() as u64;
+        let init_notification_version = init_notification.version - notification_vec.len() as u64;
         init_notification.version = init_notification_version;
         self.observer_states
             .handle_initialization_notification(init_notification);
