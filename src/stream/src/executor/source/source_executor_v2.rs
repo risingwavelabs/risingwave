@@ -37,7 +37,7 @@ pub struct StreamSourceCore<S: StateStore> {
     /// external connector.
     stream_source_splits: Vec<SplitImpl>,
 
-    /// Stores informtion of the splits.
+    /// Stores information of the splits.
     split_state_store: SourceStateTableHandler<S>,
 
     /// In-memory cache for the splits.
@@ -67,6 +67,7 @@ pub struct SourceExecutorV2<S: StateStore> {
 }
 
 impl<S: StateStore> SourceExecutorV2<S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         schema: Schema,
@@ -242,7 +243,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
 
         let mut source_info = self.stream_source_core.unwrap();
 
-        // Build source description fron the builder.
+        // Build source description from the builder.
         let source_desc = source_info
             .source_desc_builder
             .take()

@@ -187,7 +187,7 @@ pub struct ConnectorSource {
 impl ConnectorSource {
     pub async fn new(
         format: SourceFormat,
-        row_schema_location: &String,
+        row_schema_location: &str,
         use_schema_registry: bool,
         proto_message_name: String,
         properties: HashMap<String, String>,
@@ -199,7 +199,7 @@ impl ConnectorSource {
         let parser = SourceParserImpl::create(
             &format,
             &properties,
-            row_schema_location.as_str(),
+            row_schema_location,
             use_schema_registry,
             proto_message_name,
         )
@@ -332,9 +332,9 @@ impl SourceDescBuilderV2 {
             .iter()
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
-        self.row_id_index.as_ref().map(|row_id_index| {
+        if let Some(row_id_index) = self.row_id_index.as_ref() {
             columns[row_id_index.index as usize].skip_parse = true;
-        });
+        }
         assert!(
             !self.pk_column_ids.is_empty(),
             "source should have at least one pk column"
