@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
 use crate::config::{GeneratorConfig, NexmarkConfig};
 use crate::event::*;
 
@@ -21,10 +19,12 @@ use crate::event::*;
 #[derive(Default, Clone, Debug)]
 pub struct EventGenerator {
     cfg: GeneratorConfig,
-    events_so_far: u64,
+    /// The current offset of event.
+    offset: u64,
+    /// Each iteration the offset is incremented by this step.
+    step: u64,
     /// If Some, only the specified type of events will be generated.
     type_filter: Option<EventType>,
-    elapsed_ms: u64,
 }
 
 impl EventGenerator {
@@ -32,50 +32,58 @@ impl EventGenerator {
     pub fn new(config: NexmarkConfig) -> Self {
         EventGenerator {
             cfg: config.into(),
-            events_so_far: 0,
+            offset: 0,
+            step: 1,
             type_filter: None,
-            elapsed_ms: 0,
         }
     }
 
-    /// Set the start event offset.
-    pub fn with_events_so_far(mut self, events_so_far: u64) -> Self {
-        self.events_so_far = events_so_far;
+    /// Set the start event offset. Default: 0.
+    pub fn with_offset(mut self, offset: u64) -> Self {
+        self.offset = offset;
         self
     }
 
-    /// Set the type of events to generate.
+    /// Set the step. Default: 1.
+    pub fn with_step(mut self, step: u64) -> Self {
+        assert_ne!(step, 0);
+        self.step = step;
+        self
+    }
+
+    /// Set the type of events to generate. Default: all.
     pub fn with_type_filter(mut self, type_: EventType) -> Self {
         self.type_filter = Some(type_);
         self
     }
 
-    /// Return the number of events so far.
-    pub fn events_so_far(&self) -> u64 {
-        self.events_so_far
+    /// Return the current offset of the generator.
+    pub fn offset(&self) -> u64 {
+        self.offset
     }
 
-    /// Returns the amount of time elapsed since the base time to the last event timestamp.
-    pub fn elapsed(&self) -> Duration {
-        Duration::from_millis(self.elapsed_ms)
+    /// Return the timestamp of current offset event.
+    pub fn timestamp(&self) -> u64 {
+        let event_number = self.cfg.next_adjusted_event(self.offset as usize);
+        self.cfg.event_timestamp(event_number)
     }
 }
 
 impl Iterator for EventGenerator {
-    type Item = Event;
+    type Item = (u64, Event);
 
-    fn next(&mut self) -> Option<Event> {
+    fn next(&mut self) -> Option<(u64, Event)> {
         loop {
-            let event_number = self.cfg.next_adjusted_event(self.events_so_far as usize);
+            let offset = self.offset;
+            let event_number = self.cfg.next_adjusted_event(offset as usize);
             let event_type = self.cfg.event_type(event_number);
-            self.events_so_far += 1;
+            self.offset += self.step;
 
             if matches!(self.type_filter, Some(t) if t != event_type) {
                 continue;
             }
             let event = Event::new(event_number, &self.cfg);
-            self.elapsed_ms = event.timestamp() - self.cfg.base_time;
-            return Some(event);
+            return Some((offset, event));
         }
     }
 }

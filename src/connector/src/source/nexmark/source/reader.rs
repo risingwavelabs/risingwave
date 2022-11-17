@@ -36,9 +36,7 @@ pub struct NexmarkSplitReader {
     generator: EventGenerator,
     assigned_split: NexmarkSplit,
     split_id: SplitId,
-    split_index: i32,
-    split_num: i32,
-    event_num: i64,
+    event_num: u64,
     event_type: EventType,
     use_real_time: bool,
     min_event_gap_in_ns: u64,
@@ -57,8 +55,8 @@ impl SplitReader for NexmarkSplitReader {
         let mut assigned_split = NexmarkSplit::default();
         let mut split_id = "".into();
         let mut split_index = 0;
-        let mut split_num = 0;
-        let mut events_so_far = 0;
+        let mut split_num = 1;
+        let mut offset = 0;
 
         if let Some(splits) = state {
             tracing::debug!("Splits for nexmark found! {:?}", splits);
@@ -67,22 +65,24 @@ impl SplitReader for NexmarkSplitReader {
             split_id = split.id();
             let split = split.into_nexmark().unwrap();
 
-            split_index = split.split_index;
-            split_num = split.split_num;
+            split_index = split.split_index as u64;
+            split_num = split.split_num as u64;
             if let Some(s) = split.start_offset {
-                events_so_far = s;
+                offset = s;
             };
             assigned_split = split;
         }
 
         Ok(NexmarkSplitReader {
             generator: EventGenerator::new(NexmarkConfig::from(&*properties))
-                .with_events_so_far(events_so_far)
+                .with_offset(
+                    // the minimal number x where: x >= offset && x % split_num == split_index
+                    (offset + split_num - 1 - split_index) / split_num * split_num + split_index,
+                )
+                .with_step(split_num)
                 .with_type_filter(properties.table_type),
             assigned_split,
             split_id,
-            split_index,
-            split_num,
             max_chunk_size: properties.max_chunk_size,
             event_num: properties.event_num,
             event_type: properties.table_type,
@@ -101,61 +101,37 @@ impl SplitReader for NexmarkSplitReader {
 impl NexmarkSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_stream(mut self) {
-        let mut last_event = None;
-        let wall_clock_base_time = Instant::now();
+        let start_time = Instant::now();
+        let start_offset = self.generator.offset();
+        let start_ts = self.generator.timestamp();
         loop {
             let mut msgs: Vec<SourceMessage> = vec![];
-            let old_events_so_far = self.generator.events_so_far();
-
-            if let Some(event) = last_event.take() {
-                msgs.push(event);
-            }
-
-            let mut finished = false;
-
             while (msgs.len() as u64) < self.max_chunk_size {
-                let event = self.generator.next().unwrap();
-
-                if self.event_num > 0 && self.generator.events_so_far() > self.event_num as u64 {
-                    finished = true;
+                let (offset, event) = self.generator.next().unwrap();
+                if offset >= self.event_num {
                     break;
                 }
-
-                if self.generator.events_so_far() % self.split_num as u64 != self.split_index as u64
-                {
-                    continue;
-                }
-
-                let event = NexmarkMessage::new(
-                    self.split_id.clone(),
-                    self.generator.events_so_far(),
-                    event,
-                );
-
-                // When the generated timestamp is larger then current timestamp, if its the first
-                // event, sleep and continue. Otherwise, directly return.
-                if self.use_real_time {
-                    tokio::time::sleep_until(wall_clock_base_time + self.generator.elapsed()).await;
-
-                    last_event = Some(event.into());
-                    break;
-                }
-
+                let event = NexmarkMessage::new(self.split_id.clone(), offset + 1, event);
                 msgs.push(event.into());
             }
-
-            if finished && msgs.is_empty() {
+            if msgs.is_empty() {
                 break;
-            } else {
-                yield msgs;
             }
-
-            if !self.use_real_time && self.min_event_gap_in_ns > 0 {
-                tokio::time::sleep(Duration::from_nanos(
-                    (self.generator.events_so_far() - old_events_so_far) * self.min_event_gap_in_ns,
-                ))
+            if self.use_real_time {
+                tokio::time::sleep_until(
+                    start_time + Duration::from_millis(self.generator.timestamp() - start_ts),
+                )
+                .await;
+            } else if self.min_event_gap_in_ns > 0 {
+                tokio::time::sleep_until(
+                    start_time
+                        + Duration::from_nanos(
+                            self.min_event_gap_in_ns * (self.generator.offset() - start_offset),
+                        ),
+                )
                 .await;
             }
+            yield msgs;
         }
 
         tracing::debug!(?self.event_type, "nexmark generator finished");
