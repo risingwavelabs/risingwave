@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
+use futures::future::ready;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use serde_derive::{Deserialize, Serialize};
@@ -22,7 +23,7 @@ use serde_json::Value;
 
 use super::operators::*;
 use crate::parser::common::json_parse_value;
-use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DebeziumEvent {
@@ -39,9 +40,8 @@ pub struct Payload {
 #[derive(Debug)]
 pub struct DebeziumJsonParser;
 
-#[async_trait::async_trait]
-impl SourceParser for DebeziumJsonParser {
-    async fn parse(
+impl DebeziumJsonParser {
+    fn parse_inner(
         &self,
         payload: &[u8],
         writer: SourceStreamChunkRowWriter<'_>,
@@ -54,10 +54,10 @@ impl SourceParser for DebeziumJsonParser {
         match payload.op.as_str() {
             DEBEZIUM_UPDATE_OP => {
                 let before = payload.before.as_mut().ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
-                    ))
-                })?;
+            RwError::from(ProtocolError(
+                "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
+            ))
+        })?;
 
                 let after = payload.after.as_mut().ok_or_else(|| {
                     RwError::from(ProtocolError(
@@ -100,5 +100,21 @@ impl SourceParser for DebeziumJsonParser {
                 payload.op
             )))),
         }
+    }
+}
+
+impl SourceParser for DebeziumJsonParser {
+    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
+
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a,
+    {
+        ready(self.parse_inner(payload, writer))
     }
 }
