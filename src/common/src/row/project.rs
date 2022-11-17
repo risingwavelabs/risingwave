@@ -68,3 +68,29 @@ impl<'i, R: Row2> Project<'i, R> {
         Self { row, indices }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::row::{Row, RowExt};
+    use crate::types::{ScalarImpl, ScalarRefImpl};
+
+    #[test]
+    fn test_project_row() {
+        let r0 = Row((0..=8).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let indices = vec![1, 1, 4, 5, 1, 4];
+
+        let r_expected = Row(indices
+            .iter()
+            .map(|&i| Some(ScalarImpl::Int64(i as _)))
+            .collect());
+
+        let r = r0.project(&indices);
+        assert_eq!(r.len(), 6);
+        assert!(r.iter().eq(r_expected.iter()));
+
+        for (i, &v) in indices.iter().enumerate() {
+            assert_eq!(r.datum_at(i), Some(ScalarRefImpl::Int64(v as _)));
+        }
+    }
+}

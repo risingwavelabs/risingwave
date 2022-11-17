@@ -78,3 +78,34 @@ impl<R1, R2> Chain<R1, R2> {
         Self { r1, r2 }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::row::Row;
+    use crate::types::{ScalarImpl, ScalarRefImpl};
+
+    #[test]
+    fn test_chain_row() {
+        let r1 = || Row((1..=3).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r2 = || Row((4..=6).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r3 = || Row((7..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
+
+        let r_expected = Row((1..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
+
+        macro_rules! test {
+            ($r:expr) => {
+                let r = $r;
+                assert_eq!(r.len(), 9);
+                assert!(r.iter().eq(r_expected.iter()));
+
+                for i in 0..9 {
+                    assert_eq!(r.datum_at(i), Some(ScalarRefImpl::Int64(i as i64 + 1)));
+                }
+            };
+        }
+
+        test!(Chain::new(r1(), Chain::new(r2(), r3())));
+        test!(Chain::new(Chain::new(r1(), r2()), r3()));
+    }
+}
