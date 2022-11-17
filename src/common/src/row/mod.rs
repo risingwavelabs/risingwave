@@ -12,17 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod chain;
 mod compacted_row;
+mod empty;
+mod once;
 mod owned_row;
+mod project;
 
 use std::hash::{BuildHasher, Hasher};
 
+pub use chain::Chain;
 pub use compacted_row::CompactedRow;
+pub use empty::{empty, Empty};
+pub use once::{once, Once};
 pub use owned_row::{Row, RowDeserializer};
+pub use project::Project;
 
-use crate::array::RowRef;
 use crate::hash::HashCode;
-use crate::types::{hash_datum_ref, to_datum_ref, Datum, DatumRef, ToDatumRef, ToOwnedDatum};
+use crate::types::{hash_datum_ref, to_datum_ref, Datum, DatumRef, ToOwnedDatum};
 use crate::util::value_encoding;
 
 pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
@@ -76,124 +83,18 @@ pub trait RowExt: Row2 {
     where
         Self: Sized,
     {
-        assert_row(Chain {
-            r1: self,
-            r2: other,
-        })
+        assert_row(Chain::new(self, other))
     }
 
     fn project(self, indices: &[usize]) -> Project<'_, Self>
     where
         Self: Sized,
     {
-        if let Some(index) = indices.iter().find(|&&i| i >= self.len()) {
-            panic!(
-                "index {} out of bounds for row of length {}",
-                index,
-                self.len()
-            );
-        }
-        assert_row(Project { row: self, indices })
+        assert_row(Project::new(self, indices))
     }
 }
 
 impl<R: Row2> RowExt for R {}
-
-#[derive(Debug)]
-pub struct Chain<R1, R2> {
-    r1: R1,
-    r2: R2,
-}
-
-impl<R1: Row2, R2: Row2> PartialEq for Chain<R1, R2> {
-    fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other.iter())
-    }
-}
-impl<R1: Row2, R2: Row2> Eq for Chain<R1, R2> {}
-
-impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
-    where
-        R1: 'a,
-        R2: 'a;
-
-    fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        if index < self.r1.len() {
-            // SAFETY: `index < self.r1.len()` implies the index is valid.
-            unsafe { self.r1.datum_at_unchecked(index) }
-        } else {
-            self.r2.datum_at(index - self.r1.len())
-        }
-    }
-
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        if index < self.r1.len() {
-            self.r1.datum_at_unchecked(index)
-        } else {
-            self.r2.datum_at_unchecked(index - self.r1.len())
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.r1.len() + self.r2.len()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.r1.is_empty() && self.r2.is_empty()
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        self.r1.iter().chain(self.r2.iter())
-    }
-
-    fn value_serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.extend(self.r1.value_serialize());
-        buf.extend(self.r2.value_serialize());
-        buf
-    }
-}
-
-#[derive(Debug)]
-pub struct Project<'i, R> {
-    row: R,
-    indices: &'i [usize],
-}
-
-impl<'i, R: Row2> PartialEq for Project<'i, R> {
-    fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other.iter())
-    }
-}
-impl<'i, R: Row2> Eq for Project<'i, R> {}
-
-impl<'i, R: Row2> Row2 for Project<'i, R> {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
-    where
-        R: 'a,
-        'i: 'a;
-
-    fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        // SAFETY: we have checked that `self.indices` are all valid in `RowExt::project`.
-        unsafe { self.row.datum_at_unchecked(self.indices[index]) }
-    }
-
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.row
-            .datum_at_unchecked(*self.indices.get_unchecked(index))
-    }
-
-    fn len(&self) -> usize {
-        self.indices.len()
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        self.indices.iter().map(|&i|
-                // SAFETY: we have checked that `self.indices` are all valid in `RowExt::project`.
-                unsafe { self.row.datum_at_unchecked(i) })
-    }
-}
 
 macro_rules! deref_forward_row {
     () => {
@@ -293,114 +194,4 @@ impl Row2 for &[DatumRef<'_>] {
     fn iter(&self) -> Self::Iter<'_> {
         <[DatumRef<'_>]>::iter(self).copied()
     }
-}
-
-impl Row2 for Row {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
-    where
-        Self: 'a;
-
-    fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        to_datum_ref(&self[index])
-    }
-
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        to_datum_ref(self.0.get_unchecked(index))
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        Iterator::map(self.0.iter(), to_datum_ref)
-    }
-
-    fn to_owned_row(&self) -> Row {
-        self.clone()
-    }
-
-    fn into_owned_row(self) -> Row {
-        self
-    }
-}
-
-impl Row2 for RowRef<'_> {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
-    where
-        Self: 'a;
-
-    fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        RowRef::value_at(self, index)
-    }
-
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        RowRef::value_at_unchecked(self, index)
-    }
-
-    fn len(&self) -> usize {
-        RowRef::size(self)
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        RowRef::values(self)
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct Empty(());
-
-impl Row2 for Empty {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
-    where
-        Self: 'a;
-
-    fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        [][index]
-    }
-
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        *[].get_unchecked(index)
-    }
-
-    fn len(&self) -> usize {
-        0
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        std::iter::empty()
-    }
-}
-
-pub fn empty() -> Empty {
-    assert_row(Empty(()))
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct Once<D>(D);
-
-impl<D: ToDatumRef> Row2 for Once<D> {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
-    where
-        Self: 'a;
-
-    fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        [self.0.to_datum_ref()][index]
-    }
-
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        *[self.0.to_datum_ref()].get_unchecked(index)
-    }
-
-    fn len(&self) -> usize {
-        1
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        std::iter::once(self.0.to_datum_ref())
-    }
-}
-
-pub fn once<D: ToDatumRef>(datum: D) -> Once<D> {
-    assert_row(Once(datum))
 }

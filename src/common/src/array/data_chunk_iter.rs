@@ -16,7 +16,7 @@ use itertools::Itertools;
 
 use super::column::Column;
 use crate::array::DataChunk;
-use crate::row::Row;
+use crate::row::{Row, Row2};
 use crate::types::{DatumRef, ToOwnedDatum};
 
 impl DataChunk {
@@ -123,6 +123,10 @@ impl<'a> RowRef<'a> {
         }
     }
 
+    /// Returns the datum ref at the `pos`, without doing bounds checking.
+    ///
+    /// # Safety
+    /// Calling this method with an out-of-bounds index is undefined behavior.
     pub unsafe fn value_at_unchecked(&self, pos: usize) -> DatumRef<'_> {
         debug_assert!(self.idx < self.chunk.capacity());
         // for `RowRef`, the index is always in bound.
@@ -183,12 +187,9 @@ impl<'a> RowRef<'a> {
 
 impl PartialEq for RowRef<'_> {
     fn eq(&self, other: &Self) -> bool {
-        self.values()
-            .zip_longest(other.values())
-            .all(|pair| pair.both().map(|(a, b)| a == b).unwrap_or(false))
+        self.values().eq(other.values())
     }
 }
-
 impl Eq for RowRef<'_> {}
 
 impl PartialOrd for RowRef<'_> {
@@ -196,10 +197,31 @@ impl PartialOrd for RowRef<'_> {
         self.values().partial_cmp(other.values())
     }
 }
-
 impl Ord for RowRef<'_> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
+        self.values().cmp(other.values())
+    }
+}
+
+impl Row2 for RowRef<'_> {
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    where
+        Self: 'a;
+
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        RowRef::value_at(self, index)
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        RowRef::value_at_unchecked(self, index)
+    }
+
+    fn len(&self) -> usize {
+        RowRef::size(self)
+    }
+
+    fn iter(&self) -> Self::Iter<'_> {
+        RowRef::values(self)
     }
 }
 

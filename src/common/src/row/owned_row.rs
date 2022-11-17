@@ -19,10 +19,11 @@ use std::{cmp, ops};
 
 use itertools::Itertools;
 
+use super::Row2;
 use crate::array::RowRef;
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::HashCode;
-use crate::types::{hash_datum, DataType, Datum};
+use crate::types::{hash_datum, to_datum_ref, DataType, Datum, DatumRef};
 use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
@@ -209,6 +210,36 @@ impl EstimateSize for Row {
     fn estimated_heap_size(&self) -> usize {
         // FIXME(bugen): this is not accurate now as the heap size of some `Scalar` is not counted.
         self.0.capacity() * std::mem::size_of::<Datum>()
+    }
+}
+
+impl Row2 for Row {
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    where
+        Self: 'a;
+
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        to_datum_ref(&self[index])
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        to_datum_ref(self.0.get_unchecked(index))
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn iter(&self) -> Self::Iter<'_> {
+        Iterator::map(self.0.iter(), to_datum_ref)
+    }
+
+    fn to_owned_row(&self) -> Row {
+        self.clone()
+    }
+
+    fn into_owned_row(self) -> Row {
+        self
     }
 }
 
