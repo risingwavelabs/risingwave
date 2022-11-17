@@ -71,6 +71,8 @@ pub struct BackfillExecutor<S: StateStore> {
     info: ExecutorInfo,
 }
 
+const CHUNK_SIZE: usize = 1024;
+
 impl<S> BackfillExecutor<S>
 where
     S: StateStore,
@@ -172,14 +174,12 @@ where
                                     let checkpoint = barrier.checkpoint;
                                     if checkpoint {
                                         // Consume upstream buffer chunk
-                                        let mut buffer = vec![];
-                                        mem::swap(&mut upstream_chunk_buffer, &mut buffer);
-                                        for chunk in buffer {
-                                            if self.current_pos.is_some() {
+                                        for chunk in upstream_chunk_buffer.drain(..) {
+                                            if let Some(current_pos) = self.current_pos.as_ref() {
                                                 yield Message::Chunk(Self::mapping_chunk(
                                                     Self::mark_chunk(
                                                         chunk,
-                                                        self.current_pos.as_ref().unwrap(),
+                                                        current_pos,
                                                         &table_pk_indices,
                                                     ),
                                                     &upstream_indices,
@@ -217,9 +217,7 @@ where
                                     // mark the chunk anymore, otherwise, we will ignore some rows
                                     // in the buffer. Here we choose to never mark the chunk.
                                     // Consume with the renaming stream buffer chunk without mark.
-                                    let mut buffer = vec![];
-                                    mem::swap(&mut upstream_chunk_buffer, &mut buffer);
-                                    for chunk in buffer {
+                                    for chunk in upstream_chunk_buffer.drain(..) {
                                         yield Message::Chunk(Self::mapping_chunk(
                                             chunk,
                                             &upstream_indices,
@@ -290,10 +288,10 @@ where
     async fn snapshot_read(table: &StorageTable<S>, epoch: u64, current_pos: Option<Row>) {
         // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
         // scan. Otherwise, use Excluded.
-        let range_bounds = if current_pos.is_none() {
-            (Bound::Unbounded, Bound::Unbounded)
+        let range_bounds = if let Some(current_pos) = current_pos {
+            (Bound::Excluded(current_pos), Bound::Unbounded)
         } else {
-            (Bound::Excluded(current_pos.unwrap()), Bound::Unbounded)
+            (Bound::Unbounded, Bound::Unbounded)
         };
         let iter = table
             .batch_iter_with_pk_bounds(
@@ -306,7 +304,7 @@ where
         pin_mut!(iter);
 
         while let Some(data_chunk) = iter
-            .collect_data_chunk(table.schema(), Some(1024))
+            .collect_data_chunk(table.schema(), Some(CHUNK_SIZE))
             .stack_trace("backfill_snapshot_read")
             .await?
         {
@@ -331,6 +329,7 @@ where
         let chunk = chunk.compact();
         let (data, ops) = chunk.into_parts();
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
+        // TODO: The performance is bad here due to the allocation of every row. Improve this after #6404.
         for v in data
             .rows()
             .map(|row| &row.row_by_indices(table_pk_indices) <= current_pos)
