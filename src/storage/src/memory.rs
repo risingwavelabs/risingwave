@@ -22,7 +22,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, FullKeyRange, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
@@ -32,6 +32,34 @@ use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type,
     define_state_store_write_associated_type, StateStore, StateStoreIter,
 };
+
+pub type BytesFullKey = FullKey<Bytes>;
+pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);
+
+pub trait RangeKv: Send + Sync + 'static {
+    fn range(
+        &self,
+        range: BytesFullKeyRange,
+        limit: Option<usize>,
+    ) -> Vec<(FullKey<Vec<u8>>, Option<Bytes>)>;
+}
+
+pub type BTreeMapRangeKv = Arc<RwLock<BTreeMap<BytesFullKey, Option<Bytes>>>>;
+
+impl RangeKv for BTreeMapRangeKv {
+    fn range(
+        &self,
+        range: BytesFullKeyRange,
+        limit: Option<usize>,
+    ) -> Vec<(FullKey<Vec<u8>>, Option<Bytes>)> {
+        let limit = limit.unwrap_or(usize::MAX);
+        self.read()
+            .range(range)
+            .take(limit)
+            .map(|(key, value)| (key.to_ref().to_vec(), value.clone()))
+            .collect()
+    }
+}
 
 mod batched_iter {
     use itertools::Itertools;
@@ -44,14 +72,14 @@ mod batched_iter {
     ///
     /// Therefore, it's not guaranteed that we're iterating over a consistent snapshot of the map.
     /// Users should handle MVCC by themselves.
-    pub struct Iter<K, V> {
-        inner: Arc<RwLock<BTreeMap<K, V>>>,
-        range: (Bound<K>, Bound<K>),
-        current: std::vec::IntoIter<(K, V)>,
+    pub struct Iter<R: RangeKv> {
+        inner: R,
+        range: BytesFullKeyRange,
+        current: std::vec::IntoIter<(FullKey<Vec<u8>>, Option<Bytes>)>,
     }
 
-    impl<K, V> Iter<K, V> {
-        pub fn new(inner: Arc<RwLock<BTreeMap<K, V>>>, range: (Bound<K>, Bound<K>)) -> Self {
+    impl<R: RangeKv> Iter<R> {
+        pub fn new(inner: R, range: BytesFullKeyRange) -> Self {
             Self {
                 inner,
                 range,
@@ -60,45 +88,45 @@ mod batched_iter {
         }
     }
 
-    impl<K, V> Iter<K, V>
-    where
-        K: Ord + Clone,
-        V: Clone,
-    {
+    impl<R: RangeKv> Iter<R> {
         const BATCH_SIZE: usize = 256;
 
         /// Get the next batch of records and fill the `current` buffer.
         fn refill(&mut self) {
             assert!(self.current.is_empty());
 
-            let batch: Vec<(K, V)> = self
+            let batch = self
                 .inner
-                .read()
-                .range((self.range.0.as_ref(), self.range.1.as_ref()))
-                .take(Self::BATCH_SIZE)
-                .map(|(k, v)| (K::clone(k), V::clone(v)))
+                .range(
+                    (self.range.0.clone(), self.range.1.clone()),
+                    Some(Self::BATCH_SIZE),
+                )
+                .into_iter()
                 .collect_vec();
 
             if let Some((last_key, _)) = batch.last() {
-                self.range.0 = Bound::Excluded(K::clone(last_key));
+                let full_key = FullKey::new(
+                    last_key.user_key.table_id,
+                    TableKey(Bytes::from(last_key.user_key.table_key.0.clone())),
+                    last_key.epoch,
+                );
+                self.range.0 = Bound::Excluded(full_key);
             }
             self.current = batch.into_iter();
         }
     }
 
-    impl<K, V> Iterator for Iter<K, V>
-    where
-        K: Ord + Clone,
-        V: Clone,
-    {
-        type Item = (K, V);
+    impl<R: RangeKv> Iterator for Iter<R> {
+        type Item = (FullKey<Vec<u8>>, Option<Bytes>);
 
         fn next(&mut self) -> Option<Self::Item> {
             match self.current.next() {
-                Some(r) => Some(r),
+                Some((key, value)) => Some((key.to_ref().to_vec(), value)),
                 None => {
                     self.refill();
-                    self.current.next()
+                    self.current
+                        .next()
+                        .map(|(key, value)| (key.to_ref().to_vec(), value))
                 }
             }
         }
@@ -107,20 +135,30 @@ mod batched_iter {
     #[cfg(test)]
     mod tests {
         use rand::Rng;
+        use risingwave_hummock_sdk::key::FullKey;
 
         use super::*;
 
         #[test]
         fn test_iter_chaos() {
             let key_range = 1..=10000;
-            let map: BTreeMap<i32, Arc<str>> = key_range
+            let num_to_bytes = |k: i32| Bytes::from(k.to_string().as_bytes().to_vec());
+            let num_to_full_key =
+                |k: i32| FullKey::new(TableId::default(), TableKey(num_to_bytes(k)), 0);
+            let map: BTreeMap<FullKey<Bytes>, Option<Bytes>> = key_range
                 .clone()
-                .map(|k| (k, k.to_string().into()))
+                .map(|k| {
+                    let key = num_to_full_key(k);
+                    let b = key.user_key.table_key.0.clone();
+
+                    (key, Some(b))
+                })
                 .collect();
             let map = Arc::new(RwLock::new(map));
 
             let rand_bound = || {
                 let key = rand::thread_rng().gen_range(key_range.clone());
+                let key = num_to_full_key(key);
                 match rand::thread_rng().gen_range(1..=5) {
                     1 | 2 => Bound::Included(key),
                     3 | 4 => Bound::Excluded(key),
@@ -148,19 +186,17 @@ mod batched_iter {
                     }
                 };
 
-                let v1 = Iter::new(map.clone(), range).collect_vec();
-                let v2 = map
-                    .read()
-                    .range(range)
-                    .map(|(&k, v)| (k, v.clone()))
-                    .collect_vec();
+                let v1 = Iter::new(map.clone(), range.clone()).collect_vec();
+                let v2 = map.range(range, None);
 
-                // Items iterated from the batched iterator should be the same as normal iterator.
+                // Items iterated from the batched iterator should be the same as normaliterator.
                 assert_eq!(v1, v2);
             }
         }
     }
 }
+
+pub type MemoryStateStore = RangeKvStateStore<BTreeMapRangeKv>;
 
 /// An in-memory state store
 ///
@@ -168,13 +204,13 @@ mod batched_iter {
 /// never does GC, so the memory usage will be high. Therefore, in-memory state store should never
 /// be used in production.
 #[derive(Clone, Default)]
-pub struct MemoryStateStore {
+pub struct RangeKvStateStore<R: RangeKv> {
     /// Stores (key, epoch) -> user value.
     #[allow(clippy::type_complexity)]
-    inner: Arc<RwLock<BTreeMap<FullKey<Vec<u8>>, Option<Bytes>>>>,
+    inner: R,
 }
 
-fn to_full_key_range<R, B>(table_id: TableId, table_key_range: R) -> FullKeyRange
+fn to_full_key_range<R, B>(table_id: TableId, table_key_range: R) -> BytesFullKeyRange
 where
     R: RangeBounds<B> + Send,
     B: AsRef<[u8]>,
@@ -182,28 +218,36 @@ where
     let start = match table_key_range.start_bound() {
         Included(k) => Included(FullKey::new(
             table_id,
-            TableKey(k.as_ref().to_vec()),
+            TableKey(Bytes::from(k.as_ref().to_vec())),
             HummockEpoch::MAX,
         )),
-        Excluded(k) => Excluded(FullKey::new(table_id, TableKey(k.as_ref().to_vec()), 0)),
+        Excluded(k) => Excluded(FullKey::new(
+            table_id,
+            TableKey(Bytes::from(k.as_ref().to_vec())),
+            0,
+        )),
         Unbounded => Included(FullKey::new(
             table_id,
-            TableKey(b"".to_vec()),
+            TableKey(Bytes::from(b"".to_vec())),
             HummockEpoch::MAX,
         )),
     };
     let end = match table_key_range.end_bound() {
-        Included(k) => Included(FullKey::new(table_id, TableKey(k.as_ref().to_vec()), 0)),
+        Included(k) => Included(FullKey::new(
+            table_id,
+            TableKey(Bytes::from(k.as_ref().to_vec())),
+            0,
+        )),
         Excluded(k) => Excluded(FullKey::new(
             table_id,
-            TableKey(k.as_ref().to_vec()),
+            TableKey(Bytes::from(k.as_ref().to_vec())),
             HummockEpoch::MAX,
         )),
         Unbounded => {
             if let Some(next_table_id) = table_id.table_id().checked_add(1) {
                 Excluded(FullKey::new(
                     next_table_id.into(),
-                    TableKey(b"".to_vec()),
+                    TableKey(Bytes::from(b"".to_vec())),
                     HummockEpoch::MAX,
                 ))
             } else {
@@ -235,10 +279,11 @@ impl MemoryStateStore {
         if limit == Some(0) {
             return Ok(vec![]);
         }
-        let inner = self.inner.read();
-
         let mut last_user_key = None;
-        for (key, value) in inner.range(to_full_key_range(table_id, key_range)) {
+        for (key, value) in self
+            .inner
+            .range(to_full_key_range(table_id, key_range), None)
+        {
             if key.epoch > epoch {
                 continue;
             }
@@ -314,7 +359,7 @@ impl StateStoreWrite for MemoryStateStore {
             for (key, value) in kv_pairs {
                 size += key.len() + value.size();
                 inner.insert(
-                    FullKey::new(write_options.table_id, TableKey(key.to_vec()), epoch),
+                    FullKey::new(write_options.table_id, TableKey(key), epoch),
                     value.user_value,
                 );
             }
@@ -360,7 +405,7 @@ impl StateStore for MemoryStateStore {
 }
 
 pub struct MemoryStateStoreIter {
-    inner: Fuse<batched_iter::Iter<FullKey<Vec<u8>>, Option<Bytes>>>,
+    inner: Fuse<batched_iter::Iter<BTreeMapRangeKv>>,
 
     epoch: HummockEpoch,
 
@@ -368,10 +413,7 @@ pub struct MemoryStateStoreIter {
 }
 
 impl MemoryStateStoreIter {
-    pub fn new(
-        inner: batched_iter::Iter<FullKey<Vec<u8>>, Option<Bytes>>,
-        epoch: HummockEpoch,
-    ) -> Self {
+    pub fn new(inner: batched_iter::Iter<BTreeMapRangeKv>, epoch: HummockEpoch) -> Self {
         Self {
             inner: inner.fuse(),
             epoch,
@@ -391,7 +433,7 @@ impl StateStoreIter for MemoryStateStoreIter {
                 if key.epoch > self.epoch {
                     continue;
                 }
-                if Some(&key.user_key) != self.last_key.as_ref() {
+                if Some(key.user_key.as_ref()) != self.last_key.as_ref().map(|key| key.as_ref()) {
                     self.last_key = Some(key.user_key.clone());
                     if let Some(value) = value {
                         return Ok(Some((key, value)));
