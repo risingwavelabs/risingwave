@@ -152,6 +152,8 @@ pub struct EtcdConfig {
     pub unsafe_no_fsync: bool,
 
     pub exporter_port: u16,
+
+    pub provide_etcd: Option<Vec<EtcdConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
