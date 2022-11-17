@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 pub use avro_parser::*;
 pub use debezium::*;
+use futures::Future;
 use itertools::Itertools;
 pub use json_parser::*;
 pub use pb_parser::*;
@@ -246,12 +247,14 @@ impl SourceStreamChunkRowWriter<'_> {
     }
 }
 
+pub trait ParseFuture<'a, Out> = Future<Output = Out> + Send + 'a;
+
 /// `SourceParser` is the message parser, `ChunkReader` will parse the messages in `SourceReader`
 /// one by one through `SourceParser` and assemble them into `DataChunk`
 /// Note that the `skip_parse` parameter in `SourceColumnDesc`, when it is true, should skip the
 /// parse and return `Datum` of `None`
-#[async_trait::async_trait]
 pub trait SourceParser: Send + Debug + 'static {
+    type ParseResult<'a>: ParseFuture<'a, Result<WriteGuard>>;
     /// Parse the payload and append the result to the [`StreamChunk`] directly.
     ///
     /// # Arguments
@@ -263,11 +266,14 @@ pub trait SourceParser: Send + Debug + 'static {
     /// # Returns
     ///
     /// A [`WriteGuard`] to ensure that at least one record was appended or error occurred.
-    async fn parse(
-        &self,
-        payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard>;
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a;
 }
 
 #[derive(Debug)]

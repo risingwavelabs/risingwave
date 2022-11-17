@@ -13,9 +13,12 @@
 // limitations under the License.
 use std::collections::HashMap;
 
-use risingwave_common::error::ErrorCode::ProtocolError;
+use bytes::Bytes;
+use reqwest::Url;
+use risingwave_common::error::ErrorCode::{InvalidParameterValue, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 
+/// get kafka topic name
 pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> Result<&String> {
     const KAFKA_TOPIC_KEY1: &str = "kafka.topic";
     const KAFKA_TOPIC_KEY2: &str = "topic";
@@ -31,4 +34,24 @@ pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> Result<&String
         "Must specify '{}' or '{}'",
         KAFKA_TOPIC_KEY1, KAFKA_TOPIC_KEY2,
     ))))
+}
+
+/// download bytes from http(s) url
+pub(super) async fn download_from_http(location: &Url) -> Result<Bytes> {
+    let res = reqwest::get(location.clone()).await.map_err(|e| {
+        InvalidParameterValue(format!(
+            "failed to make request to URL: {}, err: {}",
+            location, e
+        ))
+    })?;
+    if !res.status().is_success() {
+        return Err(RwError::from(InvalidParameterValue(format!(
+            "Http request err, URL: {}, status code: {}",
+            location,
+            res.status()
+        ))));
+    }
+    res.bytes()
+        .await
+        .map_err(|e| InvalidParameterValue(format!("failed to read HTTP body: {}", e)).into())
 }
