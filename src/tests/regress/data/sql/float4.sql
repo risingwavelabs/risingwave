@@ -349,6 +349,6 @@ SELECT '-9223380000000000000'::float4::int8;
 --@   from (select bits::integer::xfloat4::float4 as flt
 --@           from testdata
 --@ 	offset 0) s;
---@ 
---@ -- clean up, lest opr_sanity complain
+
+-- clean up, lest opr_sanity complain
 --@ drop type xfloat4 cascade;
