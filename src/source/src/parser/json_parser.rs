@@ -195,14 +195,6 @@ mod tests {
                 row.value_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Float32(1.23.into())))
             );
-            // Usage of avx2 or neon(used by M1) results in a floating point error. Since it is
-            // very small (close to precision of f64) we ignore it.
-            #[cfg(any(target_feature = "avx2", target_feature = "neon"))]
-            assert_eq!(
-                row.value_at(5).to_owned_datum(),
-                (Some(ScalarImpl::Float64(1.2345000000000002.into())))
-            );
-            #[cfg(not(any(target_feature = "avx2", target_feature = "neon")))]
             assert_eq!(
                 row.value_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(1.2345.into())))
