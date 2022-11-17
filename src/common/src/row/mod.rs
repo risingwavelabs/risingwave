@@ -30,7 +30,7 @@ pub use owned_row::{Row, RowDeserializer};
 pub use project::Project;
 
 use crate::hash::HashCode;
-use crate::types::{hash_datum_ref, to_datum_ref, Datum, DatumRef, ToOwnedDatum};
+use crate::types::{hash_datum_ref, DatumRef, ToDatumRef, ToOwnedDatum};
 use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
@@ -189,19 +189,19 @@ impl<R: Row2> Row2 for Box<R> {
     }
 }
 
-impl Row2 for &[Datum] {
+impl<D: ToDatumRef> Row2 for &[D] {
     type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
 
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        to_datum_ref(&self[index])
+        self[index].to_datum_ref()
     }
 
     #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        to_datum_ref(self.get_unchecked(index))
+        self.get_unchecked(index).to_datum_ref()
     }
 
     #[inline]
@@ -211,23 +211,23 @@ impl Row2 for &[Datum] {
 
     #[inline]
     fn iter(&self) -> Self::Iter<'_> {
-        self.as_ref().iter().map(to_datum_ref)
+        self.as_ref().iter().map(ToDatumRef::to_datum_ref)
     }
 }
 
-impl Row2 for &[DatumRef<'_>] {
+impl<D: ToDatumRef, const N: usize> Row2 for [D; N] {
     type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
 
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        self[index]
+        self[index].to_datum_ref()
     }
 
     #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        *self.get_unchecked(index)
+        self.get_unchecked(index).to_datum_ref()
     }
 
     #[inline]
@@ -237,6 +237,6 @@ impl Row2 for &[DatumRef<'_>] {
 
     #[inline]
     fn iter(&self) -> Self::Iter<'_> {
-        self.as_ref().iter().copied()
+        self.as_ref().iter().map(ToDatumRef::to_datum_ref)
     }
 }
