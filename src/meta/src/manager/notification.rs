@@ -19,7 +19,7 @@ use std::sync::Arc;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::CompactTask;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{SubscribeResponse, SubscribeType, MetaSnapshot};
+use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tonic::Status;
@@ -127,7 +127,11 @@ where
         callback_rx.await.unwrap()
     }
 
-    pub async fn notify_snapshot(&self, worker_key: WorkerKey, meta_snapshot: MetaSnapshot) -> NotificationVersion {
+    pub async fn notify_snapshot(
+        &self,
+        worker_key: WorkerKey,
+        meta_snapshot: MetaSnapshot,
+    ) -> NotificationVersion {
         let (callback_tx, callback_rx) = oneshot::channel();
         let task = Task {
             target: Target::WorkerKey(worker_key),
