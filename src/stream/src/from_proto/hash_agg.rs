@@ -18,11 +18,11 @@ use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::agg_common::{build_agg_call_from_prost, build_agg_state_storages_from_proto};
 use super::*;
 use crate::cache::LruManagerRef;
+use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::{AggCall, AggStateStorage};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
