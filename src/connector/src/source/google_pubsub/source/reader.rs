@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::result::Result::Ok as StdOk;
+
 use anyhow::{anyhow, ensure, Context, Ok, Result};
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use futures_async_stream::try_stream;
 use google_cloud_pubsub::client::Client;
 use google_cloud_pubsub::subscription::{SeekTo, Subscription};
-use risingwave_common::try_match_expand;
+use risingwave_common::{bail, try_match_expand};
+use tonic::Code;
 
 use super::TaggedReceivedMessage;
 use crate::source::google_pubsub::PubsubProperties;
@@ -39,12 +42,22 @@ impl PubsubSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(self) {
         loop {
-            let raw_chunk = self
+            let pull_result = self
                 .subscription
                 .pull(PUBSUB_MAX_FETCH_MESSAGES as i32, None, None)
-                .await?;
+                .await;
 
-            // TODO: handle errors conditionally
+            let StdOk(raw_chunk) = pull_result else {
+                let Err(e) = pull_result else {
+                    unreachable!()
+                };
+
+                match e.code() {
+                    Code::NotFound => bail!("subscription not found"),
+                    Code::PermissionDenied => bail!("not authorised to access subscription"),
+                    _ => continue,
+                }
+            };
 
             // Sleep if we get an empty batch -- this should generally not happen
             // since subscription.pull claims to block until at least a single message is available.
