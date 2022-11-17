@@ -116,7 +116,7 @@ if [[ ! -f ${PREFIX_LOG}/$1 ]]; then
   exit 1
 fi 
 
-watch tail -n 5 ${PREFIX_LOG}/$1
+tail -f -n 5 ${PREFIX_LOG}/$1
 '''
 
 [tasks.check-logs]
