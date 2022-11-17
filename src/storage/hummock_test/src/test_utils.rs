@@ -31,7 +31,6 @@ use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
-use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::event_handler::HummockEvent;
@@ -113,7 +112,7 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
         };
 
         self.notification_manager
-            .notify_snapshot(worker_key, Info::Snapshot(meta_snapshot))
+            .notify_snapshot(worker_key, meta_snapshot)
             .await;
 
         Ok(TestChannel(rx))

@@ -18,7 +18,6 @@ use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{ParallelUnitMapping, WorkerNode, WorkerType};
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
-use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeType};
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
@@ -205,7 +204,7 @@ where
 
         self.env
             .notification_manager()
-            .notify_snapshot(worker_key, Info::Snapshot(meta_snapshot))
+            .notify_snapshot(worker_key, meta_snapshot)
             .await;
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
