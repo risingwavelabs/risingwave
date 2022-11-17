@@ -377,8 +377,6 @@ mod tests {
     use risingwave_pb::catalog::{ColumnIndex, StreamSourceInfo, TableSourceInfo};
     use risingwave_pb::plan_common::ColumnCatalog;
     use risingwave_pb::stream_plan::source_node::Info;
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::Keyspace;
 
     use crate::*;
 
@@ -453,8 +451,6 @@ mod tests {
             .collect();
         let pk_column_ids = vec![1];
         let info = TableSourceInfo {};
-
-        let _keyspace = Keyspace::table_root(MemoryStateStore::new(), table_id);
 
         let mem_source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
         let mut source_builder = SourceDescBuilder::new(
