@@ -222,6 +222,8 @@ impl UnsealedEpochData {
 /// `spilled_data`, and that data in the `uploading_tasks` in `spilled_data` are newer than data in
 /// the `uploaded_data` in `spilled_data`.
 struct SealedData {
+    // newer epochs come first
+    epochs: VecDeque<HummockEpoch>,
     // newer epoch at the front and newer data at the front in the `VecDeque`
     imms: VecDeque<(HummockEpoch, VecDeque<ImmutableMemtable>)>,
     spilled_data: SpilledData,
@@ -265,6 +267,7 @@ impl SealedData {
         }
         // the newly added data are at the front
         self.imms.push_front((epoch, unseal_epoch_data.imms));
+        self.epochs.push_front(epoch);
         unseal_epoch_data
             .spilled_data
             .uploading_tasks
@@ -302,6 +305,8 @@ impl SealedData {
 
 struct SyncingData {
     sync_epoch: HummockEpoch,
+    // newer epochs come first
+    epochs: Vec<HummockEpoch>,
     // TODO: may replace `TryJoinAll` with a future that will abort other join handles once
     // one join handle failed.
     // None means there is no pending uploading tasks
@@ -469,6 +474,7 @@ impl HummockUploader {
         self.sealed_data.flush(&self.context);
 
         let SealedData {
+            epochs,
             imms,
             spilled_data:
                 SpilledData {
@@ -499,6 +505,7 @@ impl HummockUploader {
         }
 
         self.syncing_data.push_front(SyncingData {
+            epochs: epochs.into_iter().collect(),
             sync_epoch: epoch,
             uploading_tasks: try_join_all_upload_task,
             uploaded: uploaded_data,
@@ -527,10 +534,37 @@ impl HummockUploader {
             pinned_version.max_committed_epoch()
                 >= self.context.pinned_version.max_committed_epoch()
         );
-        assert!(self.max_synced_epoch >= pinned_version.max_committed_epoch());
-        self.synced_data
-            .retain(|epoch, _| *epoch > pinned_version.max_committed_epoch());
+        let max_committed_epoch = pinned_version.max_committed_epoch();
         self.context.pinned_version = pinned_version;
+        self.synced_data
+            .retain(|epoch, _| *epoch > max_committed_epoch);
+        if self.max_synced_epoch < max_committed_epoch {
+            self.max_synced_epoch = max_committed_epoch;
+            if let Some(syncing_data) = self.syncing_data.back() {
+                // there must not be any syncing data below MCE
+                assert!(
+                    *syncing_data
+                        .epochs
+                        .last()
+                        .expect("epoch should not be empty")
+                        > max_committed_epoch
+                );
+            }
+        }
+        if self.max_syncing_epoch < max_committed_epoch {
+            self.max_syncing_epoch = max_committed_epoch;
+            // there must not be any sealed data below MCE
+            if let Some(&epoch) = self.sealed_data.epochs.back() {
+                assert!(epoch > max_committed_epoch);
+            }
+        }
+        if self.max_sealed_epoch < max_committed_epoch {
+            self.max_sealed_epoch = max_committed_epoch;
+            // there must not be any unsealed data below MCE
+            if let Some((&epoch, _)) = self.unsealed_data.first_key_value() {
+                assert!(epoch > max_committed_epoch);
+            }
+        }
     }
 
     pub(crate) fn try_flush(&mut self) {
@@ -967,6 +1001,58 @@ mod tests {
         assert!(poll_fn(|cx| uploader.poll_unsealed_spill_task(cx))
             .await
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn test_uploader_empty_advance_mce() {
+        let mut uploader = test_uploader(dummy_success_upload_future);
+        let initial_pinned_version = uploader.context.pinned_version.clone();
+        let epoch1 = INITIAL_EPOCH + 1;
+        let epoch2 = INITIAL_EPOCH + 2;
+        let epoch3 = INITIAL_EPOCH + 3;
+        let epoch4 = INITIAL_EPOCH + 4;
+        let epoch5 = INITIAL_EPOCH + 5;
+        let epoch6 = INITIAL_EPOCH + 6;
+        let version1 = initial_pinned_version.new_pin_version(test_hummock_version(epoch1));
+        let version2 = initial_pinned_version.new_pin_version(test_hummock_version(epoch2));
+        let version3 = initial_pinned_version.new_pin_version(test_hummock_version(epoch3));
+        let version4 = initial_pinned_version.new_pin_version(test_hummock_version(epoch4));
+        let version5 = initial_pinned_version.new_pin_version(test_hummock_version(epoch5));
+        uploader.update_pinned_version(version1);
+        assert_eq!(epoch1, uploader.max_synced_epoch);
+        assert_eq!(epoch1, uploader.max_syncing_epoch);
+        assert_eq!(epoch1, uploader.max_sealed_epoch);
+
+        uploader.add_imm(gen_imm(epoch6).await);
+        uploader.update_pinned_version(version2);
+        assert_eq!(epoch2, uploader.max_synced_epoch);
+        assert_eq!(epoch2, uploader.max_syncing_epoch);
+        assert_eq!(epoch2, uploader.max_sealed_epoch);
+
+        uploader.seal_epoch(epoch6);
+        assert_eq!(epoch6, uploader.max_sealed_epoch);
+        uploader.update_pinned_version(version3);
+        assert_eq!(epoch3, uploader.max_synced_epoch);
+        assert_eq!(epoch3, uploader.max_syncing_epoch);
+        assert_eq!(epoch6, uploader.max_sealed_epoch);
+
+        uploader.start_sync_epoch(epoch6);
+        assert_eq!(epoch6, uploader.max_syncing_epoch);
+        uploader.update_pinned_version(version4);
+        assert_eq!(epoch4, uploader.max_synced_epoch);
+        assert_eq!(epoch6, uploader.max_syncing_epoch);
+        assert_eq!(epoch6, uploader.max_sealed_epoch);
+
+        match uploader.next_event().await {
+            UploaderEvent::SyncFinish(epoch, _) => {
+                assert_eq!(epoch6, epoch);
+            }
+            UploaderEvent::DataSpilled(_) => unreachable!(),
+        }
+        uploader.update_pinned_version(version5);
+        assert_eq!(epoch6, uploader.max_synced_epoch);
+        assert_eq!(epoch6, uploader.max_syncing_epoch);
+        assert_eq!(epoch6, uploader.max_sealed_epoch);
     }
 
     fn prepare_uploader_order_test() -> (
