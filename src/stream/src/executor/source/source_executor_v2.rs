@@ -141,19 +141,19 @@ impl<S: StateStore> SourceExecutorV2<S> {
     // Note: `get_diff` will modify `state_cache`
     // `rhs` can not be None because we do not support split number reduction
     async fn get_diff(&mut self, rhs: ConnectorState) -> StreamExecutorResult<ConnectorState> {
-        let source_info = self.stream_source_core.as_mut().unwrap();
+        let core = self.stream_source_core.as_mut().unwrap();
 
         let split_change = rhs.unwrap();
         let mut target_state: Vec<SplitImpl> = Vec::with_capacity(split_change.len());
         let mut no_change_flag = true;
         for sc in &split_change {
-            if let Some(s) = source_info.state_cache.get(&sc.id()) {
+            if let Some(s) = core.state_cache.get(&sc.id()) {
                 target_state.push(s.clone())
             } else {
                 no_change_flag = false;
                 // write new assigned split to state cache. snapshot is base on cache.
 
-                let state = if let Some(recover_state) = source_info
+                let state = if let Some(recover_state) = core
                     .split_state_store
                     .try_recover_from_state_store(sc)
                     .await?
@@ -163,8 +163,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
                     sc.clone()
                 };
 
-                source_info
-                    .state_cache
+                core.state_cache
                     .entry(sc.id())
                     .or_insert_with(|| state.clone());
                 target_state.push(state);
@@ -204,9 +203,9 @@ impl<S: StateStore> SourceExecutorV2<S> {
         &mut self,
         epoch: EpochPair,
     ) -> StreamExecutorResult<()> {
-        let source_info = self.stream_source_core.as_mut().unwrap();
+        let core = self.stream_source_core.as_mut().unwrap();
 
-        let cache = source_info
+        let cache = core
             .state_cache
             .values()
             .map(|split_impl| split_impl.to_owned())
@@ -214,16 +213,12 @@ impl<S: StateStore> SourceExecutorV2<S> {
 
         if !cache.is_empty() {
             tracing::debug!(actor_id = self.ctx.id, state = ?cache, "take snapshot");
-            source_info.split_state_store.take_snapshot(cache).await?
+            core.split_state_store.take_snapshot(cache).await?
         }
         // commit anyway, even if no message saved
-        source_info
-            .split_state_store
-            .state_store
-            .commit(epoch)
-            .await?;
+        core.split_state_store.state_store.commit(epoch).await?;
 
-        source_info.state_cache.clear();
+        core.state_cache.clear();
 
         Ok(())
     }
@@ -241,10 +236,10 @@ impl<S: StateStore> SourceExecutorV2<S> {
             .await
             .unwrap();
 
-        let mut source_info = self.stream_source_core.unwrap();
+        let mut core = self.stream_source_core.unwrap();
 
         // Build source description from the builder.
-        let source_desc = source_info
+        let source_desc = core
             .source_desc_builder
             .take()
             .unwrap()
@@ -256,23 +251,23 @@ impl<S: StateStore> SourceExecutorV2<S> {
             match mutation.as_ref() {
                 Mutation::Add { splits, .. } => {
                     if let Some(splits) = splits.get(&self.ctx.id) {
-                        source_info.stream_source_splits = splits.clone();
+                        core.stream_source_splits = splits.clone();
                     }
                 }
                 Mutation::Update { actor_splits, .. } => {
                     if let Some(splits) = actor_splits.get(&self.ctx.id) {
-                        source_info.stream_source_splits = splits.clone();
+                        core.stream_source_splits = splits.clone();
                     }
                 }
                 _ => {}
             }
         }
 
-        source_info.split_state_store.init_epoch(barrier.epoch);
+        core.split_state_store.init_epoch(barrier.epoch);
 
-        let mut boot_state = source_info.stream_source_splits.clone();
+        let mut boot_state = core.stream_source_splits.clone();
         for ele in &mut boot_state {
-            if let Some(recover_state) = source_info
+            if let Some(recover_state) = core
                 .split_state_store
                 .try_recover_from_state_store(ele)
                 .await?
@@ -281,8 +276,8 @@ impl<S: StateStore> SourceExecutorV2<S> {
             }
         }
 
-        // Return the ownership of `source_info` to source executor.
-        self.stream_source_core = Some(source_info);
+        // Return the ownership of `stream_source_core` to the source executor.
+        self.stream_source_core = Some(core);
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::info!(
@@ -448,10 +443,10 @@ impl<S: StateStore> Executor for SourceExecutorV2<S> {
 
 impl<S: StateStore> Debug for SourceExecutorV2<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if let Some(source_info) = &self.stream_source_core {
+        if let Some(core) = &self.stream_source_core {
             f.debug_struct("SourceExecutor")
-                .field("source_id", &source_info.table_id)
-                .field("column_ids", &source_info.column_ids)
+                .field("source_id", &core.table_id)
+                .field("column_ids", &core.column_ids)
                 .field("pk_indices", &self.pk_indices)
                 .finish()
         } else {
