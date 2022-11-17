@@ -287,7 +287,7 @@ impl PlanRoot {
         plan = self.optimize_by_rules(
             plan,
             "Convert Distinct Aggregation".to_string(),
-            vec![DistinctAggRule::create()],
+            vec![UnionToDistinctRule::create(), DistinctAggRule::create()],
             ApplyOrder::TopDown,
         );
 
