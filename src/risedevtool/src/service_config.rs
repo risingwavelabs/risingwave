@@ -84,6 +84,7 @@ pub struct FrontendConfig {
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
+    pub health_check_port: u16,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,

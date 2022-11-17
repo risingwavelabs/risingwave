@@ -352,7 +352,7 @@ impl FrontendEnv {
         }
 
         let health_srv = HealthServiceImpl::new();
-        let host = opts.health_check_addr.clone();
+        let host = opts.health_check_listener_addr.clone();
         tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
@@ -360,6 +360,10 @@ impl FrontendEnv {
                 .await
                 .unwrap();
         });
+        tracing::info!(
+            "Health Check RPC Listener is set up on {}",
+            opts.health_check_listener_addr.clone()
+        );
 
         Ok((
             Self {
