@@ -21,9 +21,9 @@ use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 
 use super::*;
 use crate::cache::LruManagerRef;
+use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::table::state_table::StateTable;
 use crate::executor::{ActorContextRef, PkIndices};
 
 pub struct HashJoinExecutorBuilder;

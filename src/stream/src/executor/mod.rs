@@ -77,7 +77,6 @@ mod sink;
 mod sort;
 pub mod source;
 pub mod subtask;
-pub mod table;
 mod top_n;
 mod union;
 mod watermark_filter;

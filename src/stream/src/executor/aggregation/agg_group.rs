@@ -26,8 +26,8 @@ use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
 use super::AggCall;
+use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::table::state_table::StateTable;
 use crate::executor::PkIndices;
 
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.

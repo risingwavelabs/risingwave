@@ -23,9 +23,9 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
 
+use crate::common::table::state_table::StateTable;
 use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
-use crate::executor::table::state_table::StateTable;
 use crate::executor::test_utils::*;
 use crate::executor::{
     Barrier, BoxedMessageStream, Executor, MaterializeExecutor, Message, PkIndices,

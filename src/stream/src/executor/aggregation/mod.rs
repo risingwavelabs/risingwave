@@ -24,8 +24,8 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::StateStore;
 
-use super::table::state_table::StateTable;
 use super::ActorContextRef;
+use crate::common::table::state_table::StateTable;
 use crate::common::InfallibleExpression;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::Executor;

@@ -23,7 +23,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::DEFAULT_VNODE;
 
-use crate::executor::table::state_table::StateTable;
+use crate::common::table::state_table::StateTable;
 
 // test state table
 #[tokio::test]

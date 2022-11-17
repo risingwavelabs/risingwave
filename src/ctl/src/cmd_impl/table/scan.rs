@@ -25,7 +25,7 @@ use risingwave_storage::monitor::MonitoredStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
-use risingwave_stream::executor::table::state_table::StateTable;
+use risingwave_stream::common::table::state_table::StateTable;
 
 use crate::common::HummockServiceOpts;
 

@@ -25,8 +25,8 @@ use super::approx_distinct_utils::{
     deserialize_buckets_from_list, serialize_buckets, RegisterBucket, StreamingApproxCountDistinct,
 };
 use crate::common::iter_state_table;
+use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::table::TableStateImpl;
-use crate::executor::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
 #[derive(Clone, Debug)]

@@ -28,11 +28,11 @@ use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::table::state_table::StateTable;
 use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
     PkIndices, StreamExecutorResult, Watermark,
 };
+use crate::common::table::state_table::StateTable;
 
 /// [`SortBufferKey`] contains a record's timestamp and pk.
 type SortBufferKey = (ScalarImpl, Row);

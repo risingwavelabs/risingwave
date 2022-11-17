@@ -31,10 +31,10 @@ use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
 use crate::cache::cache_may_stale;
+use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::table::state_table::StateTable;
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 pub type GroupTopNExecutor<S, const WITH_TIES: bool> =

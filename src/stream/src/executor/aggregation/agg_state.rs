@@ -25,8 +25,8 @@ use super::minput::MaterializedInputState;
 use super::table::TableState;
 use super::value::ValueState;
 use super::AggCall;
+use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
-use crate::executor::table::state_table::StateTable;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Represents the persistent storage of aggregation state.
