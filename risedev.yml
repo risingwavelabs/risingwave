@@ -413,15 +413,15 @@ risedev:
     - use: frontend
       port: 4565
       exporter-port: 2222
-      health_check_port: 6786
+      health-check-port: 6786
     - use: frontend
       port: 4566
       exporter-port: 2223
-      health_check_port: 6787
+      health-check-port: 6787
     - use: frontend
       port: 4567
       exporter-port: 2224
-      health_check_port: 6788
+      health-check-port: 6788
     - use: compactor
 
   ci-3cn-3fe-in-memory:
@@ -444,15 +444,15 @@ risedev:
     - use: frontend
       port: 4565
       exporter-port: 2222
-      health_check_port: 6786
+      health-check-port: 6786
     - use: frontend
       port: 4566
       exporter-port: 2223
-      health_check_port: 6787
+      health-check-port: 6787
     - use: frontend
       port: 4567
       exporter-port: 2224
-      health_check_port: 6788
+      health-check-port: 6788
 
   ci-kafka:
     - use: minio
