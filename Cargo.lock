@@ -3543,6 +3543,7 @@ version = "0.1.0"
 dependencies = [
  "clap 3.2.17",
  "criterion 0.4.0",
+ "lazy_static",
  "rand 0.8.5",
  "serde",
  "serde_json",

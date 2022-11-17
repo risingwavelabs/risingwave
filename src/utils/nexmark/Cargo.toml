@@ -10,6 +10,7 @@ bin = ["clap", "serde", "serde_json"]
 
 [dependencies]
 clap = { version = "3", features = ["derive"], optional = true }
+lazy_static = "1.4"
 rand = { version = "0.8", features = ["small_rng"] }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }

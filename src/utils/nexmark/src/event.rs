@@ -36,8 +36,8 @@ use rand::{Rng, SeedableRng};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::config::{GeneratorConfig, CHANNEL_NUMBER};
-use crate::utils::NexmarkRng;
+use crate::config::GeneratorConfig;
+use crate::utils::{NexmarkRng, CHANNEL_URL_MAP};
 
 type Id = usize;
 
@@ -306,10 +306,7 @@ impl Bid {
             let index = rng.gen_range(0..nex.hot_channels.len());
             (nex.hot_channels[index].clone(), nex.hot_urls[index].clone())
         } else {
-            nex.channel_url_map
-                .get(&rng.gen_range(0..CHANNEL_NUMBER))
-                .unwrap()
-                .clone()
+            CHANNEL_URL_MAP.choose(rng).unwrap().clone()
         };
 
         let current_size = 8 + 8 + 8 + 8;

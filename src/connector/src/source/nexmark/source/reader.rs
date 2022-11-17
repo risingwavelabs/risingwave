@@ -116,8 +116,7 @@ impl NexmarkSplitReader {
             while (msgs.len() as u64) < self.max_chunk_size {
                 let event = self.generator.next().unwrap();
 
-                if self.event_num > 0 && self.generator.events_so_far() - 1 >= self.event_num as u64
-                {
+                if self.event_num > 0 && self.generator.events_so_far() > self.event_num as u64 {
                     finished = true;
                     break;
                 }

@@ -30,15 +30,12 @@
 
 //! Nexmark configurations.
 
-use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::ops::Deref;
 use std::time::SystemTime;
 
 use crate::event::EventType;
-use crate::utils::{build_channel_url_map, get_base_url};
-
-pub(crate) const CHANNEL_NUMBER: usize = 10_000;
+use crate::utils::get_base_url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -132,8 +129,6 @@ pub struct NexmarkConfig {
     pub first_names: Vec<String>,
     /// The collection of last names.
     pub last_names: Vec<String>,
-    /// The collection of channels and urls
-    pub channel_url_map: HashMap<usize, (String, String)>,
     /// Number of event generators to use. Each generates events in its own
     /// timeline.
     pub num_event_generators: usize,
@@ -183,7 +178,6 @@ impl Default for NexmarkConfig {
             hot_urls: (0..4).map(get_base_url).collect(),
             first_names: split_str("peter,paul,luke,john,saul,vicky,kate,julie,sarah,deiter,walter"),
             last_names: split_str("shultz,abrams,spencer,white,bartels,walton,smith,jones,noris"),
-            channel_url_map: build_channel_url_map(CHANNEL_NUMBER),
             num_event_generators: 1,
             rate_shape: RateShape::Sine,
             rate_period: 600,

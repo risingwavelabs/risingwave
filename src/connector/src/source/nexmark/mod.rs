@@ -237,8 +237,10 @@ impl From<&NexmarkPropertiesInner> for NexmarkConfig {
         // 2015-07-15 00:00:00
         pub const BASE_TIME: u64 = 1_436_918_400_000;
 
-        let mut cfg = NexmarkConfig::default();
-        cfg.base_time = BASE_TIME;
+        let mut cfg = NexmarkConfig {
+            base_time: BASE_TIME,
+            ..Default::default()
+        };
         macro_rules! set {
             ($name:ident) => {
                 set!($name, $name);
