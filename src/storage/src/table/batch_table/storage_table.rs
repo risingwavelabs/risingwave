@@ -402,11 +402,13 @@ impl<S: StateStore> StorageTable<S> {
                     key.0.extend(k.0.clone());
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
-                        // storage doesn't support excluded begin key yet, so transform it to
-                        // included
-                        // FIXME: What if `serialized_key` is `\xff\xff..`? Should the frontend
-                        // reject this?
-                        Included(next_key(&serialized_key))
+                        // Storage doesn't support excluded begin key yet, so transform it to
+                        // included.
+                        // We always serialize a u8 for null of datum which is not equal to '\xff',
+                        // so we can assert that the next_key would never be empty.
+                        let next_serialized_key = next_key(&serialized_key);
+                        assert!(!next_serialized_key.is_empty());
+                        Included(next_serialized_key)
                     } else {
                         Excluded(serialized_key)
                     }
