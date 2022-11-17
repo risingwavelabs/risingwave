@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Row;
+use super::Row2;
 
 /// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
 /// Executors need to serialize Row into `CompactedRow` before writing into cache.
@@ -21,10 +21,10 @@ pub struct CompactedRow {
     pub row: Vec<u8>,
 }
 
-impl From<&Row> for CompactedRow {
-    fn from(row: &Row) -> Self {
+impl<R: Row2> From<R> for CompactedRow {
+    fn from(row: R) -> Self {
         Self {
-            row: row.serialize(&None),
+            row: row.value_serialize(),
         }
     }
 }

@@ -123,6 +123,16 @@ impl<'a> RowRef<'a> {
         }
     }
 
+    pub unsafe fn value_at_unchecked(&self, pos: usize) -> DatumRef<'_> {
+        debug_assert!(self.idx < self.chunk.capacity());
+        // for `RowRef`, the index is always in bound.
+        self.chunk
+            .columns()
+            .get_unchecked(pos)
+            .array_ref()
+            .value_at_unchecked(self.idx)
+    }
+
     pub fn size(&self) -> usize {
         self.chunk.columns().len()
     }

@@ -32,6 +32,8 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
 
     fn datum_at(&self, index: usize) -> DatumRef<'_>;
 
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_>;
+
     fn len(&self) -> usize;
 
     fn is_empty(&self) -> bool {
@@ -84,6 +86,13 @@ pub trait RowExt: Row2 {
     where
         Self: Sized,
     {
+        if let Some(index) = indices.iter().find(|&&i| i >= self.len()) {
+            panic!(
+                "index {} out of bounds for row of length {}",
+                index,
+                self.len()
+            );
+        }
         assert_row(Project { row: self, indices })
     }
 }
@@ -111,9 +120,18 @@ impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
 
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         if index < self.r1.len() {
-            self.r1.datum_at(index)
+            // SAFETY: `index < self.r1.len()` implies the index is valid.
+            unsafe { self.r1.datum_at_unchecked(index) }
         } else {
             self.r2.datum_at(index - self.r1.len())
+        }
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        if index < self.r1.len() {
+            self.r1.datum_at_unchecked(index)
+        } else {
+            self.r2.datum_at_unchecked(index - self.r1.len())
         }
     }
 
@@ -157,7 +175,13 @@ impl<'i, R: Row2> Row2 for Project<'i, R> {
         'i: 'a;
 
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        self.row.datum_at(self.indices[index])
+        // SAFETY: we have checked that `self.indices` are all valid in `RowExt::project`.
+        unsafe { self.row.datum_at_unchecked(self.indices[index]) }
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        self.row
+            .datum_at_unchecked(*self.indices.get_unchecked(index))
     }
 
     fn len(&self) -> usize {
@@ -165,7 +189,9 @@ impl<'i, R: Row2> Row2 for Project<'i, R> {
     }
 
     fn iter(&self) -> Self::Iter<'_> {
-        self.indices.iter().map(|&i| self.row.datum_at(i))
+        self.indices.iter().map(|&i|
+                // SAFETY: we have checked that `self.indices` are all valid in `RowExt::project`.
+                unsafe { self.row.datum_at_unchecked(i) })
     }
 }
 
@@ -173,6 +199,10 @@ macro_rules! deref_forward_row {
     () => {
         fn datum_at(&self, index: usize) -> DatumRef<'_> {
             (**self).datum_at(index)
+        }
+
+        unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+            (**self).datum_at_unchecked(index)
         }
 
         fn len(&self) -> usize {
@@ -230,6 +260,10 @@ impl Row2 for &[Datum] {
         to_datum_ref(&self[index])
     }
 
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        to_datum_ref(self.get_unchecked(index))
+    }
+
     fn len(&self) -> usize {
         self.as_ref().len()
     }
@@ -248,6 +282,10 @@ impl Row2 for &[DatumRef<'_>] {
         self[index]
     }
 
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        *self.get_unchecked(index)
+    }
+
     fn len(&self) -> usize {
         <[DatumRef<'_>]>::len(self)
     }
@@ -264,6 +302,10 @@ impl Row2 for Row {
 
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         to_datum_ref(&self[index])
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        to_datum_ref(self.0.get_unchecked(index))
     }
 
     fn len(&self) -> usize {
@@ -292,6 +334,10 @@ impl Row2 for RowRef<'_> {
         RowRef::value_at(self, index)
     }
 
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        RowRef::value_at_unchecked(self, index)
+    }
+
     fn len(&self) -> usize {
         RowRef::size(self)
     }
@@ -311,6 +357,10 @@ impl Row2 for Empty {
 
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         [][index]
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        *[].get_unchecked(index)
     }
 
     fn len(&self) -> usize {
@@ -336,6 +386,10 @@ impl<D: ToDatumRef> Row2 for Once<D> {
 
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         [self.0.to_datum_ref()][index]
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        *[self.0.to_datum_ref()].get_unchecked(index)
     }
 
     fn len(&self) -> usize {
