@@ -43,18 +43,16 @@ impl ObserverState for HummockObserverNode {
             return;
         };
 
+        assert!(
+            resp.version > self.version,
+            "resp version={:?}, current version={:?}",
+            resp.version,
+            self.version
+        );
+
         match info.to_owned() {
             Info::Table(table_catalog) => {
-                assert!(
-                    resp.version > self.version,
-                    "resp version={:?}, current version={:?}",
-                    resp.version,
-                    self.version
-                );
-
                 self.handle_catalog_notification(resp.operation(), table_catalog);
-
-                self.version = resp.version;
             }
 
             Info::HummockVersionDeltas(hummock_version_deltas) => {
@@ -72,6 +70,8 @@ impl ObserverState for HummockObserverNode {
                 panic!("error type notification");
             }
         }
+
+        self.version = resp.version;
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
