@@ -466,7 +466,7 @@ mod tests {
                     } else {
                         tx.send(Message::Watermark(Watermark {
                             col_idx: (epoch as usize / 20 + tx_id) % CHANNEL_NUMBER,
-                            val: Some(ScalarImpl::Int64(epoch as i64)),
+                            val: ScalarImpl::Int64(epoch as i64),
                         }))
                         .await
                         .unwrap();
@@ -498,7 +498,7 @@ mod tests {
             } else if epoch as usize / 20 >= CHANNEL_NUMBER - 1 {
                 for _ in 0..CHANNEL_NUMBER {
                     assert_matches!(merger.next().await.unwrap().unwrap(), Message::Watermark(watermark) => {
-                        assert_eq!(watermark.val, Some(ScalarImpl::Int64((epoch - 20 * (CHANNEL_NUMBER as u64 - 1)) as i64)));
+                        assert_eq!(watermark.val, ScalarImpl::Int64((epoch - 20 * (CHANNEL_NUMBER as u64 - 1)) as i64));
                     });
                 }
             }

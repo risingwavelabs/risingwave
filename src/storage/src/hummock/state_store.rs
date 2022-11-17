@@ -21,7 +21,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::key::next_key;
+use risingwave_hummock_sdk::key::{map_table_key_range, next_key, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::oneshot;
@@ -43,7 +43,7 @@ use crate::{
 };
 
 impl HummockStorage {
-    /// Gets the value of a specified `key`.
+    /// Gets the value of a specified `key` in the table specified in `read_options`.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     /// if `key` has consistent hash virtual node value, then such value is stored in `value_meta`
     ///
@@ -76,18 +76,21 @@ impl HummockStorage {
                         .collect::<Vec<_>>()
                 };
 
-                let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
+                let key_range = (
+                    Bound::Included(TableKey(key.to_vec())),
+                    Bound::Included(TableKey(key.to_vec())),
+                );
                 read_filter_for_batch(epoch, table_id, &key_range, read_version_vec)?
             };
 
         self.hummock_version_reader
-            .get(key, epoch, read_options, read_version_tuple)
+            .get(TableKey(key), epoch, read_options, read_version_tuple)
             .await
     }
 
     async fn iter_inner(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
@@ -189,7 +192,7 @@ impl StateStoreRead for HummockStorage {
             // not check
         }
 
-        self.iter_inner(key_range, epoch, read_options)
+        self.iter_inner(map_table_key_range(key_range), epoch, read_options)
     }
 }
 

@@ -16,7 +16,8 @@ use std::cmp;
 
 use bytes::Bytes;
 
-use super::version_cmp::VersionedComparator;
+use super::key;
+use super::key_cmp::KeyComparator;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct KeyRange {
@@ -50,6 +51,7 @@ impl KeyRange {
 pub trait KeyRangeCommon {
     fn full_key_overlap(&self, other: &Self) -> bool;
     fn full_key_extend(&mut self, other: &Self);
+    fn user_key_overlap(&self, other: &Self) -> bool;
 }
 
 #[macro_export]
@@ -59,29 +61,38 @@ macro_rules! impl_key_range_common {
             fn full_key_overlap(&self, other: &Self) -> bool {
                 (self.end_bound_inf()
                     || other.start_bound_inf()
-                    || VersionedComparator::compare_key(&self.right, &other.left)
+                    || KeyComparator::compare_encoded_full_key(&self.right, &other.left)
                         != cmp::Ordering::Less)
                     && (other.end_bound_inf()
                         || self.start_bound_inf()
-                        || VersionedComparator::compare_key(&other.right, &self.left)
+                        || KeyComparator::compare_encoded_full_key(&other.right, &self.left)
                             != cmp::Ordering::Less)
             }
 
             fn full_key_extend(&mut self, other: &Self) {
                 if !self.start_bound_inf()
                     && (other.start_bound_inf()
-                        || VersionedComparator::compare_key(&other.left, &self.left)
+                        || KeyComparator::compare_encoded_full_key(&other.left, &self.left)
                             == cmp::Ordering::Less)
                 {
                     self.left = other.left.clone();
                 }
                 if !self.end_bound_inf()
                     && (other.end_bound_inf()
-                        || VersionedComparator::compare_key(&other.right, &self.right)
+                        || KeyComparator::compare_encoded_full_key(&other.right, &self.right)
                             == cmp::Ordering::Greater)
                 {
                     self.right = other.right.clone();
                 }
+            }
+
+            fn user_key_overlap(&self, other: &Self) -> bool {
+                (self.end_bound_inf()
+                    || other.start_bound_inf()
+                    || key::user_key(&self.right) >= key::user_key(&other.left))
+                    && (other.end_bound_inf()
+                        || self.start_bound_inf()
+                        || key::user_key(&other.right) >= key::user_key(&self.left))
             }
         }
     };
@@ -93,7 +104,7 @@ macro_rules! key_range_cmp {
         let ret = if $left.start_bound_inf() && $right.start_bound_inf() {
             cmp::Ordering::Equal
         } else if !$left.start_bound_inf() && !$right.start_bound_inf() {
-            VersionedComparator::compare_key(&$left.left, &$right.left)
+            KeyComparator::compare_encoded_full_key(&$left.left, &$right.left)
         } else if $left.left.is_empty() {
             cmp::Ordering::Less
         } else {
@@ -105,7 +116,7 @@ macro_rules! key_range_cmp {
         if $left.end_bound_inf() && $right.end_bound_inf() {
             cmp::Ordering::Equal
         } else if !$left.end_bound_inf() && !$right.end_bound_inf() {
-            VersionedComparator::compare_key(&$left.right, &$right.right)
+            KeyComparator::compare_encoded_full_key(&$left.right, &$right.right)
         } else if $left.end_bound_inf() {
             cmp::Ordering::Greater
         } else {
@@ -167,7 +178,5 @@ mod tests {
             KeyRange::new(a1.clone(), a2).partial_cmp(&KeyRange::new(a1, b1)),
             Some(cmp::Ordering::Less)
         );
-        assert!(VersionedComparator::same_user_key(a1_slice, a2_slice));
-        assert!(!VersionedComparator::same_user_key(a1_slice, b1_slice));
     }
 }

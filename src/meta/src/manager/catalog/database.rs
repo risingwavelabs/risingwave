@@ -14,7 +14,6 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::marker::PhantomData;
 
 use itertools::Itertools;
 use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
@@ -41,7 +40,7 @@ type RelationKey = (DatabaseId, SchemaId, String);
 
 /// [`DatabaseManager`] caches meta catalog information and maintains dependent relationship
 /// between tables.
-pub struct DatabaseManager<S: MetaStore> {
+pub struct DatabaseManager {
     /// Cached database information.
     pub(super) databases: BTreeMap<DatabaseId, Database>,
     /// Cached schema information.
@@ -68,15 +67,10 @@ pub struct DatabaseManager<S: MetaStore> {
     pub(super) in_progress_creation_streaming_job: HashSet<TableId>,
     // In-progress creating tables, including internal tables.
     pub(super) in_progress_creating_tables: HashMap<TableId, Table>,
-
-    _phantom: PhantomData<S>,
 }
 
-impl<S> DatabaseManager<S>
-where
-    S: MetaStore,
-{
-    pub async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+impl DatabaseManager {
+    pub async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let databases = Database::list(env.meta_store()).await?;
         let schemas = Schema::list(env.meta_store()).await?;
         let sources = Source::list(env.meta_store()).await?;
@@ -126,8 +120,6 @@ where
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashSet::default(),
             in_progress_creating_tables: HashMap::default(),
-
-            _phantom: PhantomData,
         })
     }
 
@@ -244,10 +236,6 @@ where
             && self.sinks.values().all(|s| s.schema_id != schema_id)
             && self.indexes.values().all(|i| i.schema_id != schema_id)
             && self.views.values().all(|v| v.schema_id != schema_id)
-    }
-
-    pub fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
-        self.relation_ref_count.get(&relation_id).cloned()
     }
 
     pub fn increase_ref_count(&mut self, relation_id: RelationId) {

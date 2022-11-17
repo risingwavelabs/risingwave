@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
-use std::{fmt, iter};
 
-use auto_enums::auto_enum;
 use itertools::Itertools;
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 
-use super::ArrayResult;
+use super::{ArrayResult, Vis};
 use crate::array::column::Column;
-use crate::array::data_chunk_iter::{Row, RowRef};
+use crate::array::data_chunk_iter::RowRef;
 use crate::array::{ArrayBuilderImpl, StructValue};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
+use crate::row::Row;
 use crate::types::struct_type::StructType;
 use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
@@ -38,71 +38,6 @@ use crate::util::value_encoding::serialize_datum_ref;
 pub struct DataChunk {
     columns: Vec<Column>,
     vis2: Vis,
-}
-
-/// `Vis` is a visibility bitmap of rows. When all rows are visible, it is considered compact and
-/// is represented by a single cardinality number rather than that many of ones.
-#[derive(Clone, PartialEq, Debug)]
-pub enum Vis {
-    Bitmap(Bitmap),
-    Compact(usize), // equivalent to all ones of this size
-}
-
-impl From<Bitmap> for Vis {
-    fn from(b: Bitmap) -> Self {
-        Vis::Bitmap(b)
-    }
-}
-
-impl From<usize> for Vis {
-    fn from(c: usize) -> Self {
-        Vis::Compact(c)
-    }
-}
-
-impl From<&Vis> for Vis {
-    fn from(vis: &Vis) -> Self {
-        match vis {
-            Vis::Bitmap(b) => b.clone().into(),
-            Vis::Compact(c) => (*c).into(),
-        }
-    }
-}
-
-impl Vis {
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Vis::Bitmap(b) => b.is_empty(),
-            Vis::Compact(c) => *c == 0,
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        match self {
-            Vis::Bitmap(b) => b.len(),
-            Vis::Compact(c) => *c,
-        }
-    }
-
-    /// # Panics
-    /// Panics if `idx > len`.
-    pub fn is_set(&self, idx: usize) -> bool {
-        match self {
-            Vis::Bitmap(b) => b.is_set(idx),
-            Vis::Compact(c) => {
-                assert!(idx <= *c);
-                true
-            }
-        }
-    }
-
-    #[auto_enum(Iterator)]
-    pub fn iter(&self) -> impl Iterator<Item = bool> + '_ {
-        match self {
-            Vis::Bitmap(b) => b.iter(),
-            Vis::Compact(c) => iter::repeat(true).take(*c),
-        }
-    }
 }
 
 impl DataChunk {
@@ -204,6 +139,13 @@ impl DataChunk {
             Vis::Bitmap(b) => Some(b),
             Vis::Compact(_) => None,
         }
+    }
+
+    pub fn set_vis(&mut self, vis: Vis) {
+        for column in &self.columns {
+            assert_eq!(vis.len(), column.array_ref().len())
+        }
+        self.vis2 = vis;
     }
 
     pub fn set_visibility(&mut self, visibility: Bitmap) {

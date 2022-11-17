@@ -18,10 +18,11 @@ use std::ops::Bound;
 use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::Datum;
+use risingwave_common::row::Row;
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -34,7 +35,8 @@ use super::{
 };
 
 /// [`SortBufferKey`] contains a record's timestamp and pk.
-type SortBufferKey = (Datum, Row);
+type SortBufferKey = (ScalarImpl, Row);
+
 /// [`SortBufferValue`] contains a record's value and a flag indicating whether the record has been
 /// persisted to storage.
 /// NOTE: There is an exhausting trade-off for which structure to use for the in-memory buffer. For
@@ -71,7 +73,7 @@ pub struct SortExecutor<S: StateStore> {
     buffer: BTreeMap<SortBufferKey, SortBufferValue>,
 
     /// The last received watermark. `None` on initialization. Used for range delete.
-    _prev_watermark: Option<Datum>,
+    _prev_watermark: Option<ScalarImpl>,
 }
 
 impl<S: StateStore> SortExecutor<S> {
@@ -184,15 +186,17 @@ impl<S: StateStore> SortExecutor<S> {
                             Op::Insert => {
                                 // For insert operation, we buffer the record in memory.
                                 let row = row_ref.to_owned_row();
-                                let timestamp = row.0.get(self.sort_column_index).ok_or_else(|| {
+                                let timestamp_datum = row.0.get(self.sort_column_index).ok_or_else(|| {
                                     anyhow!(
                                         "column index {} out of range in row {:?}",
                                         self.sort_column_index,
                                         row
                                     )
-                                })?.clone();
+                                })?;
                                 let pk = row.by_indices(&self.pk_indices);
-                                self.buffer.insert((timestamp, pk), (row, false));
+                                // Null event time should not exist in the row since the `WatermarkFilter`
+                                // before the `Sort` will filter out the Null event time.
+                                self.buffer.insert((timestamp_datum.clone().unwrap(), pk), (row, false));
                             },
                             // Other operations are not supported currently.
                             _ => unimplemented!("operations other than insert currently are not supported by sort executor")
@@ -267,8 +271,8 @@ impl<S: StateStore> SortExecutor<S> {
         let mut values_per_vnode = Vec::new();
         for (owned_vnode, _) in newly_owned_vnodes
             .iter()
-            .filter(|is_set| *is_set)
             .enumerate()
+            .filter(|(_, is_set)| *is_set)
         {
             let value_iter = self
                 .state_table
@@ -282,19 +286,18 @@ impl<S: StateStore> SortExecutor<S> {
             while let Some(storage_result) = stream.next().await {
                 // Insert the data into buffer.
                 let row = storage_result?.into_owned();
-                let timestamp = row
-                    .0
-                    .get(self.sort_column_index)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "column index {} out of range in row {:?}",
-                            self.sort_column_index,
-                            row
-                        )
-                    })?
-                    .clone();
+                let timestamp_datum = row.0.get(self.sort_column_index).ok_or_else(|| {
+                    anyhow!(
+                        "column index {} out of range in row {:?}",
+                        self.sort_column_index,
+                        row
+                    )
+                })?;
                 let pk = row.by_indices(&self.pk_indices);
-                self.buffer.insert((timestamp, pk), (row, true));
+                // Null event time should not exist in the row since the `WatermarkFilter` before
+                // the `Sort` will filter out the Null event time.
+                self.buffer
+                    .insert((timestamp_datum.clone().unwrap(), pk), (row, true));
             }
         }
         Ok(())
@@ -349,8 +352,8 @@ mod tests {
             + 37 5
             + 60 8",
         );
-        let watermark1 = Some(ScalarImpl::Int64(3));
-        let watermark2 = Some(ScalarImpl::Int64(7));
+        let watermark1 = ScalarImpl::Int64(3);
+        let watermark2 = ScalarImpl::Int64(7);
 
         let state_table = create_state_table().await;
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table);
@@ -362,8 +365,8 @@ mod tests {
         sort_executor.next().await.unwrap().unwrap();
 
         // Init watermark
-        tx.push_watermark(0, Some(ScalarImpl::Int64(0)));
-        tx.push_watermark(sort_column_index, Some(ScalarImpl::Int64(0)));
+        tx.push_watermark(0, ScalarImpl::Int64(0));
+        tx.push_watermark(sort_column_index, ScalarImpl::Int64(0));
 
         // Consume the watermark
         sort_executor.next().await.unwrap().unwrap();
@@ -440,7 +443,7 @@ mod tests {
             + 3 6
             + 4 7",
         );
-        let watermark = Some(ScalarImpl::Int64(3));
+        let watermark = ScalarImpl::Int64(3);
 
         let state_table = create_state_table().await;
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table.clone());
@@ -452,8 +455,8 @@ mod tests {
         sort_executor.next().await.unwrap().unwrap();
 
         // Init watermark
-        tx.push_watermark(0, Some(ScalarImpl::Int64(0)));
-        tx.push_watermark(sort_column_index, Some(ScalarImpl::Int64(0)));
+        tx.push_watermark(0, ScalarImpl::Int64(0));
+        tx.push_watermark(sort_column_index, ScalarImpl::Int64(0));
 
         // Consume the watermark
         sort_executor.next().await.unwrap().unwrap();

@@ -96,6 +96,8 @@ pub struct TableCatalog {
 
     /// Definition of the materialized view.
     pub definition: String,
+
+    pub handle_pk_conflict: bool,
 }
 
 impl TableCatalog {
@@ -107,6 +109,10 @@ impl TableCatalog {
     pub fn with_id(mut self, id: TableId) -> Self {
         self.id = id;
         self
+    }
+
+    pub fn handle_pk_conflict(&self) -> bool {
+        self.handle_pk_conflict
     }
 
     /// Get the table catalog's associated source id.
@@ -190,6 +196,7 @@ impl TableCatalog {
                 .map(|i| ProstColumnIndex { index: i as _ }),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
             definition: self.definition.clone(),
+            handle_pk_conflict: self.handle_pk_conflict,
         }
     }
 }
@@ -236,6 +243,7 @@ impl From<ProstTable> for TableCatalog {
             vnode_col_idx: tb.vnode_col_idx.map(|x| x.index as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition.clone(),
+            handle_pk_conflict: tb.handle_pk_conflict,
         }
     }
 }
@@ -320,6 +328,7 @@ mod tests {
             vnode_col_idx: None,
             value_indices: vec![0],
             definition: "".into(),
+            handle_pk_conflict: false,
         }
         .into();
 
@@ -377,6 +386,7 @@ mod tests {
                 vnode_col_idx: None,
                 value_indices: vec![0],
                 definition: "".into(),
+                handle_pk_conflict: false
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

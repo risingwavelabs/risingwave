@@ -16,11 +16,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use super::RwPgResponse;
@@ -139,8 +140,16 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
         Some(rows.len() as i32),
         rows.into(),
         vec![
-            PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
-            PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+            PgFieldDescriptor::new(
+                "Name".to_owned(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Type".to_owned(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
         ],
     ))
 }

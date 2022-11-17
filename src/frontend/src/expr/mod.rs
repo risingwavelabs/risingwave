@@ -15,7 +15,7 @@
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use paste::paste;
-use risingwave_common::array::{ListValue, Row};
+use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr::expr::{build_from_prost, AggKind};
@@ -288,20 +288,34 @@ impl ExprImpl {
             }
 
             fn visit_subquery(&mut self, subquery: &Subquery) -> bool {
-                use crate::binder::BoundSetExpr;
-
-                let mut has = false;
                 self.depth += 1;
-                match &subquery.query.body {
+                let has = self.visit_bound_set_expr(&subquery.query.body);
+                self.depth -= 1;
+
+                has
+            }
+        }
+
+        impl Has {
+            fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) -> bool {
+                let mut has = false;
+                match set_expr {
                     BoundSetExpr::Select(select) => {
                         select.exprs().for_each(|expr| has |= self.visit_expr(expr))
                     }
                     BoundSetExpr::Values(values) => {
                         values.exprs().for_each(|expr| has |= self.visit_expr(expr))
                     }
-                }
-                self.depth -= 1;
-
+                    BoundSetExpr::Query(query) => {
+                        self.depth += 1;
+                        has = self.visit_bound_set_expr(&query.body);
+                        self.depth -= 1;
+                    }
+                    BoundSetExpr::SetOperation { left, right, .. } => {
+                        has |= self.visit_bound_set_expr(left);
+                        has |= self.visit_bound_set_expr(right);
+                    }
+                };
                 has
             }
         }
@@ -328,8 +342,13 @@ impl ExprImpl {
             }
 
             fn visit_subquery(&mut self, subquery: &Subquery) -> bool {
-                use crate::binder::BoundSetExpr;
-                match &subquery.query.body {
+                self.visit_bound_set_expr(&subquery.query.body)
+            }
+        }
+
+        impl Has {
+            fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) -> bool {
+                match set_expr {
                     BoundSetExpr::Select(select) => select
                         .exprs()
                         .map(|expr| self.visit_expr(expr))
@@ -340,6 +359,10 @@ impl ExprImpl {
                         .map(|expr| self.visit_expr(expr))
                         .reduce(Self::merge)
                         .unwrap_or_default(),
+                    BoundSetExpr::Query(query) => self.visit_bound_set_expr(&query.body),
+                    BoundSetExpr::SetOperation { left, right, .. } => {
+                        self.visit_bound_set_expr(left) | self.visit_bound_set_expr(right)
+                    }
                 }
             }
         }
@@ -373,18 +396,31 @@ impl ExprImpl {
             }
 
             fn visit_subquery(&mut self, subquery: &mut Subquery) {
-                use crate::binder::BoundSetExpr;
-
                 self.depth += 1;
-                match &mut subquery.query.body {
+                self.visit_bound_set_expr(&mut subquery.query.body);
+                self.depth -= 1;
+            }
+        }
+
+        impl Collector {
+            fn visit_bound_set_expr(&mut self, set_expr: &mut BoundSetExpr) {
+                match set_expr {
                     BoundSetExpr::Select(select) => {
                         select.exprs_mut().for_each(|expr| self.visit_expr(expr))
                     }
                     BoundSetExpr::Values(values) => {
                         values.exprs_mut().for_each(|expr| self.visit_expr(expr))
                     }
+                    BoundSetExpr::Query(query) => {
+                        self.depth += 1;
+                        self.visit_bound_set_expr(&mut query.body);
+                        self.depth -= 1;
+                    }
+                    BoundSetExpr::SetOperation { left, right, .. } => {
+                        self.visit_bound_set_expr(&mut *left);
+                        self.visit_bound_set_expr(&mut *right);
+                    }
                 }
-                self.depth -= 1;
             }
         }
 
@@ -734,7 +770,9 @@ macro_rules! assert_eq_input_ref {
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
 
+use crate::binder::BoundSetExpr;
 use crate::utils::Condition;
 
 #[cfg(test)]

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::key::user_key;
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
-use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 pub trait OverlapInfo {
@@ -76,19 +76,16 @@ impl OverlapInfo for RangeOverlapInfo {
             Some(key_range) => {
                 let mut tables = vec![];
                 let overlap_begin = others.partition_point(|table_status| {
-                    VersionedComparator::less_than(
-                        &table_status.key_range.as_ref().unwrap().right,
-                        &key_range.left,
-                    )
+                    user_key(&table_status.key_range.as_ref().unwrap().right)
+                        < user_key(&key_range.left)
                 });
                 if overlap_begin >= others.len() {
                     return vec![];
                 }
                 for table in &others[overlap_begin..] {
-                    if VersionedComparator::less_than(
-                        &key_range.right,
-                        &table.key_range.as_ref().unwrap().left,
-                    ) {
+                    if user_key(&table.key_range.as_ref().unwrap().left)
+                        > user_key(&key_range.right)
+                    {
                         break;
                     }
                     tables.push(table.clone());
@@ -125,5 +122,5 @@ impl OverlapStrategy for RangeOverlapStrategy {
 
 fn check_table_overlap(key_range: &KeyRange, table: &SstableInfo) -> bool {
     let other = table.key_range.as_ref().unwrap();
-    key_range.full_key_overlap(other)
+    key_range.user_key_overlap(other)
 }

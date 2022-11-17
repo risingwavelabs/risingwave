@@ -18,7 +18,7 @@ use std::future::Future;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use bytes::{BufMut, Bytes};
+use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
@@ -156,18 +156,6 @@ pub async fn prepare_first_valid_version(
         tx,
         rx,
     )
-}
-
-/// Prefix the `key` with a dummy table id.
-/// We use `0` because：
-/// - This value is used in the code to identify unit tests and prevent some parameters that are not
-///   easily constructible in tests from breaking the test.
-/// - When calling state store interfaces, we normally pass `TableId::default()`, which is `0`.
-pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
-    let mut buf = Vec::new();
-    buf.put_u32(0);
-    buf.put_slice(key.as_ref());
-    buf.into()
 }
 
 #[async_trait::async_trait]

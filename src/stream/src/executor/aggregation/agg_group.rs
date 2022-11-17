@@ -16,10 +16,11 @@ use std::fmt::Debug;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, Op, Row};
+use risingwave_common::array::{ArrayBuilderImpl, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
+use risingwave_common::row::Row;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;

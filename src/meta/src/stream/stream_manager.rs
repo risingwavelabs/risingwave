@@ -163,13 +163,13 @@ where
                 stream_node: &mut StreamNode,
                 actor_id: ActorId,
                 upstream_actor_idx: usize,
-                _same_worker_node_as_upstream: bool,
                 is_singleton: bool,
+                upstream_fragment_id: FragmentId,
             ) -> MetaResult<()> {
                 let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
                     // If node is not chain node, recursively deal with input nodes
                     for input in &mut stream_node.input {
-                        self.resolve_chain_node_inner(input, actor_id, upstream_actor_idx, _same_worker_node_as_upstream, is_singleton)?;
+                        self.resolve_chain_node_inner(input, actor_id, upstream_actor_idx, is_singleton, upstream_fragment_id)?;
                     }
                     return Ok(());
                 };
@@ -238,6 +238,7 @@ where
                     unreachable!("chain's input[0] should always be merge");
                 };
                 merge.upstream_actor_id.push(*upstream_actor_id);
+                merge.upstream_fragment_id = upstream_fragment_id;
 
                 // finally, we should also build dispatcher infos here.
                 //
@@ -290,21 +291,6 @@ where
                 continue;
             }
 
-            let is_singleton =
-                fragment.get_distribution_type()? == FragmentDistributionType::Single;
-
-            for (idx, actor) in &mut fragment.actors.iter_mut().enumerate() {
-                let stream_node = actor.nodes.as_mut().unwrap();
-                env.resolve_chain_node_inner(
-                    stream_node,
-                    actor.actor_id,
-                    idx,
-                    actor.same_worker_node_as_upstream,
-                    is_singleton,
-                )?;
-                // setup actor vnode bitmap.
-                actor.vnode_bitmap = env.actor_vnode_bitmaps.remove(&actor.actor_id).unwrap();
-            }
             // setup fragment vnode mapping.
             let upstream_table_id = chain_fragment_upstream_table_map
                 .get(&fragment.fragment_id)
@@ -320,6 +306,32 @@ where
                 .as_ref()
                 .unwrap()
                 .fragment_id;
+
+            let is_singleton =
+                fragment.get_distribution_type()? == FragmentDistributionType::Single;
+
+            let upstream_actor_ids = env
+                .upstream_vnode_bitmap_info
+                .get(upstream_table_id)
+                .map(|v| v.iter().map(|(actor_id, _)| *actor_id).collect_vec())
+                .unwrap();
+
+            for (idx, actor) in &mut fragment.actors.iter_mut().enumerate() {
+                let stream_node = actor.nodes.as_mut().unwrap();
+                env.resolve_chain_node_inner(
+                    stream_node,
+                    actor.actor_id,
+                    idx,
+                    is_singleton,
+                    upstream_fragment_id,
+                )?;
+
+                // setup actor vnode bitmap.
+                actor.vnode_bitmap = env.actor_vnode_bitmaps.remove(&actor.actor_id).unwrap();
+
+                // setup upstream actor id
+                actor.upstream_actor_id.push(upstream_actor_ids[idx]);
+            }
 
             // Note: it's possible that there're some other normal `Merge` nodes in the fragment of
             // `Chain` and their upstreams are already filled in `upstream_fragment_ids`, so we

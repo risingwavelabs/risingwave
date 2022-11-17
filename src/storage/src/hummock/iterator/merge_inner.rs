@@ -17,7 +17,7 @@ use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
 use std::future::Future;
 
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::key::FullKey;
 
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::value::HummockValue;
@@ -55,12 +55,8 @@ impl<I: HummockIterator> PartialOrd for Node<I, UnorderedNodeExtra> {
         // order should be reversed.
 
         Some(match I::Direction::direction() {
-            DirectionEnum::Forward => {
-                VersionedComparator::compare_key(other.iter.key(), self.iter.key())
-            }
-            DirectionEnum::Backward => {
-                VersionedComparator::compare_key(self.iter.key(), other.iter.key())
-            }
+            DirectionEnum::Forward => other.iter.key().cmp(&self.iter.key()),
+            DirectionEnum::Backward => self.iter.key().cmp(&other.iter.key()),
         })
     }
 }
@@ -70,14 +66,16 @@ impl<I: HummockIterator> PartialOrd for Node<I, OrderedNodeExtra> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         // The `extra_info` is used as a tie-breaker when the keys are equal.
         Some(match I::Direction::direction() {
-            DirectionEnum::Forward => {
-                VersionedComparator::compare_key(other.iter.key(), self.iter.key())
-                    .then_with(|| other.extra_order_info.cmp(&self.extra_order_info))
-            }
-            DirectionEnum::Backward => {
-                VersionedComparator::compare_key(self.iter.key(), other.iter.key())
-                    .then_with(|| self.extra_order_info.cmp(&other.extra_order_info))
-            }
+            DirectionEnum::Forward => other
+                .iter
+                .key()
+                .cmp(&self.iter.key())
+                .then_with(|| other.extra_order_info.cmp(&self.extra_order_info)),
+            DirectionEnum::Backward => self
+                .iter
+                .key()
+                .cmp(&other.iter.key())
+                .then_with(|| self.extra_order_info.cmp(&other.extra_order_info)),
         })
     }
 }
@@ -209,7 +207,7 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
 
             // Take all nodes with the same current key as the top_node out of the heap.
             while let Some(next_node) = self.heap.peek_mut() {
-                match VersionedComparator::compare_key(top_node.iter.key(), next_node.iter.key()) {
+                match top_node.iter.key().cmp(&next_node.iter.key()) {
                     Ordering::Equal => {
                         popped_nodes.push(PeekMut::pop(next_node));
                     }
@@ -298,7 +296,7 @@ where
         self.next_inner()
     }
 
-    fn key(&self) -> &[u8] {
+    fn key(&self) -> FullKey<&[u8]> {
         self.heap.peek().expect("no inner iter").iter.key()
     }
 
@@ -320,7 +318,7 @@ where
         }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             self.reset_heap();
             futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.seek(key)))
