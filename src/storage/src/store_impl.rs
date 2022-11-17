@@ -606,7 +606,7 @@ pub mod boxed_state_store {
 
     impl Clone for BoxDynamicDispatchedStateStore {
         fn clone(&self) -> Self {
-            self.clone_box()
+            self.deref().clone_box()
         }
     }
 
