@@ -293,6 +293,12 @@ impl Barrier {
         matches!(self.mutation.as_deref(), Some(Mutation::Update { .. }))
     }
 
+    /// Whether this barrier is for resume. Used for now executor to determine whether to yield a
+    /// chunk and a watermark before this barrier.
+    pub fn is_resume(&self) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Resume))
+    }
+
     /// Returns the [`MergeUpdate`] if this barrier is to update the merge executors for the actor
     /// with `actor_id`.
     pub fn as_update_merge(

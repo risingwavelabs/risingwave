@@ -308,7 +308,7 @@ impl<S: StateStore> TemporalFilterExecutor<S> {
                 }
                 Message::Barrier(barrier) => {
                     time_millis = Epoch::from(barrier.epoch.curr).as_unix_millis();
-                    if barrier.is_update() {
+                    if barrier.is_update() || barrier.is_resume() {
                         sync_expr = None;
                         self.state_table.commit_no_data_expected(barrier.epoch);
                     } else {
