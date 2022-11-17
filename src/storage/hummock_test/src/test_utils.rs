@@ -95,12 +95,9 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
     async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
+        let worker_key = WorkerKey(self.addr.to_protobuf());
         self.notification_manager
-            .insert_sender(
-                subscribe_type,
-                WorkerKey(self.addr.to_protobuf()),
-                tx.clone(),
-            )
+            .insert_sender(subscribe_type, worker_key.clone(), tx.clone())
             .await;
 
         let hummock_version = self
@@ -115,13 +112,9 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
             ..Default::default()
         };
 
-        tx.send(Ok(SubscribeResponse {
-            status: None,
-            operation: Operation::Snapshot as i32,
-            info: Some(Info::Snapshot(meta_snapshot)),
-            version: self.notification_manager.current_version().await,
-        }))
-        .unwrap();
+        self.notification_manager
+            .notify_snapshot(worker_key, Info::Snapshot(meta_snapshot))
+            .await;
 
         Ok(TestChannel(rx))
     }
