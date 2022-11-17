@@ -12,13 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::assert_row;
-use crate::types::Datum;
+use super::{assert_row, Row2};
+use crate::types::DatumRef;
 
 /// Row for the [`empty`] function.
-pub type Empty = [Datum; 0];
+#[derive(Debug, PartialEq, Eq)]
+pub struct Empty(());
+
+impl Row2 for Empty {
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    where
+        Self: 'a;
+
+    #[inline]
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        [][index] // for better error messages
+    }
+
+    #[inline]
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        *[].get_unchecked(index) // for better error messages
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        0
+    }
+
+    #[inline]
+    fn iter(&self) -> Self::Iter<'_> {
+        std::iter::empty()
+    }
+}
 
 /// Creates a row which contains no datums.
 pub fn empty() -> Empty {
-    assert_row([])
+    assert_row(Empty(()))
 }
