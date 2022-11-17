@@ -394,6 +394,7 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         if compaction_group_id_set.len() > old_id_cnt {
             hummock_manager
                 .sync_group(
+                    None,
                     versioning,
                     &Self::gen_compaction_group_snapshot(
                         &compaction_groups,
@@ -450,6 +451,7 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
             let (hummock_manager, versioning) = empty_group_vacuum_context.unwrap();
             hummock_manager
                 .sync_group(
+                    None,
                     versioning,
                     &Self::gen_compaction_group_snapshot(
                         &compaction_groups,
@@ -519,6 +521,7 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         if compaction_group_id_set.len() > old_id_cnt {
             hummock_manager
                 .sync_group(
+                    None,
                     versioning,
                     &Self::gen_compaction_group_snapshot(
                         &compaction_groups,
@@ -567,6 +570,7 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
             let mut trx_wrapper = Some(trx);
             hummock_manager
                 .sync_group(
+                    None,
                     versioning,
                     &Self::gen_compaction_group_snapshot(
                         &compaction_groups,
@@ -613,6 +617,7 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
             let mut trx_wrapper = Some(trx);
             hummock_manager
                 .sync_group(
+                    None,
                     versioning,
                     &Self::gen_compaction_group_snapshot(&compaction_groups, compaction_group_ids),
                     &mut trx_wrapper,
