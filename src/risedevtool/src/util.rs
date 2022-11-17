@@ -43,16 +43,28 @@ pub fn get_program_env_cmd(cmd: &Command) -> String {
 
 pub fn new_spinner() -> ProgressBar {
     let pb = ProgressBar::new(0);
-    pb.set_style(ProgressStyle::default_spinner().template("{spinner} {prefix}: {msg}"));
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner} {prefix}: {msg}")
+            .unwrap(),
+    );
     pb
 }
 
 pub fn complete_spin(pb: &ProgressBar) {
-    pb.set_style(ProgressStyle::default_spinner().template("✅ {prefix}: {msg}"));
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("✅ {prefix}: {msg}")
+            .unwrap(),
+    );
 }
 
 pub fn fail_spin(pb: &ProgressBar) {
-    pb.set_style(ProgressStyle::default_spinner().template("❗ {prefix}: {msg}"));
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("❗ {prefix}: {msg}")
+            .unwrap(),
+    );
 }
 
 pub fn is_env_set(var: &str) -> bool {
