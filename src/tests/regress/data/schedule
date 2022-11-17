@@ -7,4 +7,4 @@
 # interferes with crash-recovery testing.
 # test: tablespace
 
-test: boolean varchar int2 int4
+test: boolean varchar int2 int4 float4

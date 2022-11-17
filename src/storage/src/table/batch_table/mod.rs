@@ -14,5 +14,3 @@
 
 pub mod iter_utils;
 pub mod storage_table;
-#[cfg(test)]
-pub mod test_batch_table;
