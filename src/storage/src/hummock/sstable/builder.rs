@@ -256,6 +256,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.finalize_last_table_stats();
 
         self.build_block().await?;
+        let mut right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
         for tombstone in &self.range_tombstones {
             assert!(!tombstone.end_user_key.is_empty());
@@ -270,6 +271,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
                 largest_key =
                     FullKey::from_user_key(tombstone.end_user_key.clone(), HummockEpoch::MAX)
                         .encode();
+                right_exclusive = true;
             }
             if smallest_key.is_empty()
                 || KeyComparator::encoded_greater_than_unencoded(
@@ -310,6 +312,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             key_range: Some(risingwave_pb::hummock::KeyRange {
                 left: meta.smallest_key.clone(),
                 right: meta.largest_key.clone(),
+                right_exclusive,
             }),
             file_size: meta.estimated_size as u64,
             table_ids: self.table_ids.into_iter().collect(),

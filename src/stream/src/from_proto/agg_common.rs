@@ -21,9 +21,9 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_expr::expr::{build_from_prost, AggKind};
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{AggArgs, AggCall, AggStateStorage};
 

@@ -108,7 +108,7 @@ pub trait TableIter: Send {
 }
 
 /// Get vnode value with `indices` on the given `row`.
-fn compute_vnode(row: impl Row2, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
+pub fn compute_vnode(row: impl Row2, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {

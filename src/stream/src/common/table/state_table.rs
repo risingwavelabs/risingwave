@@ -36,19 +36,20 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
 use risingwave_pb::catalog::Table;
-use tracing::trace;
-
-use super::mem_table::{MemTable, MemTableIter, RowOp};
-use crate::error::{StorageError, StorageResult};
-use crate::keyspace::ExtractTableKeyIterator;
-use crate::row_serde::row_serde_util::{
+use risingwave_storage::keyspace::ExtractTableKeyIterator;
+use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
-use crate::storage_value::StorageValue;
-use crate::store::{LocalStateStore, ReadOptions, WriteOptions};
-use crate::table::streaming_table::mem_table::MemTableError;
-use crate::table::{compute_chunk_vnode, compute_vnode, Distribution};
-use crate::{Keyspace, StateStore, StateStoreIter};
+use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::store::{LocalStateStore, ReadOptions, WriteOptions};
+use risingwave_storage::table::streaming_table::mem_table::{
+    MemTable, MemTableError, MemTableIter, RowOp,
+};
+use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
+use risingwave_storage::{Keyspace, StateStore, StateStoreIter};
+use tracing::trace;
+
+use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
@@ -409,7 +410,7 @@ const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 // point get
 impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
-    pub async fn get_row(&self, pk: impl Row2) -> StorageResult<Option<Row>> {
+    pub async fn get_row(&self, pk: impl Row2) -> StreamExecutorResult<Option<Row>> {
         let compacted_row: Option<CompactedRow> = self.get_compacted_row(pk).await?;
         match compacted_row {
             Some(compacted_row) => {
@@ -423,7 +424,10 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Get a compacted row from state table.
-    pub async fn get_compacted_row(&self, pk: impl Row2) -> StorageResult<Option<CompactedRow>> {
+    pub async fn get_compacted_row(
+        &self,
+        pk: impl Row2,
+    ) -> StreamExecutorResult<Option<CompactedRow>> {
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
         let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
@@ -619,7 +623,7 @@ impl<S: StateStore> StateTable<S> {
         self.epoch = Some(new_epoch);
     }
 
-    pub async fn commit(&mut self, new_epoch: EpochPair) -> StorageResult<()> {
+    pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.batch_write_rows(mem_table, new_epoch.prev).await?;
@@ -628,7 +632,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// used for unit test, and do not need to assert epoch.
-    pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StorageResult<()> {
+    pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.batch_write_rows(mem_table, new_epoch.prev).await?;
         self.update_epoch(new_epoch);
@@ -649,7 +653,7 @@ impl<S: StateStore> StateTable<S> {
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
-    ) -> StorageResult<()> {
+    ) -> StreamExecutorResult<()> {
         let mut write_batch = self.keyspace.start_write_batch(WriteOptions {
             epoch,
             table_id: self.table_id(),
@@ -690,7 +694,7 @@ impl<S: StateStore> StateTable<S> {
         key: &[u8],
         value: &[u8],
         epoch: u64,
-    ) -> StorageResult<()> {
+    ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
             prefix_hint: None,
             check_bloom_filter: false,
@@ -722,7 +726,7 @@ impl<S: StateStore> StateTable<S> {
         key: &[u8],
         old_row: &[u8],
         epoch: u64,
-    ) -> StorageResult<()> {
+    ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
             prefix_hint: None,
             check_bloom_filter: false,
@@ -756,7 +760,7 @@ impl<S: StateStore> StateTable<S> {
         old_row: &[u8],
         new_row: &[u8],
         epoch: u64,
-    ) -> StorageResult<()> {
+    ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
             prefix_hint: None,
             ignore_range_tombstone: false,
@@ -787,14 +791,14 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
-fn get_second<T, U>(arg: StorageResult<(T, U)>) -> StorageResult<U> {
+fn get_second<T, U>(arg: StreamExecutorResult<(T, U)>) -> StreamExecutorResult<U> {
     arg.map(|x| x.1)
 }
 
 // Iterator functions
 impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table.
-    pub async fn iter(&self) -> StorageResult<RowStream<'_, S>> {
+    pub async fn iter(&self) -> StreamExecutorResult<RowStream<'_, S>> {
         self.iter_with_pk_prefix(row::empty()).await
     }
 
@@ -802,7 +806,7 @@ impl<S: StateStore> StateTable<S> {
     pub async fn iter_with_pk_prefix(
         &self,
         pk_prefix: impl Row2,
-    ) -> StorageResult<RowStream<'_, S>> {
+    ) -> StreamExecutorResult<RowStream<'_, S>> {
         let (mem_table_iter, storage_iter_stream) = self
             .iter_with_pk_prefix_inner(pk_prefix, self.epoch())
             .await?;
@@ -823,7 +827,7 @@ impl<S: StateStore> StateTable<S> {
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
         vnode: u8,
-    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
+    ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
 
         let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &[vnode]);
@@ -844,7 +848,7 @@ impl<S: StateStore> StateTable<S> {
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
         vnode: u8,
-    ) -> StorageResult<RowStream<'_, S>> {
+    ) -> StreamExecutorResult<RowStream<'_, S>> {
         let (mem_table_iter, storage_iter_stream) =
             self.iter_with_pk_range_inner(pk_range, vnode).await?;
         let storage_iter = storage_iter_stream.into_stream();
@@ -862,7 +866,7 @@ impl<S: StateStore> StateTable<S> {
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
         vnode: u8,
-    ) -> StorageResult<RowStreamWithPk<'_, S>> {
+    ) -> StreamExecutorResult<RowStreamWithPk<'_, S>> {
         let (mem_table_iter, storage_iter_stream) =
             self.iter_with_pk_range_inner(pk_range, vnode).await?;
         let storage_iter = storage_iter_stream.into_stream();
@@ -876,7 +880,7 @@ impl<S: StateStore> StateTable<S> {
     pub async fn iter_prev_epoch_with_pk_prefix(
         &self,
         pk_prefix: impl Row2,
-    ) -> StorageResult<RowStream<'_, S>> {
+    ) -> StreamExecutorResult<RowStream<'_, S>> {
         let (mem_table_iter, storage_iter_stream) = self
             .iter_with_pk_prefix_inner(pk_prefix, self.prev_epoch())
             .await?;
@@ -894,7 +898,7 @@ impl<S: StateStore> StateTable<S> {
     pub async fn iter_key_and_val(
         &self,
         pk_prefix: impl Row2,
-    ) -> StorageResult<RowStreamWithPk<'_, S>> {
+    ) -> StreamExecutorResult<RowStreamWithPk<'_, S>> {
         let (mem_table_iter, storage_iter_stream) = self
             .iter_with_pk_prefix_inner(pk_prefix, self.epoch())
             .await?;
@@ -910,7 +914,7 @@ impl<S: StateStore> StateTable<S> {
         &self,
         pk_prefix: impl Row2,
         epoch: u64,
-    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
+    ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);
@@ -947,7 +951,7 @@ impl<S: StateStore> StateTable<S> {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         prefix_hint: Option<Vec<u8>>,
         epoch: u64,
-    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
+    ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         // Mem table iterator.
         let mem_table_iter = self.mem_table.iter(key_range.clone());
 
@@ -978,9 +982,9 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
-pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
+pub type RowStream<'a, S: StateStore> = impl Stream<Item = StreamExecutorResult<Cow<'a, Row>>>;
 pub type RowStreamWithPk<'a, S: StateStore> =
-    impl Stream<Item = StorageResult<(Cow<'a, Vec<u8>>, Cow<'a, Row>)>>;
+    impl Stream<Item = StreamExecutorResult<(Cow<'a, Vec<u8>>, Cow<'a, Row>)>>;
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
 /// It will merge the result of `mem_table_iter` and `state_store_iter`.
@@ -994,7 +998,7 @@ struct StateTableRowIter<'a, M, C> {
 impl<'a, M, C> StateTableRowIter<'a, M, C>
 where
     M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
-    C: Stream<Item = StorageResult<(Vec<u8>, Row)>>,
+    C: Stream<Item = StreamExecutorResult<(Vec<u8>, Row)>>,
 {
     fn new(mem_table_iter: M, storage_iter: C, deserializer: RowDeserializer) -> Self {
         Self {
@@ -1008,7 +1012,7 @@ where
     /// This function scans kv pairs from the `shared_storage` and
     /// memory(`mem_table`) with optional pk_bounds. If a record exist in both `shared_storage` and
     /// `mem_table`, result `mem_table` is returned according to the operation(RowOp) on it.
-    #[try_stream(ok = (Cow<'a, Vec<u8>>, Cow<'a, Row>), error = StorageError)]
+    #[try_stream(ok = (Cow<'a, Vec<u8>>, Cow<'a, Row>), error = StreamExecutorError)]
     async fn into_stream(self) {
         let storage_iter = self.storage_iter.peekable();
         pin_mut!(storage_iter);
@@ -1108,7 +1112,7 @@ impl<S: LocalStateStore> StorageIterInner<S> {
         raw_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
         deserializer: RowDeserializer,
-    ) -> StorageResult<Self> {
+    ) -> StreamExecutorResult<Self> {
         let iter = keyspace
             .iter_with_range(raw_key_range, epoch, read_options)
             .await?;
@@ -1117,7 +1121,7 @@ impl<S: LocalStateStore> StorageIterInner<S> {
     }
 
     /// Yield a row with its primary key.
-    #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
+    #[try_stream(ok = (Vec<u8>, Row), error = StreamExecutorError)]
     async fn into_stream(mut self) {
         while let Some((key, value)) = self
             .iter

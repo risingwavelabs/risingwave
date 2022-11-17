@@ -25,7 +25,6 @@ use risingwave_common::row::{self, Row};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
@@ -33,6 +32,7 @@ use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
     PkIndices, StreamExecutorResult, Watermark,
 };
+use crate::common::table::state_table::StateTable;
 
 /// [`SortBufferKey`] contains a record's timestamp and pk.
 type SortBufferKey = (ScalarImpl, Row);
@@ -336,7 +336,6 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
