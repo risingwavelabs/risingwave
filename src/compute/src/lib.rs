@@ -81,7 +81,7 @@ pub struct ComputeNodeOpts {
 
     /// Endpoint of the connector node
     #[clap(long, default_value = "127.0.0.1:60061")]
-    pub connector_node_addr: String,
+    pub connector_source_endpoint: String,
 }
 
 use std::future::Future;

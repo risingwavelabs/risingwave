@@ -48,7 +48,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             node.properties.clone(),
             node.get_info()?.clone(),
             params.env.source_manager_ref(),
-            params.env.connector_node_address(),
+            params.env.connector_source_endpoint(),
         );
 
         let columns = node.columns.clone();
