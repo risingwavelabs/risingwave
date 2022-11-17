@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
 
     use std::collections::{BTreeSet, HashMap};
     use std::ops::Bound;
@@ -63,7 +63,7 @@ mod tests {
         HummockV2MixedStateStore as HummockStorage,
     };
 
-    async fn get_hummock_storage(
+    pub(crate) async fn get_hummock_storage(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
     ) -> HummockStorage {
@@ -416,7 +416,7 @@ mod tests {
         assert!(compact_task.is_none());
     }
 
-    async fn flush_and_commit(
+    pub(crate) async fn flush_and_commit(
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         storage: &HummockStorage,
         epoch: u64,
