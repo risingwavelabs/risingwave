@@ -5862,8 +5862,6 @@ dependencies = [
  "serde",
  "smallvec",
  "spin 0.9.4",
- "strum",
- "strum_macros",
  "sync-point",
  "tempfile",
  "thiserror",

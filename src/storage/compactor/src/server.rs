@@ -129,6 +129,7 @@ pub async fn compactor_serve(
         read_memory_limiter: memory_limiter,
         sstable_id_manager: sstable_id_manager.clone(),
         task_progress_manager: Default::default(),
+        #[cfg(not(madsim))]
         tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
     });
     let compactor_context = Arc::new(CompactorContext::with_config(

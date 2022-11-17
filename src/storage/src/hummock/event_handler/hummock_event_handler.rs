@@ -88,7 +88,6 @@ pub type ReadVersionMappingType =
 
 pub struct HummockEventHandler {
     buffer_tracker: BufferTracker,
-    // sstable_id_manager: SstableIdManagerRef,
     hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
     upload_handle_manager: UploadHandleManager,
     pending_sync_requests: HashMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
