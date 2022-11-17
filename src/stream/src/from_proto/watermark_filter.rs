@@ -15,9 +15,9 @@
 use std::sync::Arc;
 
 use risingwave_expr::expr::build_from_prost;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::WatermarkFilterExecutor;
 
 pub struct WatermarkFilterBuilder;

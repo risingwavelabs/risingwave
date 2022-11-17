@@ -12,5 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod iter_utils;
-pub mod storage_table;
+pub mod state_table;
+
+#[cfg(test)]
+pub mod test_batch_table;
+#[cfg(test)]
+pub mod test_streaming_table;
