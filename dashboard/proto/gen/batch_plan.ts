@@ -116,6 +116,7 @@ export interface TopNNode {
   columnOrders: ColumnOrder[];
   limit: number;
   offset: number;
+  withTies: boolean;
 }
 
 export interface GroupTopNNode {
@@ -123,6 +124,7 @@ export interface GroupTopNNode {
   limit: number;
   offset: number;
   groupKey: number[];
+  withTies: boolean;
 }
 
 export interface LimitNode {
@@ -809,7 +811,7 @@ export const SortNode = {
 };
 
 function createBaseTopNNode(): TopNNode {
-  return { columnOrders: [], limit: 0, offset: 0 };
+  return { columnOrders: [], limit: 0, offset: 0, withTies: false };
 }
 
 export const TopNNode = {
@@ -820,6 +822,7 @@ export const TopNNode = {
         : [],
       limit: isSet(object.limit) ? Number(object.limit) : 0,
       offset: isSet(object.offset) ? Number(object.offset) : 0,
+      withTies: isSet(object.withTies) ? Boolean(object.withTies) : false,
     };
   },
 
@@ -832,6 +835,7 @@ export const TopNNode = {
     }
     message.limit !== undefined && (obj.limit = Math.round(message.limit));
     message.offset !== undefined && (obj.offset = Math.round(message.offset));
+    message.withTies !== undefined && (obj.withTies = message.withTies);
     return obj;
   },
 
@@ -840,12 +844,13 @@ export const TopNNode = {
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.limit = object.limit ?? 0;
     message.offset = object.offset ?? 0;
+    message.withTies = object.withTies ?? false;
     return message;
   },
 };
 
 function createBaseGroupTopNNode(): GroupTopNNode {
-  return { columnOrders: [], limit: 0, offset: 0, groupKey: [] };
+  return { columnOrders: [], limit: 0, offset: 0, groupKey: [], withTies: false };
 }
 
 export const GroupTopNNode = {
@@ -859,6 +864,7 @@ export const GroupTopNNode = {
       groupKey: Array.isArray(object?.groupKey)
         ? object.groupKey.map((e: any) => Number(e))
         : [],
+      withTies: isSet(object.withTies) ? Boolean(object.withTies) : false,
     };
   },
 
@@ -876,6 +882,7 @@ export const GroupTopNNode = {
     } else {
       obj.groupKey = [];
     }
+    message.withTies !== undefined && (obj.withTies = message.withTies);
     return obj;
   },
 
@@ -885,6 +892,7 @@ export const GroupTopNNode = {
     message.limit = object.limit ?? 0;
     message.offset = object.offset ?? 0;
     message.groupKey = object.groupKey?.map((e) => e) || [];
+    message.withTies = object.withTies ?? false;
     return message;
   },
 };

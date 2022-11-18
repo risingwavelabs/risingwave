@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table t1 (v1 int, v2 int) with (appendonly = true);
 
 statement ok
@@ -23,9 +26,6 @@ select * from mv1;
 
 statement ok
 insert into t1 values (3,4), (7,7);
-
-statement ok
-flush;
 
 query II rowsort
 select * from mv1;
@@ -74,6 +74,49 @@ select * from mv5;
 ----
 16 9 1
 
+statement ok
+create table t5 (v1 int, v2 int) with (appendonly = true);
+
+statement ok
+insert into t5 values (1,0), (1,1), (1,2), (1,3);
+
+## TopN with ties
+statement ok
+create materialized view mv6 as select v1, v2 from t5 order by v1 fetch first 3 rows with ties;
+
+query IV rowsort
+select * from mv6;
+----
+1 0
+1 1
+1 2
+1 3
+
+statement ok
+insert into t5 values (0,1), (0,2);
+
+query IV rowsort
+select * from mv6;
+----
+0 1
+0 2
+1 0
+1 1
+1 2
+1 3
+
+statement ok
+insert into t5 values (0,3);
+
+query IV rowsort
+select * from mv6;
+----
+0 1
+0 2
+0 3
+
+statement ok
+drop materialized view mv6
 
 statement ok
 drop materialized view mv5
@@ -86,6 +129,9 @@ drop materialized view mv3
 
 statement ok
 drop materialized view mv1
+
+statement ok
+drop table t5
 
 statement ok
 drop table t4
