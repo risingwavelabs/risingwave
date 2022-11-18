@@ -97,8 +97,7 @@ category = "Misc"
 description = "List all nodes in the cluster"
 script = '''
 #!/bin/bash
-set -e
-for node in $(ls ${PREFIX_LOG}); do echo $(basename $node .log)  ; done
+tmux list-windows -t risedev | cut -d'(' -f1
 '''
 
 [tasks.check-logs]
