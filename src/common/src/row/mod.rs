@@ -141,6 +141,7 @@ pub trait RowExt: Row2 {
 
 impl<R: Row2> RowExt for R {}
 
+/// Forward the implementation of [`Row2`] to the deref target.
 macro_rules! deref_forward_row {
     () => {
         fn datum_at(&self, index: usize) -> DatumRef<'_> {
@@ -210,30 +211,37 @@ impl<R: Row2> Row2 for Box<R> {
     }
 }
 
+/// Implements [`Row2`] for a slice of datums.
+macro_rules! impl_slice_row {
+    () => {
+        #[inline]
+        fn datum_at(&self, index: usize) -> DatumRef<'_> {
+            self[index].to_datum_ref()
+        }
+
+        #[inline]
+        unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+            self.get_unchecked(index).to_datum_ref()
+        }
+
+        #[inline]
+        fn len(&self) -> usize {
+            self.as_ref().len()
+        }
+
+        #[inline]
+        fn iter(&self) -> Self::Iter<'_> {
+            self.as_ref().iter().map(ToDatumRef::to_datum_ref)
+        }
+    };
+}
+
 impl<D: ToDatumRef> Row2 for &[D] {
     type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
 
-    #[inline]
-    fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        self[index].to_datum_ref()
-    }
-
-    #[inline]
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.get_unchecked(index).to_datum_ref()
-    }
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.as_ref().len()
-    }
-
-    #[inline]
-    fn iter(&self) -> Self::Iter<'_> {
-        self.as_ref().iter().map(ToDatumRef::to_datum_ref)
-    }
+    impl_slice_row!();
 }
 
 impl<D: ToDatumRef, const N: usize> Row2 for [D; N] {
@@ -241,23 +249,5 @@ impl<D: ToDatumRef, const N: usize> Row2 for [D; N] {
     where
         Self: 'a;
 
-    #[inline]
-    fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        self[index].to_datum_ref()
-    }
-
-    #[inline]
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.get_unchecked(index).to_datum_ref()
-    }
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.as_ref().len()
-    }
-
-    #[inline]
-    fn iter(&self) -> Self::Iter<'_> {
-        self.as_ref().iter().map(ToDatumRef::to_datum_ref)
-    }
+    impl_slice_row!();
 }
