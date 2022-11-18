@@ -91,6 +91,34 @@ echo ""
 echo ""
 '''
 
+
+[tasks.f]
+alias = "follow"
+
+[tasks.follow]
+category = "misc"
+description = "Follows the end of the logs of a specific component"
+script = '''
+#!/bin/bash
+set -e
+
+if [[ -z "$1" ]]; then 
+  echo "Please pass a parameter to this script, defining which logs you want to follow"
+  echo "Available logs are..."
+  ls ${PREFIX_LOG}
+  exit 1
+fi
+
+if [[ ! -f ${PREFIX_LOG}/$1 ]]; then
+  echo "selected file does not exist"
+  echo "Available logs are..."
+  ls ${PREFIX_LOG}
+  exit 1
+fi 
+
+tail -f -n 5 ${PREFIX_LOG}/$1
+'''
+
 [tasks.check-logs]
 category = "Misc"
 description = "Check if there is panic in log or significant log size issue"
@@ -390,7 +418,7 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make typos-cli
+for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-upgrades typos-cli
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo install $tool --locked

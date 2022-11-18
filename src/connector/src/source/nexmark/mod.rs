@@ -20,6 +20,7 @@ use std::collections::HashMap;
 
 pub use enumerator::*;
 use nexmark::config::{NexmarkConfig, RateShape};
+use nexmark::event::EventType;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 pub use split::*;
@@ -52,8 +53,8 @@ pub struct NexmarkPropertiesInner {
     #[serde(rename = "nexmark.event.num", default = "default_event_num")]
     pub event_num: i64,
 
-    #[serde(rename = "nexmark.table.type", default)]
-    pub table_type: String,
+    #[serde(rename = "nexmark.table.type", default = "default_event_type")]
+    pub table_type: EventType,
 
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "nexmark.max.chunk.size", default = "identity_u64::<1024>")]
@@ -220,6 +221,10 @@ fn default_event_num() -> i64 {
     -1
 }
 
+fn default_event_type() -> EventType {
+    EventType::Person
+}
+
 impl Default for NexmarkPropertiesInner {
     fn default() -> Self {
         let v = serde_json::to_value(HashMap::<String, String>::new()).unwrap();
@@ -229,7 +234,13 @@ impl Default for NexmarkPropertiesInner {
 
 impl From<&NexmarkPropertiesInner> for NexmarkConfig {
     fn from(value: &NexmarkPropertiesInner) -> Self {
-        let mut cfg = NexmarkConfig::default();
+        // 2015-07-15 00:00:00
+        pub const BASE_TIME: u64 = 1_436_918_400_000;
+
+        let mut cfg = NexmarkConfig {
+            base_time: BASE_TIME,
+            ..Default::default()
+        };
         macro_rules! set {
             ($name:ident) => {
                 set!($name, $name);
