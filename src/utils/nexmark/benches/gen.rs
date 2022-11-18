@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use nexmark::event::EventType;
 use nexmark::EventGenerator;
 
 criterion_group!(benches, nexmark_generator);
@@ -21,6 +22,18 @@ criterion_main!(benches);
 fn nexmark_generator(c: &mut Criterion) {
     c.bench_function("nexmark_generate_event", |bencher| {
         let mut gen = EventGenerator::default();
+        bencher.iter(|| gen.next())
+    });
+    c.bench_function("nexmark_generate_person", |bencher| {
+        let mut gen = EventGenerator::default().with_type_filter(EventType::Person);
+        bencher.iter(|| gen.next())
+    });
+    c.bench_function("nexmark_generate_auction", |bencher| {
+        let mut gen = EventGenerator::default().with_type_filter(EventType::Auction);
+        bencher.iter(|| gen.next())
+    });
+    c.bench_function("nexmark_generate_bid", |bencher| {
+        let mut gen = EventGenerator::default().with_type_filter(EventType::Bid);
         bencher.iter(|| gen.next())
     });
 }

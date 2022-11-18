@@ -30,14 +30,12 @@
 
 //! Nexmark configurations.
 
-use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::ops::Deref;
+use std::time::SystemTime;
 
-use crate::utils::{build_channel_url_map, get_base_url};
-
-pub const CHANNEL_NUMBER: usize = 10_000;
-pub const NEXMARK_BASE_TIME: u64 = 1_436_918_400_000;
+use crate::event::EventType;
+use crate::utils::get_base_url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -58,6 +56,7 @@ pub struct NexmarkConfig {
     /// generator.
     pub in_flight_auctions: usize,
     /// Number of events in out-of-order groups.
+    ///
     /// 1 implies no out-of-order events. 1000 implies every 1000 events per
     /// generator are emitted in pseudo-random order.
     pub out_of_order_group_size: usize,
@@ -76,10 +75,12 @@ pub struct NexmarkConfig {
     /// Ratio of bids for 'hot' channels compared to all other channels.
     pub hot_channel_ratio: usize,
     /// Event id of first event to be generated.
+    ///
     /// Event ids are unique over all generators, and are used as a seed to
     /// generate each event's data.
     pub first_event_id: usize,
     /// First event number.
+    ///
     /// Generators running in parallel time may share the same event number, and
     /// the event number is used to determine the event timestamp.
     pub first_event_number: usize,
@@ -103,8 +104,6 @@ pub struct NexmarkConfig {
     pub auction_proportion: usize,
     /// Bid Proportion.
     pub bid_proportion: usize,
-    /// Proportion Denominator.
-    pub proportion_denominator: usize,
     /// We start the ids at specific values to help ensure the queries find a
     /// match even on small synthesized dataset sizes.
     pub first_auction_id: usize,
@@ -130,8 +129,6 @@ pub struct NexmarkConfig {
     pub first_names: Vec<String>,
     /// The collection of last names.
     pub last_names: Vec<String>,
-    /// The collection of channels and urls
-    pub channel_url_map: HashMap<usize, (String, String)>,
     /// Number of event generators to use. Each generates events in its own
     /// timeline.
     pub num_event_generators: usize,
@@ -145,9 +142,6 @@ pub struct NexmarkConfig {
 /// Default configuration.
 impl Default for NexmarkConfig {
     fn default() -> Self {
-        let person_proportion = 1;
-        let auction_proportion = 3;
-        let bid_proportion = 46;
         Self {
             active_people: 1000,
             in_flight_auctions: 100,
@@ -166,23 +160,24 @@ impl Default for NexmarkConfig {
             hot_seller_ratio_2: 100,
             hot_auction_ratio_2: 100,
             hot_bidder_ratio_2: 100,
-            person_proportion,
-            auction_proportion,
-            bid_proportion,
-            proportion_denominator: person_proportion + auction_proportion + bid_proportion,
+            person_proportion: 1,
+            auction_proportion: 3,
+            bid_proportion: 46,
             first_auction_id: 1000,
             first_person_id: 1000,
             first_category_id: 10,
             person_id_lead: 10,
             sine_approx_steps: 10,
-            base_time: NEXMARK_BASE_TIME,
+            base_time: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64,
             us_states: split_str("az,ca,id,or,wa,wy"),
             us_cities: split_str("phoenix,los angeles,san francisco,boise,portland,bend,redmond,seattle,kent,cheyenne"),
             hot_channels: split_str("Google,Facebook,Baidu,Apple"),
             hot_urls: (0..4).map(get_base_url).collect(),
             first_names: split_str("peter,paul,luke,john,saul,vicky,kate,julie,sarah,deiter,walter"),
             last_names: split_str("shultz,abrams,spencer,white,bartels,walton,smith,jones,noris"),
-            channel_url_map: build_channel_url_map(CHANNEL_NUMBER),
             num_event_generators: 1,
             rate_shape: RateShape::Sine,
             rate_period: 600,
@@ -197,6 +192,9 @@ impl Default for NexmarkConfig {
 pub(crate) struct GeneratorConfig {
     pub config: NexmarkConfig,
 
+    // The following are derived from config thus should not be changed.
+    /// The proportion denominator.
+    pub proportion_denominator: usize,
     /// Delay before changing the current inter-event delay.
     pub step_length: usize,
     /// Number of events per epoch.
@@ -228,6 +226,8 @@ impl Deref for GeneratorConfig {
 
 impl From<NexmarkConfig> for GeneratorConfig {
     fn from(cfg: NexmarkConfig) -> Self {
+        let proportion_denominator =
+            cfg.person_proportion + cfg.auction_proportion + cfg.bid_proportion;
         let generators = cfg.num_event_generators as f32;
 
         // Calculate inter event delays array.
@@ -272,6 +272,7 @@ impl From<NexmarkConfig> for GeneratorConfig {
 
         Self {
             config: cfg,
+            proportion_denominator,
             step_length,
             events_per_epoch,
             epoch_period,
@@ -281,7 +282,7 @@ impl From<NexmarkConfig> for GeneratorConfig {
 }
 
 impl GeneratorConfig {
-    /// Returns a new event timestamp.
+    /// Returns the timestamp of event.
     pub fn event_timestamp(&self, event_number: usize) -> u64 {
         if self.inter_event_delays.len() == 1 {
             return self.base_time
@@ -313,6 +314,18 @@ impl GeneratorConfig {
         let n = self.out_of_order_group_size;
         let event_number = self.first_event_number + events_so_far;
         (event_number / n) * n + (event_number * 953) % n
+    }
+
+    /// Returns the event type.
+    pub fn event_type(&self, event_number: usize) -> EventType {
+        let rem = event_number % self.proportion_denominator;
+        if rem < self.person_proportion {
+            EventType::Person
+        } else if rem < self.person_proportion + self.auction_proportion {
+            EventType::Auction
+        } else {
+            EventType::Bid
+        }
     }
 }
 
