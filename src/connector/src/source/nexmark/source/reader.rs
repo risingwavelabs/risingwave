@@ -67,18 +67,13 @@ impl SplitReader for NexmarkSplitReader {
 
             split_index = split.split_index as u64;
             split_num = split.split_num as u64;
-            if let Some(s) = split.start_offset {
-                offset = s;
-            };
+            offset = split.start_offset.unwrap_or(split_index);
             assigned_split = split;
         }
 
         Ok(NexmarkSplitReader {
             generator: EventGenerator::new(NexmarkConfig::from(&*properties))
-                .with_offset(
-                    // the minimal number x where: x >= offset && x % split_num == split_index
-                    (offset + split_num - 1 - split_index) / split_num * split_num + split_index,
-                )
+                .with_offset(offset)
                 .with_step(split_num)
                 .with_type_filter(properties.table_type),
             assigned_split,
@@ -102,16 +97,17 @@ impl NexmarkSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_stream(mut self) {
         let start_time = Instant::now();
-        let start_offset = self.generator.offset();
+        let start_offset = self.generator.global_offset();
         let start_ts = self.generator.timestamp();
         loop {
             let mut msgs: Vec<SourceMessage> = vec![];
             while (msgs.len() as u64) < self.max_chunk_size {
-                let (offset, event) = self.generator.next().unwrap();
-                if offset >= self.event_num {
+                if self.generator.global_offset() >= self.event_num {
                     break;
                 }
-                let event = NexmarkMessage::new(self.split_id.clone(), offset + 1, event);
+                let event = self.generator.next().unwrap();
+                let event =
+                    NexmarkMessage::new(self.split_id.clone(), self.generator.offset(), event);
                 msgs.push(event.into());
             }
             if msgs.is_empty() {
@@ -126,7 +122,8 @@ impl NexmarkSplitReader {
                 tokio::time::sleep_until(
                     start_time
                         + Duration::from_nanos(
-                            self.min_event_gap_in_ns * (self.generator.offset() - start_offset),
+                            self.min_event_gap_in_ns
+                                * (self.generator.global_offset() - start_offset),
                         ),
                 )
                 .await;

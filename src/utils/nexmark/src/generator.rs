@@ -20,6 +20,9 @@ use crate::event::*;
 pub struct EventGenerator {
     cfg: GeneratorConfig,
     /// The current offset of event.
+    ///
+    /// If `type_filter` is set, this is the offset of the certain type.
+    /// Otherwise, this is the offset of all events.
     offset: u64,
     /// Each iteration the offset is incremented by this step.
     step: u64,
@@ -64,26 +67,47 @@ impl EventGenerator {
 
     /// Return the timestamp of current offset event.
     pub fn timestamp(&self) -> u64 {
-        let event_number = self.cfg.next_adjusted_event(self.offset as usize);
-        self.cfg.event_timestamp(event_number)
+        self.cfg.event_timestamp(self.event_number())
+    }
+
+    /// Return the global offset of all type of events.
+    pub fn global_offset(&self) -> u64 {
+        match self.type_filter {
+            Some(EventType::Person) => {
+                (self.offset as usize / self.cfg.person_proportion
+                    * self.cfg.proportion_denominator
+                    + self.offset as usize % self.cfg.person_proportion) as u64
+            }
+            Some(EventType::Auction) => {
+                (self.offset as usize / self.cfg.auction_proportion
+                    * self.cfg.proportion_denominator
+                    + self.cfg.person_proportion
+                    + self.offset as usize % self.cfg.auction_proportion) as u64
+            }
+            Some(EventType::Bid) => {
+                (self.offset as usize / self.cfg.bid_proportion * self.cfg.proportion_denominator
+                    + self.cfg.person_proportion
+                    + self.cfg.auction_proportion
+                    + self.offset as usize % self.cfg.bid_proportion) as u64
+            }
+            None => self.offset,
+        }
+    }
+
+    fn event_number(&self) -> usize {
+        match self.type_filter {
+            Some(_) => self.cfg.first_event_number + self.global_offset() as usize,
+            None => self.cfg.next_adjusted_event(self.offset as usize),
+        }
     }
 }
 
 impl Iterator for EventGenerator {
-    type Item = (u64, Event);
+    type Item = Event;
 
-    fn next(&mut self) -> Option<(u64, Event)> {
-        loop {
-            let offset = self.offset;
-            let event_number = self.cfg.next_adjusted_event(offset as usize);
-            let event_type = self.cfg.event_type(event_number);
-            self.offset += self.step;
-
-            if matches!(self.type_filter, Some(t) if t != event_type) {
-                continue;
-            }
-            let event = Event::new(event_number, &self.cfg);
-            return Some((offset, event));
-        }
+    fn next(&mut self) -> Option<Event> {
+        let event = Event::new(self.event_number(), &self.cfg);
+        self.offset += self.step;
+        Some(event)
     }
 }

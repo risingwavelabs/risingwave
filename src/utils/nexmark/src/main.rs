@@ -78,7 +78,7 @@ fn main() {
     };
     let start_time = Instant::now();
     let start_ts = iter.timestamp();
-    for (_, event) in iter.take(number) {
+    for event in iter.take(number) {
         if !opts.no_wait {
             let emit_time = start_time + Duration::from_millis(event.timestamp() - start_ts);
             // sleep until the timestamp of the event
