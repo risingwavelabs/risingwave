@@ -51,7 +51,11 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// ignore based on the `current_pos` at the end of the later barrier. Once `current_pos` reaches
 /// the end of the upstream mv pk, the backfill would finish.
 ///
-/// Notice: The pk we talk about here refers to the storage primary key.
+/// Notice:
+/// The pk we are talking about here refers to the storage primary key.
+/// We rely on the scheduler to schedule the `BackfillExecutor` together with the upstream mv/table
+/// in the same worker, so that we can read uncommitted data from the upstream table without
+/// waiting.
 pub struct BackfillExecutor<S: StateStore> {
     /// Upstream table
     table: StorageTable<S>,
