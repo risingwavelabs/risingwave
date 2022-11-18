@@ -51,7 +51,7 @@ use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
-use crate::storage::{EtcdMetaStore, MemStore, MetaStore, MetaStoreError, Transaction};
+use crate::storage::{EtcdMetaStore, MemStore, MetaStore, MetaStoreError, Snapshot, Transaction};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::{hummock, MetaResult};
 
@@ -264,8 +264,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let handle = tokio::spawn(async move {
             let mut ticker = tokio::time::interval(Duration::from_secs(lease_time / 2)); // + random to reduce load
+
+            // election
             loop {
-                let mut txn = Transaction::default(); // transaction with timeout?
+                // define lease
+                let mut txn = Transaction::default();
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("Time went backwards");
@@ -284,10 +287,14 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     META_LEASE_KEY.as_bytes().to_vec(),
                     lease_info.encode_to_vec(),
                 );
+
+                // TODO: Do I already do this stuff above?
+
+                // try to acquire lease
+                let mut this_is_leader = false;
                 if let Err(e) = meta_store.txn(txn).await {
                     match e {
                         MetaStoreError::TransactionAbort() => {
-                            // get value, if value is outdated, delete leader value
                             tracing::error!(
                                 "keep lease failed, another node has become new leader"
                             );
@@ -297,21 +304,49 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                                 "keep lease failed, try again later, MetaStoreError: {:?}",
                                 e
                             );
+                            continue; // TODO: introduce time delay here
                         }
                         MetaStoreError::ItemNotFound(e) => {
                             tracing::warn!("keep lease failed, MetaStoreError: {:?}", e);
                         }
                     }
                 } else {
-                    tracing::info!("Current node is leader")
+                    tracing::info!("Current node is leader");
+                    this_is_leader = true;
                 }
-                tokio::select! {
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("Register leader info is stopped");
-                        return;
+
+                // election done. Enter current term in loop below
+                loop {
+                    // sleep OR abort if shutdown
+                    tokio::select! {
+                        _ = &mut shutdown_rx => {
+                            tracing::info!("Register leader info is stopped");
+                            return;
+                        }
+                        // Wait for the minimal interval,
+                        _ = ticker.tick() => {},
                     }
-                    // Wait for the minimal interval,
-                    _ = ticker.tick() => {},
+
+                    // get leader info
+                    let leader_info = meta_store
+                        .snapshot()
+                        .await
+                        .get_cf(META_CF_NAME, META_LEADER_KEY.as_bytes())
+                        .await
+                        .unwrap_or_default();
+
+                    if !leader_info.is_empty() {
+                        let leader_info =
+                            MetaLeaderInfo::decode(&mut leader_info.as_slice()).unwrap();
+                    } else {
+                        // TODO: how do I get the key from the cf?
+                    }
+
+                    // get value, if value is outdated, delete leader value
+                    if this_is_leader {
+                        // TODO: renew lease
+                        continue;
+                    }
                 }
             }
         });
