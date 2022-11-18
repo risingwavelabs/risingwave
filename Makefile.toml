@@ -100,6 +100,38 @@ script = '''
 tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
 '''
 
+[tasks.del]
+alias = "delete"
+
+[tasks.delete]
+category = "Misc"
+description = "Delete a node in the cluster"
+script = '''
+#!/bin/bash
+
+risedev_ls () {
+  tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
+}
+
+err () {
+  echo "Available nodes are"
+  risedev_ls
+  exit 1
+}
+
+if [[ -z "$1" ]]; then 
+  echo "Please pass a parameter to this script, defining which node you want to delete"
+  err
+fi
+
+if [[ -z $(risedev_ls | grep "$1" ) ]]; then 
+  echo "Please select a node that is currently running"
+  err
+fi
+
+tmux kill-window -t $1
+'''
+
 [tasks.f]
 alias = "follow"
 
