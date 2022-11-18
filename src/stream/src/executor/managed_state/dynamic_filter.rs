@@ -203,19 +203,21 @@ impl<S: StateStore> RangeCache<S> {
         new_vnodes: Arc<Bitmap>,
     ) -> StreamExecutorResult<Arc<Bitmap>> {
         let old_vnodes = self.state_table.update_vnode_bitmap(new_vnodes.clone());
-        let current_range = self.range.as_ref().map(|(r0, r1)| {
-            (
-                Self::to_row_bound(r0.clone()),
-                Self::to_row_bound(r1.clone()),
-            )
-        });
         for (vnode, (old, new)) in old_vnodes.iter().zip_eq(new_vnodes.iter()).enumerate() {
             if old && !new {
                 let vnode = vnode.try_into().unwrap();
                 self.cache.remove(&vnode);
             }
-            if new && !old && let Some(ref current_range) = current_range {
-                self.add_vnode_range(vnode, current_range).await?;
+        }
+        if let Some(ref self_range) = self.range {
+            let current_range = (
+                Self::to_row_bound(self_range.0.clone()),
+                Self::to_row_bound(self_range.1.clone()),
+            );
+            for (vnode, (old, new)) in old_vnodes.iter().zip_eq(new_vnodes.iter()).enumerate() {
+                if new && !old {
+                    self.add_vnode_range(vnode, &current_range).await?;
+                }
             }
         }
         self.vnodes = new_vnodes;
