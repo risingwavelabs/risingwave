@@ -97,7 +97,7 @@ category = "Misc"
 description = "List all nodes in the cluster"
 script = '''
 #!/bin/bash
-tmux list-windows -t risedev | cut -d'(' -f1
+tmux list-windows -t risedev | grep -v active | cut -d'(' -f1 
 '''
 
 [tasks.check-logs]
