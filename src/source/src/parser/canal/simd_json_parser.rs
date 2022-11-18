@@ -30,7 +30,7 @@ use crate::{
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
 const OP: &str = "type";
-const ISDDL: &str = "isDdl";
+const IS_DDL: &str = "isDdl";
 
 #[derive(Debug)]
 pub struct CanalJsonParser;
@@ -45,7 +45,7 @@ impl CanalJsonParser {
         let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        let is_ddl = event.get(ISDDL).and_then(|v| v.as_bool()).ok_or_else(|| {
+        let is_ddl = event.get(IS_DDL).and_then(|v| v.as_bool()).ok_or_else(|| {
             RwError::from(ProtocolError(
                 "isDdl field not found in canal json".to_owned(),
             ))
