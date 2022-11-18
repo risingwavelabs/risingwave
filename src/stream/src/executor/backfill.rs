@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -23,6 +24,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::{Row2, RowExt};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
@@ -36,7 +38,7 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// An implementation of the RFC: Use Backfill To Let Mv On Mv Stream Again.(https://github.com/risingwavelabs/rfcs/pull/13)
 /// `BackfillExecutor` is used to create a materialized view on another materialized view.
 ///
-/// It can only buffer chunks between two (checkpoint) barriers instead of unbundled memory usage of
+/// It can only buffer chunks between two barriers instead of unbundled memory usage of
 /// `RearrangedChainExecutor`.
 ///
 /// It uses the latest epoch to read the snapshot of the upstream mv during two barriers and all the
@@ -141,7 +143,7 @@ where
         // We construct a backfill stream with upstream as its left input and mv snapshot read
         // stream as its right input. When a chunk comes from upstream, we will buffer it.
         //
-        // When a checkpoint barrier comes from upstream:
+        // When a barrier comes from upstream:
         //  - Update the `snapshot_read_epoch`.
         //  - For each row of the upstream chunk buffer, forward it to downstream if its pk <=
         //    `current_pos`, otherwise ignore it.
@@ -178,22 +180,16 @@ where
                     Either::Left(msg) => {
                         match msg? {
                             Message::Barrier(barrier) => {
-                                // If it is a checkpoint barrier, switch snapshot and consume
+                                // If it is a barrier, switch snapshot and consume
                                 // upstream buffer chunk
-                                let checkpoint = barrier.checkpoint;
-                                if checkpoint {
-                                    // Consume upstream buffer chunk
-                                    for chunk in upstream_chunk_buffer.drain(..) {
-                                        if let Some(current_pos) = self.current_pos.as_ref() {
-                                            yield Message::Chunk(Self::mapping_chunk(
-                                                Self::mark_chunk(
-                                                    chunk,
-                                                    current_pos,
-                                                    &table_pk_indices,
-                                                ),
-                                                &upstream_indices,
-                                            ));
-                                        }
+
+                                // Consume upstream buffer chunk
+                                for chunk in upstream_chunk_buffer.drain(..) {
+                                    if let Some(current_pos) = self.current_pos.as_ref() {
+                                        yield Message::Chunk(Self::mapping_chunk(
+                                            Self::mark_chunk(chunk, current_pos, &table_pk_indices),
+                                            &upstream_indices,
+                                        ));
                                     }
                                 }
 
@@ -202,12 +198,10 @@ where
 
                                 yield Message::Barrier(barrier);
 
-                                if checkpoint {
-                                    self.progress
-                                        .update(snapshot_read_epoch, snapshot_read_epoch);
-                                    // Break the for loop and start a new snapshot read stream.
-                                    break;
-                                }
+                                self.progress
+                                    .update(snapshot_read_epoch, snapshot_read_epoch);
+                                // Break the for loop and start a new snapshot read stream.
+                                break;
                             }
                             Message::Chunk(chunk) => {
                                 // Buffer the upstream chunk.
@@ -293,12 +287,10 @@ where
         } else {
             (Bound::Unbounded, Bound::Unbounded)
         };
+        // We use uncommitted read here, because we have already scheduled the `BackfillExecutor`
+        // together with the upstream mv.
         let iter = table
-            .batch_iter_with_pk_bounds(
-                HummockReadEpoch::Committed(epoch),
-                Row::empty(),
-                range_bounds,
-            )
+            .batch_iter_with_pk_bounds(HummockReadEpoch::NoWait(epoch), Row::empty(), range_bounds)
             .await?;
 
         pin_mut!(iter);
@@ -329,12 +321,13 @@ where
         let chunk = chunk.compact();
         let (data, ops) = chunk.into_parts();
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
-        // TODO: The performance is bad here due to the allocation of every row. Improve this after
-        // #6404.
-        for v in data
-            .rows()
-            .map(|row| &row.row_by_indices(table_pk_indices) <= current_pos)
-        {
+        // Use project to avoid allocation.
+        for v in data.rows().map(|row| {
+            match row.project(table_pk_indices).iter().cmp(current_pos.iter()) {
+                Ordering::Less | Ordering::Equal => true,
+                Ordering::Greater => false,
+            }
+        }) {
             new_visibility.append(v);
         }
         let (columns, _) = data.into_parts();
