@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
 use super::value_encoding::serialize_datum_to_bytes;
-use crate::array::Row;
+use crate::row::{Row2, RowExt};
 use crate::types::{Datum, ScalarImpl, VirtualNode};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::serialize_datum;
@@ -102,9 +102,10 @@ impl ScanRange {
             return None;
         }
 
-        let pk_prefix_value = Row(self.eq_conds.clone());
+        let pk_prefix_value = &self.eq_conds;
         let vnode = pk_prefix_value
-            .hash_by_indices(&dist_key_in_pk_indices, &Crc32FastBuilder {})
+            .project(&dist_key_in_pk_indices)
+            .hash(Crc32FastBuilder {})
             .to_vnode();
         Some(vnode)
     }
@@ -172,6 +173,7 @@ for_all_scalar_int_variants! { impl_split_small_range }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::row::Row;
 
     // dist_key is prefix of pk
     #[test]

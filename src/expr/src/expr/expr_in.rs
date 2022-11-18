@@ -17,7 +17,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk, Row};
+use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -120,7 +121,8 @@ impl<'a> TryFrom<&'a ExprNode> for InExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{DataChunk, Row};
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{DataType, Scalar, ScalarImpl};
     use risingwave_common::util::value_encoding::serialize_datum_to_bytes;

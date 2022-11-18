@@ -1,0 +1,30 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query RRRR
+SELECT 1e6, -1e6, 1e-6, -1e-6, -1.25e3, 1.25e3
+----
+1000000 -1000000 0.000001 -0.000001 -1250 1250
+
+statement ok
+create table t (v1 int, v2 int, v3 float, v4 float)
+
+statement ok
+INSERT INTO t values (1e6, -1e6, 1e-6, -1e-6)
+
+query RRRR
+select * from t;
+----
+1000000 -1000000 0.000001 -0.000001
+
+statement error
+INSERT INTO t values (1e1000, 1, 1, 1)
+
+statement error
+INSERT INTO t values (1e-1000, 1, 1, 1)
+
+statement error
+INSERT INTO t values (-1e1000, 1, 1, 1)
+
+statement ok
+drop table t

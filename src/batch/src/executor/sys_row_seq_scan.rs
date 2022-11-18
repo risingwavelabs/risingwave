@@ -14,9 +14,10 @@
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, SysCatalogReaderRef, TableId};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::row::Row;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::{

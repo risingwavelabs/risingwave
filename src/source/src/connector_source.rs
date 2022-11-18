@@ -146,7 +146,11 @@ impl ConnectorSourceReader {
             for msg in batch {
                 if let Some(content) = msg.payload {
                     split_offset_mapping.insert(msg.split_id, msg.offset);
-                    if let Err(e) = self.parser.parse(content.as_ref(), builder.row_writer()) {
+                    if let Err(e) = self
+                        .parser
+                        .parse(content.as_ref(), builder.row_writer())
+                        .await
+                    {
                         tracing::warn!("message parsing failed {}, skipping", e.to_string());
                         continue;
                     }

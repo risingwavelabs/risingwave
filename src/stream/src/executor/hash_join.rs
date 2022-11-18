@@ -20,14 +20,14 @@ use fixedbitset::FixedBitSet;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, Row, RowRef, StreamChunk};
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use self::JoinType::{FullOuter, LeftOuter, LeftSemi, RightAnti, RightOuter, RightSemi};
@@ -39,6 +39,7 @@ use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::cache::LruManagerRef;
+use crate::common::table::state_table::StateTable;
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::executor::JoinType::LeftAnti;
@@ -946,6 +947,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::common::table::state_table::StateTable;
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{ActorContext, Barrier, EpochPair, Message};
 

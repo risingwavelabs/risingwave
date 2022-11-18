@@ -20,7 +20,7 @@ use itertools::Itertools;
 use OrderedDatum::{NormalOrder, ReversedOrder};
 
 pub use self::serde::*;
-use crate::array::Row;
+use crate::row::Row;
 use crate::types::{serialize_datum_into, Datum};
 use crate::util::sort_util::OrderType;
 

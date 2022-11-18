@@ -18,18 +18,16 @@ use std::sync::Arc;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{
-    Array, ArrayImpl, DataChunk, Op, Row as RowData, RowDeserializer, StreamChunk,
-};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::{Row as RowData, RowDeserializer};
 use risingwave_common::types::{to_datum_ref, DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -39,6 +37,7 @@ use super::monitor::StreamingMetrics;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
+use crate::common::table::state_table::StateTable;
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::expect_first_barrier_from_aligned_stream;
 
@@ -222,7 +221,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let is_insert = matches!(self.comparator, GreaterThan | GreaterThanOrEqual);
                     (range, true, is_insert)
                 } else {
-                    // p > c
+                    // c > p
                     let range = match self.comparator {
                         GreaterThan | LessThanOrEqual => (Excluded(p), Included(c)),
                         GreaterThanOrEqual | LessThan => (Included(p), Excluded(c)),
@@ -383,8 +382,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         if last_committed_epoch_row != current_epoch_row {
                             // If both `None`, then this branch is inactive.
                             // Hence, at least one is `Some`, hence at least one update.
-                            if let Some(old_row) = &last_committed_epoch_row {
-                                self.right_table.delete(old_row.clone());
+                            if let Some(old_row) = last_committed_epoch_row.take() {
+                                self.right_table.delete(old_row);
                             }
                             if let Some(row) = &current_epoch_row {
                                 self.right_table.insert(row.clone());

@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
 use itertools::Itertools;
-use risingwave_pb::catalog::Table;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -89,8 +86,7 @@ where
         let users = catalog_guard.user.list_users();
 
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
-        let parallel_unit_mappings = fragment_guard.all_fragment_mappings().collect_vec();
-        let all_internal_tables = fragment_guard.all_internal_tables();
+        let parallel_unit_mappings = fragment_guard.all_running_fragment_mappings().collect_vec();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
         // We should only pin for workers to which we send a `meta_snapshot` that includes
@@ -109,17 +105,6 @@ where
         match subscribe_type {
             SubscribeType::Compactor | SubscribeType::Hummock => {
                 tables.extend(creating_tables);
-                let all_table_set: HashSet<u32> = tables.iter().map(|table| table.id).collect();
-                // FIXME: since `SourceExecutor` doesn't have catalog yet, this is a workaround to
-                // sync internal tables of source.
-                for table_id in all_internal_tables {
-                    if !all_table_set.contains(table_id) {
-                        tables.extend(std::iter::once(Table {
-                            id: *table_id,
-                            ..Default::default()
-                        }));
-                    }
-                }
             }
             _ => {}
         }
@@ -140,7 +125,6 @@ where
                 parallel_unit_mappings,
                 hummock_snapshot,
                 views,
-                compaction_groups: vec![],
             },
 
             SubscribeType::Compactor => MetaSnapshot {
@@ -151,13 +135,6 @@ where
             SubscribeType::Hummock => MetaSnapshot {
                 tables,
                 hummock_version: Some(hummock_manager_guard.current_version.clone()),
-                compaction_groups: self
-                    .hummock_manager
-                    .compaction_groups()
-                    .await
-                    .iter()
-                    .map(|group| group.into())
-                    .collect_vec(),
                 ..Default::default()
             },
 
