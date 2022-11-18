@@ -335,7 +335,6 @@ pub type MemoryStateStore = RangeKvStateStore<BTreeMapRangeKv>;
 #[derive(Clone, Default)]
 pub struct RangeKvStateStore<R: RangeKv> {
     /// Stores (key, epoch) -> user value.
-    #[allow(clippy::type_complexity)]
     inner: R,
 }
 
@@ -541,6 +540,9 @@ pub struct RangeKvStateStoreIter<R: RangeKv> {
     epoch: HummockEpoch,
 
     last_key: Option<UserKey<Vec<u8>>>,
+
+    /// For supporting semantic of `Fuse`
+    stopped: bool,
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
@@ -549,6 +551,7 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
             inner,
             epoch,
             last_key: None,
+            stopped: false,
         }
     }
 }
@@ -560,19 +563,37 @@ impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            while let Some((key, value)) = self.inner.next()? {
-                if key.epoch > self.epoch {
-                    continue;
-                }
-                if Some(key.user_key.as_ref()) != self.last_key.as_ref().map(|key| key.as_ref()) {
-                    self.last_key = Some(key.user_key.clone());
-                    if let Some(value) = value {
-                        return Ok(Some((key, value)));
+            if self.stopped {
+                Ok(None)
+            } else {
+                let ret = self.next_inner();
+                match &ret {
+                    Err(_) | Ok(None) => {
+                        self.stopped = true;
                     }
+                    _ => {}
+                }
+
+                ret
+            }
+        }
+    }
+}
+
+impl<R: RangeKv> RangeKvStateStoreIter<R> {
+    fn next_inner(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Bytes)>> {
+        while let Some((key, value)) = self.inner.next()? {
+            if key.epoch > self.epoch {
+                continue;
+            }
+            if Some(key.user_key.as_ref()) != self.last_key.as_ref().map(|key| key.as_ref()) {
+                self.last_key = Some(key.user_key.clone());
+                if let Some(value) = value {
+                    return Ok(Some((key, value)));
                 }
             }
-            Ok(None)
         }
+        Ok(None)
     }
 }
 
