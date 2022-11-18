@@ -30,8 +30,10 @@ use crate::hummock::{
     HummockStorage, HummockStorageV1, MemoryLimiter, SstableIdManagerRef, SstableStore,
     TieredCache, TieredCacheMetricsBuilder,
 };
+use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
+use crate::store_impl::verify::VerifyStateStore;
 use crate::StateStore;
 
 pub type HummockStorageType = impl StateStore + AsHummockTrait;
@@ -72,6 +74,14 @@ fn may_dynamic_dispatch(
     }
 }
 
+fn may_verify(state_store: impl StateStore + AsHummockTrait) -> impl StateStore + AsHummockTrait {
+    // TODO: enable by config
+    VerifyStateStore {
+        actual: state_store,
+        expected: SledStateStore::new_temp(),
+    }
+}
+
 impl StateStoreImpl {
     fn in_memory(
         state_store: MemoryStateStore,
@@ -86,7 +96,9 @@ impl StateStoreImpl {
         state_store_metrics: Arc<StateStoreMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreType in deducted here.
-        Self::HummockStateStore(may_dynamic_dispatch(state_store).monitored(state_store_metrics))
+        Self::HummockStateStore(
+            may_verify(may_dynamic_dispatch(state_store)).monitored(state_store_metrics),
+        )
     }
 
     pub fn hummock_v1(
@@ -94,7 +106,9 @@ impl StateStoreImpl {
         state_store_metrics: Arc<StateStoreMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreV1Type in deducted here.
-        Self::HummockStateStoreV1(may_dynamic_dispatch(state_store).monitored(state_store_metrics))
+        Self::HummockStateStoreV1(
+            may_verify(may_dynamic_dispatch(state_store)).monitored(state_store_metrics),
+        )
     }
 
     pub fn shared_in_memory_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
@@ -196,6 +210,7 @@ pub mod verify {
         NextFutureTrait, ReadOptions, StateStoreRead, StateStoreWrite, SyncFutureTrait,
         WriteOptions,
     };
+    use crate::store_impl::{AsHummockTrait, HummockTrait};
     use crate::{StateStore, StateStoreIter};
 
     fn assert_result_eq<Item: PartialEq + Debug, E>(
@@ -220,6 +235,12 @@ pub mod verify {
     pub struct VerifyStateStore<A, E> {
         pub actual: A,
         pub expected: E,
+    }
+
+    impl<A: AsHummockTrait, E> AsHummockTrait for VerifyStateStore<A, E> {
+        fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
+            self.actual.as_hummock_trait()
+        }
     }
 
     impl<A: StateStoreIter<Item: PartialEq + Debug>, E: StateStoreIter<Item = A::Item>>
