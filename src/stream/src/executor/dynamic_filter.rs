@@ -221,7 +221,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let is_insert = matches!(self.comparator, GreaterThan | GreaterThanOrEqual);
                     (range, true, is_insert)
                 } else {
-                    // p > c
+                    // c > p
                     let range = match self.comparator {
                         GreaterThan | LessThanOrEqual => (Excluded(p), Included(c)),
                         GreaterThanOrEqual | LessThan => (Included(p), Excluded(c)),
@@ -382,8 +382,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         if last_committed_epoch_row != current_epoch_row {
                             // If both `None`, then this branch is inactive.
                             // Hence, at least one is `Some`, hence at least one update.
-                            if let Some(old_row) = &last_committed_epoch_row {
-                                self.right_table.delete(old_row.clone());
+                            if let Some(old_row) = last_committed_epoch_row.take() {
+                                self.right_table.delete(old_row);
                             }
                             if let Some(row) = &current_epoch_row {
                                 self.right_table.insert(row.clone());
