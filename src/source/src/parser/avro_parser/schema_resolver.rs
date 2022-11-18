@@ -18,14 +18,13 @@ use std::sync::Arc;
 
 use apache_avro::Schema;
 use moka::future::Cache;
-use risingwave_common::error::ErrorCode::{
-    InternalError, InvalidConfigValue, InvalidParameterValue, ProtocolError,
-};
+use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
 use url::Url;
 
 use crate::parser::schema_registry::Client;
+use crate::parser::util::download_from_http;
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
@@ -73,25 +72,9 @@ pub(super) fn read_schema_from_local(path: impl AsRef<Path>) -> Result<String> {
 
 /// Read avro schema file from local file.For common usage.
 pub(super) async fn read_schema_from_http(location: &Url) -> Result<String> {
-    let res = reqwest::get(location.clone()).await.map_err(|e| {
-        InvalidParameterValue(format!(
-            "failed to make request to URL: {}, err: {}",
-            location, e
-        ))
-    })?;
-    if !res.status().is_success() {
-        return Err(RwError::from(InvalidParameterValue(format!(
-            "Http request err, URL: {}, status code: {}",
-            location,
-            res.status()
-        ))));
-    }
-    let body = res
-        .bytes()
-        .await
-        .map_err(|e| InvalidParameterValue(format!("failed to read HTTP body: {}", e)))?;
+    let schema_bytes = download_from_http(location).await?;
 
-    String::from_utf8(body.into()).map_err(|e| {
+    String::from_utf8(schema_bytes.into()).map_err(|e| {
         RwError::from(InternalError(format!(
             "read schema string from https failed {}",
             e
