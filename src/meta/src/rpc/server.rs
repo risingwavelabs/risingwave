@@ -129,11 +129,18 @@ pub async fn rpc_serve(
     }
 }
 
+// TODO: write docstring
 pub async fn register_leader_for_meta<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,
-    lease_time: u64,
+    lease_time: u64, // seconds
 ) -> MetaResult<(MetaLeaderInfo, JoinHandle<()>, Sender<()>)> {
+    tracing::info!(
+        "addr: {}, meta_store: ???, lease_time: {}",
+        addr,
+        lease_time
+    );
+
     let mut tick_interval = tokio::time::interval(Duration::from_secs(lease_time / 2));
     loop {
         tick_interval.tick().await;
@@ -147,6 +154,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 continue;
             }
         };
+        tracing::info!(
+            "Old_leader_info: {:?}",
+            String::from_utf8_lossy(&old_leader_info)
+        );
+
         let old_leader_lease = match meta_store
             .get_cf(META_CF_NAME, META_LEASE_KEY.as_bytes())
             .await
@@ -157,10 +169,17 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 continue;
             }
         };
+        tracing::info!(
+            "old_leader_lease: {:?}",
+            String::from_utf8_lossy(&old_leader_lease)
+        );
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards");
+
         if !old_leader_lease.is_empty() {
+            tracing::info!("old_leader_lease is not empty");
             let lease_info = MetaLeaseInfo::decode(&mut old_leader_lease.as_slice()).unwrap();
 
             if lease_info.lease_expire_time > now.as_secs()
@@ -181,16 +200,21 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         } else {
             0
         };
+        tracing::info!("lease_id: {}", lease_id);
+
         let mut txn = Transaction::default();
         let leader_info = MetaLeaderInfo {
             lease_id,
             node_address: addr.to_string(),
         };
+        tracing::info!("lease_info: {:?}", leader_info);
+
         let lease_info = MetaLeaseInfo {
             leader: Some(leader_info.clone()),
             lease_register_time: now.as_secs(),
             lease_expire_time: now.as_secs() + lease_time,
         };
+        tracing::info!("lease_info: {:?}", lease_info);
 
         if !old_leader_info.is_empty() {
             txn.check_equal(
@@ -278,6 +302,8 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                             tracing::warn!("keep lease failed, MetaStoreError: {:?}", e);
                         }
                     }
+                } else {
+                    tracing::info!("Current node is leader")
                 }
                 tokio::select! {
                     _ = &mut shutdown_rx => {
@@ -289,6 +315,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 }
             }
         });
+        // What does the node do if it is (not) the leader?
         return Ok((leader, handle, shutdown_tx));
     }
 }
