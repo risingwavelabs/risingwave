@@ -18,6 +18,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use prost::Message;
+use rand::distributions::{Distribution, Uniform};
+use rand::Rng;
 use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -263,10 +265,18 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         let leader = leader_info.clone();
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let handle = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(Duration::from_secs(lease_time / 2)); // + random to reduce load
+            // How can I properly do random things within this thread?
+            let rand_delay = (SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_micros()
+                % 100) as u64;
+            let mut ticker =
+                tokio::time::interval(Duration::from_millis(rand_delay / 2 + rand_delay)); // + random to reduce load
+            tracing::info!("Pseudo random delay is {}ms", rand_delay);
 
             // election
-            loop {
+            'election: loop {
                 // define lease
                 let mut txn = Transaction::default();
                 let now = SystemTime::now()
@@ -304,7 +314,9 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                                 "keep lease failed, try again later, MetaStoreError: {:?}",
                                 e
                             );
-                            continue; // TODO: introduce time delay here
+                            // TODO: DO I need this delay here?
+                            tokio::select! { _ = ticker.tick() => {}}
+                            continue 'election;
                         }
                         MetaStoreError::ItemNotFound(e) => {
                             tracing::warn!("keep lease failed, MetaStoreError: {:?}", e);
@@ -316,41 +328,81 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 }
 
                 // election done. Enter current term in loop below
-                loop {
+                'term: loop {
                     // sleep OR abort if shutdown
                     tokio::select! {
                         _ = &mut shutdown_rx => {
                             tracing::info!("Register leader info is stopped");
                             return;
                         }
-                        // Wait for the minimal interval,
                         _ = ticker.tick() => {},
                     }
 
+                    // update the current lease
+                    if this_is_leader {
+                        // TODO: renew lease
+                        continue 'term;
+                    }
+
+                    // TODO: How do we know we are talking to the correct ETCD node?
                     // get leader info
-                    let leader_info = meta_store
+                    let lease_info = meta_store
                         .snapshot()
                         .await
                         .get_cf(META_CF_NAME, META_LEADER_KEY.as_bytes())
                         .await
                         .unwrap_or_default();
 
-                    if !leader_info.is_empty() {
-                        let leader_info =
-                            MetaLeaderInfo::decode(&mut leader_info.as_slice()).unwrap();
-                    } else {
-                        // TODO: how do I get the key from the cf?
+                    if lease_info.is_empty() {
+                        // ETCD does not have leader lease. Run an election
+                        continue 'election;
                     }
 
-                    // get value, if value is outdated, delete leader value
-                    if this_is_leader {
-                        // TODO: renew lease
-                        continue;
+                    // delete lease and run new election if lease is expired for some time
+                    let some_time = lease_time / 2;
+                    let lease_info = MetaLeaseInfo::decode(&mut lease_info.as_slice()).unwrap();
+                    if lease_info.get_lease_expire_time() + some_time
+                        < SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Time went backwards")
+                            .as_secs()
+                    {
+                        let mut txn = Transaction::default();
+                        txn.delete(
+                            META_CF_NAME.to_string(),
+                            META_LEADER_KEY.as_bytes().to_vec(),
+                        );
+                        if let Err(e) = meta_store.txn(txn).await {
+                            match e {
+                                MetaStoreError::TransactionAbort() => {
+                                    tracing::info!(
+                                        // How can we make sure that we delete exactly that lease?
+                                        // Is randomizing the tick good enough?
+                                        "Deleting lease failed: New leader already elected"
+                                    );
+                                }
+                                MetaStoreError::Internal(e) => {
+                                    tracing::warn!(
+                                        "Deleting lease failed: MetaStoreError: {:?}",
+                                        e
+                                    );
+                                    continue 'term;
+                                }
+                                MetaStoreError::ItemNotFound(e) => {
+                                    tracing::warn!(
+                                        "Deleting lease failed: MetaStoreError: {:?}",
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                        continue 'election;
                     }
+
+                    // lease exists and leader continues term
                 }
             }
         });
-        // What does the node do if it is (not) the leader?
         return Ok((leader, handle, shutdown_tx));
     }
 }
