@@ -263,9 +263,9 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         let leader = leader_info.clone();
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let handle = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(Duration::from_secs(lease_time / 2));
+            let mut ticker = tokio::time::interval(Duration::from_secs(lease_time / 2)); // + random to reduce load
             loop {
-                let mut txn = Transaction::default();
+                let mut txn = Transaction::default(); // transaction with timeout?
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("Time went backwards");
@@ -287,10 +287,10 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 if let Err(e) = meta_store.txn(txn).await {
                     match e {
                         MetaStoreError::TransactionAbort() => {
+                            // get value, if value is outdated, delete leader value
                             tracing::error!(
                                 "keep lease failed, another node has become new leader"
                             );
-                            futures::future::pending::<()>().await;
                         }
                         MetaStoreError::Internal(e) => {
                             tracing::warn!(
