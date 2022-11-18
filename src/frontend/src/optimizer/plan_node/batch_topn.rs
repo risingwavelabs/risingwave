@@ -92,6 +92,7 @@ impl ToBatchProst for BatchTopN {
             limit: self.logical.limit(),
             offset: self.logical.offset(),
             column_orders,
+            with_ties: self.logical.with_ties(),
         })
     }
 }
