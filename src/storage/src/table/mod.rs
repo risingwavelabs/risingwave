@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, Row2, RowExt};
 use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 
@@ -108,13 +108,11 @@ pub trait TableIter: Send {
 }
 
 /// Get vnode value with `indices` on the given `row`.
-pub fn compute_vnode(row: &Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
+pub fn compute_vnode(row: impl Row2, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {
-        let vnode = row
-            .hash_by_indices(indices, &Crc32FastBuilder {})
-            .to_vnode();
+        let vnode = (&row).project(indices).hash(Crc32FastBuilder {}).to_vnode();
         check_vnode_is_set(vnode, vnodes);
         vnode
     };

@@ -28,12 +28,6 @@ where rank <= 3;
 3  2
 3  3
 
-statement ok
-drop table t;
-
-halt 
-# TODO: support RANK() for batch mode
-
 query II rowsort
 select x, y from (
     select *, RANK() OVER (ORDER BY y) as rank from t
@@ -65,3 +59,6 @@ where rank <= 3;
 3  2
 3  3
 3  3
+
+statement ok
+drop table t;
