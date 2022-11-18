@@ -23,9 +23,9 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
+use risingwave_stream::common::table::state_table::StateTable;
 
 use crate::common::HummockServiceOpts;
 

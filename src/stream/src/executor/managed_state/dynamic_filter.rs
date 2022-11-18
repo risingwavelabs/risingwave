@@ -25,11 +25,9 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::{CompactedRow, Row};
 use risingwave_common::types::{ScalarImpl, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_storage::table::streaming_table::state_table::{
-    prefix_range_to_memcomparable, StateTable,
-};
 use risingwave_storage::StateStore;
 
+use crate::common::table::state_table::{prefix_range_to_memcomparable, StateTable};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
