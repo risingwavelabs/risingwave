@@ -18,8 +18,8 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::UnionNode;
 
 use super::PlanRef;
-use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, StreamNode};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamUnion` implements [`super::LogicalUnion`]
@@ -36,9 +36,9 @@ impl StreamUnion {
         let inputs = logical.inputs();
         let dist = inputs[0].distribution().clone();
         assert!(logical
-                .inputs()
-                .iter()
-                .all(|input| *input.distribution() == dist));
+            .inputs()
+            .iter()
+            .all(|input| *input.distribution() == dist));
 
         let base = PlanBase::new_stream(
             ctx,
