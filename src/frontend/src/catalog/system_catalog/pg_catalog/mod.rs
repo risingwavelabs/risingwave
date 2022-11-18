@@ -12,28 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod pg_am;
 pub mod pg_cast;
 pub mod pg_class;
+pub mod pg_collation;
 pub mod pg_index;
 pub mod pg_matviews_info;
 pub mod pg_namespace;
 pub mod pg_opclass;
+pub mod pg_operator;
 pub mod pg_type;
 pub mod pg_user;
+pub mod pg_views;
 
 use std::collections::HashMap;
 
 use itertools::Itertools;
+pub use pg_am::*;
 pub use pg_cast::*;
 pub use pg_class::*;
+pub use pg_collation::*;
 pub use pg_index::*;
 pub use pg_matviews_info::*;
 pub use pg_namespace::*;
 pub use pg_opclass::*;
+pub use pg_operator::*;
 pub use pg_type::*;
 pub use pg_user::*;
-use risingwave_common::array::Row;
+pub use pg_views::*;
 use risingwave_common::error::Result;
+use risingwave_common::row::Row;
 use risingwave_common::types::ScalarImpl;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_pb::user::UserInfo;
@@ -167,6 +175,21 @@ impl SysCatalogReaderImpl {
         Ok(vec![])
     }
 
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    pub(super) fn read_operator_info(&self) -> Result<Vec<Row>> {
+        Ok(vec![])
+    }
+
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    pub(super) fn read_am_info(&self) -> Result<Vec<Row>> {
+        Ok(vec![])
+    }
+
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    pub(super) fn read_collation_info(&self) -> Result<Vec<Row>> {
+        Ok(vec![])
+    }
+
     pub(super) fn read_class_info(&self) -> Result<Vec<Row>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
@@ -240,11 +263,25 @@ impl SysCatalogReaderImpl {
                     })
                     .collect_vec();
 
+                let views = schema
+                    .iter_view()
+                    .map(|view| {
+                        Row::new(vec![
+                            Some(ScalarImpl::Int32(view.id as i32)),
+                            Some(ScalarImpl::Utf8(view.name().to_string())),
+                            Some(ScalarImpl::Int32(schema_info.id as i32)),
+                            Some(ScalarImpl::Int32(view.owner as i32)),
+                            Some(ScalarImpl::Utf8("v".to_string())),
+                        ])
+                    })
+                    .collect_vec();
+
                 rows.into_iter()
                     .chain(mvs.into_iter())
                     .chain(indexes.into_iter())
                     .chain(sources.into_iter())
                     .chain(sys_tables.into_iter())
+                    .chain(views.into_iter())
                     .collect_vec()
             })
             .collect_vec())
@@ -305,5 +342,30 @@ impl SysCatalogReaderImpl {
         }
 
         Ok(rows)
+    }
+
+    pub(super) fn read_views_info(&self) -> Result<Vec<Row>> {
+        // TODO(zehua): solve the deadlock problem.
+        // Get two read locks. The order must be the same as
+        // `FrontendObserverNode::handle_initialization_notification`.
+        let catalog_reader = self.catalog_reader.read_guard();
+        let user_info_reader = self.user_info_reader.read_guard();
+        let schemas = catalog_reader.iter_schemas(&self.auth_context.database)?;
+
+        Ok(schemas
+            .flat_map(|schema| {
+                schema.iter_view().map(|view| {
+                    Row::new(vec![
+                        Some(ScalarImpl::Utf8(schema.name())),
+                        Some(ScalarImpl::Utf8(view.name().to_string())),
+                        Some(ScalarImpl::Utf8(
+                            user_info_reader.get_user_name_by_id(view.owner).unwrap(),
+                        )),
+                        // TODO(zehua): may be not same as postgresql's "definition" column.
+                        Some(ScalarImpl::Utf8(view.sql.clone())),
+                    ])
+                })
+            })
+            .collect_vec())
     }
 }

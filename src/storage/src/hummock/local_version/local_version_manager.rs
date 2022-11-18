@@ -20,6 +20,7 @@ use bytes::Bytes;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::Payload;
@@ -145,11 +146,13 @@ impl LocalVersionManager {
         &self,
         epoch: HummockEpoch,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         table_id: TableId,
     ) -> HummockResult<usize> {
         let batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
             kv_pairs,
+            delete_ranges,
             table_id,
             Some(self.buffer_tracker.get_memory_limiter().as_ref()),
         )
@@ -189,7 +192,9 @@ impl LocalVersionManager {
     /// Return:
     ///   - Some(task join handle) when there is new upload task
     ///   - None when there is no new task
-    pub fn flush_shared_buffer(self: Arc<Self>) -> Option<(HummockEpoch, JoinHandle<()>)> {
+    pub(in crate::hummock) fn flush_shared_buffer(
+        self: Arc<Self>,
+    ) -> Option<(HummockEpoch, JoinHandle<()>)> {
         let (epoch, (order_index, payload, task_write_batch_size), compaction_group_index) = {
             let mut local_version_guard = self.local_version.write();
 
@@ -325,13 +330,13 @@ impl LocalVersionManager {
         self: &LocalVersionManager,
         read_epoch: HummockEpoch,
         table_id: TableId,
-        key_range: &R,
+        table_key_range: &R,
     ) -> ReadVersion
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
-        LocalVersion::read_filter(&self.local_version, read_epoch, table_id, key_range)
+        LocalVersion::read_filter(&self.local_version, read_epoch, table_id, table_key_range)
     }
 
     pub fn get_pinned_version(&self) -> PinnedVersion {

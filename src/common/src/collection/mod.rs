@@ -13,4 +13,3 @@
 // limitations under the License.
 
 pub mod estimate_size;
-pub mod evictable;

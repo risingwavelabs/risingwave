@@ -19,6 +19,7 @@ use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 
@@ -140,20 +141,17 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            if kv_pairs.is_empty() {
-                return Ok(0);
-            }
-
             self.stats
                 .write_batch_tuple_counts
                 .inc_by(kv_pairs.len() as _);
             let timer = self.stats.write_batch_duration.start_timer();
             let batch_size = self
                 .inner
-                .ingest_batch(kv_pairs, write_options)
+                .ingest_batch(kv_pairs, delete_ranges, write_options)
                 .verbose_stack_trace("store_ingest_batch")
                 .await
                 .inspect_err(|e| error!("Failed in ingest_batch: {:?}", e))?;
@@ -165,9 +163,12 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
     }
 }
 
+impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {}
+
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
-    type Local = S::Local;
-    type NewLocalFuture<'a> = S::NewLocalFuture<'a>;
+    type Local = MonitoredStateStore<S::Local>;
+
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
     define_state_store_associated_type!();
 
@@ -221,7 +222,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     }
 
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        self.inner.new_local(table_id)
+        async move { MonitoredStateStore::new(self.inner.new_local(table_id).await, self.stats.clone()) }
     }
 }
 
@@ -247,9 +248,9 @@ pub struct MonitoredStateStoreIter<I> {
 
 impl<I> StateStoreIter for MonitoredStateStoreIter<I>
 where
-    I: StateStoreIter<Item = (Bytes, Bytes)>,
+    I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>,
 {
-    type Item = (Bytes, Bytes);
+    type Item = (FullKey<Vec<u8>>, Bytes);
 
     type NextFuture<'a> = impl NextFutureTrait<'a, Self::Item>;
 
@@ -264,7 +265,7 @@ where
             self.total_items += 1;
             self.total_size += pair
                 .as_ref()
-                .map(|(k, v)| k.len() + v.len())
+                .map(|(k, v)| k.encoded_len() + v.len())
                 .unwrap_or_default();
 
             Ok(pair)

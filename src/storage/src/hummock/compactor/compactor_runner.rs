@@ -27,8 +27,11 @@ use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
 };
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
-use crate::hummock::sstable::DeleteRangeAggregator;
-use crate::hummock::{CachePolicy, CompressionAlgorithm, HummockResult, SstableBuilderOptions};
+use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
+use crate::hummock::{
+    CachePolicy, CompressionAlgorithm, HummockResult, RangeTombstonesCollector,
+    SstableBuilderOptions,
+};
 use crate::monitor::StoreLocalStatistic;
 
 #[derive(Clone)]
@@ -63,6 +66,7 @@ impl CompactorRunner {
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
             right: Bytes::copy_from_slice(task.splits[split_index].get_right()),
+            right_exclusive: true,
         };
         let compactor = Compactor::new(
             context.context.clone(),
@@ -86,10 +90,10 @@ impl CompactorRunner {
         &self,
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        del_agg: Arc<RangeTombstonesCollector>,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
-        let del_agg = self.build_delete_range_iter().await?;
         let ssts = self
             .compactor
             .compact_key_range(
@@ -103,34 +107,24 @@ impl CompactorRunner {
         Ok((self.split_index, ssts))
     }
 
-    async fn build_delete_range_iter(&self) -> HummockResult<Arc<DeleteRangeAggregator>> {
-        let mut aggregator = DeleteRangeAggregator::new(
-            self.key_range.clone(),
-            self.compact_task.watermark,
-            self.compact_task.gc_delete_keys,
-        );
+    pub async fn build_delete_range_iter(
+        compact_task: &CompactTask,
+        sstable_store: &CompactorSstableStoreRef,
+    ) -> HummockResult<Arc<RangeTombstonesCollector>> {
+        let mut builder = DeleteRangeAggregatorBuilder::default();
         let mut local_stats = StoreLocalStatistic::default();
-        for level in &self.compact_task.input_ssts {
+        for level in &compact_task.input_ssts {
             if level.table_infos.is_empty() {
                 continue;
             }
 
             for table_info in &level.table_infos {
-                let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
-                if !self.key_range.full_key_overlap(&key_range) {
-                    continue;
-                }
-                let table = self
-                    .compactor
-                    .context
-                    .sstable_store
-                    .sstable(table_info, &mut local_stats)
-                    .await?;
-                aggregator.add_tombstone(table.value().meta.range_tombstone_list.clone());
+                let table = sstable_store.sstable(table_info, &mut local_stats).await?;
+                builder.add_tombstone(table.value().meta.range_tombstone_list.clone());
             }
         }
-        aggregator.sort();
-        Ok(Arc::new(aggregator))
+        let aggregator = builder.build(compact_task.watermark, compact_task.gc_delete_keys);
+        Ok(aggregator)
     }
 
     /// Build the merge iterator based on the given input ssts.

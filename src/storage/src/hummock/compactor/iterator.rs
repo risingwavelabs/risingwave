@@ -18,8 +18,9 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{atomic, Arc};
 use std::time::Instant;
 
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
 
 use super::sstable_store::BlockStream;
@@ -209,7 +210,7 @@ impl ConcatSstableIterator {
         self.sstable_iter.take();
         let seek_key: Option<&[u8]> = match (seek_key, self.key_range.left.is_empty()) {
             (Some(seek_key), false) => {
-                match VersionedComparator::compare_key(seek_key, &self.key_range.left) {
+                match KeyComparator::compare_encoded_full_key(seek_key, &self.key_range.left) {
                     Ordering::Less | Ordering::Equal => Some(&self.key_range.left),
                     Ordering::Greater => Some(seek_key),
                 }
@@ -232,7 +233,7 @@ impl ConcatSstableIterator {
                     // start_index points to the greatest block whose smallest_key <= seek_key.
                     block_metas
                         .partition_point(|block| {
-                            VersionedComparator::compare_key(&block.smallest_key, seek_key)
+                            KeyComparator::compare_encoded_full_key(&block.smallest_key, seek_key)
                                 != Ordering::Greater
                         })
                         .saturating_sub(1)
@@ -242,8 +243,10 @@ impl ConcatSstableIterator {
                 block_metas.len()
             } else {
                 block_metas.partition_point(|block| {
-                    VersionedComparator::compare_key(&block.smallest_key, &self.key_range.right)
-                        != Ordering::Greater
+                    KeyComparator::compare_encoded_full_key(
+                        &block.smallest_key,
+                        &self.key_range.right,
+                    ) != Ordering::Greater
                 })
             };
             if end_index <= start_index {
@@ -296,8 +299,8 @@ impl HummockIterator for ConcatSstableIterator {
         }
     }
 
-    fn key(&self) -> &[u8] {
-        self.sstable_iter.as_ref().expect("no table iter").key()
+    fn key(&self) -> FullKey<&[u8]> {
+        FullKey::decode(self.sstable_iter.as_ref().expect("no table iter").key())
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -313,14 +316,16 @@ impl HummockIterator for ConcatSstableIterator {
     }
 
     /// Resets the iterator and seeks to the first position where the stored key >= `key`.
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
-        async {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+        async move {
+            let encoded_key = key.encode();
+            let key_slice = encoded_key.as_slice();
             let seek_key: &[u8] = if self.key_range.left.is_empty() {
-                key
+                key_slice
             } else {
-                match VersionedComparator::compare_key(key, &self.key_range.left) {
+                match KeyComparator::compare_encoded_full_key(key_slice, &self.key_range.left) {
                     Ordering::Less | Ordering::Equal => &self.key_range.left,
-                    Ordering::Greater => key,
+                    Ordering::Greater => key_slice,
                 }
             };
             let table_idx = self.tables.partition_point(|table| {
@@ -331,10 +336,10 @@ impl HummockIterator for ConcatSstableIterator {
                 // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
                 // (including its max. key) produce the same search result.
                 let max_sst_key = &table.key_range.as_ref().unwrap().right;
-                VersionedComparator::compare_key(max_sst_key, seek_key) == Ordering::Less
+                KeyComparator::compare_encoded_full_key(max_sst_key, seek_key) == Ordering::Less
             });
 
-            self.seek_idx(table_idx, Some(key)).await
+            self.seek_idx(table_idx, Some(key_slice)).await
         }
     }
 
@@ -348,9 +353,9 @@ mod tests {
     use std::cmp::Ordering;
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::key::{next_full_key, prev_full_key};
+    use risingwave_hummock_sdk::key::{next_full_key, prev_full_key, FullKey};
     use risingwave_hummock_sdk::key_range::KeyRange;
-    use risingwave_hummock_sdk::VersionedComparator;
+    use risingwave_hummock_sdk::KeyComparator;
 
     use crate::hummock::compactor::ConcatSstableIterator;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -386,17 +391,17 @@ mod tests {
         let end_index = 25000;
 
         let kr = KeyRange::new(
-            test_key_of(start_index).into(),
-            test_key_of(end_index).into(),
+            test_key_of(start_index).encode().into(),
+            test_key_of(end_index).encode().into(),
         );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(&kr.left).await.unwrap();
+        iter.seek(FullKey::decode(&kr.left)).await.unwrap();
 
         for idx in start_index..end_index {
             let key = iter.key();
             let val = iter.value();
-            assert_eq!(key, test_key_of(idx).as_slice(), "failed at {}", idx);
+            assert_eq!(key, test_key_of(idx).to_ref(), "failed at {}", idx);
             assert_eq!(
                 val.into_user_value().unwrap(),
                 test_value_of(idx).as_slice()
@@ -405,19 +410,25 @@ mod tests {
         }
 
         // seek non-overlap range
-        let kr = KeyRange::new(test_key_of(30000).into(), test_key_of(40000).into());
+        let kr = KeyRange::new(
+            test_key_of(30000).encode().into(),
+            test_key_of(40000).encode().into(),
+        );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(&kr.left).await.unwrap();
+        iter.seek(FullKey::decode(&kr.left)).await.unwrap();
         assert!(!iter.is_valid());
-        let kr = KeyRange::new(test_key_of(start_index).into(), test_key_of(40000).into());
+        let kr = KeyRange::new(
+            test_key_of(start_index).encode().into(),
+            test_key_of(40000).encode().into(),
+        );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(&kr.left).await.unwrap();
+        iter.seek(FullKey::decode(&kr.left)).await.unwrap();
         for idx in start_index..30000 {
             let key = iter.key();
             let val = iter.value();
-            assert_eq!(key, test_key_of(idx).as_slice(), "failed at {}", idx);
+            assert_eq!(key, test_key_of(idx).to_ref(), "failed at {}", idx);
             assert_eq!(
                 val.into_user_value().unwrap(),
                 test_value_of(idx).as_slice()
@@ -427,36 +438,36 @@ mod tests {
         assert!(!iter.is_valid());
 
         // Test seek. Result is dominated by given seek key rather than key range.
-        let kr = KeyRange::new(test_key_of(0).into(), test_key_of(40000).into());
+        let kr = KeyRange::new(
+            test_key_of(0).encode().into(),
+            test_key_of(40000).encode().into(),
+        );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(test_key_of(10000).as_slice()).await.unwrap();
-        assert!(
-            iter.is_valid() && iter.cur_idx == 1 && iter.key() == test_key_of(10000).as_slice()
-        );
-        iter.seek(test_key_of(10001).as_slice()).await.unwrap();
-        assert!(
-            iter.is_valid() && iter.cur_idx == 1 && iter.key() == test_key_of(10001).as_slice()
-        );
-        iter.seek(test_key_of(9999).as_slice()).await.unwrap();
-        assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == test_key_of(9999).as_slice());
-        iter.seek(test_key_of(1).as_slice()).await.unwrap();
-        assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == test_key_of(1).as_slice());
-        iter.seek(test_key_of(29999).as_slice()).await.unwrap();
-        assert!(
-            iter.is_valid() && iter.cur_idx == 2 && iter.key() == test_key_of(29999).as_slice()
-        );
-        iter.seek(test_key_of(30000).as_slice()).await.unwrap();
+        iter.seek(test_key_of(10000).to_ref()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 1 && iter.key() == test_key_of(10000).to_ref());
+        iter.seek(test_key_of(10001).to_ref()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 1 && iter.key() == test_key_of(10001).to_ref());
+        iter.seek(test_key_of(9999).to_ref()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == test_key_of(9999).to_ref());
+        iter.seek(test_key_of(1).to_ref()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == test_key_of(1).to_ref());
+        iter.seek(test_key_of(29999).to_ref()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 2 && iter.key() == test_key_of(29999).to_ref());
+        iter.seek(test_key_of(30000).to_ref()).await.unwrap();
         assert!(!iter.is_valid());
 
         // Test seek. Result is dominated by key range rather than given seek key.
-        let kr = KeyRange::new(test_key_of(6000).into(), test_key_of(16000).into());
+        let kr = KeyRange::new(
+            test_key_of(6000).encode().into(),
+            test_key_of(16000).encode().into(),
+        );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(test_key_of(17000).as_slice()).await.unwrap();
+        iter.seek(test_key_of(17000).to_ref()).await.unwrap();
         assert!(!iter.is_valid());
-        iter.seek(test_key_of(1).as_slice()).await.unwrap();
-        assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == kr.left);
+        iter.seek(test_key_of(1).to_ref()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == FullKey::decode(&kr.left));
     }
 
     #[tokio::test]
@@ -482,7 +493,10 @@ mod tests {
         ));
 
         // Test seek_idx. Result is dominated by given seek key rather than key range.
-        let kr = KeyRange::new(test_key_of(0).into(), test_key_of(40000).into());
+        let kr = KeyRange::new(
+            test_key_of(0).encode().into(),
+            test_key_of(40000).encode().into(),
+        );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
         let sst = sstable_store
@@ -495,17 +509,19 @@ mod tests {
         // Use block_1_smallest_key as seek key and result in the first KV of block 1.
         let seek_key = block_1_smallest_key.clone();
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
-        assert!(iter.is_valid() && iter.key() == block_1_smallest_key.as_slice());
+        assert!(iter.is_valid() && iter.key() == FullKey::decode(block_1_smallest_key.as_slice()));
         // Use prev_full_key(block_1_smallest_key) as seek key and result in the first KV of block
         // 1.
         let seek_key = prev_full_key(block_1_smallest_key.as_slice());
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
-        assert!(iter.is_valid() && iter.key() == block_1_smallest_key.as_slice());
+        assert!(iter.is_valid() && iter.key() == FullKey::decode(block_1_smallest_key.as_slice()));
         iter.next().await.unwrap();
         let block_1_second_key = iter.key().to_vec();
         // Use a big enough seek key and result in invalid iterator.
         let seek_key = test_key_of(30001);
-        iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
+        iter.seek_idx(0, Some(seek_key.encode().as_slice()))
+            .await
+            .unwrap();
         assert!(!iter.is_valid());
 
         // Test seek_idx. Result is dominated by key range rather than given seek key.
@@ -517,15 +533,17 @@ mod tests {
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
         // Use block_2_smallest_key as seek key and result in invalid iterator.
         let seek_key = block_2_smallest_key.clone();
-        assert!(VersionedComparator::compare_key(&seek_key, &kr.right) == Ordering::Greater);
+        assert!(KeyComparator::compare_encoded_full_key(&seek_key, &kr.right) == Ordering::Greater);
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
         assert!(!iter.is_valid());
         // Use a small enough seek key and result in the second KV of block 1.
-        let seek_key = test_key_of(0);
+        let seek_key = test_key_of(0).encode();
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
-        assert!(iter.is_valid() && iter.key() == block_1_second_key);
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), block_1_second_key.to_ref());
         // Use None seek key and result in the second KV of block 1.
         iter.seek_idx(0, None).await.unwrap();
-        assert!(iter.is_valid() && iter.key() == block_1_second_key);
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), block_1_second_key.to_ref());
     }
 }

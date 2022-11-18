@@ -19,6 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::StorageResult;
@@ -29,7 +30,7 @@ use crate::write_batch::WriteBatch;
 pub trait StaticSendSync = Send + Sync + 'static;
 
 pub trait NextFutureTrait<'a, Item> = Future<Output = StorageResult<Option<Item>>> + Send + 'a;
-pub trait StateStoreIter: Send + 'static {
+pub trait StateStoreIter: StaticSendSync {
     type Item: Send;
     type NextFuture<'a>: NextFutureTrait<'a, Self::Item>;
 
@@ -41,12 +42,27 @@ pub trait StateStoreIterExt: StateStoreIter {
         + Send
         + 'a;
 
+    fn map<B, F>(self, f: F) -> StateStoreMapIter<Self, F>
+    where
+        Self: Sized,
+        B: Send,
+        F: FnMut(Self::Item) -> B;
+
     fn collect(&mut self, limit: Option<usize>) -> Self::CollectFuture<'_>;
 }
 
 impl<I: StateStoreIter> StateStoreIterExt for I {
     type CollectFuture<'a> =
         impl Future<Output = StorageResult<Vec<<Self as StateStoreIter>::Item>>> + Send + 'a;
+
+    fn map<B, F>(self, f: F) -> StateStoreMapIter<Self, F>
+    where
+        Self: Sized,
+        B: Send,
+        F: FnMut(Self::Item) -> B,
+    {
+        StateStoreMapIter { iter: self, f }
+    }
 
     fn collect(&mut self, limit: Option<usize>) -> Self::CollectFuture<'_> {
         async move {
@@ -64,6 +80,26 @@ impl<I: StateStoreIter> StateStoreIterExt for I {
     }
 }
 
+pub struct StateStoreMapIter<I, F> {
+    iter: I,
+    f: F,
+}
+
+impl<B, I, F> StateStoreIter for StateStoreMapIter<I, F>
+where
+    B: Send,
+    I: StateStoreIter,
+    F: FnMut(I::Item) -> B + StaticSendSync,
+{
+    type Item = B;
+
+    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move { Ok(self.iter.next().await?.map(&mut self.f)) }
+    }
+}
+
 #[macro_export]
 macro_rules! define_state_store_read_associated_type {
     () => {
@@ -73,10 +109,10 @@ macro_rules! define_state_store_read_associated_type {
 }
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
-pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>> =
+pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> =
     Future<Output = StorageResult<I>> + Send + 'a;
 pub trait StateStoreRead: StaticSendSync {
-    type Iter: StateStoreIter<Item = (Bytes, Bytes)> + 'static;
+    type Iter: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + 'static;
 
     type GetFuture<'a>: GetFutureTrait<'a>;
     type IterFuture<'a>: IterFutureTrait<'a, Self::Iter>;
@@ -103,7 +139,8 @@ pub trait StateStoreRead: StaticSendSync {
     ) -> Self::IterFuture<'_>;
 }
 
-pub trait ScanFutureTrait<'a> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send + 'a;
+pub trait ScanFutureTrait<'a> =
+    Future<Output = StorageResult<Vec<(FullKey<Vec<u8>>, Bytes)>>> + Send + 'a;
 
 pub trait StateStoreReadExt: StaticSendSync {
     type ScanFuture<'a>: ScanFutureTrait<'a>;
@@ -154,6 +191,11 @@ pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + S
 pub trait StateStoreWrite: StaticSendSync {
     type IngestBatchFuture<'a>: IngestBatchFutureTrait<'a>;
 
+    /// Writes a batch to storage. The batch should be:
+    /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
+    /// * Locally unique. There should not be two or more operations on the same key in one write
+    ///   batch.
+    ///
     /// Ingests a batch of data into the state store. One write batch should never contain operation
     /// on the same key. e.g. Put(233, x) then Delete(233).
     /// An epoch should be provided to ingest a write batch. It is served as:
@@ -166,6 +208,7 @@ pub trait StateStoreWrite: StaticSendSync {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_>;
 
@@ -197,7 +240,7 @@ macro_rules! define_state_store_associated_type {
     };
 }
 
-pub trait StateStore: StateStoreRead + StateStoreWrite + StaticSendSync + Clone {
+pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
     type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;
@@ -206,7 +249,7 @@ pub trait StateStore: StateStoreRead + StateStoreWrite + StaticSendSync + Clone 
 
     type ClearSharedBufferFuture<'a>: EmptyFutureTrait<'a>;
 
-    type NewLocalFuture<'a>: Future<Output = Self::Local> + 'a;
+    type NewLocalFuture<'a>: Future<Output = Self::Local> + Send + 'a;
 
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
     /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
@@ -265,6 +308,7 @@ pub struct ReadOptions {
     /// If the `prefix_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Vec<u8>>,
+    pub ignore_range_tombstone: bool,
     pub check_bloom_filter: bool,
 
     pub retention_seconds: Option<u32>,

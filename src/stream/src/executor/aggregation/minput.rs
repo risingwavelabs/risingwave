@@ -18,14 +18,14 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayImpl, Op, Row};
+use risingwave_common::array::{ArrayImpl, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
 use risingwave_common::types::{Datum, DatumRef, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 use smallvec::SmallVec;
 
@@ -34,6 +34,7 @@ use super::state_cache::extreme::ExtremeAgg;
 use super::state_cache::string_agg::StringAgg;
 use super::state_cache::{CacheKey, GenericStateCache, StateCache};
 use super::AggCall;
+use crate::common::table::state_table::StateTable;
 use crate::common::{iter_state_table, StateTableColumnMapping};
 use crate::executor::{PkIndices, StreamExecutorResult};
 
@@ -284,18 +285,19 @@ mod tests {
     use itertools::Itertools;
     use rand::seq::IteratorRandom;
     use rand::Rng;
-    use risingwave_common::array::{Row, StreamChunk};
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
     use risingwave_storage::StateStore;
 
     use super::MaterializedInputState;
+    use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::StreamExecutorResult;
@@ -318,7 +320,7 @@ mod tests {
         chunk
     }
 
-    fn create_mem_state_table(
+    async fn create_mem_state_table(
         input_schema: &Schema,
         upstream_columns: Vec<usize>,
         order_types: Vec<OrderType>,
@@ -339,7 +341,8 @@ mod tests {
             columns,
             order_types,
             (0..pk_len).collect(),
-        );
+        )
+        .await;
         (table, mapping)
     }
 
@@ -376,7 +379,8 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
-        );
+        )
+        .await;
 
         let mut state = MaterializedInputState::new(
             &agg_call,
@@ -490,7 +494,8 @@ mod tests {
                 OrderType::Descending, // for AggKind::Max
                 OrderType::Ascending,
             ],
-        );
+        )
+        .await;
 
         let mut state = MaterializedInputState::new(
             &agg_call,
@@ -605,7 +610,8 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
-        );
+        )
+        .await;
         let (mut table_2, mapping_2) = create_mem_state_table(
             &input_schema,
             vec![1, 3],
@@ -613,7 +619,8 @@ mod tests {
                 OrderType::Descending, // for AggKind::Max
                 OrderType::Ascending,
             ],
-        );
+        )
+        .await;
 
         let epoch = EpochPair::new_test_epoch(1);
         table_1.init_epoch(epoch);
@@ -715,7 +722,8 @@ mod tests {
                 OrderType::Descending, // b DESC for AggKind::Max
                 OrderType::Ascending,  // _row_id ASC
             ],
-        );
+        )
+        .await;
 
         let mut state = MaterializedInputState::new(
             &agg_call,
@@ -826,7 +834,8 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
-        );
+        )
+        .await;
 
         let epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
@@ -940,7 +949,8 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
-        );
+        )
+        .await;
 
         let mut state = MaterializedInputState::new(
             &agg_call,
@@ -1073,7 +1083,8 @@ mod tests {
                 OrderType::Descending, // a DESC
                 OrderType::Ascending,  // b ASC
             ],
-        );
+        )
+        .await;
 
         let mut state = MaterializedInputState::new(
             &agg_call,
@@ -1174,7 +1185,8 @@ mod tests {
                 OrderType::Descending, // a DESC
                 OrderType::Ascending,  // _row_id ASC
             ],
-        );
+        )
+        .await;
 
         let mut state = MaterializedInputState::new(
             &agg_call,

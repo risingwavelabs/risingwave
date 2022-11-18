@@ -16,15 +16,16 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::{LookupExecutor, LookupExecutorParams};
 
 pub struct LookupExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for LookupExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -51,7 +52,8 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             lookup.arrangement_table.as_ref().unwrap(),
             store,
             params.vnode_bitmap.map(Arc::new),
-        );
+        )
+        .await;
 
         Ok(Box::new(LookupExecutor::new(LookupExecutorParams {
             schema: Schema::new(node.fields.iter().map(Field::from).collect()),

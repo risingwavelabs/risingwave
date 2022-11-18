@@ -21,18 +21,19 @@ use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
-use risingwave_common::array::{Row, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
+use risingwave_common::row::Row;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorage};
 use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo, AggGroup};
 use crate::executor::error::StreamExecutorError;
@@ -559,11 +560,11 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array::data_chunk_iter::Row;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::hash::SerializedKey;
+    use risingwave_common::row::Row;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
@@ -576,7 +577,7 @@ mod tests {
     use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
 
     #[allow(clippy::too_many_arguments)]
-    fn new_boxed_hash_agg_executor<S: StateStore>(
+    async fn new_boxed_hash_agg_executor<S: StateStore>(
         store: S,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
@@ -586,10 +587,9 @@ mod tests {
         extreme_cache_size: usize,
         executor_id: u64,
     ) -> Box<dyn Executor> {
-        let agg_state_tables = agg_calls
-            .iter()
-            .enumerate()
-            .map(|(idx, agg_call)| {
+        let mut agg_state_tables = Vec::with_capacity(agg_calls.iter().len());
+        for (idx, agg_call) in agg_calls.iter().enumerate() {
+            agg_state_tables.push(
                 create_agg_state_table(
                     store.clone(),
                     TableId::new(idx as u32),
@@ -598,15 +598,18 @@ mod tests {
                     &pk_indices,
                     input.as_ref(),
                 )
-            })
-            .collect();
+                .await,
+            )
+        }
+
         let result_table = create_result_table(
             store,
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
             &group_key_indices,
             input.as_ref(),
-        );
+        )
+        .await;
 
         HashAggExecutor::<SerializedKey, S>::new(
             ActorContext::create(123),
@@ -709,7 +712,8 @@ mod tests {
             1 << 16,
             1 << 10,
             1,
-        );
+        )
+        .await;
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -811,7 +815,8 @@ mod tests {
             1 << 16,
             1 << 10,
             1,
-        );
+        )
+        .await;
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -905,7 +910,8 @@ mod tests {
             1 << 16,
             1 << 10,
             1,
-        );
+        )
+        .await;
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -1004,7 +1010,8 @@ mod tests {
             1 << 16,
             1 << 10,
             1,
-        );
+        )
+        .await;
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier

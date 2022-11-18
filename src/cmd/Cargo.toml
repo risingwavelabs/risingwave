@@ -1,7 +1,11 @@
 [package]
 name = "risingwave_cmd"
-version = "0.2.0-alpha"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [features]
 static-link = ["workspace-config/enable-static-link"]
@@ -33,7 +37,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tracing = { version = "0.1" }
 workspace-config = { path = "../utils/workspace-config", optional = true }
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { path = "../workspace-hack" }
 
 [[bin]]
 name = "frontend"

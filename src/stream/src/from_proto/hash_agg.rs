@@ -18,11 +18,11 @@ use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::agg_common::{build_agg_call_from_prost, build_agg_state_storages_from_proto};
 use super::*;
 use crate::cache::LruManagerRef;
+use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::{AggCall, AggStateStorage};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
@@ -73,8 +73,9 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
 
 pub struct HashAggExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for HashAggExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -105,9 +106,11 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             node.get_agg_call_states(),
             store.clone(),
             vnodes.clone(),
-        );
+        )
+        .await;
+
         let result_table =
-            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, vnodes);
+            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, vnodes).await;
 
         let args = HashAggExecutorDispatcherArgs {
             ctx: params.actor_context,

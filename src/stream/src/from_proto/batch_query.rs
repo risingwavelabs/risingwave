@@ -25,12 +25,13 @@ use crate::executor::BatchQueryExecutor;
 
 pub struct BatchQueryExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for BatchQueryExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         state_store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
 
@@ -100,7 +101,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(
             table,
-            None,
+            stream.config.developer.stream_chunk_size,
             ExecutorInfo {
                 schema,
                 pk_indices: params.pk_indices,

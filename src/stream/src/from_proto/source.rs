@@ -23,8 +23,9 @@ use crate::executor::SourceExecutor;
 
 pub struct SourceExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for SourceExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -38,6 +39,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .register_sender(params.actor_context.id, sender);
 
         let source_id = TableId::new(node.source_id);
+
         let source_builder = SourceDescBuilder::new(
             source_id,
             node.row_id_index.clone(),
@@ -46,6 +48,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             node.properties.clone(),
             node.get_info()?.clone(),
             params.env.source_manager_ref(),
+            params.env.connector_source_endpoint(),
         );
 
         let columns = node.columns.clone();
@@ -69,7 +72,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .expect("vnodes not set for source executor");
 
         let state_table_handler =
-            SourceStateTableHandler::from_table_catalog(node.state_table.as_ref().unwrap(), store);
+            SourceStateTableHandler::from_table_catalog(node.state_table.as_ref().unwrap(), store)
+                .await;
 
         Ok(Box::new(SourceExecutor::new(
             params.actor_context,

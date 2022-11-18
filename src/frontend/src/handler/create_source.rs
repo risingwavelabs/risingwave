@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{
@@ -69,7 +69,12 @@ async fn extract_avro_table_schema(
     schema: &AvroSchema,
     with_properties: HashMap<String, String>,
 ) -> Result<Vec<ProstColumnCatalog>> {
-    let parser = AvroParser::new(schema.row_schema_location.0.as_str(), with_properties).await?;
+    let parser = AvroParser::new(
+        schema.row_schema_location.0.as_str(),
+        schema.use_schema_registry,
+        with_properties,
+    )
+    .await?;
     let vec_column_desc = parser.map_to_columns()?;
     Ok(vec_column_desc
         .into_iter()
@@ -88,6 +93,7 @@ async fn extract_protobuf_table_schema(
     let parser = ProtobufParser::new(
         &schema.row_schema_location.0,
         &schema.message_name.0,
+        schema.use_schema_registry,
         with_properties,
     )
     .await?;
@@ -110,23 +116,43 @@ pub async fn handle_create_source(
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
-
-    let mut with_properties = context.with_options.inner().clone();
-
+    if row_id_index.is_none() && !is_materialized {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "The non-materialized source does not support PRIMARY KEY constraint, please use \"CREATE MATERIALIZED SOURCE\" instead".to_owned(),
+        )
+        .into());
+    }
+    let with_properties = context.with_options.inner().clone();
+    const UPSTREAM_SOURCE_KEY: &str = "connector";
+    // confluent schema registry must be used with kafka
+    let is_kafka = with_properties
+        .get("connector")
+        .unwrap_or(&"".to_string())
+        .to_lowercase()
+        .eq("kafka");
+    if !is_kafka
+        && matches!(
+            &stmt.source_schema,
+            SourceSchema::Protobuf(ProtobufSchema {
+                use_schema_registry: true,
+                ..
+            }) | SourceSchema::Avro(AvroSchema {
+                use_schema_registry: true,
+                ..
+            })
+        )
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "The {} must be kafka when schema registry is used",
+            UPSTREAM_SOURCE_KEY
+        ))));
+    }
     let (columns, source_info) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            // the key is identified with SourceParserImpl::create
-            const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
-
             assert_eq!(columns.len(), 1);
             assert_eq!(pk_column_ids, vec![0.into()]);
             assert_eq!(row_id_index, Some(0));
 
-            // unlike other formats, there are multiple messages in one file. Will insert a key to
-            // identify the desired message.
-            with_properties
-                .entry(PROTOBUF_MESSAGE_KEY.into())
-                .or_insert_with(|| protobuf_schema.message_name.0.clone());
             columns.extend(
                 extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
             );
@@ -136,6 +162,8 @@ pub async fn handle_create_source(
                 StreamSourceInfo {
                     row_format: RowFormatType::Protobuf as i32,
                     row_schema_location: protobuf_schema.row_schema_location.0.clone(),
+                    use_schema_registry: protobuf_schema.use_schema_registry,
+                    proto_message_name: protobuf_schema.message_name.0.clone(),
                 },
             )
         }
@@ -149,6 +177,8 @@ pub async fn handle_create_source(
                 StreamSourceInfo {
                     row_format: RowFormatType::Avro as i32,
                     row_schema_location: avro_schema.row_schema_location.0.clone(),
+                    use_schema_registry: avro_schema.use_schema_registry,
+                    proto_message_name: "".to_owned(),
                 },
             )
         }
@@ -156,7 +186,7 @@ pub async fn handle_create_source(
             columns,
             StreamSourceInfo {
                 row_format: RowFormatType::Json as i32,
-                row_schema_location: "".to_string(),
+                ..Default::default()
             },
         ),
         SourceSchema::Maxwell => {
@@ -171,11 +201,10 @@ pub async fn handle_create_source(
                 columns,
                 StreamSourceInfo {
                     row_format: RowFormatType::Maxwell as i32,
-                    row_schema_location: "".to_string(),
+                    ..Default::default()
                 },
             )
         }
-
         SourceSchema::DebeziumJson => {
             // return err if user has not specified a pk
             if row_id_index.is_some() {
@@ -188,7 +217,23 @@ pub async fn handle_create_source(
                 columns,
                 StreamSourceInfo {
                     row_format: RowFormatType::DebeziumJson as i32,
-                    row_schema_location: "".to_string(),
+                    ..Default::default()
+                },
+            )
+        }
+        SourceSchema::CanalJson => {
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format cannal_json."
+                        .to_string(),
+                )));
+            }
+            (
+                columns,
+                StreamSourceInfo {
+                    row_format: RowFormatType::CanalJson as i32,
+                    ..Default::default()
                 },
             )
         }
