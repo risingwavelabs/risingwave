@@ -59,7 +59,9 @@ impl ComputeNodeService {
             .arg("--metrics-level")
             .arg("1")
             .arg("--async-stack-trace")
-            .arg(&config.async_stack_trace);
+            .arg(&config.async_stack_trace)
+            .arg("--connector-source-endpoint")
+            .arg(&config.connector_source_endpoint);
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {

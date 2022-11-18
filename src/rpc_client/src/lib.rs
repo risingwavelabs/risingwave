@@ -42,11 +42,13 @@ use tokio::sync::Mutex;
 
 pub mod error;
 use error::{Result, RpcError};
+mod cdc_client;
 mod compute_client;
 mod hummock_meta_client;
 mod meta_client;
 mod stream_client;
 
+pub use cdc_client::CdcClient;
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use hummock_meta_client::HummockMetaClient;
 pub use meta_client::MetaClient;
