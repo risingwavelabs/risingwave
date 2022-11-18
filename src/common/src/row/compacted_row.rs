@@ -12,26 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::BufRead;
+use super::Row2;
 
-use risingwave_sqlparser::parser::*;
-use risingwave_sqlparser::tokenizer::Tokenizer;
+/// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
+/// Executors need to serialize Row into `CompactedRow` before writing into cache.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct CompactedRow {
+    pub row: Vec<u8>,
+}
 
-/// Input SQL, output AST.
-fn main() {
-    let mut sql = String::new();
-    #[allow(clippy::significant_drop_in_scrutinee)]
-    for line in std::io::stdin().lock().lines() {
-        sql += &line.unwrap();
-        if !sql.ends_with(';') {
-            continue;
+impl<R: Row2> From<R> for CompactedRow {
+    fn from(row: R) -> Self {
+        Self {
+            row: row.value_serialize(),
         }
-
-        let tokens = Tokenizer::new(&sql).tokenize().unwrap();
-        println!("{:?}", tokens);
-        let ast = Parser::parse_sql(&sql).unwrap();
-        println!("{:?}", ast);
-
-        sql = String::new();
     }
 }

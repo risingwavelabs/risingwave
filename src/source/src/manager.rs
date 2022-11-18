@@ -254,6 +254,7 @@ impl SourceDescBuilder {
             RowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
             RowFormatType::Avro => SourceFormat::Avro,
             RowFormatType::Maxwell => SourceFormat::Maxwell,
+            RowFormatType::CanalJson => SourceFormat::CanalJson,
             RowFormatType::RowUnspecified => unreachable!(),
         };
 
