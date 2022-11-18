@@ -38,8 +38,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
 use risingwave_storage::hummock::SstableIdManager;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, WriteOptions};
-use risingwave_storage::Keyspace;
+use risingwave_storage::store::{ReadOptions, StateStoreWrite, WriteOptions};
 use serial_test::serial;
 
 use super::compactor_tests::tests::{
@@ -265,11 +264,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
     compactor_manager.add_compactor(worker_node.id, u64::MAX);
 
-    let keyspace = Keyspace::table_root(storage.clone(), TableId::new(existing_table_id));
     // 1. add sstables
     let val0 = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
     let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
-    let mut local = keyspace.start_write_batch(WriteOptions {
+    let mut local = storage.local.start_write_batch(WriteOptions {
         epoch: 100,
         table_id: existing_table_id.into(),
     });
@@ -284,7 +282,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     local.ingest().await.unwrap();
     flush_and_commit(&hummock_meta_client, &storage, 100).await;
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
-    let mut local = keyspace.start_write_batch(WriteOptions {
+    let mut local = storage.local.start_write_batch(WriteOptions {
         epoch: 101,
         table_id: existing_table_id.into(),
     });
@@ -294,7 +292,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     local.ingest().await.unwrap();
     flush_and_commit(&hummock_meta_client, &storage, 101).await;
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
-    let mut local = keyspace.start_write_batch(WriteOptions {
+    let mut local = storage.local.start_write_batch(WriteOptions {
         epoch: 102,
         table_id: existing_table_id.into(),
     });
@@ -306,7 +304,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     // move this two file to the same level.
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
 
-    let mut local = keyspace.start_write_batch(WriteOptions {
+    let mut local = storage.local.start_write_batch(WriteOptions {
         epoch: 103,
         table_id: existing_table_id.into(),
     });

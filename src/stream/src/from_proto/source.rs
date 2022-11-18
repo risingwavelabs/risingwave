@@ -39,6 +39,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .register_sender(params.actor_context.id, sender);
 
         let source_id = TableId::new(node.source_id);
+
         let source_builder = SourceDescBuilder::new(
             source_id,
             node.row_id_index.clone(),
@@ -47,6 +48,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             node.properties.clone(),
             node.get_info()?.clone(),
             params.env.source_manager_ref(),
+            params.env.connector_source_endpoint(),
         );
 
         let columns = node.columns.clone();
