@@ -27,9 +27,6 @@ select * from mv1;
 statement ok
 insert into t1 values (3,4), (7,7);
 
-statement ok
-flush;
-
 query II rowsort
 select * from mv1;
 ----

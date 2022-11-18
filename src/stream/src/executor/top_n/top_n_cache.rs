@@ -601,7 +601,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
                     .middle
                     .range((middle_last_order_by.clone(), vec![])..)
                     .count();
-                // We evict the last row and its ties only if the number of remaining rows still is
+                // We evict the last row and its ties only if the number of remaining rows is
                 // still larger than limit, i.e., there are limit-1 other rows.
                 //
                 // e.g., limit = 3, [1,1,1,1]
@@ -610,7 +610,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
                 // insert 0 -> [0,0,0]
                 if self.middle.len() - num_ties + 1 >= self.limit {
                     while let Some(middle_last) = self.middle.last_entry()
-                    && middle_last.key().0 == middle_last_order_by.clone() {
+                    && &middle_last.key().0 == middle_last_order_by {
                         let middle_last = middle_last.remove_entry();
                         res_ops.push(Op::Delete);
                         res_rows.push(middle_last.1.clone());
