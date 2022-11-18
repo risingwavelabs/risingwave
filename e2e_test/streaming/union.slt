@@ -10,8 +10,15 @@ create table t2 (v1 int, v3 int);
 statement ok
 create materialized view v as select * from t1 union all select * from t2;
 
+statement ok
+create materialized view v2 as select * from t1 union select * from t2;
+
 query II
 select * from v;
+----
+
+query II
+select * from v2;
 ----
 
 statement ok
@@ -19,6 +26,11 @@ insert into t1 values(1, 2);
 
 query II
 select * from v;
+----
+1 2
+
+query II
+select * from v2;
 ----
 1 2
 
@@ -32,11 +44,21 @@ select * from v;
 1 2
 1 2
 
+query II
+select * from v2;
+----
+1 2
+
 statement ok
 delete from t1 where v1 = 1;
 
 query II
 select * from v;
+----
+1 2
+
+query II
+select * from v2;
 ----
 1 2
 
@@ -47,8 +69,16 @@ query II
 select * from v;
 ----
 
+query II
+select * from v2;
+----
+
+
 statement ok
 drop materialized view v;
+
+statement ok
+drop materialized view v2;
 
 statement ok
 drop table t1;
