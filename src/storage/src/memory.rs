@@ -35,6 +35,7 @@ use crate::{
 pub type BytesFullKey = FullKey<Bytes>;
 pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);
 
+#[allow(clippy::type_complexity)]
 pub trait RangeKv: Clone + Send + Sync + 'static {
     fn range(
         &self,
@@ -230,6 +231,7 @@ mod batched_iter {
     }
 
     impl<R: RangeKv> Iter<R> {
+        #[allow(clippy::type_complexity)]
         pub fn next(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Option<Bytes>)>> {
             match self.current.next() {
                 Some((key, value)) => Ok(Some((key.to_ref().to_vec(), value))),
