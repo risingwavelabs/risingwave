@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::UnionNode;
 
 use super::PlanRef;
 use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, StreamNode};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamUnion` implements [`super::LogicalUnion`]
@@ -33,16 +33,12 @@ impl StreamUnion {
     pub fn new(logical: LogicalUnion) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
-
-        let dist = if logical
-            .inputs()
-            .iter()
-            .all(|input| *input.distribution() == Distribution::Single)
-        {
-            Distribution::Single
-        } else {
-            Distribution::SomeShard
-        };
+        let inputs = logical.inputs();
+        let dist = inputs[0].distribution().clone();
+        assert!(logical
+                .inputs()
+                .iter()
+                .all(|input| *input.distribution() == dist));
 
         let base = PlanBase::new_stream(
             ctx,
