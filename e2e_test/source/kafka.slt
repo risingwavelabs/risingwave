@@ -194,6 +194,21 @@ create materialized source s13 (
 ) row format maxwell;
 
 statement ok
+create materialized source s14 (
+  id integer,
+  name varchar,
+  is_adult bool,
+  reg_time timestamp,
+	balance decimal,
+	win_rate double,
+  PRIMARY KEY (id)
+) with (
+  connector = 'kafka',
+  topic = 'cannal_json',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format CANAL_JSON;
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
@@ -344,6 +359,11 @@ select * from s13 order by id;
 1 tom 0 2017-12-31 16:00:01
 2 chi 1 1999-12-31 16:00:01
 
+query ITTTTT
+select * from s14;
+----
+1 mike f 2018-01-01 00:00:01 1500.62 0.65
+
 statement ok
 drop materialized view source_mv1
 
@@ -370,3 +390,6 @@ drop source s12
 
 statement ok
 drop source s13
+
+statement ok
+drop source s14
