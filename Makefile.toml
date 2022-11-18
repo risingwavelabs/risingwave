@@ -100,6 +100,14 @@ script = '''
 tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
 '''
 
+[tasks.lsw]
+category = "Misc"
+description = "List --watch all nodes in the cluster"
+script = '''
+#!/bin/bash
+watch -n 1 "tmux list-windows -t risedev | grep -v active | cut -d'(' -f1"
+'''
+
 [tasks.del]
 alias = "delete"
 
