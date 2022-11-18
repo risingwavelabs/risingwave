@@ -100,3 +100,39 @@ select (v1).v2 from s1 order by v1 limit 10;
 
 statement ok
 drop source s1;
+
+statement ok
+create materialized source s1 (v1 struct<v2 int>, t1 timestamp, c1 varchar) with (
+    connector = 'datagen',
+    fields.v1.v2.kind = 'random',
+    fields.v1.v2.min = '1',
+    fields.v1.v2.max = '100',
+    fields.v1.v2.seed = '1',
+    fields.t1.kind = 'random',
+    fields.t1.max_past = '2h 37min',
+    fields.t1.seed = '3',
+    fields.c1.kind = 'random',
+    fields.c1.length = '100',
+    fields.c1.seed = '3',
+    datagen.rows.per.second = '10',
+    datagen.split.num = '5'
+) row format json;
+
+# Wait enough time to ensure Datagen connector generate data
+sleep 2s
+
+statement ok
+flush;
+
+query I
+select count(*) > 2*10 from s1;
+----
+t
+
+query I
+select l.len, count(*) > 2*10 from (select length(s1.c1) as len from s1) as l group by l.len;
+----
+100 t
+
+statement ok
+drop source s1;

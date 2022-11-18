@@ -203,9 +203,11 @@ pub struct SourceDescBuilder {
     properties: HashMap<String, String>,
     info: ProstSourceInfo,
     source_manager: TableSourceManagerRef,
+    connector_node_addr: String,
 }
 
 impl SourceDescBuilder {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         source_id: TableId,
         row_id_index: Option<ProstColumnIndex>,
@@ -214,6 +216,7 @@ impl SourceDescBuilder {
         properties: HashMap<String, String>,
         info: ProstSourceInfo,
         source_manager: TableSourceManagerRef,
+        connector_node_addr: String,
     ) -> Self {
         Self {
             source_id,
@@ -223,6 +226,7 @@ impl SourceDescBuilder {
             properties,
             info,
             source_manager,
+            connector_node_addr,
         }
     }
 
@@ -286,7 +290,14 @@ impl SourceDescBuilder {
             "source should have at least one pk column"
         );
 
-        let config = ConnectorProperties::extract(self.properties.clone())
+        // store the connector node address to properties for later use
+        let mut source_props: HashMap<String, String> =
+            HashMap::from_iter(self.properties.clone().into_iter());
+        source_props.insert(
+            "connector_node_addr".to_string(),
+            self.connector_node_addr.clone(),
+        );
+        let config = ConnectorProperties::extract(source_props)
             .map_err(|e| RwError::from(ConnectorError(e.into())))?;
 
         let source = SourceImpl::Connector(ConnectorSource {
@@ -350,6 +361,7 @@ pub mod test_utils {
             properties: Default::default(),
             info,
             source_manager,
+            connector_node_addr: "127.0.0.1:60061".to_string(),
         }
     }
 }
@@ -365,8 +377,6 @@ mod tests {
     use risingwave_pb::catalog::{ColumnIndex, StreamSourceInfo, TableSourceInfo};
     use risingwave_pb::plan_common::ColumnCatalog;
     use risingwave_pb::stream_plan::source_node::Info;
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::Keyspace;
 
     use crate::*;
 
@@ -401,6 +411,7 @@ mod tests {
             properties,
             Info::StreamSource(info),
             mem_source_manager,
+            Default::default(),
         );
         let source = source_builder.build().await;
 
@@ -441,8 +452,6 @@ mod tests {
         let pk_column_ids = vec![1];
         let info = TableSourceInfo {};
 
-        let _keyspace = Keyspace::table_root(MemoryStateStore::new(), table_id);
-
         let mem_source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
         let mut source_builder = SourceDescBuilder::new(
             table_id,
@@ -452,6 +461,7 @@ mod tests {
             Default::default(),
             Info::TableSource(info),
             mem_source_manager.clone(),
+            Default::default(),
         );
         let res = source_builder.build().await;
         assert!(res.is_ok());

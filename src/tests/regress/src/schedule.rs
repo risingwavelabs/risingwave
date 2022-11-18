@@ -53,6 +53,11 @@ pub(crate) struct Schedule {
     schedules: Vec<Vec<String>>,
 }
 
+// Test queries commented out with `--@ ` are ignored for comparison.
+// Unlike normal comment `--`, this does not require modification to expected output file.
+// We can simplify toggle the case on/off by just updating the input sql file.
+const PREFIX_IGNORE: &str = "--@ ";
+
 impl Schedule {
     pub(crate) fn new(opts: Opts) -> anyhow::Result<Self> {
         Ok(Self {
@@ -284,7 +289,9 @@ impl TestCase {
 
         let expected_output_path = self.file_manager.expected_output_of(&self.test_name)?;
 
-        let input_lines = input_file_content.lines().filter(|s| !s.is_empty());
+        let input_lines = input_file_content
+            .lines()
+            .filter(|s| !s.is_empty() && *s != PREFIX_IGNORE);
         let mut expected_lines = std::io::BufReader::new(File::open(expected_output_path)?)
             .lines()
             .map(|s| s.unwrap())
@@ -293,7 +300,7 @@ impl TestCase {
             .lines()
             .skip(extra_lines_added_to_input.len())
             .map(|s| s.unwrap())
-            .filter(|s| !s.is_empty());
+            .filter(|s| !s.is_empty() && s != PREFIX_IGNORE);
 
         // We split the output lines (either expected or actual) based on matching lines from input.
         // For example:
@@ -317,10 +324,6 @@ impl TestCase {
         // * query 9..=9 and output 10..=12
         let mut is_diff = false;
         let mut pending_input = vec![];
-        // Test queries commented out with `--@ ` are ignored for comparison.
-        // Unlike normal comment `--`, this does not require modification to expected output file.
-        // We can simplify toggle the case on/off by just updating the input sql file.
-        const PREFIX_IGNORE: &str = "--@ ";
         for input_line in input_lines {
             let original_input_line = input_line.strip_prefix(PREFIX_IGNORE).unwrap_or(input_line);
 
@@ -344,9 +347,6 @@ impl TestCase {
 
             let query_input = std::mem::replace(&mut pending_input, vec![input_line]);
 
-            if let Some(l) = query_input.last() && l.starts_with(PREFIX_IGNORE) {
-                continue;
-            }
             is_diff = !compare_output(&query_input, &expected_output, &actual_output) || is_diff;
         }
         // There may be more lines after the final matching lines.
@@ -371,6 +371,9 @@ fn compare_output(query: &[&str], expected: &[String], actual: &[String]) -> boo
         eq
     };
 
+    if let Some(l) = query.last() && l.starts_with(PREFIX_IGNORE) {
+        return true;
+    }
     if !expected.is_empty()
         && !actual.is_empty()
         && expected[0].starts_with("ERROR:  ")

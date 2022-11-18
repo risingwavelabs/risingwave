@@ -42,7 +42,7 @@
 extern crate tracing;
 
 pub mod cache;
-mod common;
+pub mod common;
 pub mod error;
 pub mod executor;
 mod from_proto;
