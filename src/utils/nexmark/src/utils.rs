@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
@@ -83,9 +81,14 @@ pub fn get_base_url(seed: u64) -> String {
     )
 }
 
-pub fn build_channel_url_map(channel_number: usize) -> HashMap<usize, (String, String)> {
-    let mut ans = HashMap::new();
-    ans.reserve(channel_number);
+lazy_static::lazy_static! {
+    pub static ref CHANNEL_URL_MAP: Vec<(String, String)> = build_channel_url_map(CHANNEL_NUMBER);
+}
+
+const CHANNEL_NUMBER: usize = 10_000;
+
+fn build_channel_url_map(channel_number: usize) -> Vec<(String, String)> {
+    let mut ans = Vec::with_capacity(channel_number);
     for i in 0..channel_number {
         let mut url = get_base_url(i as u64);
         let mut rng = SmallRng::seed_from_u64(i as u64);
@@ -94,7 +97,7 @@ pub fn build_channel_url_map(channel_number: usize) -> HashMap<usize, (String, S
             url.push_str(&i64::abs((i as i32).reverse_bits() as i64).to_string());
         }
         let channel = format!("channel-{}", i);
-        ans.insert(i, (channel, url));
+        ans.push((channel, url));
     }
     ans
 }
