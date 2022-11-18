@@ -17,9 +17,11 @@ use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use itertools::Itertools;
 use num_traits::ToPrimitive;
 use postgres_types::ToSql;
-use risingwave_common::array::{Array, ListRef, ListValue};
+use risingwave_common::array::{Array, ListRef, ListValue, StructRef, StructValue};
+use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
@@ -422,8 +424,6 @@ macro_rules! for_all_cast_variants {
 // TODO(nanderstabel): optimize for multidimensional List. Depth can be given as a parameter to this
 // function.
 fn unnest(input: &str) -> Result<Vec<String>> {
-    use itertools::Itertools;
-
     // Trim input
     let trimmed = input.trim();
 
@@ -511,6 +511,27 @@ pub fn list_cast(
     ))
 }
 
+/// Cast struct of `source_elem_type` to `target_elem_type` by casting each element.
+pub fn struct_cast(
+    input: StructRef<'_>,
+    source_elem_type: &StructType,
+    target_elem_type: &StructType,
+) -> Result<StructValue> {
+    Ok(StructValue::new(
+        input
+            .fields_ref()
+            .into_iter()
+            .zip_eq(source_elem_type.fields.iter())
+            .zip_eq(target_elem_type.fields.iter())
+            .map(|((datum_ref, source_elem_type), target_elem_type)| {
+                datum_ref
+                    .map(|scalar_ref| scalar_cast(scalar_ref, source_elem_type, target_elem_type))
+                    .transpose()
+            })
+            .try_collect()?,
+    ))
+}
+
 /// Cast scalar ref with `source_type` into owned scalar with `target_type`. This function forms a
 /// mutual recursion with `list_cast` so that we can cast nested lists (e.g., varchar[][] to
 /// int[][]).
@@ -522,6 +543,9 @@ fn scalar_cast(
     use crate::expr::data_types::*;
 
     match (source_type, target_type) {
+        (DataType::Struct(source_type), DataType::Struct(target_type)) => {
+            Ok(struct_cast(source.try_into()?, source_type, target_type)?.to_scalar_value())
+        }
         (
             DataType::List {
                 datatype: source_elem_type,
@@ -792,5 +816,31 @@ mod tests {
         assert!(str_to_list("{}}", &DataType::Int32).is_err());
         assert!(str_to_list("{{1, 2, 3}, {4, 5, 6}", &DataType::Int32).is_err());
         assert!(str_to_list("{{1, 2, 3}, 4, 5, 6}}", &DataType::Int32).is_err());
+    }
+
+    #[test]
+    fn test_struct_cast() {
+        assert_eq!(
+            struct_cast(
+                StructValue::new(vec![
+                    Some("1".to_string().to_scalar_value()),
+                    Some(OrderedF32::from(0.0).to_scalar_value()),
+                ])
+                .as_scalar_ref(),
+                &StructType::new(vec![
+                    (DataType::Varchar, "a".to_string()),
+                    (DataType::Float32, "b".to_string()),
+                ]),
+                &StructType::new(vec![
+                    (DataType::Int32, "a".to_string()),
+                    (DataType::Int32, "b".to_string()),
+                ])
+            )
+            .unwrap(),
+            StructValue::new(vec![
+                Some(1i32.to_scalar_value()),
+                Some(0i32.to_scalar_value()),
+            ])
+        );
     }
 }
