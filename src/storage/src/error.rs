@@ -31,6 +31,13 @@ pub enum StorageError {
 
     #[error("Deserialize row error {0}.")]
     DeserializeRow(ValueEncodingError),
+
+    #[error("Sled error: {0}")]
+    Sled(
+        #[backtrace]
+        #[from]
+        sled::Error,
+    ),
 }
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;
