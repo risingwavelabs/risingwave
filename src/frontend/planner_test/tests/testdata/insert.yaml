@@ -74,8 +74,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
       └─BatchValues { rows: [['2020-01-01 01:02:03':Varchar::Timestamp::Time], ['03:04:05':Varchar::Time]] }
-- name: a `VALUES` without insert context may be invalid on its own (compare with
-    above)
+- name: a `VALUES` without insert context may be invalid on its own (compare with above)
   sql: |
     create table t (v1 time);
     values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
@@ -122,8 +121,7 @@
   sql: |
     create table t (v1 timestamp, v2 real);
     insert into t select time '01:02:03', 4.5 from t;
-  binder_error: 'Bind error: cannot cast type "time without time zone" to "timestamp
-    without time zone" in Assign context'
+  binder_error: 'Bind error: cannot cast type "time without time zone" to "timestamp without time zone" in Assign context'
 - name: insert into select mismatch columns length
   sql: |
     create table t (v1 int, v2 real);
