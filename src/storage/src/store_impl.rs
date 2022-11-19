@@ -97,7 +97,7 @@ impl StateStoreImpl {
     ) -> Self {
         // The specific type of HummockStateStoreType in deducted here.
         Self::HummockStateStore(
-            may_verify(may_dynamic_dispatch(state_store)).monitored(state_store_metrics),
+            may_dynamic_dispatch(may_verify(state_store)).monitored(state_store_metrics),
         )
     }
 
@@ -107,7 +107,7 @@ impl StateStoreImpl {
     ) -> Self {
         // The specific type of HummockStateStoreV1Type in deducted here.
         Self::HummockStateStoreV1(
-            may_verify(may_dynamic_dispatch(state_store)).monitored(state_store_metrics),
+            may_dynamic_dispatch(may_verify(state_store)).monitored(state_store_metrics),
         )
     }
 
