@@ -347,7 +347,10 @@ pub mod verify {
         }
 
         fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
-            self.actual.sync(epoch)
+            async move {
+                let _ = self.expected.sync(epoch).await;
+                self.actual.sync(epoch).await
+            }
         }
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
