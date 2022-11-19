@@ -171,7 +171,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             tracing::error!("Failed to optimize rank predicate with conflicting bounds.");
             return None;
         }
-        return Some((1, (eq - 1) as u64));
+        Some((1, (eq - 1) as u64))
     } else {
         match (lb, ub) {
             (Some(lb), Some(ub)) => Some(((ub - lb + 1).max(0) as u64, (lb - 1).max(0) as u64)),
