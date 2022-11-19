@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
 
 use super::Rule;
-use crate::expr::{ExprType, WindowFunctionType};
+use crate::expr::{ExprImpl, ExprType, WindowFunctionType};
 use crate::optimizer::plan_node::{
     LogicalFilter, LogicalTopN, PlanTreeNodeUnary, PlanWindowFunction,
 };
@@ -80,74 +80,7 @@ impl Rule for OverAggToTopNRule {
             predicate.clone().split_disjoint(&rank_col)
         };
 
-        // Currently rank [ < | <= | > | >= ] N is used to implement group topn.
-        // While rank = 1 is used to implement deduplication.
-        let (limit, offset) = {
-            // rank >= lb
-            let mut lb = vec![];
-            // rank <= ub
-            let mut ub = vec![];
-            // rank == eq
-            let mut eq = vec![];
-
-            for cond in rank_pred.conjunctions {
-                if let Some((input_ref, cmp, v)) = cond.as_comparison_const() {
-                    assert_eq!(input_ref.index, window_func_pos);
-                    let v = v
-                        .cast_implicit(DataType::Int64)
-                        .ok()?
-                        .eval_row_const()
-                        .ok()??;
-                    let v = *v.as_int64();
-                    // Note: rank functions start from 1
-                    match cmp {
-                        ExprType::LessThanOrEqual => ub.push(v),
-                        ExprType::LessThan => ub.push(v - 1),
-                        ExprType::GreaterThan => lb.push(v + 1),
-                        ExprType::GreaterThanOrEqual => lb.push(v),
-                        _ => unreachable!(),
-                    }
-                } else if let Some((input_ref, v)) = cond.as_eq_const() {
-                    assert_eq!(input_ref.index, window_func_pos);
-                    let v = v
-                        .cast_implicit(DataType::Int64)
-                        .ok()?
-                        .eval_row_const()
-                        .ok()??;
-                    let v = *v.as_int64();
-                    eq.push(v);
-                } else {
-                    tracing::error!("Failed to optimize complex rank predicate {:?}", cond);
-                    return None;
-                }
-            }
-
-            if eq.len() > 1
-                || lb.len() > 1
-                || ub.len() > 1
-                || (!eq.is_empty() && (!lb.is_empty() || !ub.is_empty()))
-            {
-                tracing::error!("Failed to optimize multiple complex rank predicates");
-                return None;
-            }
-            if !eq.is_empty() {
-                if eq[0] == 1 {
-                    (1, 0)
-                } else {
-                    tracing::error!("Failed to optimize complex rank predicate rank={}", eq[0]);
-                    return None;
-                }
-            } else {
-                let lb = lb.into_iter().next();
-                let ub = ub.into_iter().next();
-                match (lb, ub) {
-                    (Some(lb), Some(ub)) => ((ub - lb + 1).max(0) as u64, (lb - 1).max(0) as u64),
-                    (Some(lb), None) => (LIMIT_ALL_COUNT, (lb - 1).max(0) as u64),
-                    (None, Some(ub)) => (ub.max(0) as u64, 0),
-                    (None, None) => unreachable!(),
-                }
-            }
-        };
+        let (limit, offset) = handle_rank_preds(&rank_pred.conjunctions, window_func_pos)?;
 
         if offset > 0 && with_ties {
             tracing::error!("Failed to optimize with ties and offset");
@@ -173,5 +106,78 @@ impl Rule for OverAggToTopNRule {
         .into();
         let filter = LogicalFilter::create(topn, other_pred);
         Some(project.clone_with_input(filter).into())
+    }
+}
+
+/// Returns `None` if the conditions are too complex or invalid. `Some((limit, offset))` otherwise.
+fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<(u64, u64)> {
+    // rank >= lb
+    let mut lb: Option<i64> = None;
+    // rank <= ub
+    let mut ub: Option<i64> = None;
+    // rank == eq
+    let mut eq: Option<i64> = None;
+
+    for cond in rank_preds {
+        if let Some((input_ref, cmp, v)) = cond.as_comparison_const() {
+            assert_eq!(input_ref.index, window_func_pos);
+            let v = v
+                .cast_implicit(DataType::Int64)
+                .ok()?
+                .eval_row_const()
+                .ok()??;
+            let v = *v.as_int64();
+            match cmp {
+                ExprType::LessThanOrEqual => ub = ub.map_or(Some(v), |ub| Some(ub.min(v))),
+                ExprType::LessThan => ub = ub.map_or(Some(v - 1), |ub| Some(ub.min(v - 1))),
+                ExprType::GreaterThan => lb = lb.map_or(Some(v + 1), |lb| Some(lb.max(v + 1))),
+                ExprType::GreaterThanOrEqual => lb = lb.map_or(Some(v), |lb| Some(lb.max(v))),
+                _ => unreachable!(),
+            }
+        } else if let Some((input_ref, v)) = cond.as_eq_const() {
+            assert_eq!(input_ref.index, window_func_pos);
+            let v = v
+                .cast_implicit(DataType::Int64)
+                .ok()?
+                .eval_row_const()
+                .ok()??;
+            let v = *v.as_int64();
+            if let Some(eq) = eq && eq != v {
+                tracing::error!(
+                    "Failed to optimize rank predicate with conflicting equal conditions."
+                );
+                return None;
+            }
+            eq = Some(v)
+        } else {
+            // TODO: support between and in
+            tracing::error!("Failed to optimize complex rank predicate {:?}", cond);
+            return None;
+        }
+    }
+
+    // Note: rank functions start from 1
+    if let Some(eq) = eq {
+        if eq < 1 {
+            tracing::error!(
+                "Failed to optimize rank predicate with invalid predicate rank={}.",
+                eq
+            );
+            return None;
+        }
+        let lb = lb.unwrap_or(i64::MIN);
+        let ub = ub.unwrap_or(i64::MAX);
+        if !(lb <= eq && eq <= ub) {
+            tracing::error!("Failed to optimize rank predicate with conflicting bounds.");
+            return None;
+        }
+        return Some((1, (eq - 1) as u64));
+    } else {
+        match (lb, ub) {
+            (Some(lb), Some(ub)) => Some(((ub - lb + 1).max(0) as u64, (lb - 1).max(0) as u64)),
+            (Some(lb), None) => Some((LIMIT_ALL_COUNT, (lb - 1).max(0) as u64)),
+            (None, Some(ub)) => Some((ub.max(0) as u64, 0)),
+            (None, None) => unreachable!(),
+        }
     }
 }
