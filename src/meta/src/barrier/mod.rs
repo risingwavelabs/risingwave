@@ -25,6 +25,7 @@ use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -812,7 +813,11 @@ where
                         .map(|grouped| {
                             let sst = grouped.sst.expect("field not None");
                             sst_to_worker.insert(sst.id, resp.worker_id);
-                            LocalSstableInfo::new(grouped.compaction_group_id, sst)
+                            LocalSstableInfo::new(
+                                grouped.compaction_group_id,
+                                sst,
+                                from_prost_table_stats_map(&grouped.table_stats_map),
+                            )
                         })
                         .collect_vec();
                     synced_ssts.append(&mut t);

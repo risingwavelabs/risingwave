@@ -24,6 +24,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionDelta,
+    HummockVersionStats,
 };
 
 use crate::hummock::manager::read_lock;
@@ -37,30 +38,31 @@ pub struct Versioning {
     /// Don't persist compaction version delta to meta store
     pub disable_commit_epochs: bool,
 
-    // Newest version
+    /// Latest hummock version
     pub current_version: HummockVersion,
-    // These SSTs should be deleted from object store.
-    // Mapping from a SST to the version that has marked it stale. See `ack_deleted_ssts`.
+    /// These SSTs should be deleted from object store.
+    /// Mapping from a SST to the version that has marked it stale. See `ack_deleted_ssts`.
     pub ssts_to_delete: BTreeMap<HummockSstableId, HummockVersionId>,
-    // These deltas should be deleted from meta store.
-    // A delta can be deleted if
-    // - It's version id <= checkpoint version id. Currently we only make checkpoint for version id
-    //   <= min_pinned_version_id.
-    // - AND It either contains no SST to delete, or all these SSTs has been deleted. See
-    //   `extend_ssts_to_delete_from_deltas`.
+    /// These deltas should be deleted from meta store.
+    /// A delta can be deleted if
+    /// - It's version id <= checkpoint version id. Currently we only make checkpoint for version
+    ///   id <= min_pinned_version_id.
+    /// - AND It either contains no SST to delete, or all these SSTs has been deleted. See
+    ///   `extend_ssts_to_delete_from_deltas`.
     pub deltas_to_delete: Vec<HummockVersionId>,
     /// SST which is referenced more than once
     pub branched_ssts:
         BTreeMap<HummockSstableId, HashMap<CompactionGroupId, /* divide version */ u64>>,
 
     // Persistent states below
-
-    // Mapping from id of each hummock version which succeeds checkpoint to its
-    // `HummockVersionDelta`
+    /// Mapping from id of each hummock version which succeeds checkpoint to its
+    /// `HummockVersionDelta`
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pub pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pub pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
     pub checkpoint_version: HummockVersion,
+    /// Stats for latest hummock version.
+    pub version_stats: HummockVersionStats,
 }
 
 impl Versioning {
@@ -133,6 +135,11 @@ where
             }
         }
         workers
+    }
+
+    #[named]
+    pub async fn get_version_stats(&self) -> HummockVersionStats {
+        read_lock!(self, versioning).await.version_stats.clone()
     }
 }
 

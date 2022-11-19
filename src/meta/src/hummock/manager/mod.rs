@@ -43,7 +43,7 @@ use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::{
     pin_version_response, CompactTask, CompactTaskAssignment, GroupConstruct, GroupDelta,
     GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta, LevelType,
+    HummockVersionDelta, HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, LevelType,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -154,6 +154,10 @@ macro_rules! read_lock {
 }
 pub(crate) use read_lock;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_hummock_sdk::table_stats::{
+    add_table_stats_map, from_prost_table_stats_map, purge_table_stats, to_prost_table_stats_map,
+    TableStatsMap,
+};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::CompactionGroup as ProstCompactionGroup;
@@ -406,10 +410,23 @@ where
                     ),
                 );
             }
+            versioning_guard.version_stats = HummockVersionStats::default();
             init_version.insert(self.env.meta_store()).await?;
+            versioning_guard
+                .version_stats
+                .insert(self.env.meta_store())
+                .await?;
             init_version
         } else {
-            versions.first().unwrap().clone()
+            versioning_guard.version_stats = HummockVersionStats::list(self.env.meta_store())
+                .await?
+                .into_iter()
+                .next()
+                .expect("should contain exact one item");
+            versions
+                .into_iter()
+                .next()
+                .expect("should contain exact one item")
         };
         versioning_guard.checkpoint_version = redo_state.clone();
 
@@ -782,7 +799,7 @@ where
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard))
+            self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
                 .await?;
             tracing::debug!(
                 "TrivialMove for compaction group {}: pick up {} tables in level {} to compact to target_level {}  cost time: {:?}",
@@ -867,7 +884,7 @@ where
 
     pub async fn cancel_compact_task_impl(&self, compact_task: &mut CompactTask) -> Result<bool> {
         assert!(CANCEL_STATUS_SET.contains(&compact_task.task_status()));
-        self.report_compact_task_impl(None, compact_task, None)
+        self.report_compact_task_impl(None, compact_task, None, None)
             .await
     }
 
@@ -999,9 +1016,10 @@ where
         &self,
         context_id: HummockContextId,
         compact_task: &mut CompactTask,
+        table_stats_change: Option<TableStatsMap>,
     ) -> Result<bool> {
         let ret = self
-            .report_compact_task_impl(Some(context_id), compact_task, None)
+            .report_compact_task_impl(Some(context_id), compact_task, None, table_stats_change)
             .await?;
 
         Ok(ret)
@@ -1020,6 +1038,7 @@ where
         context_id: Option<HummockContextId>,
         compact_task: &mut CompactTask,
         compaction_guard: Option<RwLockWriteGuard<'_, Compaction>>,
+        table_stats_change: Option<TableStatsMap>,
     ) -> Result<bool> {
         let mut compaction_guard = match compaction_guard {
             None => write_lock!(self, compaction).await,
@@ -1112,6 +1131,12 @@ where
                     CompactStatus::is_trivial_move_task(compact_task),
                     deterministic_mode,
                 );
+                let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
+                if let Some(table_stats_change) = table_stats_change {
+                    let mut agg = from_prost_table_stats_map(&version_stats.table_stats);
+                    add_table_stats_map(&mut agg, &table_stats_change);
+                    version_stats.table_stats = to_prost_table_stats_map(agg);
+                }
 
                 commit_multi_var!(
                     self,
@@ -1119,7 +1144,8 @@ where
                     Transaction::default(),
                     compact_statuses,
                     compact_task_assignment,
-                    hummock_version_deltas
+                    hummock_version_deltas,
+                    version_stats
                 )?;
                 branched_ssts.commit_memory();
 
@@ -1474,6 +1500,13 @@ where
             &versioning.current_version,
         )
         .await?;
+
+        // Consume and aggregate table stats.
+        let mut table_stats_change = TableStatsMap::default();
+        for s in &mut sstables {
+            add_table_stats_map(&mut table_stats_change, &std::mem::take(&mut s.table_stats));
+        }
+
         let old_version = versioning.current_version.clone();
         let new_version_id = old_version.id + 1;
         let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
@@ -1486,12 +1519,10 @@ where
                 ..Default::default()
             },
         );
-
         let mut new_hummock_version = old_version;
         new_version_delta.id = new_version_id;
         new_hummock_version.id = new_version_id;
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
-
         let mut branch_sstables = vec![];
         sstables.retain_mut(|local_sst_info| {
             let LocalSstableInfo {
@@ -1535,7 +1566,9 @@ where
                 for (group_id, match_ids) in group_table_ids {
                     let mut branch_sst = sst.clone();
                     branch_sst.table_ids = match_ids;
-                    branch_sstables.push(LocalSstableInfo::new(group_id, branch_sst));
+                    branch_sstables.push(LocalSstableInfo::with_compaction_group(
+                        group_id, branch_sst,
+                    ));
                     branch_groups.insert(group_id, sst.get_divide_version());
                 }
                 if !branch_groups.is_empty() && !is_trivial_adjust {
@@ -1602,7 +1635,21 @@ where
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
         new_version_delta.max_committed_epoch = epoch;
         new_hummock_version.max_committed_epoch = epoch;
-        commit_multi_var!(self, None, Transaction::default(), new_version_delta)?;
+
+        // Apply stats changes.
+        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
+        let mut agg = from_prost_table_stats_map(&version_stats.table_stats);
+        add_table_stats_map(&mut agg, &table_stats_change);
+        purge_table_stats(&mut agg, &new_hummock_version);
+        version_stats.table_stats = to_prost_table_stats_map(agg);
+
+        commit_multi_var!(
+            self,
+            None,
+            Transaction::default(),
+            new_version_delta,
+            version_stats
+        )?;
         branched_ssts.commit_memory();
         versioning.current_version = new_hummock_version;
 
@@ -1753,6 +1800,7 @@ where
                 let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
                 let checkpoint_version_copy = versioning_guard.checkpoint_version.clone();
                 let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
+                let version_stats_copy = versioning_guard.version_stats.clone();
                 (
                     compact_statuses_copy,
                     compact_task_assignment_copy,
@@ -1760,6 +1808,7 @@ where
                     pinned_snapshots_copy,
                     checkpoint_version_copy,
                     hummock_version_deltas_copy,
+                    version_stats_copy,
                 )
             };
         let mem_state = get_state(compaction_guard.borrow(), versioning_guard.borrow());

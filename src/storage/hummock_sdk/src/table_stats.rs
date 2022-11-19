@@ -12,10 +12,102 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
+use std::collections::{HashMap, HashSet};
+
+use risingwave_pb::hummock::{HummockVersion, TableStats as ProstTableStats};
+
+use crate::compaction_group::hummock_version_ext::HummockVersionExt;
+
+pub type TableStatsMap = HashMap<u32, TableStats>;
+
 #[derive(Default, Debug, Clone)]
 pub struct TableStats {
-    pub total_key_size: usize,
-    pub total_value_size: usize,
-    pub total_key_count: usize,
-    pub stale_key_count: usize,
+    pub total_key_size: i64,
+    pub total_value_size: i64,
+    pub total_key_count: i64,
+    pub stale_key_count: i64,
+}
+
+impl From<&TableStats> for ProstTableStats {
+    fn from(value: &TableStats) -> Self {
+        Self {
+            total_key_size: value.total_key_size,
+            total_value_size: value.total_value_size,
+            total_key_count: value.total_key_count,
+            stale_key_count: value.stale_key_count,
+        }
+    }
+}
+
+impl From<TableStats> for ProstTableStats {
+    fn from(value: TableStats) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&ProstTableStats> for TableStats {
+    fn from(value: &ProstTableStats) -> Self {
+        Self {
+            total_key_size: value.total_key_size,
+            total_value_size: value.total_value_size,
+            total_key_count: value.total_key_count,
+            stale_key_count: value.stale_key_count,
+        }
+    }
+}
+
+impl TableStats {
+    pub fn add(&mut self, other: &TableStats) {
+        self.total_key_size += other.total_key_size;
+        self.total_value_size += other.total_value_size;
+        self.total_key_count += other.total_key_count;
+        self.stale_key_count += other.stale_key_count;
+    }
+}
+
+pub fn add_table_stats_map(this: &mut TableStatsMap, other: &TableStatsMap) {
+    for (table_id, stats) in other {
+        this.entry(*table_id).or_default().add(stats);
+    }
+}
+
+pub fn sum_table_stats_map(table_stats: &[&TableStatsMap]) -> TableStatsMap {
+    let mut agg = TableStatsMap::default();
+    for s in table_stats {
+        add_table_stats_map(&mut agg, s);
+    }
+    agg
+}
+
+pub fn to_prost_table_stats_map(
+    table_stats: impl Borrow<TableStatsMap>,
+) -> HashMap<u32, ProstTableStats> {
+    table_stats
+        .borrow()
+        .iter()
+        .map(|(t, s)| (*t, s.into()))
+        .collect()
+}
+
+pub fn from_prost_table_stats_map(
+    table_stats: impl Borrow<HashMap<u32, ProstTableStats>>,
+) -> HashMap<u32, TableStats> {
+    table_stats
+        .borrow()
+        .iter()
+        .map(|(t, s)| (*t, s.into()))
+        .collect()
+}
+
+pub fn purge_table_stats(table_stats: &mut TableStatsMap, hummock_version: &HummockVersion) {
+    let mut all_tables_in_version: HashSet<u32> = HashSet::default();
+    for group in hummock_version.levels.keys() {
+        hummock_version.level_iter(*group, |level| {
+            all_tables_in_version
+                .extend(level.table_infos.iter().flat_map(|s| s.table_ids.clone()));
+            true
+        })
+    }
+    table_stats.retain(|k, _| all_tables_in_version.contains(k));
 }

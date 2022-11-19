@@ -25,7 +25,6 @@ mod key_cmp;
 extern crate num_derive;
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::ops::Deref;
 
 pub use key_cmp::*;
@@ -34,7 +33,7 @@ use risingwave_pb::hummock::SstableInfo;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key::user_key;
 use crate::key_range::KeyRangeCommon;
-use crate::table_stats::TableStats;
+use crate::table_stats::TableStatsMap;
 
 pub mod compact;
 pub mod compaction_group;
@@ -61,24 +60,35 @@ pub const REMOTE_SST_ID_MASK: HummockSstableId = !LOCAL_SST_ID_MASK;
 pub struct LocalSstableInfo {
     pub compaction_group_id: CompactionGroupId,
     pub sst_info: SstableInfo,
-    pub table_stats: HashMap<u32, TableStats>,
+    pub table_stats: TableStatsMap,
 }
 
 impl LocalSstableInfo {
-    pub fn new(compaction_group_id: CompactionGroupId, sstable_info: SstableInfo) -> Self {
+    pub fn new(
+        compaction_group_id: CompactionGroupId,
+        sst_info: SstableInfo,
+        table_stats: TableStatsMap,
+    ) -> Self {
         Self {
             compaction_group_id,
-            sst_info: sstable_info,
-            table_stats: Default::default(),
+            sst_info,
+            table_stats,
         }
     }
 
-    pub fn with_stats(sstable_info: SstableInfo, table_stats: HashMap<u32, TableStats>) -> Self {
-        Self {
-            compaction_group_id: StaticCompactionGroupId::StateDefault as CompactionGroupId,
-            sst_info: sstable_info,
+    pub fn with_compaction_group(
+        compaction_group_id: CompactionGroupId,
+        sst_info: SstableInfo,
+    ) -> Self {
+        Self::new(compaction_group_id, sst_info, TableStatsMap::default())
+    }
+
+    pub fn with_stats(sst_info: SstableInfo, table_stats: TableStatsMap) -> Self {
+        Self::new(
+            StaticCompactionGroupId::StateDefault as CompactionGroupId,
+            sst_info,
             table_stats,
-        }
+        )
     }
 
     pub fn file_size(&self) -> u64 {
