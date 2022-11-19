@@ -27,7 +27,9 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, State};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{
+    Dispatcher, DispatcherType, FragmentType, StreamActor, StreamNode,
+};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
@@ -45,30 +47,24 @@ pub struct FragmentManagerCore {
 }
 
 impl FragmentManagerCore {
-    /// List all fragment vnode mapping info.
-    pub fn all_fragment_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
-        self.table_fragments.values().flat_map(|table_fragments| {
-            table_fragments.fragments.values().map(|fragment| {
-                let parallel_unit_mapping = fragment
-                    .vnode_mapping
-                    .as_ref()
-                    .expect("no data distribution found");
-                ParallelUnitMapping {
-                    fragment_id: fragment.fragment_id,
-                    original_indices: parallel_unit_mapping.original_indices.clone(),
-                    data: parallel_unit_mapping.data.clone(),
-                }
+    /// List all fragment vnode mapping info that not in `State::Initial`.
+    pub fn all_running_fragment_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
+        self.table_fragments
+            .values()
+            .filter(|tf| tf.state() != State::Initial)
+            .flat_map(|table_fragments| {
+                table_fragments.fragments.values().map(|fragment| {
+                    let parallel_unit_mapping = fragment
+                        .vnode_mapping
+                        .as_ref()
+                        .expect("no data distribution found");
+                    ParallelUnitMapping {
+                        fragment_id: fragment.fragment_id,
+                        original_indices: parallel_unit_mapping.original_indices.clone(),
+                        data: parallel_unit_mapping.data.clone(),
+                    }
+                })
             })
-        })
-    }
-
-    pub fn all_internal_tables(&self) -> impl Iterator<Item = &u32> + '_ {
-        self.table_fragments.values().flat_map(|table_fragments| {
-            table_fragments
-                .fragments
-                .values()
-                .flat_map(|fragment| fragment.state_table_ids.iter())
-        })
     }
 }
 
@@ -645,6 +641,7 @@ where
 
                 let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
 
+                // First step, update self fragment
                 // Add actors to this fragment: set the state to `Running`.
                 for actor_id in &added_actors {
                     table_fragment
@@ -707,10 +704,13 @@ where
                     }
                 }
 
+                // Second step, update upstream fragments
                 // Update the dispatcher of the upstream fragments.
                 for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
-                    // TODO: here we assume the upstream fragment is in the same streaming job
-                    // as this fragment.
+                    // here we assume the upstream fragment is in the same streaming job as this
+                    // fragment. Cross-table references only occur in the case
+                    // of Chain fragment, and the scale of Chain fragment does not introduce updates
+                    // to the upstream Fragment (because of NoShuffle)
                     let upstream_fragment = table_fragment
                         .fragments
                         .get_mut(&upstream_fragment_id)
@@ -723,7 +723,10 @@ where
 
                         for dispatcher in &mut upstream_actor.dispatcher {
                             if dispatcher.dispatcher_id == dispatcher_id {
-                                dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
+                                if let DispatcherType::Hash = dispatcher.r#type() {
+                                    dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
+                                }
+
                                 update_actors(
                                     dispatcher.downstream_actor_id.as_mut(),
                                     &removed_actor_ids,

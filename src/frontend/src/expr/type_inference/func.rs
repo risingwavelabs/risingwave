@@ -816,6 +816,13 @@ fn build_type_derive_map() -> FuncSigMap {
     map.insert(E::ToTimestamp, vec![T::Float64], T::Timestampz);
     map.insert(E::AtTimeZone, vec![T::Timestamp, T::Varchar], T::Timestampz);
     map.insert(E::AtTimeZone, vec![T::Timestampz, T::Varchar], T::Timestamp);
+    map.insert(E::DateTrunc, vec![T::Varchar, T::Timestamp], T::Timestamp);
+    map.insert(
+        E::DateTrunc,
+        vec![T::Varchar, T::Timestampz, T::Varchar],
+        T::Timestampz,
+    );
+    map.insert(E::DateTrunc, vec![T::Varchar, T::Interval], T::Interval);
 
     // string expressions
     for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper, E::Md5] {
