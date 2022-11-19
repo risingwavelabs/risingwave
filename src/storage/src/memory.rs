@@ -47,6 +47,8 @@ pub trait RangeKv: Clone + Send + Sync + 'static {
         &self,
         kv_pairs: impl Iterator<Item = (BytesFullKey, Option<Bytes>)>,
     ) -> StorageResult<()>;
+
+    fn flush(&self) -> StorageResult<()>;
 }
 
 pub type BTreeMapRangeKv = Arc<RwLock<BTreeMap<BytesFullKey, Option<Bytes>>>>;
@@ -76,9 +78,15 @@ impl RangeKv for BTreeMapRangeKv {
         }
         Ok(())
     }
+
+    fn flush(&self) -> StorageResult<()> {
+        Ok(())
+    }
 }
 
 pub mod sled {
+    use std::fs::create_dir_all;
+
     use bytes::Bytes;
     use risingwave_hummock_sdk::key::FullKey;
 
@@ -98,10 +106,11 @@ pub mod sled {
         }
 
         pub fn new_temp() -> Self {
-            let path = tempfile::tempdir().expect("find temp dir").into_path();
-            SledRangeKv {
-                inner: sled::open(path).expect("open"),
-            }
+            create_dir_all("./.risingwave/sled").expect("should create");
+            let path = tempfile::TempDir::new_in("./.risingwave/sled")
+                .expect("find temp dir")
+                .into_path();
+            Self::new(path)
         }
     }
 
@@ -154,6 +163,10 @@ pub mod sled {
             }
             self.inner.apply_batch(batch)?;
             Ok(())
+        }
+
+        fn flush(&self) -> StorageResult<()> {
+            Ok(self.inner.flush().map(|_| {})?)
         }
     }
 
@@ -518,6 +531,7 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
 
     fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
         async move {
+            self.inner.flush()?;
             // memory backend doesn't need to push to S3, so this is a no-op
             Ok(SyncResult {
                 ..Default::default()
