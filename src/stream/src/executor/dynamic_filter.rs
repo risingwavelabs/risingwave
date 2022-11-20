@@ -391,6 +391,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         } else {
                             self.right_table.commit_no_data_expected(barrier.epoch);
                         }
+                    } else {
+                        last_committed_epoch_row = current_epoch_row.clone();
                     }
 
                     self.range_cache.flush(barrier.epoch).await?;
