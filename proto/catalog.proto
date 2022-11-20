@@ -14,6 +14,13 @@ message ColumnIndex {
   uint64 index = 1;
 }
 
+message SourceInfo{
+  oneof SourceInfo{
+    StreamSourceInfo stream_source = 1;
+    TableSourceInfo table_source = 2;
+  }
+}
+
 message StreamSourceInfo {
   plan_common.RowFormatType row_format = 1;
   string row_schema_location = 2;

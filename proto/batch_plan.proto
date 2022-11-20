@@ -6,6 +6,7 @@ import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
+import "catalog.proto";
 
 option optimize_for = SPEED;
 
@@ -48,11 +49,14 @@ message ScanRange {
   Bound upper_bound = 3;
 }
 
-message SourceScanNode {
-  uint32 table_id = 1;
-  // timestamp_ms is used for offset synchronization of high level consumer groups, this field will be deprecated if a more elegant approach is available in the future
-  int64 timestamp_ms = 2;
-  repeated int32 column_ids = 3;
+message SourceNode {
+  uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
+  catalog.ColumnIndex row_id_index = 2;
+  repeated plan_common.ColumnCatalog columns = 3;
+  repeated int32 pk_column_ids = 4;
+  map<string, string> properties = 5;
+  bytes split = 6;
+  catalog.SourceInfo info = 7;
 }
 
 message ProjectNode {
@@ -270,6 +274,7 @@ message PlanNode {
     UnionNode union = 31;
     GroupTopNNode group_top_n = 32;
     DistributedLookupJoinNode distributed_lookup_join = 33;
+    SourceNode source = 34;
   }
   string identity = 24;
 }

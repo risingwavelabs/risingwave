@@ -24,9 +24,9 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_connector::source::ConnectorProperties;
+use risingwave_pb::catalog::source_info::SourceInfo as ProstSourceInfo;
 use risingwave_pb::catalog::ColumnIndex as ProstColumnIndex;
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
-use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
 
 use crate::monitor::SourceMetrics;
 use crate::table::TableSource;
@@ -321,9 +321,9 @@ impl SourceDescBuilder {
 
 pub mod test_utils {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+    use risingwave_pb::catalog::source_info::SourceInfo as ProstSourceInfo;
     use risingwave_pb::catalog::{ColumnIndex, TableSourceInfo};
     use risingwave_pb::plan_common::ColumnCatalog;
-    use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
 
     use crate::{SourceDescBuilder, TableSourceManagerRef};
 
@@ -375,9 +375,9 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_connector::source::kinesis::config::kinesis_demo_properties;
+    use risingwave_pb::catalog::source_info::SourceInfo as Info;
     use risingwave_pb::catalog::{ColumnIndex, StreamSourceInfo, TableSourceInfo};
     use risingwave_pb::plan_common::ColumnCatalog;
-    use risingwave_pb::stream_plan::source_node::Info;
 
     use crate::*;
 
