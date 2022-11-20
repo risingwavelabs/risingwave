@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::result::Result::Ok as StdOk;
-
-use anyhow::{anyhow, ensure, Context, Ok, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use futures_async_stream::try_stream;
@@ -47,16 +45,13 @@ impl PubsubSplitReader {
                 .pull(PUBSUB_MAX_FETCH_MESSAGES as i32, None, None)
                 .await;
 
-            let StdOk(raw_chunk) = pull_result else {
-                let Err(e) = pull_result else {
-                    unreachable!()
-                };
-
-                match e.code() {
+            let raw_chunk = match pull_result {
+                Ok(chunk) => chunk,
+                Err(e) => match e.code() {
                     Code::NotFound => bail!("subscription not found"),
-                    Code::PermissionDenied => bail!("not authorised to access subscription"),
+                    Code::PermissionDenied => bail!("not authorized to access subscription"),
                     _ => continue,
-                }
+                },
             };
 
             // Sleep if we get an empty batch -- this should generally not happen
