@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Deref;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -25,19 +25,38 @@ use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress,
+    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress, CompactorWorkload,
     SubscribeCompactTasksResponse,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use super::compaction_schedule_policy::{CompactionSchedulePolicy, RoundRobinPolicy, ScoredPolicy};
+use super::CompactionResumeHandleRef;
 use crate::hummock::error::Result;
+use crate::hummock::CompactionResumeTrigger;
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
+
+struct TaskHeartbeat {
+    task: CompactTask,
+    num_ssts_sealed: u32,
+    num_ssts_uploaded: u32,
+    expire_at: u64,
+}
+
+pub type CompactorStateType = u8;
+
+#[expect(non_snake_case, non_upper_case_globals)]
+pub mod CompactorState {
+    use super::CompactorStateType;
+
+    pub const Idle: CompactorStateType = 0;
+    pub const Busy: CompactorStateType = 1;
+}
 
 /// Wraps the stream between meta node and compactor node.
 /// Compactor node will re-establish the stream when the previous one fails.
@@ -46,13 +65,7 @@ pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
     max_concurrent_task_number: AtomicU64,
-}
-
-struct TaskHeartbeat {
-    task: CompactTask,
-    num_ssts_sealed: u32,
-    num_ssts_uploaded: u32,
-    expire_at: u64,
+    state: AtomicU8,
 }
 
 impl Compactor {
@@ -65,6 +78,7 @@ impl Compactor {
             context_id,
             sender,
             max_concurrent_task_number: AtomicU64::new(max_concurrent_task_number),
+            state: AtomicU8::new(CompactorState::Idle),
         }
     }
 
@@ -105,6 +119,14 @@ impl Compactor {
         self.max_concurrent_task_number
             .store(config.max_concurrent_task_number, Ordering::Relaxed);
     }
+
+    pub fn state(&self) -> CompactorStateType {
+        self.state.load(Ordering::Relaxed)
+    }
+
+    pub fn set_state(&self, state: CompactorStateType) {
+        self.state.store(state, Ordering::Relaxed);
+    }
 }
 
 /// `CompactorManager` maintains compactors which can process compact task.
@@ -131,12 +153,15 @@ pub struct CompactorManager {
     // A map: { context_id -> { task_id -> heartbeat } }
     task_heartbeats:
         RwLock<HashMap<HummockContextId, HashMap<HummockCompactionTaskId, TaskHeartbeat>>>,
+
+    compaction_resume_handle: CompactionResumeHandleRef,
 }
 
 impl CompactorManager {
     pub async fn with_meta<S: MetaStore>(
         env: MetaSrvEnv<S>,
         task_expiry_seconds: u64,
+        compaction_resume_handle: CompactionResumeHandleRef,
     ) -> MetaResult<Self> {
         // Retrieve the existing task assignments from metastore.
         let task_assignment = CompactTaskAssignment::list(env.meta_store()).await?;
@@ -146,6 +171,7 @@ impl CompactorManager {
             ))),
             task_expiry_seconds,
             task_heartbeats: Default::default(),
+            compaction_resume_handle,
         };
         // Initialize heartbeat for existing tasks.
         task_assignment.into_iter().for_each(|assignment| {
@@ -161,6 +187,7 @@ impl CompactorManager {
             policy: RwLock::new(Box::new(RoundRobinPolicy::new())),
             task_expiry_seconds: 1,
             task_heartbeats: Default::default(),
+            compaction_resume_handle: Default::default(),
         }
     }
 
@@ -170,16 +197,14 @@ impl CompactorManager {
             policy: RwLock::new(policy),
             task_expiry_seconds: 1,
             task_heartbeats: Default::default(),
+            compaction_resume_handle: Default::default(),
         }
     }
 
     /// Gets next idle compactor to assign task.
-    pub fn next_idle_compactor(
-        &self,
-        compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
-    ) -> Option<Arc<Compactor>> {
+    pub fn next_idle_compactor(&self) -> Option<Arc<Compactor>> {
         let policy = self.policy.read();
-        policy.next_idle_compactor(compactor_assigned_task_num)
+        policy.next_idle_compactor()
     }
 
     /// Gets next compactor to assign task.
@@ -379,6 +404,29 @@ impl CompactorManager {
         }
     }
 
+    /// Update compactor state based on its workload.
+    pub fn update_compactor_state(
+        &self,
+        context_id: HummockContextId,
+        workload: CompactorWorkload,
+    ) {
+        const CPU_THRESHOLD: u32 = 80;
+
+        if let Some(compactor) = self.policy.read().get_compactor(context_id) {
+            let state = if workload.cpu <= CPU_THRESHOLD {
+                CompactorState::Idle
+            } else {
+                CompactorState::Busy
+            };
+            compactor.set_state(state);
+
+            if state == CompactorState::Idle {
+                self.compaction_resume_handle
+                    .try_resume_compaction(CompactionResumeTrigger::CompactorIdle { context_id });
+            }
+        }
+    }
+
     pub fn compactor_num(&self) -> usize {
         self.policy.read().compactor_num()
     }
@@ -408,7 +456,7 @@ mod tests {
             let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
             let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
             let _receiver = compactor_manager.add_compactor(context_id, 1);
-            let _compactor = hummock_manager.get_idle_compactor().await.unwrap();
+            let _compactor = hummock_manager.get_idle_compactor().unwrap();
             let task = hummock_manager
                 .get_compact_task(StaticCompactionGroupId::StateDefault.into())
                 .await
@@ -422,7 +470,9 @@ mod tests {
         };
 
         // Restart. Set task_expiry_seconds to 0 only to speed up test.
-        let compactor_manager = CompactorManager::with_meta(env, 0).await.unwrap();
+        let compactor_manager = CompactorManager::with_meta(env, 0, Default::default())
+            .await
+            .unwrap();
         // Because task assignment exists.
         assert_eq!(compactor_manager.task_heartbeats.read().len(), 1);
         // Because compactor gRPC is not established yet.

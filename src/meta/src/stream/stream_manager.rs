@@ -930,8 +930,11 @@ mod tests {
 
             // TODO: what should we choose the task heartbeat interval to be? Anyway, we don't run a
             // heartbeat thread here, so it doesn't matter.
-            let compactor_manager =
-                Arc::new(CompactorManager::with_meta(env.clone(), 1).await.unwrap());
+            let compactor_manager = Arc::new(
+                CompactorManager::with_meta(env.clone(), 1, Default::default())
+                    .await
+                    .unwrap(),
+            );
 
             let hummock_manager = Arc::new(
                 HummockManager::new(

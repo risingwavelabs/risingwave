@@ -46,7 +46,7 @@ use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, KeyRange as KeyRange_vec, LevelType,
+    CompactTask, CompactTaskProgress, CompactorWorkload, KeyRange as KeyRange_vec, LevelType,
     SubscribeCompactTasksResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
@@ -430,7 +430,11 @@ impl Compactor {
                                     num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
                                 });
                             }
-                            if let Err(e) = hummock_meta_client.report_compaction_task_progress(progress_list).await {
+                            // TODO: change dummy workload
+                            let workload = CompactorWorkload {
+                                cpu: 60,
+                            };
+                            if let Err(e) = hummock_meta_client.report_compaction_task_progress(progress_list, workload).await {
                                 // ignore any errors while trying to report task progress
                                 tracing::warn!("Failed to report task progress. {e:?}");
                             }

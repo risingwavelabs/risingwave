@@ -218,7 +218,7 @@ pub async fn compact_once(
         .unwrap()
         .unwrap();
     compact_task.gc_delete_keys = false;
-    let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+    let compactor = hummock_manager_ref.get_idle_compactor().unwrap();
     hummock_manager_ref
         .assign_compaction_task(&compact_task, compactor.context_id())
         .await

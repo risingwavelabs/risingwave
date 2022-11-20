@@ -40,7 +40,7 @@ use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
-use crate::hummock::{CompactionScheduler, HummockManager};
+use crate::hummock::{CompactionResumeHandleRef, CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
 };
@@ -312,10 +312,17 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();
     monitor_process(registry).unwrap();
+
+    let compaction_resume_handle = CompactionResumeHandleRef::default();
+
     let compactor_manager = Arc::new(
-        hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
-            .await
-            .unwrap(),
+        hummock::CompactorManager::with_meta(
+            env.clone(),
+            max_heartbeat_interval.as_secs(),
+            compaction_resume_handle.clone(),
+        )
+        .await
+        .unwrap(),
     );
 
     let cluster_manager = Arc::new(
@@ -440,6 +447,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         compactor_manager.clone(),
         vacuum_trigger.clone(),
         fragment_manager.clone(),
+        compaction_resume_handle.clone(),
     );
     let notification_manager = env.notification_manager_ref();
     let notification_srv = NotificationServiceImpl::new(
@@ -463,6 +471,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         env.clone(),
         hummock_manager.clone(),
         compactor_manager.clone(),
+        compaction_resume_handle,
     ));
     let mut sub_tasks = hummock::start_hummock_workers(
         hummock_manager.clone(),

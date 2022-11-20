@@ -17,8 +17,8 @@ use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
-    SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactTaskProgress, CompactionGroup, CompactorWorkload, HummockSnapshot,
+    HummockVersion, SubscribeCompactTasksResponse, VacuumTask,
 };
 use tonic::Streaming;
 
@@ -37,6 +37,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn report_compaction_task_progress(
         &self,
         progress: Vec<CompactTaskProgress>,
+        workload: CompactorWorkload,
     ) -> Result<()>;
     // We keep `commit_epoch` only for test/benchmark like ssbench.
     async fn commit_epoch(
