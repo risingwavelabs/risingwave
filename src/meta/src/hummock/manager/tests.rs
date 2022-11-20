@@ -144,7 +144,7 @@ async fn test_hummock_compaction_task() {
     // Get the compactor and assign task.
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     compactor_manager.add_compactor(worker_node.id, u64::MAX);
-    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+    let compactor = hummock_manager.get_idle_compactor().unwrap();
     hummock_manager
         .assign_compaction_task(&compact_task, compactor.context_id())
         .await
@@ -172,7 +172,7 @@ async fn test_hummock_compaction_task() {
         .unwrap());
 
     // Get compactor.
-    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+    let compactor = hummock_manager.get_idle_compactor().unwrap();
     // Get a compaction task.
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
@@ -849,6 +849,7 @@ async fn test_trigger_compaction_deterministic() {
         env.clone(),
         hummock_manager.clone(),
         compactor_manager_ref.clone(),
+        Default::default(),
     ));
 
     let _ = compactor_manager_ref.add_compactor(context_id, u64::MAX);
@@ -931,7 +932,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     .await
     .unwrap();
 
-    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+    let compactor = hummock_manager.get_idle_compactor().unwrap();
     // Get a compaction task.
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
@@ -977,7 +978,7 @@ async fn test_hummock_compaction_task_heartbeat() {
         .await
         .unwrap());
 
-    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+    let compactor = hummock_manager.get_idle_compactor().unwrap();
     // Get a compaction task.
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
@@ -1049,7 +1050,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     .await
     .unwrap();
 
-    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+    let compactor = hummock_manager.get_idle_compactor().unwrap();
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())

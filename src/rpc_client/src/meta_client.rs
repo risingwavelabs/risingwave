@@ -770,10 +770,12 @@ impl HummockMetaClient for MetaClient {
     async fn report_compaction_task_progress(
         &self,
         progress: Vec<CompactTaskProgress>,
+        workload: CompactorWorkload,
     ) -> Result<()> {
         let req = ReportCompactionTaskProgressRequest {
             context_id: self.worker_id(),
             progress,
+            workload: Some(workload),
         };
         self.inner.report_compaction_task_progress(req).await?;
         Ok(())

@@ -23,7 +23,8 @@ use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::{
-    CompactionResumeTrigger, CompactorManagerRef, HummockManagerRef, VacuumManagerRef,
+    CompactionResumeHandleRef, CompactionResumeTrigger, CompactorManagerRef, HummockManagerRef,
+    VacuumManagerRef,
 };
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
@@ -37,6 +38,7 @@ where
     compactor_manager: CompactorManagerRef,
     vacuum_manager: VacuumManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
+    compaction_resume_handle: CompactionResumeHandleRef,
 }
 
 impl<S> HummockServiceImpl<S>
@@ -48,12 +50,14 @@ where
         compactor_manager: CompactorManagerRef,
         vacuum_trigger: VacuumManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        compaction_resume_handle: CompactionResumeHandleRef,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
             compactor_manager,
             vacuum_manager: vacuum_trigger,
             fragment_manager,
+            compaction_resume_handle,
         }
     }
 }
@@ -261,7 +265,7 @@ where
                 );
             }
         }
-        self.hummock_manager
+        self.compaction_resume_handle
             .try_resume_compaction(CompactionResumeTrigger::CompactorAddition { context_id });
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
@@ -274,6 +278,8 @@ where
         let req = request.into_inner();
         self.compactor_manager
             .update_task_heartbeats(req.context_id, &req.progress);
+        self.compactor_manager
+            .update_compactor_state(req.context_id, req.workload.unwrap());
         Ok(Response::new(ReportCompactionTaskProgressResponse {
             status: None,
         }))

@@ -33,7 +33,9 @@ mod vacuum;
 
 use std::time::Duration;
 
-pub use compaction_scheduler::CompactionScheduler;
+pub use compaction_scheduler::{
+    CompactionResumeHandleRef, CompactionResumeTrigger, CompactionScheduler,
+};
 pub use compactor_manager::*;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;

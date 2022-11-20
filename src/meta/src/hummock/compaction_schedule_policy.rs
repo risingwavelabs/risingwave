@@ -20,7 +20,7 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{CompactTask, CompactTaskAssignment, SubscribeCompactTasksResponse};
 use tokio::sync::mpsc::Receiver;
 
-use super::Compactor;
+use super::{Compactor, CompactorState};
 use crate::hummock::error::{Error, Result};
 use crate::MetaResult;
 
@@ -29,10 +29,7 @@ const STREAM_BUFFER_SIZE: usize = 4;
 /// The implementation of compaction task scheduling policy.
 pub trait CompactionSchedulePolicy: Send + Sync {
     /// Get next idle compactor to assign task.
-    fn next_idle_compactor(
-        &self,
-        compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
-    ) -> Option<Arc<Compactor>>;
+    fn next_idle_compactor(&self) -> Option<Arc<Compactor>>;
 
     /// Get next compactor to assign task.
     fn next_compactor(&self) -> Option<Arc<Compactor>>;
@@ -104,10 +101,7 @@ impl RoundRobinPolicy {
 }
 
 impl CompactionSchedulePolicy for RoundRobinPolicy {
-    fn next_idle_compactor(
-        &self,
-        compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
-    ) -> Option<Arc<Compactor>> {
+    fn next_idle_compactor(&self) -> Option<Arc<Compactor>> {
         if self.compactors.is_empty() {
             return None;
         }
@@ -117,11 +111,7 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
             .chain(&self.compactors[..compactor_index])
         {
             let compactor = self.compactor_map.get(context_id).unwrap();
-            if *compactor_assigned_task_num
-                .get(&compactor.context_id())
-                .unwrap_or(&0)
-                < compactor.max_concurrent_task_number()
-            {
+            if compactor.state() != CompactorState::Busy {
                 return Some(compactor.clone());
             }
         }
@@ -270,16 +260,9 @@ impl ScoredPolicy {
 }
 
 impl CompactionSchedulePolicy for ScoredPolicy {
-    fn next_idle_compactor(
-        &self,
-        compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
-    ) -> Option<Arc<Compactor>> {
+    fn next_idle_compactor(&self) -> Option<Arc<Compactor>> {
         for compactor in self.score_to_compactor.values() {
-            if *compactor_assigned_task_num
-                .get(&compactor.context_id())
-                .unwrap_or(&0)
-                < compactor.max_concurrent_task_number()
-            {
+            if compactor.state() != CompactorState::Busy {
                 return Some(compactor.clone());
             }
         }
@@ -383,7 +366,7 @@ mod tests {
         register_sstable_infos_to_compaction_group, setup_compute_env_with_config,
         to_local_sstable_info,
     };
-    use crate::hummock::HummockManager;
+    use crate::hummock::{CompactorState, HummockManager};
     use crate::storage::MetaStore;
 
     async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)
@@ -570,7 +553,7 @@ mod tests {
         assert_eq!(policy.context_id_to_score.len(), existing_tasks.len());
 
         // No compactor available.
-        assert!(policy.next_idle_compactor(&HashMap::new()).is_none());
+        assert!(policy.next_idle_compactor().is_none());
         assert!(policy.next_compactor().is_none());
 
         // Adding existing compactor does not change score.
@@ -738,13 +721,14 @@ mod tests {
             .unwrap();
         assert_eq!(compactor.context_id(), 0);
 
+        // Set compactor 0 to busy.
+        policy
+            .get_compactor(0)
+            .unwrap()
+            .set_state(CompactorState::Busy);
+
         // Next compactor should be compactor 1.
-        let mut compactor_assigned_task_num = HashMap::new();
-        compactor_assigned_task_num.insert(0, 2);
-        compactor_assigned_task_num.insert(1, 1);
-        let compactor = policy
-            .next_idle_compactor(&compactor_assigned_task_num)
-            .unwrap();
+        let compactor = policy.next_idle_compactor().unwrap();
         assert_eq!(compactor.context_id(), 1);
     }
 }
