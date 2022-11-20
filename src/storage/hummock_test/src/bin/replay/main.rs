@@ -19,7 +19,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
-use replay_impl::{get_replay_notification_client, HummockInterface};
+use replay_impl::{get_replay_notification_client, HummockInterface, Replay};
 use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_hummock_trace::{
     HummockReplay, Operation, Record, Replayable, Result, TraceReader, TraceReaderImpl,
@@ -82,7 +82,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn Replaya
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let notifier = env.notification_manager_ref();
-        let Record(_, _, _, op) = r;
+        let Record(_, _, op) = r;
         let notification_client = match op {
             Operation::MetaMessage(resp) => {
                 get_replay_notification_client(env, worker_node.clone(), resp)
@@ -111,7 +111,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn Replaya
     .expect("fail to create a HummockStorage object");
     let replay_interface = HummockInterface::new(storage, notifier);
 
-    Ok(Box::new(replay_interface))
+    Ok(Box::new(Replay::Global(replay_interface)))
 }
 
 #[derive(Serialize, Deserialize, Default)]

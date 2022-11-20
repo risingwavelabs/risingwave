@@ -16,10 +16,12 @@ shared_buffer_capacity_mb = 4096
 sstable_size_mb = 256
 block_size_kb = 1024
 bloom_false_positive = 0.01
-data_directory = "hummock_001"
+# data_directory = "hummock_001"
+data_directory = "hummock_003"
 block_cache_capacity_mb = 4096
 meta_cache_capacity_mb = 1024
 compactor_memory_limit_mb = 5120
+local_object_store = "minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001"
 
 [storage.file_cache]
 capacity_mb = 1024

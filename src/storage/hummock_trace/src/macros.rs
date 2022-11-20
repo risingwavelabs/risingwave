@@ -24,7 +24,6 @@ macro_rules! trace {
                 $opt.retention_seconds,
                 $opt.table_id.table_id,
             ),
-            risingwave_common::hm_trace::task_local_get(),
             $storage_type,
         );
     };
@@ -41,7 +40,6 @@ macro_rules! trace {
                 $opt.epoch,
                 $opt.table_id.table_id,
             ),
-            risingwave_common::hm_trace::task_local_get(),
             $storage_type,
         );
     };
@@ -55,28 +53,24 @@ macro_rules! trace {
                 retention_seconds: $opt.retention_seconds,
                 check_bloom_filter: $opt.check_bloom_filter,
             },
-            risingwave_common::hm_trace::task_local_get(),
             $storage_type,
         );
     };
-    (ITER_NEXT, $id:expr) => {
+    (ITER_NEXT, $id:expr, $storage_type:expr) => {
         $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::IterNext($id),
-            risingwave_common::hm_trace::task_local_get(),
-            $crate::collector::StorageType::Local,
+            $storage_type,
         );
     };
     (SYNC, $epoch:ident, $storage_type:expr) => {
         $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Sync($epoch),
-            risingwave_common::hm_trace::TraceLocalId::None,
             $storage_type,
         );
     };
     (SEAL, $epoch:ident, $check_point:ident, $storage_type:expr) => {
         let _span = $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Seal($epoch, $check_point),
-            risingwave_common::hm_trace::TraceLocalId::None,
             $storage_type,
         );
     };
@@ -91,7 +85,6 @@ macro_rules! trace {
             $crate::record::Operation::MetaMessage(Box::new($crate::record::TraceSubResp(
                 $resp.clone(),
             ))),
-            risingwave_common::hm_trace::TraceLocalId::None,
             $crate::collector::StorageType::Global,
         );
     };
@@ -100,36 +93,26 @@ macro_rules! trace {
 #[macro_export]
 macro_rules! trace_result {
     (GET, $span:ident, $result:ident) => {
-        let res: Option<Option<Vec<u8>>> = $result
-            .as_ref()
-            .map(|o| o.as_ref().map(|b| b.to_vec()))
-            .ok();
-        $span.send($crate::record::Operation::Result(OperationResult::Get(res)));
+        let res: TraceResult<Option<Vec<u8>>> =
+            TraceResult::from($result.as_ref().map(|o| o.as_ref().map(|b| b.to_vec())));
+        $span.send_result(OperationResult::Get(res));
     };
     (INGEST, $span:ident, $result:ident) => {
-        let res = $result.as_ref().map(|b| *b).ok();
-        $span.send($crate::record::Operation::Result(OperationResult::Ingest(
-            res,
-        )));
+        let res = TraceResult::from($result.as_ref().map(|b| *b));
+        $span.send_result(OperationResult::Ingest(res));
     };
     (ITER, $span:ident, $result:ident) => {
-        let res = $result.as_ref().map(|_| ()).ok();
-        $span.send($crate::record::Operation::Result(OperationResult::Iter(
-            res,
-        )));
+        let res = TraceResult::from($result.as_ref().map(|_| ()));
+        $span.send_result(OperationResult::Iter(res));
     };
-    (ITER_NEXT, $span:ident, $pair:ident) => {
+    (ITER_NEXT, $span:expr, $pair:ident) => {
         let res = $pair
             .as_ref()
             .map(|(k, v)| (k.user_key.table_key.to_vec(), v.to_vec()));
-        $span.send($crate::record::Operation::Result(
-            OperationResult::IterNext(res),
-        ));
+        $span.send_result(OperationResult::IterNext(TraceResult::Ok(res)));
     };
     (SYNC, $span:ident, $result:ident) => {
-        let res = $result.as_ref().map(|res| res.sync_size.clone()).ok();
-        $span.send($crate::record::Operation::Result(OperationResult::Sync(
-            res,
-        )));
+        let res = TraceResult::from($result.as_ref().map(|res| res.sync_size.clone()));
+        $span.send_result(OperationResult::Sync(res));
     };
 }

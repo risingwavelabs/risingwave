@@ -20,9 +20,11 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
-    init_collector, trace, trace_result, OperationResult, RecordId, StorageType, TraceSpan,
+    init_collector, trace, trace_result, Operation, OperationResult, RecordId, StorageType,
+    TraceResult, TraceSpan,
 };
 
+use super::get_concurrent_id;
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
@@ -49,9 +51,10 @@ impl<S> TracedStateStore<S> {
     }
 
     pub fn new_local(inner: S) -> Self {
+        let id = get_concurrent_id();
         Self {
             inner,
-            storage_type: StorageType::Local,
+            storage_type: StorageType::Local(id),
         }
     }
 }
@@ -65,16 +68,13 @@ impl<S: StateStoreRead> TracedStateStore<S> {
         &self,
         iter: I,
         record_id: RecordId,
+        span: TraceSpan,
     ) -> StorageResult<TracedStateStoreIter<S::Iter>>
     where
         I: Future<Output = StorageResult<S::Iter>>,
     {
-        let iter = iter.await?;
-        let traced = TracedStateStoreIter {
-            inner: iter,
-            record_id,
-        };
-        Ok(traced)
+        let inner = iter.await?;
+        Ok(TracedStateStoreIter::new(inner, record_id, span))
     }
 }
 
@@ -142,9 +142,12 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         async move {
             let span: TraceSpan = trace!(ITER, key_range, epoch, read_options, self.storage_type);
             let iter = self
-                .traced_iter(self.inner.iter(key_range, epoch, read_options), span.id())
+                .traced_iter(
+                    self.inner.iter(key_range, epoch, read_options),
+                    span.id(),
+                    span,
+                )
                 .await;
-            trace_result!(ITER, span, iter);
             iter
         }
     }
@@ -160,6 +163,11 @@ impl<S: StateStoreWrite> StateStoreWrite for TracedStateStore<S> {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            // do not trace empty pairs
+            if kv_pairs.is_empty() {
+                return Ok(0);
+            }
+
             let span: TraceSpan = trace!(
                 INGEST,
                 kv_pairs,
@@ -182,14 +190,26 @@ impl TracedStateStore<HummockStorage> {
         self.inner.sstable_store()
     }
 
-    pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
-        self.inner.sstable_id_manager().clone()
+    pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
+        self.inner.sstable_id_manager()
     }
 }
 
 pub struct TracedStateStoreIter<I> {
     inner: I,
     record_id: RecordId,
+    span: TraceSpan,
+}
+
+impl<I> TracedStateStoreIter<I> {
+    fn new(inner: I, record_id: RecordId, span: TraceSpan) -> Self {
+        span.send_result(OperationResult::Iter(TraceResult::Ok(())));
+        TracedStateStoreIter {
+            inner,
+            record_id,
+            span,
+        }
+    }
 }
 
 impl<I> StateStoreIter for TracedStateStoreIter<I>
@@ -202,9 +222,10 @@ where
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            let span = trace!(ITER_NEXT, self.record_id);
+            self.span.send(Operation::IterNext(self.record_id));
+            // let span = trace!(ITER_NEXT, self.record_id, self.storage_type);
             let kv_pair: _ = self.inner.next().await?;
-            trace_result!(ITER_NEXT, span, kv_pair);
+            trace_result!(ITER_NEXT, self.span, kv_pair);
             Ok(kv_pair)
         }
     }

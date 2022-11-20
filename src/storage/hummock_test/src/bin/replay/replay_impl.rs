@@ -20,9 +20,7 @@ use risingwave_common::error::Result as RwResult;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_trace::{
-    LocalReplay, ReplayIter, Replayable, Result, TraceError, TraceSubResp,
-};
+use risingwave_hummock_trace::{ReplayIter, Replayable, Result, TraceError, TraceSubResp};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
@@ -55,58 +53,13 @@ impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + Send + Sync> ReplayIt
     }
 }
 
-pub(crate) struct HummockInterface {
-    store: HummockStorage,
-    notifier: NotificationManagerRef<MemStore>,
-}
-
-impl HummockInterface {
-    pub(crate) fn new(store: HummockStorage, notifier: NotificationManagerRef<MemStore>) -> Self {
-        Self { store, notifier }
-    }
+pub(crate) enum Replay {
+    Global(HummockInterface),
+    Local(LocalReplayInterface),
 }
 
 #[async_trait::async_trait]
-impl Replayable for HummockInterface {
-    async fn sync(&self, id: u64) -> Result<usize> {
-        let result: SyncResult = self
-            .store
-            .sync(id)
-            .await
-            .map_err(|e| TraceError::SyncFailed(format!("{e}")))?;
-        Ok(result.sync_size)
-    }
-
-    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
-        self.store.seal_epoch(epoch_id, is_checkpoint);
-    }
-
-    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
-        let prev_version_id = match &info {
-            Info::HummockVersionDeltas(deltas) => deltas.version_deltas.last().map(|d| d.prev_id),
-            _ => None,
-        };
-
-        let version = self.notifier.notify_hummock(op, info).await;
-
-        // wait till version updated
-        if let Some(prev_version_id) = prev_version_id {
-            self.store.wait_version_update(prev_version_id).await;
-        }
-        Ok(version)
-    }
-
-    async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay> {
-        let table_id = TableId { table_id };
-        let local_storage = self.store.new_local(table_id).await;
-        Box::new(LocalReplayInterface(local_storage))
-    }
-}
-
-pub(crate) struct LocalReplayInterface(LocalHummockStorage);
-
-#[async_trait::async_trait]
-impl LocalReplay for LocalReplayInterface {
+impl Replayable for Replay {
     async fn get(
         &self,
         key: Vec<u8>,
@@ -116,20 +69,20 @@ impl LocalReplay for LocalReplayInterface {
         table_id: u32,
         retention_seconds: Option<u32>,
     ) -> Result<Option<Vec<u8>>> {
-        let value = self
-            .0
-            .get(
-                &key,
-                epoch,
-                ReadOptions {
-                    check_bloom_filter,
-                    table_id: TableId { table_id },
-                    retention_seconds,
-                    prefix_hint,
-                },
-            )
-            .await
-            .map_err(|e| TraceError::GetFailed(format!("{e}")))?;
+        let read_options = ReadOptions {
+            prefix_hint,
+            check_bloom_filter,
+            retention_seconds,
+            table_id: TableId { table_id },
+        };
+        let value = match &self {
+            Replay::Global(interface) => interface
+                .store
+                .get(&key, epoch, read_options)
+                .await
+                .unwrap(),
+            Replay::Local(local) => local.0.get(&key, epoch, read_options).await.unwrap(),
+        };
 
         Ok(value.map(|b| b.to_vec()))
     }
@@ -160,11 +113,18 @@ impl LocalReplay for LocalReplayInterface {
 
         let table_id = TableId { table_id };
 
-        let size = self
-            .0
-            .ingest_batch(kv_pairs, delete_ranges, WriteOptions { epoch, table_id })
-            .await
-            .map_err(|e| TraceError::IngestFailed(format!("{e}")))?;
+        let write_options = WriteOptions { epoch, table_id };
+
+        let size = match &self {
+            Replay::Global(_) => {
+                unreachable!("GlobalStorage does not allow ingest");
+            }
+            Replay::Local(local) => local
+                .0
+                .ingest_batch(kv_pairs, delete_ranges, write_options)
+                .await
+                .map_err(|e| TraceError::IngestFailed(format!("{e}")))?,
+        };
 
         Ok(size)
     }
@@ -179,25 +139,100 @@ impl LocalReplay for LocalReplayInterface {
         table_id: u32,
     ) -> Result<Box<dyn ReplayIter>> {
         let table_id = TableId { table_id };
-        let iter = self
-            .0
-            .iter(
-                key_range,
-                epoch,
-                ReadOptions {
-                    prefix_hint,
-                    check_bloom_filter,
-                    retention_seconds,
-                    table_id,
-                },
-            )
-            .await
-            .map_err(|e| TraceError::IterFailed(format!("{e}")))?;
+        let read_options = ReadOptions {
+            prefix_hint,
+            check_bloom_filter,
+            retention_seconds,
+            table_id,
+        };
+
+        let iter = match &self {
+            Replay::Global(interface) => interface.store.iter(key_range, epoch, read_options).await,
+            Replay::Local(local) => local.0.iter(key_range, epoch, read_options).await,
+        }
+        .map_err(|e| TraceError::IterFailed(format!("{e}")))?;
 
         let iter = HummockReplayIter::new(iter);
         Ok(Box::new(iter))
     }
+
+    async fn sync(&self, id: u64) -> Result<usize> {
+        match &self {
+            Self::Global(interface) => {
+                let result: SyncResult = interface
+                    .store
+                    .sync(id)
+                    .await
+                    .map_err(|e| TraceError::SyncFailed(format!("{e}")))?;
+                Ok(result.sync_size)
+            }
+            Self::Local(_) => {
+                unreachable!("LocalStorage does not allow sync")
+            }
+        }
+    }
+
+    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
+        match &self {
+            Self::Global(interface) => {
+                interface.store.seal_epoch(epoch_id, is_checkpoint);
+            }
+            Self::Local(_) => {
+                unreachable!("LocalStorage does not allow seal_epoch")
+            }
+        }
+    }
+
+    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
+        match &self {
+            Self::Global(interface) => {
+                let prev_version_id = match &info {
+                    Info::HummockVersionDeltas(deltas) => {
+                        deltas.version_deltas.last().map(|d| d.prev_id)
+                    }
+                    _ => None,
+                };
+
+                let version = interface.notifier.notify_hummock(op, info).await;
+
+                // wait till version updated
+                if let Some(prev_version_id) = prev_version_id {
+                    interface.store.wait_version_update(prev_version_id).await;
+                }
+                Ok(version)
+            }
+            Self::Local(_) => {
+                unreachable!("LocalStorage does not allow seal_epoch")
+            }
+        }
+    }
+
+    async fn new_local(&self, table_id: u32) -> Box<dyn Replayable> {
+        match &self {
+            Self::Global(interface) => {
+                let table_id = TableId { table_id };
+                let local_storage = interface.store.new_local(table_id).await;
+                Box::new(Self::Local(LocalReplayInterface(local_storage)))
+            }
+            Self::Local(_) => {
+                unreachable!("should not create a local storage from local storage")
+            }
+        }
+    }
 }
+
+pub(crate) struct HummockInterface {
+    store: HummockStorage,
+    notifier: NotificationManagerRef<MemStore>,
+}
+
+impl HummockInterface {
+    pub(crate) fn new(store: HummockStorage, notifier: NotificationManagerRef<MemStore>) -> Self {
+        Self { store, notifier }
+    }
+}
+
+pub(crate) struct LocalReplayInterface(LocalHummockStorage);
 
 pub struct ReplayNotificationClient<S: MetaStore> {
     addr: HostAddr,

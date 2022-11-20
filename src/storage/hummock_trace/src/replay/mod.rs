@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod replay_runner;
+mod runner;
 mod worker;
 
 use std::ops::Bound;
 
 #[cfg(test)]
 use mockall::automock;
-pub use replay_runner::*;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
+pub use runner::*;
 pub(crate) use worker::*;
 
 use crate::error::Result;
 use crate::Record;
 
-type ReplayGroup = Vec<Record>;
+type ReplayGroup = Record;
 
 type WorkerResponse = ();
 
@@ -37,24 +37,14 @@ pub(crate) enum ReplayRequest {
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
-enum WorkerId {
-    Actor(u64),
-    Executor(u64),
-    None(u64),
+pub(crate) enum WorkerId {
+    Local(u64),
+    OneShot(u64),
 }
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
 pub trait Replayable: Send + Sync {
-    async fn sync(&self, id: u64) -> Result<usize>;
-    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
-    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
-    async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay>;
-}
-
-#[cfg_attr(test, automock)]
-#[async_trait::async_trait]
-pub trait LocalReplay: Send + Sync {
     async fn get(
         &self,
         key: Vec<u8>,
@@ -80,10 +70,30 @@ pub trait LocalReplay: Send + Sync {
         retention_seconds: Option<u32>,
         table_id: u32,
     ) -> Result<Box<dyn ReplayIter>>;
+    async fn sync(&self, id: u64) -> Result<usize>;
+    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
+    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
+    async fn new_local(&self, table_id: u32) -> Box<dyn Replayable>;
 }
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
 pub trait ReplayIter: Send + Sync {
     async fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)>;
+}
+
+#[macro_export]
+macro_rules! dispatch_replay {
+    ($storage_type:ident, $replay:ident, $local_storages:ident, $table_id:ident) => {
+        match $storage_type {
+            StorageType::Global => $replay,
+            StorageType::Local(_) => {
+                if let Entry::Vacant(e) = $local_storages.entry($table_id) {
+                    e.insert($replay.new_local($table_id).await)
+                } else {
+                    $local_storages.get(&$table_id).unwrap()
+                }
+            }
+        }
+    };
 }

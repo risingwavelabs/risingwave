@@ -20,10 +20,9 @@ use std::path::Path;
 use bincode::{Decode, Encode};
 use either::Either;
 use flume::{unbounded, Receiver, Sender};
-use risingwave_common::hm_trace::TraceLocalId;
 
 use crate::write::{TraceWriter, TraceWriterImpl};
-use crate::{Operation, Record, RecordId, RecordIdGenerator};
+use crate::{Operation, OperationResult, Record, RecordId, RecordIdGenerator};
 
 // create a global singleton of collector as well as record id generator
 lazy_static! {
@@ -165,41 +164,32 @@ impl Drop for GlobalCollector {
 pub struct TraceSpan {
     tx: Sender<RecordMsg>,
     id: RecordId,
-    local_id: TraceLocalId,
     storage_type: StorageType,
 }
 
 impl TraceSpan {
-    pub fn new(
-        tx: Sender<RecordMsg>,
-        id: RecordId,
-        local_id: TraceLocalId,
-        storage_type: StorageType,
-    ) -> Self {
+    pub fn new(tx: Sender<RecordMsg>, id: RecordId, storage_type: StorageType) -> Self {
         Self {
             tx,
             id,
-            local_id,
             storage_type,
         }
     }
 
     pub fn send(&self, op: Operation) {
         self.tx
-            .send(Either::Left(Record::new(
-                self.storage_type,
-                self.local_id,
-                self.id,
-                op,
-            )))
+            .send(Either::Left(Record::new(self.storage_type, self.id, op)))
             .expect("failed to log record");
+    }
+
+    pub fn send_result(&self, res: OperationResult) {
+        self.send(Operation::Result(res));
     }
 
     pub fn finish(&self) {
         self.tx
             .send(Either::Left(Record::new(
                 self.storage_type,
-                self.local_id,
                 self.id,
                 Operation::Finish,
             )))
@@ -211,13 +201,8 @@ impl TraceSpan {
     }
 
     /// Create a span and send operation to the `GLOBAL_COLLECTOR`
-    pub fn new_to_global(op: Operation, local_id: TraceLocalId, storage_type: StorageType) -> Self {
-        let span = TraceSpan::new(
-            GLOBAL_COLLECTOR.tx(),
-            GLOBAL_RECORD_ID.next(),
-            local_id,
-            storage_type,
-        );
+    pub fn new_to_global(op: Operation, storage_type: StorageType) -> Self {
+        let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next(), storage_type);
         span.send(op);
         span
     }
@@ -229,7 +214,7 @@ impl TraceSpan {
         op: Operation,
         storage_type: StorageType,
     ) -> Self {
-        let span = TraceSpan::new(tx, id, TraceLocalId::None, storage_type);
+        let span = TraceSpan::new(tx, id, storage_type);
         span.send(op);
         span
     }
@@ -244,10 +229,12 @@ impl Drop for TraceSpan {
 pub type RecordMsg = Either<Record, ()>;
 pub type WriteMsg = Either<Vec<Record>, ()>;
 
+pub type ConcurrentId = u64;
+
 #[derive(Clone, Copy, Debug, Encode, Decode, PartialEq, Eq)]
 pub enum StorageType {
     Global,
-    Local,
+    Local(ConcurrentId),
 }
 
 #[cfg(test)]
@@ -264,11 +251,11 @@ mod tests {
         let op1 = Operation::Sync(0);
         let op2 = Operation::Seal(0, false);
 
-        let record1 = Record::new(StorageType::Global, TraceLocalId::None, 0, op1.clone());
-        let record2 = Record::new(StorageType::Global, TraceLocalId::None, 1, op2.clone());
+        let record1 = Record::new(StorageType::Global, 0, op1.clone());
+        let record2 = Record::new(StorageType::Global, 1, op2.clone());
 
-        let _span1 = TraceSpan::new_to_global(op1, TraceLocalId::None, StorageType::Global);
-        let _span2 = TraceSpan::new_to_global(op2, TraceLocalId::None, StorageType::Global);
+        let _span1 = TraceSpan::new_to_global(op1, StorageType::Global);
+        let _span2 = TraceSpan::new_to_global(op2, StorageType::Global);
 
         let msg1 = rx.recv().unwrap();
         let msg2 = rx.recv().unwrap();
@@ -346,7 +333,7 @@ mod tests {
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
                 let _span =
-                    TraceSpan::new_op(collector.tx(), generator.next(), op, StorageType::Local);
+                    TraceSpan::new_op(collector.tx(), generator.next(), op, StorageType::Local(0));
             });
             handles.push(handle);
         }

@@ -12,17 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
-use risingwave_common::hm_trace::TraceLocalId;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::task::JoinHandle;
-
-use super::{ReplayRequest, WorkerId, WorkerResponse};
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::{replay_worker, Operation, OperationResult, RecordId, Replayable};
+use crate::{Operation, Replayable, WorkerScheduler};
 
 pub struct HummockReplay<R: TraceReader> {
     reader: R,
@@ -38,45 +33,20 @@ impl<R: TraceReader> HummockReplay<R> {
     }
 
     pub async fn run(&mut self) -> Result<()> {
-        let mut workers: HashMap<WorkerId, WorkerHandler> = HashMap::new();
+        let time = Instant::now();
+        let mut worker_scheduler = WorkerScheduler::new();
         let mut total_ops: u64 = 0;
+
         while let Ok(r) = self.reader.read() {
-            let local_id = r.local_id();
-            let record_id = r.record_id();
-
-            let worker_id = self.allocate_worker_id(&local_id, record_id);
-
             match r.op() {
                 Operation::Result(trace_result) => {
-                    if let Some(handler) = workers.get_mut(&worker_id) {
-                        handler.send_result(trace_result.to_owned());
-                    }
+                    worker_scheduler.send_result(&r, trace_result.to_owned());
                 }
                 Operation::Finish => {
-                    if let Some(handler) = workers.get_mut(&worker_id) {
-                        handler.wait_resp().await;
-                        if let TraceLocalId::None = local_id {
-                            handler.finish();
-                            workers.remove(&worker_id);
-                        }
-                    }
+                    worker_scheduler.wait_finish(&r).await;
                 }
                 _ => {
-                    let handler = workers.entry(worker_id.clone()).or_insert_with(|| {
-                        let (req_tx, req_rx) = unbounded_channel();
-                        let (resp_tx, resp_rx) = unbounded_channel();
-                        let (res_tx, res_rx) = unbounded_channel();
-                        let replay = self.replay.clone();
-                        let join = tokio::spawn(replay_worker(req_rx, res_rx, resp_tx, replay));
-                        WorkerHandler {
-                            req_tx,
-                            res_tx,
-                            resp_rx,
-                            join,
-                        }
-                    });
-
-                    handler.send_replay_req(ReplayRequest::Task(vec![r]));
+                    worker_scheduler.schedule(r, self.replay.clone());
                     total_ops += 1;
                     if total_ops % 10000 == 0 {
                         println!("replayed {} ops", total_ops);
@@ -85,54 +55,11 @@ impl<R: TraceReader> HummockReplay<R> {
             };
         }
 
-        for handler in workers.into_values() {
-            handler.finish();
-            handler.join().await;
-        }
-        println!("replay finished, totally {} operations", total_ops);
+        worker_scheduler.shutdown().await;
+
+        println!("Replay finished, totally {} operations", total_ops);
+        println!("Total time {} seconds", time.elapsed().as_secs());
         Ok(())
-    }
-
-    fn allocate_worker_id(&self, local_id: &TraceLocalId, record_id: RecordId) -> WorkerId {
-        match local_id {
-            TraceLocalId::Actor(id) => WorkerId::Actor(*id),
-            TraceLocalId::Executor(id) => WorkerId::Executor(*id),
-            TraceLocalId::None => WorkerId::None(record_id),
-        }
-    }
-}
-
-struct WorkerHandler {
-    req_tx: UnboundedSender<ReplayRequest>,
-    res_tx: UnboundedSender<OperationResult>,
-    resp_rx: UnboundedReceiver<WorkerResponse>,
-    join: JoinHandle<()>,
-}
-
-impl WorkerHandler {
-    async fn join(self) {
-        self.join.await.expect("failed to stop worker");
-    }
-
-    fn finish(&self) {
-        self.send_replay_req(ReplayRequest::Fin);
-    }
-
-    fn send_replay_req(&self, req: ReplayRequest) {
-        self.req_tx
-            .send(req)
-            .expect("failed to send replay request");
-    }
-
-    fn send_result(&self, result: OperationResult) {
-        self.res_tx.send(result).expect("failed to send result");
-    }
-
-    async fn wait_resp(&mut self) {
-        self.resp_rx
-            .recv()
-            .await
-            .expect("failed to wait worker resp");
     }
 }
 
@@ -145,7 +72,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        MockLocalReplay, MockReplayable, MockTraceReader, Record, StorageType, TraceError,
+        MockReplayable, MockTraceReader, OperationResult, Record, StorageType, TraceError,
+        TraceResult,
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -157,10 +85,11 @@ mod tests {
         let sync_id = 4561245432;
         let seal_id = 5734875243;
 
-        let storage_type = StorageType::Local;
-        let local_id1 = TraceLocalId::Actor(1);
-        let local_id2 = TraceLocalId::Actor(2);
-        let local_id3 = TraceLocalId::Executor(1);
+        let storage_type1 = StorageType::Local(0);
+        let storage_type2 = StorageType::Local(1);
+        let storage_type3 = StorageType::Local(2);
+        let storage_type4 = StorageType::Global;
+
         let table_id1 = 1;
         let table_id2 = 2;
         let table_id3 = 3;
@@ -171,7 +100,9 @@ mod tests {
             ),
             (
                 0,
-                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
+                Operation::Result(OperationResult::Get(TraceResult::Ok(Some(
+                    get_result.clone(),
+                )))),
             ),
             (0, Operation::Finish),
             (
@@ -180,12 +111,12 @@ mod tests {
             ),
             (
                 3,
-                Operation::Result(OperationResult::Ingest(Some(ingest_result))),
+                Operation::Result(OperationResult::Ingest(TraceResult::Ok(ingest_result))),
             ),
             (3, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id1, record_id, op)));
+        .map(|(record_id, op)| Ok(Record::new(storage_type1, record_id, op)));
 
         let actor_2 = vec![
             (
@@ -194,7 +125,9 @@ mod tests {
             ),
             (
                 1,
-                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
+                Operation::Result(OperationResult::Get(TraceResult::Ok(Some(
+                    get_result.clone(),
+                )))),
             ),
             (1, Operation::Finish),
             (
@@ -203,12 +136,12 @@ mod tests {
             ),
             (
                 2,
-                Operation::Result(OperationResult::Ingest(Some(ingest_result))),
+                Operation::Result(OperationResult::Ingest(TraceResult::Ok(ingest_result))),
             ),
             (2, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id2, record_id, op)));
+        .map(|(record_id, op)| Ok(Record::new(storage_type2, record_id, op)));
 
         let actor_3 = vec![
             (
@@ -217,7 +150,9 @@ mod tests {
             ),
             (
                 4,
-                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
+                Operation::Result(OperationResult::Get(TraceResult::Ok(Some(
+                    get_result.clone(),
+                )))),
             ),
             (4, Operation::Finish),
             (
@@ -226,22 +161,25 @@ mod tests {
             ),
             (
                 5,
-                Operation::Result(OperationResult::Ingest(Some(ingest_result))),
+                Operation::Result(OperationResult::Ingest(TraceResult::Ok(ingest_result))),
             ),
             (5, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id3, record_id, op)));
+        .map(|(record_id, op)| Ok(Record::new(storage_type3, record_id, op)));
 
         let mut non_local: Vec<Result<Record>> = vec![
             (6, Operation::Seal(seal_id, seal_checkpoint)),
             (6, Operation::Finish),
             (7, Operation::Sync(sync_id)),
-            (7, Operation::Result(OperationResult::Sync(Some(0)))),
+            (
+                7,
+                Operation::Result(OperationResult::Sync(TraceResult::Ok(0))),
+            ),
             (7, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, TraceLocalId::None, record_id, op)))
+        .map(|(record_id, op)| Ok(Record::new(storage_type4, record_id, op)))
         .collect();
 
         // interleave vectors to simulate concurrency
@@ -264,7 +202,7 @@ mod tests {
         let mut mock_replay = MockReplayable::new();
 
         mock_replay.expect_new_local().times(3).returning(move |_| {
-            let mut mock_local = MockLocalReplay::new();
+            let mut mock_local = MockReplayable::new();
 
             mock_local
                 .expect_get()
