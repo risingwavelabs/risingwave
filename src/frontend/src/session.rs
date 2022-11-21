@@ -842,7 +842,7 @@ impl Session<PgResponseStream> for SessionImpl {
                 }
             },
             Statement::ShowVariable { variable } => {
-                let name = &variable[0].value.to_lowercase();
+                let name = &variable[0].real_value().to_lowercase();
                 if name.eq_ignore_ascii_case("ALL") {
                     vec![
                         PgFieldDescriptor::new(
