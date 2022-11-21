@@ -146,7 +146,6 @@ impl DiskObjectStore {
             path.hash(&mut hasher);
             hasher.finish()
         };
-        let path_when_err = path.clone();
         let entry = self
             .opened_read_file_cache
             .lookup_with_request_dedup::<_, ObjectError, _>(
@@ -160,14 +159,7 @@ impl DiskObjectStore {
                     Ok((file, 1))
                 },
             )
-            .await
-            .map_err(|e| {
-                ObjectError::internal(format!(
-                    "open file cache request dedup get canceled {:?}. Err{:?}",
-                    path_when_err.to_str(),
-                    e
-                ))
-            })??;
+            .await?;
         Ok(Arc::new(entry))
     }
 }

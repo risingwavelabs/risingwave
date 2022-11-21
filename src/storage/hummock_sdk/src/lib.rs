@@ -91,6 +91,14 @@ impl LocalSstableInfo {
         )
     }
 
+    pub fn for_test(sst_info: SstableInfo) -> Self {
+        Self {
+            compaction_group_id: StaticCompactionGroupId::StateDefault as CompactionGroupId,
+            sst_info,
+            table_stats: Default::default(),
+        }
+    }
+
     pub fn file_size(&self) -> u64 {
         self.sst_info.file_size
     }
