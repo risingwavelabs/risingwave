@@ -51,6 +51,11 @@ impl FrontendService {
                 "{}:{}",
                 config.listen_address, config.exporter_port
             ))
+            .arg("--health-check-listener-addr")
+            .arg(format!(
+                "{}:{}",
+                config.listen_address, config.health_check_port
+            ))
             .arg("--metrics-level")
             .arg("1");
 
