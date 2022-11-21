@@ -34,6 +34,7 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
+use crate::hummock::compaction::manual_compaction_picker::ManualCompactionSelector;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::level_handler::LevelHandler;
 
@@ -206,13 +207,13 @@ impl CompactStatus {
     ) -> Option<CompactionTask> {
         // manual_compaction no need to select level
         // level determined by option
-        self.create_level_selector(compaction_config)
-            .manual_pick_compaction(
-                task_id,
-                levels,
-                &mut self.level_handlers,
-                manual_compaction_option,
-            )
+        let overlap_strategy = create_overlap_strategy(compaction_config.compaction_mode());
+        ManualCompactionSelector::new(
+            Arc::new(compaction_config),
+            overlap_strategy,
+            manual_compaction_option,
+        )
+        .pick_compaction(task_id, levels, &mut self.level_handlers)
     }
 
     /// Declares a task as either succeeded, failed or canceled.

@@ -121,9 +121,9 @@ impl Binder {
 
         let mut target_table_col_idxs: Vec<usize> = vec![];
         'outer: for query_column in &columns {
-            let column_name = &query_column.value;
+            let column_name = query_column.real_value();
             for (col_idx, table_column) in table_source.columns.iter().enumerate() {
-                if column_name.eq_ignore_ascii_case(table_column.name.as_str()) {
+                if column_name == table_column.name {
                     target_table_col_idxs.push(col_idx);
                     continue 'outer;
                 }

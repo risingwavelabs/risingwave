@@ -38,7 +38,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         &self,
         progress: Vec<CompactTaskProgress>,
     ) -> Result<()>;
-    // We keep `commit_epoch` only for test/benchmark like ssbench.
+    // We keep `commit_epoch` only for test/benchmark.
     async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
