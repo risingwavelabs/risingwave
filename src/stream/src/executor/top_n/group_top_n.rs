@@ -273,7 +273,6 @@ where
                 self.managed_state
                     .init_topn_cache(Some(&pk_prefix), &mut topn_cache, self.order_by_len)
                     .await?;
-                println!("123");
                 self.caches.insert(group_key, topn_cache);
             }
             let cache = self.caches.get_mut(&pk_prefix.0).unwrap();
