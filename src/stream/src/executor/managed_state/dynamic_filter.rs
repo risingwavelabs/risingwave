@@ -19,12 +19,11 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::future::try_join_all;
-use futures::{pin_mut, StreamExt};
+use futures::{pin_mut, stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::{CompactedRow, Row, Row2};
-use risingwave_common::types::{ScalarImpl, VIRTUAL_NODE_SIZE};
+use risingwave_common::types::{ScalarImpl, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::StateStore;
 
@@ -153,15 +152,14 @@ impl<S: StateStore> RangeCache<S> {
             )
         });
 
-        let own_vnodes = self.vnodes.ones().collect_vec();
         for pk_range in missing_ranges {
-            for (vnode, mut map) in try_join_all(
-                own_vnodes
-                    .iter()
-                    .map(|vnode| self.fetch_vnode_range(*vnode, &pk_range)),
-            )
-            .await?
-            {
+            let futures = self
+                .vnodes
+                .ones()
+                .map(|vnode| self.fetch_vnode_range(vnode, &pk_range));
+            let results: Vec<_> = stream::iter(futures).buffer_unordered(10).collect().await;
+            for result in results {
+                let (vnode, mut map) = result?;
                 self.cache.entry(vnode).or_default().append(&mut map);
             }
         }
@@ -180,7 +178,7 @@ impl<S: StateStore> RangeCache<S> {
         &self,
         vnode: usize,
         pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
-    ) -> StreamExecutorResult<(u8, BTreeMap<Vec<u8>, CompactedRow>)> {
+    ) -> StreamExecutorResult<(VirtualNode, BTreeMap<Vec<u8>, CompactedRow>)> {
         let vnode = vnode.try_into().unwrap();
         let row_stream = self
             .state_table
@@ -221,13 +219,13 @@ impl<S: StateStore> RangeCache<S> {
                 Self::to_row_bound(self_range.1.clone()),
             );
             let newly_owned_vnodes = Bitmap::bit_saturate_subtract(&new_vnodes, &old_vnodes);
-            for (vnode, map) in try_join_all(
-                newly_owned_vnodes
-                    .ones()
-                    .map(|vnode| self.fetch_vnode_range(vnode, &current_range)),
-            )
-            .await?
-            {
+
+            let futures = newly_owned_vnodes
+                .ones()
+                .map(|vnode| self.fetch_vnode_range(vnode, &current_range));
+            let results: Vec<_> = stream::iter(futures).buffer_unordered(10).collect().await;
+            for result in results {
+                let (vnode, map) = result?;
                 self.cache.insert(vnode, map);
             }
         }
