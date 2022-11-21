@@ -131,7 +131,7 @@ where
             last_epoch = Some(barrier.epoch);
 
             // Collect barriers to local barrier manager
-            self.context.lock_barrier_manager().collect(id, &barrier);
+            self.context.lock_barrier_manager().collect(id, &barrier)?;
 
             // Then stop this actor if asked
             let to_stop = barrier.is_stop_or_update_drop_actor(id);
@@ -150,6 +150,8 @@ where
                 span
             };
         }
+
+        tracing::error!(actor_id = id, "actor exit without stop barrier");
 
         Ok(())
     }

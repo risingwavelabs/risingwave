@@ -104,9 +104,6 @@ impl ObserverState for FrontendObserverNode {
                 for index in snapshot.indexes {
                     catalog_guard.create_index(&index)
                 }
-                for sink in snapshot.sinks {
-                    catalog_guard.create_sink(&sink)
-                }
                 for view in snapshot.views {
                     catalog_guard.create_view(&view)
                 }

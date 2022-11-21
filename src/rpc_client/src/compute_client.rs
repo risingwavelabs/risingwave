@@ -20,8 +20,6 @@ use futures::StreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
-use risingwave_pb::compute::config_service_client::ConfigServiceClient;
-use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
     ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse,
@@ -45,7 +43,6 @@ pub struct ComputeClient {
     pub exchange_client: ExchangeServiceClient<Channel>,
     pub task_client: TaskServiceClient<Channel>,
     pub monitor_client: MonitorServiceClient<Channel>,
-    pub config_client: ConfigServiceClient<Channel>,
     pub addr: HostAddr,
 }
 
@@ -64,13 +61,11 @@ impl ComputeClient {
     pub fn with_channel(addr: HostAddr, channel: Channel) -> Self {
         let exchange_client = ExchangeServiceClient::new(channel.clone());
         let task_client = TaskServiceClient::new(channel.clone());
-        let monitor_client = MonitorServiceClient::new(channel.clone());
-        let config_client = ConfigServiceClient::new(channel);
+        let monitor_client = MonitorServiceClient::new(channel);
         Self {
             exchange_client,
             task_client,
             monitor_client,
-            config_client,
             addr,
         }
     }
@@ -179,15 +174,6 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .profiling(ProfilingRequest { sleep_s })
-            .await?
-            .into_inner())
-    }
-
-    pub async fn show_config(&self) -> Result<ShowConfigResponse> {
-        Ok(self
-            .config_client
-            .to_owned()
-            .show_config(ShowConfigRequest {})
             .await?
             .into_inner())
     }

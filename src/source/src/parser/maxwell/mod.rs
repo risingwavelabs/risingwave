@@ -51,8 +51,8 @@ mod test {
 
     use super::*;
     use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
-    #[tokio::test]
-    async fn test_json_parser() {
+    #[test]
+    fn test_json_parser() {
         let parser = MaxwellParser;
         let descs = vec![
             SourceColumnDesc::simple("id", DataType::Int32, 0.into()),
@@ -70,7 +70,7 @@ mod test {
 
         for payload in payloads {
             let writer = builder.row_writer();
-            parser.parse(payload, writer).await.unwrap();
+            parser.parse(payload, writer).unwrap();
         }
 
         let chunk = builder.finish();

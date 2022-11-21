@@ -23,7 +23,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::key::UserKey;
 use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStore};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
@@ -100,11 +100,7 @@ async fn build_tables<F: SstableWriterFactory>(
 ) {
     for i in RANGE {
         builder
-            .add_full_key(
-                &FullKey::from_user_key(test_user_key_of(i).as_ref(), 1),
-                HummockValue::put(VALUE),
-                true,
-            )
+            .add_user_key(test_user_key_of(i), HummockValue::put(VALUE), 1)
             .await
             .unwrap();
     }

@@ -145,7 +145,7 @@ mod test {
     #[test]
     fn test_bincode_deserialize() {
         let deserializer = BincodeDeserializer::new();
-        let op = Operation::get(vec![5, 5, 15, 6], 7564, None, true, Some(5433), 123, false);
+        let op = Operation::get(vec![5, 5, 15, 6], 7564, None, true, Some(5433), 123);
         let expected = Record::new_local_none(54433, op);
 
         let mut buf = MemTraceStore::default();

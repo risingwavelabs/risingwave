@@ -145,7 +145,6 @@ async fn test_read_version_basic() {
                     key_range: Some(KeyRange {
                         left: key_with_epoch(iterator_test_user_key_of(1).encode(), 1),
                         right: key_with_epoch(iterator_test_user_key_of(2).encode(), 2),
-                        right_exclusive: false,
                     }),
                     file_size: 1,
                     table_ids: vec![0],
@@ -159,7 +158,6 @@ async fn test_read_version_basic() {
                     key_range: Some(KeyRange {
                         left: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
                         right: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
-                        right_exclusive: false,
                     }),
                     file_size: 1,
                     table_ids: vec![0],

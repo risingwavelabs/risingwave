@@ -172,12 +172,23 @@ async fn handle_record(
     match op {
         Operation::Get {
             key,
+            check_bloom_filter,
             epoch,
-            read_options,
+            table_id,
+            retention_seconds,
+            prefix_hint,
         } => {
-            let storage =
-                dispatch_replay!(storage_type, replay, local_storages, read_options.table_id);
-            let actual = storage.get(key, epoch, read_options).await;
+            let storage = dispatch_replay!(storage_type, replay, local_storages, table_id);
+            let actual = storage
+                .get(
+                    key,
+                    check_bloom_filter,
+                    epoch,
+                    prefix_hint,
+                    table_id,
+                    retention_seconds,
+                )
+                .await;
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Get(expected) = res {
                 assert_eq!(TraceResult::from(actual), expected, "get result wrong");
@@ -185,12 +196,14 @@ async fn handle_record(
         }
         Operation::Ingest {
             kv_pairs,
+            epoch,
+            table_id,
             delete_ranges,
-            write_options,
         } => {
-            let storage =
-                dispatch_replay!(storage_type, replay, local_storages, write_options.table_id);
-            let actual = storage.ingest(kv_pairs, delete_ranges, write_options).await;
+            let storage = dispatch_replay!(storage_type, replay, local_storages, table_id);
+            let actual = storage
+                .ingest(kv_pairs, delete_ranges, epoch, table_id)
+                .await;
 
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Ingest(expected) = res {
@@ -198,13 +211,24 @@ async fn handle_record(
             }
         }
         Operation::Iter {
+            prefix_hint,
             key_range,
             epoch,
-            read_options,
+            table_id,
+            retention_seconds,
+            check_bloom_filter,
         } => {
-            let storage =
-                dispatch_replay!(storage_type, replay, local_storages, read_options.table_id);
-            let iter = storage.iter(key_range, epoch, read_options).await;
+            let storage = dispatch_replay!(storage_type, replay, local_storages, table_id);
+            let iter = storage
+                .iter(
+                    key_range,
+                    epoch,
+                    prefix_hint,
+                    check_bloom_filter,
+                    retention_seconds,
+                    table_id,
+                )
+                .await;
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Iter(expected) = res {
                 if expected.is_ok() {
@@ -253,7 +277,7 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
-    use crate::{MockReplayIter, MockReplayable, Replayable, StorageType, TraceReadOptions};
+    use crate::{MockReplayIter, MockReplayable, Replayable, StorageType};
 
     #[tokio::test]
     async fn test_handle_record() {
@@ -261,39 +285,36 @@ mod tests {
         let mut local_storages = HashMap::new();
         let (res_tx, mut res_rx) = unbounded_channel();
 
-        let read_options = TraceReadOptions {
+        let op = Operation::Get {
+            key: vec![123],
+            epoch: 123,
             prefix_hint: None,
             check_bloom_filter: false,
             retention_seconds: Some(12),
             table_id: 12,
-            ignore_range_tombstone: false,
         };
-
-        let op = Operation::Get {
-            key: vec![123],
-            epoch: 123,
-            read_options: read_options.clone(),
-        };
-
         let record = Record::new(StorageType::Local(0), 0, op);
         let mut mock_replay = MockReplayable::new();
 
-        mock_replay.expect_new_local().times(1).returning(move |_| {
+        mock_replay.expect_new_local().times(1).returning(|_| {
             let mut mock_local = MockReplayable::new();
 
             mock_local
                 .expect_get()
                 .with(
                     predicate::eq(vec![123]),
+                    predicate::eq(false),
                     predicate::eq(123),
-                    predicate::always(),
+                    predicate::eq(None),
+                    predicate::eq(12),
+                    predicate::eq(Some(12)),
                 )
-                .returning(|_, _, _| Ok(Some(vec![120])));
+                .returning(|_, _, _, _, _, _| Ok(Some(vec![120])));
 
             Box::new(mock_local)
         });
 
-        mock_replay.expect_new_local().times(1).returning(move |_| {
+        mock_replay.expect_new_local().times(1).returning(|_| {
             let mut mock_local = MockReplayable::new();
 
             mock_local
@@ -301,9 +322,12 @@ mod tests {
                 .with(
                     predicate::eq((Bound::Unbounded, Bound::Unbounded)),
                     predicate::eq(45),
-                    predicate::always(),
+                    predicate::eq(None),
+                    predicate::eq(false),
+                    predicate::eq(Some(12)),
+                    predicate::eq(500),
                 )
-                .returning(|_, _, _| {
+                .returning(|_, _, _, _, _, _| {
                     let mut mock_iter = MockReplayIter::new();
                     mock_iter
                         .expect_next()
@@ -334,7 +358,10 @@ mod tests {
         let op = Operation::Iter {
             key_range: (Bound::Unbounded, Bound::Unbounded),
             epoch: 45,
-            read_options: read_options.clone(),
+            prefix_hint: None,
+            check_bloom_filter: false,
+            retention_seconds: Some(12),
+            table_id: 500,
         };
         let record = Record::new(StorageType::Local(0), 1, op);
         res_tx

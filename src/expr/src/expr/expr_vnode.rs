@@ -14,8 +14,9 @@
 
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder};
-use risingwave_common::row::Row;
+use risingwave_common::array::{
+    ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder, Row,
+};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::expr::expr_node::{RexNode, Type};

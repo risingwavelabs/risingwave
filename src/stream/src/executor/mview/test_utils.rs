@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-
-use crate::common::table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore> {
     let state_store = MemoryStateStore::new();

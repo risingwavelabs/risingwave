@@ -17,7 +17,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
-use itertools::Itertools;
 
 use crate::{EtcdConfig, Task};
 
@@ -66,23 +65,7 @@ impl EtcdService {
             .arg("--auto-compaction-retention")
             .arg("1m")
             .arg("--snapshot-count")
-            .arg("10000")
-            .arg("--name")
-            .arg(&config.id)
-            .arg("--initial-cluster-token")
-            .arg("risingwave-etcd")
-            .arg("--initial-cluster-state")
-            .arg("new")
-            .arg("--initial-cluster")
-            .arg(
-                config
-                    .provide_etcd
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .map(|x| format!("{}=http://{}:{}", x.id, x.address, x.peer_port))
-                    .join(","),
-            );
+            .arg("10000");
 
         if config.unsafe_no_fsync {
             cmd.arg("--unsafe-no-fsync");

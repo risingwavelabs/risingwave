@@ -385,7 +385,6 @@ pub mod tests {
             key_range: Some(KeyRange {
                 left: iterator_test_key_of_epoch(table_prefix, left, epoch),
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch),
-                right_exclusive: false,
             }),
             file_size: (right - left + 1) as u64,
             table_ids: vec![],
@@ -675,7 +674,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
                 level: 0,
@@ -703,7 +701,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
                 level: 0,
@@ -763,7 +760,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
                 level: 3,
@@ -793,7 +789,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
                 level: 4,

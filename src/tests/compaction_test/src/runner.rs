@@ -38,7 +38,8 @@ use risingwave_storage::monitor::{
     StateStoreMetrics,
 };
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
-use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
+use risingwave_storage::StateStoreImpl::HummockStateStore;
+use risingwave_storage::{StateStoreImpl, StateStoreIter};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
 
@@ -92,6 +93,7 @@ pub async fn compaction_test_main(
         opts.state_store.clone(),
         opts.config_path.clone(),
     );
+    tracing::info!("Started compactor thread");
 
     let original_meta_endpoint = "http://127.0.0.1:5690";
     let mut table_id: u32 = opts.table_id;
@@ -175,7 +177,6 @@ fn start_compactor_thread(
             .unwrap();
         runtime.block_on(async {
             tokio::spawn(async {
-                tracing::info!("Starting compactor node");
                 start_compactor_node(meta_endpoint, client_addr, state_store, config_path).await
             });
             rx.recv().unwrap();
@@ -210,12 +211,6 @@ async fn init_metadata_for_replay(
     ci_mode: bool,
     table_id: &mut u32,
 ) -> anyhow::Result<()> {
-    // The compactor needs to receive catalog notification from the new Meta node,
-    // and we should wait the compactor finishes setup the subscription channel
-    // before registering the table catalog to the new Meta node. Otherwise the
-    // filter key manager will fail to acquire a key extractor.
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
     let meta_client: MetaClient;
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
@@ -592,7 +587,6 @@ async fn open_hummock_iters(
                     table_id: TableId { table_id },
                     retention_seconds: None,
                     check_bloom_filter: false,
-                    ignore_range_tombstone: false,
                 },
             )
             .await?;
@@ -666,10 +660,8 @@ pub async fn create_hummock_store_with_metrics(
     )
     .await?;
 
-    if let Some(hummock_state_store) = state_store_impl.as_hummock() {
-        Ok(hummock_state_store
-            .clone()
-            .monitored(metrics.state_store_metrics))
+    if let HummockStateStore(hummock_state_store) = state_store_impl {
+        Ok(hummock_state_store)
     } else {
         Err(anyhow!("only Hummock state store is supported!"))
     }

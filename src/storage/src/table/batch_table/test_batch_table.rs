@@ -13,25 +13,28 @@
 // limitations under the License.
 
 use futures::pin_mut;
+use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
-use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{Distribution, TableIter};
 
-use crate::common::table::state_table::StateTable;
+use crate::error::StorageResult;
+use crate::memory::MemoryStateStore;
+use crate::table::batch_table::storage_table::StorageTable;
+use crate::table::streaming_table::state_table::StateTable;
+use crate::table::{Distribution, TableIter};
 
 /// There are three struct in relational layer, StateTable, MemTable and CellBasedTable.
 /// `StateTable` provides read/write interfaces to the upper layer streaming operator.
 /// `MemTable` is an in-memory buffer used to cache operator operations.
+/// `CellBasedTable` provides the transform from the kv encoding (hummock) to cell_based row
+/// encoding.
 
 // test storage table
 #[tokio::test]
-async fn test_storage_table_get_row() {
+async fn test_storage_table_get_row() -> StorageResult<()> {
     let state_store = MemoryStateStore::new();
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
@@ -110,6 +113,8 @@ async fn test_storage_table_get_row() {
         .await
         .unwrap();
     assert_eq!(get_no_exist_res, None);
+
+    Ok(())
 }
 
 #[tokio::test]

@@ -8,12 +8,12 @@ anyhow = "1"
 itertools = "0.10"
 risingwave_sqlparser = { path = "../" }
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+serde_yaml = "0.8"
 tempfile = "3"
 walkdir = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
+workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }
 
 [build-dependencies]
 walkdir = "2"

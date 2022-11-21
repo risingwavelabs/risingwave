@@ -22,9 +22,9 @@ use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
-use risingwave_common::row::{self, Row, Row2, RowDeserializer, RowExt};
 use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -34,23 +34,21 @@ use tracing::trace;
 
 use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
+use crate::keyspace::ExtractTableKeyIterator;
 use crate::row_serde::row_serde_util::{
     parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
 use crate::table::{compute_vnode, Distribution, TableIter};
-use crate::{StateStore, StateStoreIter};
+use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format, and is used in batch mode.
 #[derive(Clone)]
 pub struct StorageTable<S: StateStore> {
-    /// Id for this table.
-    table_id: TableId,
-
-    /// State store backend.
-    store: S,
+    /// The keyspace that the pk and value of the original table has.
+    keyspace: Keyspace<S>,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
     /// RowSeqScanExecutor.
@@ -198,9 +196,9 @@ impl<S: StateStore> StorageTable<S> {
             })
             .collect_vec();
 
+        let keyspace = Keyspace::table_root(store, table_id);
         Self {
-            table_id,
-            store,
+            keyspace,
             schema,
             pk_serializer,
             mapping: Arc::new(mapping),
@@ -225,31 +223,34 @@ impl<S: StateStore> StorageTable<S> {
 /// Point get
 impl<S: StateStore> StorageTable<S> {
     /// Get vnode value with given primary key.
-    fn compute_vnode_by_pk(&self, pk: impl Row2) -> VirtualNode {
+    fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
         compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
     }
 
     /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
     /// Return `None` if the provided columns are not enough.
-    fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: impl Row2) -> Option<VirtualNode> {
+    fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: &Row) -> Option<VirtualNode> {
         self.dist_key_in_pk_indices
             .iter()
-            .all(|&d| d < pk_prefix.len())
+            .all(|&d| d < pk_prefix.0.len())
             .then(|| compute_vnode(pk_prefix, &self.dist_key_in_pk_indices, &self.vnodes))
     }
 
     /// Get a single row by point get
     pub async fn get_row(
         &self,
-        pk: impl Row2,
+        pk: &Row,
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<Row>> {
         let epoch = wait_epoch.get_epoch();
-        self.store.try_wait_epoch(wait_epoch).await?;
+        self.keyspace
+            .state_store()
+            .try_wait_epoch(wait_epoch)
+            .await?;
         let serialized_pk =
-            serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
-        assert!(pk.len() <= self.pk_indices.len());
-        let key_indices = (0..pk.len())
+            serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode_by_pk(pk));
+        assert!(pk.size() <= self.pk_indices.len());
+        let key_indices = (0..pk.size())
             .into_iter()
             .map(|index| self.pk_indices[index])
             .collect_vec();
@@ -257,10 +258,13 @@ impl<S: StateStore> StorageTable<S> {
             prefix_hint: None,
             check_bloom_filter: self.dist_key_indices == key_indices,
             retention_seconds: self.table_option.retention_seconds,
-            ignore_range_tombstone: false,
-            table_id: self.table_id,
+            table_id: self.keyspace.table_id(),
         };
-        if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
+        if let Some(value) = self
+            .keyspace
+            .get(&serialized_pk, epoch, read_options)
+            .await?
+        {
             let full_row = self.row_deserializer.deserialize(value)?;
             let result_row = self.mapping.project(full_row);
             Ok(Some(result_row))
@@ -330,12 +334,11 @@ impl<S: StateStore> StorageTable<S> {
                 let read_options = ReadOptions {
                     prefix_hint,
                     check_bloom_filter,
-                    ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
-                    table_id: self.table_id,
+                    table_id: self.keyspace.table_id(),
                 };
                 let iter = StorageTableIterInner::<S>::new(
-                    &self.store,
+                    &self.keyspace,
                     self.mapping.clone(),
                     self.row_deserializer.clone(),
                     raw_key_range,
@@ -369,20 +372,21 @@ impl<S: StateStore> StorageTable<S> {
     async fn iter_with_pk_bounds(
         &self,
         epoch: HummockReadEpoch,
-        pk_prefix: impl Row2,
+        pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerde,
-            pk_prefix: impl Row2,
+            pk_prefix: &Row,
             next_col_bound: Bound<&Datum>,
             is_start_bound: bool,
         ) -> Bound<Vec<u8>> {
             match next_col_bound {
                 Included(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + 1);
-                    let key = pk_prefix.chain(row::once(k));
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
+                    let mut key = pk_prefix.clone();
+                    key.0.push(k.clone());
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
                         Included(serialized_key)
@@ -393,8 +397,9 @@ impl<S: StateStore> StorageTable<S> {
                     }
                 }
                 Excluded(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + 1);
-                    let key = pk_prefix.chain(row::once(k));
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
+                    let mut key = pk_prefix.clone();
+                    key.0.push(k.clone());
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
                         // storage doesn't support excluded begin key yet, so transform it to
@@ -407,9 +412,9 @@ impl<S: StateStore> StorageTable<S> {
                     }
                 }
                 Unbounded => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len());
-                    let serialized_pk_prefix = serialize_pk(&pk_prefix, &pk_prefix_serializer);
-                    if pk_prefix.is_empty() {
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
+                    let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
+                    if pk_prefix.size() == 0 {
                         Unbounded
                     } else if is_start_bound {
                         Included(serialized_pk_prefix)
@@ -422,19 +427,19 @@ impl<S: StateStore> StorageTable<S> {
 
         let start_key = serialize_pk_bound(
             &self.pk_serializer,
-            &pk_prefix,
+            pk_prefix,
             next_col_bounds.start_bound(),
             true,
         );
         let end_key = serialize_pk_bound(
             &self.pk_serializer,
-            &pk_prefix,
+            pk_prefix,
             next_col_bounds.end_bound(),
             false,
         );
 
-        assert!(pk_prefix.len() <= self.pk_indices.len());
-        let pk_prefix_indices = (0..pk_prefix.len())
+        assert!(pk_prefix.size() <= self.pk_indices.len());
+        let pk_prefix_indices = (0..pk_prefix.size())
             .into_iter()
             .map(|index| self.pk_indices[index])
             .collect_vec();
@@ -443,21 +448,21 @@ impl<S: StateStore> StorageTable<S> {
         {
             trace!(
                 "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
-                self.table_id,
+                self.keyspace.table_id(),
                 pk_prefix,
                 self.dist_key_indices,
                 pk_prefix_indices
             );
             None
         } else {
-            let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.len());
-            let serialized_pk_prefix = serialize_pk(&pk_prefix, &pk_prefix_serializer);
+            let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
+            let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
             Some(serialized_pk_prefix)
         };
 
         trace!(
             "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
-            self.table_id,
+            self.keyspace.table_id(),
             prefix_hint,
             start_key,
             end_key,
@@ -481,7 +486,7 @@ impl<S: StateStore> StorageTable<S> {
     pub async fn batch_iter_with_pk_bounds(
         &self,
         epoch: HummockReadEpoch,
-        pk_prefix: impl Row2,
+        pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageTableIter<S>> {
         self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, true)
@@ -490,7 +495,7 @@ impl<S: StateStore> StorageTable<S> {
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
     pub async fn batch_iter(&self, epoch: HummockReadEpoch) -> StorageResult<StorageTableIter<S>> {
-        self.batch_iter_with_pk_bounds(epoch, row::empty(), ..)
+        self.batch_iter_with_pk_bounds(epoch, Row::empty(), ..)
             .await
     }
 }
@@ -498,7 +503,7 @@ impl<S: StateStore> StorageTable<S> {
 /// [`StorageTableIterInner`] iterates on the storage table.
 struct StorageTableIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
-    iter: S::Iter,
+    iter: ExtractTableKeyIterator<S::Iter>,
 
     mapping: Arc<ColumnMapping>,
 
@@ -508,7 +513,7 @@ struct StorageTableIterInner<S: StateStore> {
 impl<S: StateStore> StorageTableIterInner<S> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
-        store: &S,
+        keyspace: &Keyspace<S>,
         mapping: Arc<ColumnMapping>,
         row_deserializer: Arc<RowDeserializer>,
         raw_key_range: R,
@@ -520,12 +525,10 @@ impl<S: StateStore> StorageTableIterInner<S> {
         B: AsRef<[u8]> + Send,
     {
         let raw_epoch = epoch.get_epoch();
-        let range = (
-            raw_key_range.start_bound().map(|b| b.as_ref().to_vec()),
-            raw_key_range.end_bound().map(|b| b.as_ref().to_vec()),
-        );
-        store.try_wait_epoch(epoch).await?;
-        let iter = store.iter(range, raw_epoch, read_options).await?;
+        keyspace.state_store().try_wait_epoch(epoch).await?;
+        let iter = keyspace
+            .iter_with_range(raw_key_range, raw_epoch, read_options)
+            .await?;
         let iter = Self {
             iter,
             mapping,
@@ -536,12 +539,9 @@ impl<S: StateStore> StorageTableIterInner<S> {
 
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
-    async fn into_stream(self) {
-        use crate::store::StateStoreIterExt;
-
-        // No need for table id and epoch.
-        let mut iter = self.iter.map(|(k, v)| (k.user_key.table_key.0, v));
-        while let Some((raw_key, value)) = iter
+    async fn into_stream(mut self) {
+        while let Some((raw_key, value)) = self
+            .iter
             .next()
             .verbose_stack_trace("storage_table_iter_next")
             .await?

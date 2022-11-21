@@ -111,7 +111,8 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(43)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
-- name: If the IN list has a larger type than the column, the InputRef is casted. Currently this case is not converted to scan range yet.
+- name: If the IN list has a larger type than the column, the InputRef is casted.
+    Currently this case is not converted to scan range yet.
   before:
   - create_table_and_mv
   sql: |
@@ -238,7 +239,8 @@
     CREATE TABLE t(x smallint);
     CREATE MATERIALIZED VIEW mv AS
       SELECT x from t group by x;
-- name: When the constant has a larger type and cannot be casted to the column's type, we can't convert it to scan range yet.
+- name: When the constant has a larger type and cannot be casted to the column's type,
+    we can't convert it to scan range yet.
   before:
   - create_small
   sql: |
@@ -247,7 +249,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (mv.x = 60000:Int32) }
       └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
-- name: When the constant has a larger type and cannot be casted to the column's type, we can't convert it to scan range yet.
+- name: When the constant has a larger type and cannot be casted to the column's type,
+    we can't convert it to scan range yet.
   before:
   - create_small
   sql: |
@@ -277,7 +280,8 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(1) , orders_count_by_user.user_id = Int64(2) AND orders_count_by_user.date = Int32(1111) , orders_count_by_user.user_id = Int64(2) AND orders_count_by_user.date = Int32(2222)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
-- name: When one arm of or clause contains other conditions, we can't convert it to scan range yet.
+- name: When one arm of or clause contains other conditions, we can't convert it to
+    scan range yet.
   before:
   - create_table_and_mv
   sql: |
@@ -286,7 +290,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (((orders_count_by_user.user_id = 1:Int32) OR ((orders_count_by_user.user_id = 2:Int32) AND In(orders_count_by_user.date, 1111:Int32, 2222:Int32))) OR (orders_count_by_user.user_id <> 3:Int32)) }
       └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
-- name: When any arm of or clause is not equal type, we can't convert it to scan range yet.
+- name: When any arm of or clause is not equal type, we can't convert it to scan range
+    yet.
   before:
   - create_table_and_mv
   sql: |

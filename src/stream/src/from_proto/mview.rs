@@ -27,7 +27,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
@@ -39,7 +39,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .collect();
 
         let table = node.get_table()?;
-        let handle_pk_conflict = node.get_handle_pk_conflict();
+        let do_sanity_check = node.get_ignore_on_conflict();
         let executor = MaterializeExecutor::new(
             input,
             store,
@@ -48,9 +48,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.actor_context,
             params.vnode_bitmap.map(Arc::new),
             table,
-            stream.context.lru_manager.clone(),
-            1 << 16,
-            handle_pk_conflict,
+            do_sanity_check,
         )
         .await;
 
@@ -66,7 +64,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let arrange_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Arrange)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
@@ -83,7 +81,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
         // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let handle_pk_conflict = arrange_node.get_handle_pk_conflict();
+        let ignore_on_conflict = arrange_node.get_ignore_on_conflict();
         let executor = MaterializeExecutor::new(
             input,
             store,
@@ -92,9 +90,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             params.actor_context,
             vnodes,
             table,
-            stream.context.lru_manager.clone(),
-            1 << 16,
-            handle_pk_conflict,
+            ignore_on_conflict,
         )
         .await;
 

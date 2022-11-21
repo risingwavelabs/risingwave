@@ -16,9 +16,8 @@ use std::borrow::Cow;
 
 use itertools::Itertools;
 
-use crate::array::RowRef;
+use crate::array::{Row, RowRef};
 use crate::error::Result;
-use crate::row::{Row, Row2};
 use crate::types::{
     deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
     DatumRef,
@@ -52,16 +51,14 @@ impl OrderedRowSerde {
         }
     }
 
-    pub fn serialize(&self, row: impl Row2, append_to: &mut Vec<u8>) {
-        self.serialize_datum_refs(row.iter(), append_to)
+    pub fn serialize(&self, row: &Row, append_to: &mut Vec<u8>) {
+        self.serialize_datums(row.values(), append_to)
     }
 
-    /// TODO(row trait): remove this.
     pub fn serialize_ref(&self, row_ref: RowRef<'_>, append_to: &mut Vec<u8>) {
-        self.serialize(row_ref, append_to)
+        self.serialize_datum_refs(row_ref.values(), append_to)
     }
 
-    /// TODO(row trait): use `OrderedRowSerde::serialize` instead.
     pub fn serialize_datums<'a>(
         &self,
         datums: impl Iterator<Item = &'a Datum>,
@@ -75,7 +72,6 @@ impl OrderedRowSerde {
         }
     }
 
-    /// TODO(row trait): use `OrderedRowSerde::serialize` instead.
     pub fn serialize_datum_refs<'a>(
         &self,
         datum_refs: impl Iterator<Item = DatumRef<'a>>,

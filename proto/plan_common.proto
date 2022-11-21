@@ -15,8 +15,7 @@ message Field {
 message ColumnDesc {
   data.DataType column_type = 1;
   int32 column_id = 2;
-  // we store the column name in column desc now just for debug, but in future
-  // we should store it in ColumnCatalog but not here
+  // we store the column name in column desc now just for debug, but in future we should store it in ColumnCatalog but not here
   string name = 3;
   // For STRUCT type.
   repeated ColumnDesc field_descs = 4;
@@ -74,5 +73,4 @@ enum RowFormatType {
   DEBEZIUM_JSON = 3;
   AVRO = 4;
   MAXWELL = 5;
-  CANAL_JSON = 6;
 }

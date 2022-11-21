@@ -30,8 +30,8 @@ use super::{
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, DeleteRangeTombstone, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableStoreRef, SstableWriter,
+    CachePolicy, LruCache, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
+    SstableWriter,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
@@ -101,7 +101,6 @@ pub fn gen_dummy_sst_info(
         key_range: Some(KeyRange {
             left: FullKey::for_test(table_id, min_table_key, epoch).encode(),
             right: FullKey::for_test(table_id, max_table_key, epoch).encode(),
-            right_exclusive: false,
         }),
         file_size,
         table_ids: vec![],
@@ -173,7 +172,6 @@ pub async fn put_sst(
         key_range: Some(KeyRange {
             left: meta.smallest_key.clone(),
             right: meta.largest_key.clone(),
-            right_exclusive: false,
         }),
         file_size: meta.estimated_size as u64,
         table_ids: vec![],
@@ -192,7 +190,6 @@ pub async fn gen_test_sstable_inner(
     opts: SstableBuilderOptions,
     sst_id: HummockSstableId,
     kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
-    range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
 ) -> Sstable {
@@ -205,9 +202,6 @@ pub async fn gen_test_sstable_inner(
     let mut b = SstableBuilder::for_test(sst_id, writer, opts);
     for (key, value) in kv_iter {
         b.add(&key.to_ref(), value.as_slice(), true).await.unwrap();
-    }
-    for tombstone in range_tombstones {
-        b.add_delete_range(tombstone);
     }
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
@@ -228,34 +222,7 @@ pub async fn gen_test_sstable(
     kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    gen_test_sstable_inner(
-        opts,
-        sst_id,
-        kv_iter,
-        vec![],
-        sstable_store,
-        CachePolicy::NotFill,
-    )
-    .await
-}
-
-/// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
-pub async fn gen_test_sstable_with_range_tombstone(
-    opts: SstableBuilderOptions,
-    sst_id: HummockSstableId,
-    kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
-    range_tombstones: Vec<DeleteRangeTombstone>,
-    sstable_store: SstableStoreRef,
-) -> Sstable {
-    gen_test_sstable_inner(
-        opts,
-        sst_id,
-        kv_iter,
-        range_tombstones,
-        sstable_store,
-        CachePolicy::NotFill,
-    )
-    .await
+    gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::NotFill).await
 }
 
 /// Generates a user key with table id 0 and the given `table_key`

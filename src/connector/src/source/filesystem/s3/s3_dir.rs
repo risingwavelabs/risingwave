@@ -15,9 +15,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
-use aws_config::timeout::TimeoutConfig;
+use aws_config::timeout::Http;
 use aws_sdk_s3::{client as s3_client, config as s3_config};
 use aws_sdk_sqs::client as sqs_client;
+use aws_smithy_types::tristate::TriState;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
 use sync::watch;
@@ -181,11 +182,12 @@ pub(crate) fn new_s3_client(s3_source_config: S3SourceConfig) -> s3_client::Clie
     let config_for_s3 = match s3_source_config.custom_config {
         Some(conf) => {
             let retry_conf =
-                aws_config::retry::RetryConfig::standard().with_max_attempts(conf.max_retry_times);
-            let timeout_conf = TimeoutConfig::builder()
-                .connect_timeout(conf.conn_time_out)
-                .read_timeout(conf.read_time_out)
-                .build();
+                aws_config::RetryConfig::standard().with_max_attempts(conf.max_retry_times);
+            let timeout_conf = aws_config::timeout::Config::new().with_http_timeouts(
+                Http::new()
+                    .with_connect_timeout(TriState::Set(conf.conn_time_out))
+                    .with_read_timeout(TriState::Set(conf.read_time_out)),
+            );
 
             s3_config::Builder::from(&s3_source_config.shared_config)
                 .retry_config(retry_conf)

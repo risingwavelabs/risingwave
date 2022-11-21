@@ -31,7 +31,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         state_store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
 
@@ -101,7 +101,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(
             table,
-            stream.config.developer.stream_chunk_size,
+            None,
             ExecutorInfo {
                 schema,
                 pk_indices: params.pk_indices,

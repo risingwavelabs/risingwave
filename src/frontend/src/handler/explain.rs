@@ -14,11 +14,10 @@
 
 use std::sync::atomic::Ordering;
 
-use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
 
 use super::create_index::gen_create_index_plan;
@@ -163,8 +162,7 @@ pub(super) fn handle_explain(
         rows.into(),
         vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
-            DataType::VARCHAR.to_oid(),
-            DataType::VARCHAR.type_len(),
+            TypeOid::Varchar,
         )],
     ))
 }

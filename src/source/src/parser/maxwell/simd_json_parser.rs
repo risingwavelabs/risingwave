@@ -14,14 +14,13 @@
 
 use std::fmt::Debug;
 
-use futures::future::ready;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, ValueAccess};
 
 use super::operators::*;
 use crate::parser::common::simd_json_parse_value;
-use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
@@ -30,12 +29,8 @@ const OP: &str = "type";
 #[derive(Debug)]
 pub struct MaxwellParser;
 
-impl MaxwellParser {
-    fn parse_inner(
-        &self,
-        payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+impl SourceParser for MaxwellParser {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         let mut payload_mut = payload.to_vec();
         let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
@@ -95,21 +90,5 @@ impl MaxwellParser {
                 other
             )))),
         }
-    }
-}
-
-impl SourceParser for MaxwellParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        ready(self.parse_inner(payload, writer))
     }
 }

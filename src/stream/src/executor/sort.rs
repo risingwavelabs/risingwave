@@ -18,13 +18,13 @@ use std::ops::Bound;
 use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{self, Row};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
@@ -32,7 +32,6 @@ use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
     PkIndices, StreamExecutorResult, Watermark,
 };
-use crate::common::table::state_table::StateTable;
 
 /// [`SortBufferKey`] contains a record's timestamp and pk.
 type SortBufferKey = (ScalarImpl, Row);
@@ -276,13 +275,7 @@ impl<S: StateStore> SortExecutor<S> {
         {
             let value_iter = self
                 .state_table
-                .iter_with_pk_range(
-                    &(
-                        Bound::<row::Empty>::Unbounded,
-                        Bound::<row::Empty>::Unbounded,
-                    ),
-                    owned_vnode as _,
-                )
+                .iter_with_pk_range(&(Bound::Unbounded, Bound::Unbounded), owned_vnode as _)
                 .await?;
             let value_iter = Box::pin(value_iter);
             values_per_vnode.push(value_iter);
@@ -336,6 +329,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::streaming_table::state_table::StateTable;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};

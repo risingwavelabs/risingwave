@@ -11,75 +11,60 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::path::Path;
 
 use apache_avro::types::Value;
-use apache_avro::{from_avro_datum, Reader, Schema};
+use apache_avro::{Reader, Schema};
 use chrono::{Datelike, NaiveDate};
+use hyper::http::uri::InvalidUri;
+use hyper_tls::HttpsConnector;
 use itertools::Itertools;
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
+use risingwave_common::error::ErrorCode::{
+    InternalError, InvalidConfigValue, InvalidParameterValue, ProtocolError,
+};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{
     DataType, Datum, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
     ScalarImpl,
 };
+use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
-use super::schema_resolver::*;
-use crate::parser::schema_registry::{extract_schema_id, Client};
-use crate::parser::util::get_kafka_topic;
-use crate::parser::ParseFuture;
 use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
-fn unix_epoch_days() -> i32 {
+const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
+
+pub fn unix_epoch_days() -> i32 {
     NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()
 }
 
 #[derive(Debug)]
 pub struct AvroParser {
     schema: Schema,
-    schema_resolver: Option<ConfluentSchemaResolver>,
 }
-// confluent_wire_format, kafka only, subject-name: "${topic-name}-value"
+
 impl AvroParser {
-    pub async fn new(
-        schema_location: &str,
-        use_schema_registry: bool,
-        props: HashMap<String, String>,
-    ) -> Result<Self> {
+    pub async fn new(schema_location: &str, props: HashMap<String, String>) -> Result<Self> {
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
-        let (schema, schema_resolver) = if use_schema_registry {
-            let kafka_topic = get_kafka_topic(&props)?;
-            let client = Client::new(url)?;
-            let (schema, resolver) =
-                ConfluentSchemaResolver::new(format!("{}-value", kafka_topic).as_str(), client)
-                    .await?;
-            (schema, Some(resolver))
-        } else {
-            let schema_content = match url.scheme() {
-                "file" => read_schema_from_local(url.path()),
-                "s3" => read_schema_from_s3(&url, props).await,
-                "https" | "http" => read_schema_from_http(&url).await,
-                scheme => Err(RwError::from(ProtocolError(format!(
-                    "path scheme {} is not supported",
-                    scheme
-                )))),
-            }?;
-            let schema = Schema::parse_str(&schema_content).map_err(|e| {
-                RwError::from(InternalError(format!("Avro schema parse error {}", e)))
-            })?;
-            (schema, None)
-        };
-        Ok(Self {
-            schema,
-            schema_resolver,
-        })
+        let url_schema = url.scheme();
+        let schema_content = match url_schema {
+            "file" => read_schema_from_local(url.path()),
+            "s3" => read_schema_from_s3(&url, props).await,
+            "https" => read_schema_from_https(&url).await,
+            _ => Err(RwError::from(ProtocolError(format!(
+                "path scheme {} is not supported",
+                url_schema
+            )))),
+        }?;
+        let schema = Schema::parse_str(&schema_content)
+            .map_err(|e| RwError::from(InternalError(format!("Avro schema parse error {}", e))))?;
+        Ok(Self { schema })
     }
 
     pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
@@ -175,51 +160,6 @@ impl AvroParser {
 
         Ok(data_type)
     }
-
-    async fn parse_inner(
-        &self,
-        payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        // parse payload to avro value
-        // if use confluent schema, get writer schema from confluent schema registry
-        let avro_value = if let Some(resolver) = &self.schema_resolver {
-            let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
-            let writer_schema = resolver.get(schema_id).await?;
-            from_avro_datum(writer_schema.as_ref(), &mut raw_payload, Some(&self.schema))
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
-        } else {
-            let mut reader = Reader::with_schema(&self.schema, payload)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-            match reader.next() {
-                Some(Ok(v)) => v,
-                Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
-                None => {
-                    return Err(RwError::from(ProtocolError(
-                        "avro parse unexpected eof".to_string(),
-                    )))
-                }
-            }
-        };
-        // parse the valur to rw value
-        if let Value::Record(fields) = avro_value {
-            writer.insert(|column| {
-                let tuple = fields.iter().find(|val| column.name.eq(&val.0)).unwrap();
-                from_avro_value(tuple.1.clone()).map_err(|e| {
-                    tracing::error!(
-                        "failed to process value ({}): {}",
-                        String::from_utf8_lossy(payload),
-                        e
-                    );
-                    e
-                })
-            })
-        } else {
-            Err(RwError::from(ProtocolError(
-                "avro parse unexpected value".to_string(),
-            )))
-        }
-    }
 }
 
 /// Convert Avro value to datum.For now, support the following [Avro type](https://avro.apache.org/docs/current/spec.html).
@@ -303,19 +243,95 @@ fn from_avro_value(value: Value) -> Result<Datum> {
 }
 
 impl SourceParser for AvroParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        self.parse_inner(payload, writer)
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+        match Reader::with_schema(&self.schema, payload) {
+            Ok(mut reader) => match reader.next() {
+                Some(Ok(Value::Record(fields))) => writer.insert(|column| {
+                    let tuple = fields.iter().find(|val| column.name.eq(&val.0)).unwrap();
+                    from_avro_value(tuple.1.clone()).map_err(|e| {
+                        tracing::error!(
+                            "failed to process value ({}): {}",
+                            String::from_utf8_lossy(payload),
+                            e
+                        );
+                        e
+                    })
+                }),
+                Some(Ok(_)) => Err(RwError::from(ProtocolError(
+                    "avro parse unexpected value".to_string(),
+                ))),
+                Some(Err(e)) => Err(RwError::from(ProtocolError(e.to_string()))),
+                None => Err(RwError::from(ProtocolError(
+                    "avro parse unexpected eof".to_string(),
+                ))),
+            },
+            Err(e) => Err(RwError::from(ProtocolError(e.to_string()))),
+        }
     }
+}
+
+/// Read schema from s3 bucket.
+/// S3 file location format: <s3://bucket_name/file_name>
+pub async fn read_schema_from_s3(url: &Url, properties: HashMap<String, String>) -> Result<String> {
+    let bucket = url
+        .domain()
+        .ok_or_else(|| RwError::from(InternalError(format!("Illegal Avro schema path {}", url))))?;
+    if properties.get(AVRO_SCHEMA_LOCATION_S3_REGION).is_none() {
+        return Err(RwError::from(InvalidConfigValue {
+            config_entry: AVRO_SCHEMA_LOCATION_S3_REGION.to_string(),
+            config_value: "NONE".to_string(),
+        }));
+    }
+    let key = url.path().replace('/', "");
+    let config = AwsConfigV2::from(properties.clone());
+    let sdk_config = config.load_config(None).await;
+    let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
+    let response = s3_client
+        .get_object()
+        .bucket(bucket.to_string())
+        .key(key)
+        .send()
+        .await
+        .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+    let body_bytes = response.body.collect().await.map_err(|e| {
+        RwError::from(InternalError(format!(
+            "Read Avro schema file from s3 {}",
+            e
+        )))
+    })?;
+    let schema_bytes = body_bytes.into_bytes().to_vec();
+    String::from_utf8(schema_bytes)
+        .map_err(|e| RwError::from(InternalError(format!("Avro schema not valid utf8 {}", e))))
+}
+
+/// Read avro schema file from local file.For on-premise or testing.
+pub fn read_schema_from_local(path: impl AsRef<Path>) -> Result<String> {
+    std::fs::read_to_string(path.as_ref()).map_err(|e| e.into())
+}
+
+/// Read avro schema file from local file.For common usage.
+async fn read_schema_from_https(location: &Url) -> Result<String> {
+    let client = hyper::Client::builder().build::<_, hyper::Body>(HttpsConnector::new());
+    let res = client
+        .get(
+            location
+                .to_string()
+                .parse()
+                .map_err(|e: InvalidUri| InvalidParameterValue(e.to_string()))?,
+        )
+        .await
+        .map_err(|e| {
+            InvalidParameterValue(format!("failed to read from URL {}: {}", location, e))
+        })?;
+    let buf = hyper::body::to_bytes(res)
+        .await
+        .map_err(|e| InvalidParameterValue(format!("failed to read HTTP body: {}", e)))?;
+    String::from_utf8(buf.into()).map_err(|e| {
+        RwError::from(InternalError(format!(
+            "read schema string from https failed {}",
+            e
+        )))
+    })
 }
 
 #[cfg(test)]
@@ -335,8 +351,8 @@ mod test {
     };
     use url::Url;
 
-    use super::{
-        read_schema_from_http, read_schema_from_local, read_schema_from_s3, unix_epoch_days,
+    use crate::parser::avro_parser::{
+        read_schema_from_https, read_schema_from_local, read_schema_from_s3, unix_epoch_days,
         AvroParser,
     };
     use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
@@ -383,7 +399,7 @@ mod test {
         let schema_location =
             "https://mingchao-schemas.s3.ap-southeast-1.amazonaws.com/complex-schema.avsc";
         let url = Url::parse(schema_location).unwrap();
-        let schema_content = read_schema_from_http(&url).await;
+        let schema_content = read_schema_from_https(&url).await;
         assert!(schema_content.is_ok());
         let schema = Schema::parse_str(&schema_content.unwrap());
         assert!(schema.is_ok());
@@ -392,7 +408,7 @@ mod test {
 
     async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {
         let schema_path = "file://".to_owned() + &test_data_path(file_name);
-        AvroParser::new(schema_path.as_str(), false, HashMap::new()).await
+        AvroParser::new(schema_path.as_str(), HashMap::new()).await
     }
 
     #[tokio::test]
@@ -413,7 +429,7 @@ mod test {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
         {
             let writer = builder.row_writer();
-            avro_parser.parse(&input_data[..], writer).await.unwrap();
+            avro_parser.parse(&input_data[..], writer).unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();

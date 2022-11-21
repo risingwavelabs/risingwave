@@ -15,8 +15,7 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::{ArrayRef, DataChunk, ListValue};
-use risingwave_common::row::Row;
+use risingwave_common::array::{ArrayRef, DataChunk, ListValue, Row};
 use risingwave_common::types::{to_datum_ref, DataType, Datum, DatumRef, ScalarRefImpl};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;

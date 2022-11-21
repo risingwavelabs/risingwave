@@ -24,7 +24,6 @@ mod query;
 mod relation;
 mod select;
 mod set_expr;
-mod set_operation;
 mod statement;
 mod update;
 mod values;

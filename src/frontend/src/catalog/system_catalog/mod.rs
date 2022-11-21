@@ -20,12 +20,12 @@ use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use paste::paste;
+use risingwave_common::array::Row;
 use risingwave_common::catalog::{
     ColumnDesc, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
     INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
-use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 
 use crate::catalog::catalog_service::CatalogReader;

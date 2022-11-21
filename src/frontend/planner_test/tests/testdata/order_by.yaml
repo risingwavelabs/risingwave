@@ -160,7 +160,8 @@
   sql: |
     create table t (x int, y int);
     select distinct x from t order by y;
-  planner_error: 'Invalid input syntax: for SELECT DISTINCT, ORDER BY expressions must appear in select list'
+  planner_error: 'Invalid input syntax: for SELECT DISTINCT, ORDER BY expressions
+    must appear in select list'
 - name: No BatchSort needed, when input is already sorted
   sql: |
     create table t(v int);

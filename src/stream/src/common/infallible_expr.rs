@@ -14,8 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk};
-use risingwave_common::row::Row;
+use risingwave_common::array::{ArrayRef, DataChunk, Row};
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::Expression;
 use risingwave_expr::ExprError;

@@ -84,7 +84,6 @@ impl StreamMaterialize {
         out_names: Vec<String>,
         is_index: bool,
         definition: String,
-        handle_pk_conflict: bool,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
@@ -168,6 +167,7 @@ impl StreamMaterialize {
 
         let ctx = input.ctx();
         let properties = ctx.inner().with_options.internal_table_subset();
+
         let table = TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -185,7 +185,6 @@ impl StreamMaterialize {
             vnode_col_idx: None,
             value_indices,
             definition,
-            handle_pk_conflict,
         };
 
         Ok(Self { base, input, table })
@@ -266,7 +265,7 @@ impl StreamNode for StreamMaterialize {
                 .map(FieldOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
-            handle_pk_conflict: self.table.handle_pk_conflict(),
+            ignore_on_conflict: true,
         })
     }
 }

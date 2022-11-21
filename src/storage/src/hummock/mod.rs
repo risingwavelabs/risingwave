@@ -95,7 +95,6 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::{HummockReadVersion, HummockVersionReader};
 use crate::monitor::StoreLocalStatistic;
-use crate::store::ReadOptions;
 
 struct HummockStorageShutdownGuard {
     shutdown_sender: UnboundedSender<HummockEvent>,
@@ -319,23 +318,15 @@ pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
     sstable_info: &SstableInfo,
     full_key: FullKey<&[u8]>,
-    read_options: &ReadOptions,
+    check_bloom_filter: bool,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
     let ukey = &full_key.user_key;
-    let delete_epoch = if read_options.ignore_range_tombstone {
-        None
-    } else {
-        get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
-    };
-    if read_options.check_bloom_filter
+    if check_bloom_filter
         && !hit_sstable_bloom_filter(sstable.value(), ukey.encode().as_slice(), local_stats)
     {
-        if delete_epoch.is_some() {
-            return Ok(Some(HummockValue::Delete));
-        }
         return Ok(None);
     }
 
@@ -349,27 +340,14 @@ pub async fn get_from_sstable_info(
     iter.seek(full_key).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
-        if delete_epoch.is_some() {
-            return Ok(Some(HummockValue::Delete));
-        }
         return Ok(None);
     }
 
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
-    let value = if iter.key().user_key == *ukey {
-        if delete_epoch
-            .map(|epoch| epoch >= iter.key().epoch)
-            .unwrap_or(false)
-        {
-            Some(HummockValue::Delete)
-        } else {
-            Some(iter.value().to_bytes())
-        }
-    } else if delete_epoch.is_some() {
-        Some(HummockValue::Delete)
-    } else {
-        None
+    let value = match iter.key().user_key == *ukey {
+        true => Some(iter.value().to_bytes()),
+        false => None,
     };
     iter.collect_local_statistic(local_stats);
 
@@ -397,7 +375,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
     order_sorted_uncommitted_data: OrderSortedUncommittedData,
     full_key: FullKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
-    read_options: &ReadOptions,
+    check_bloom_filter: bool,
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
     let epoch = full_key.epoch;
@@ -420,7 +398,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
                         sstable_store_ref.clone(),
                         &sst_info,
                         full_key,
-                        read_options,
+                        check_bloom_filter,
                         local_stats,
                     )
                     .await?
@@ -440,9 +418,6 @@ pub fn get_from_batch(
     table_key: TableKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
-    if batch.check_delete_by_range(table_key) {
-        return Some(HummockValue::Delete);
-    }
     batch.get(table_key).map(|v| {
         local_stats.get_shared_buffer_hit_counts += 1;
         v

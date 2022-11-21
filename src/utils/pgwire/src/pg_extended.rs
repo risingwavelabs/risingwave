@@ -21,14 +21,13 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use futures::stream::FusedStream;
 use futures::{Stream, StreamExt, TryStreamExt};
-use itertools::{zip_eq, Itertools};
+use itertools::zip_eq;
 use postgres_types::{FromSql, Type};
 use regex::Regex;
-use risingwave_common::types::DataType;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
-use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
 use crate::pg_protocol::{cstr_to_str, Conn};
 use crate::pg_response::{PgResponse, RowSetResult};
@@ -62,12 +61,8 @@ impl PgStatement {
         self.name.clone()
     }
 
-    pub fn param_oid_desc(&self) -> Vec<i32> {
-        self.prepared_statement
-            .param_type_description()
-            .into_iter()
-            .map(|v| v.to_oid())
-            .collect_vec()
+    pub fn type_desc(&self) -> Vec<TypeOid> {
+        self.prepared_statement.type_description()
     }
 
     pub fn row_desc(&self) -> Vec<PgFieldDescriptor> {
@@ -250,7 +245,7 @@ pub struct PreparedStatement {
     /// param_tokens : {{1,"$1"},{2,"$2::INT"}}
     param_tokens: HashMap<usize, String>,
 
-    param_types: Vec<DataType>,
+    param_types: Vec<TypeOid>,
 }
 
 static PARAMETER_PATTERN: LazyLock<Regex> =
@@ -272,13 +267,8 @@ impl PreparedStatement {
     /// information(PreparedStatement::param_types).
     pub fn parse_statement(
         raw_statement: String,
-        provided_param_oid: Vec<i32>,
+        provided_param_types: Vec<TypeOid>,
     ) -> PsqlResult<Self> {
-        let provided_param_types = provided_param_oid
-            .iter()
-            .map(|x| DataType::from_oid(*x).map_err(|e| PsqlError::ParseError(Box::new(e))))
-            .collect::<PsqlResult<Vec<_>>>()?;
-
         // Match all generic param.
         // e.g.
         // raw_statement = "select * from table where a = $1 and b = $2::INT4"
@@ -297,7 +287,7 @@ impl PreparedStatement {
         }
 
         let mut param_tokens = HashMap::new();
-        let mut param_records: Vec<Option<DataType>> = vec![None; 1];
+        let mut param_records: Vec<Option<TypeOid>> = vec![None; 1];
 
         // Parse the implicit type information.
         // e.g.
@@ -314,7 +304,7 @@ impl PreparedStatement {
                 .parse::<usize>()
                 .unwrap();
             let param_type = if let Some(str) = param.next() {
-                Some(DataType::from_str(str).map_err(|_| {
+                Some(TypeOid::from_str(str).map_err(|_| {
                     PsqlError::ParseError(format!("Invalid type name {}", str).into())
                 })?)
             } else {
@@ -342,11 +332,11 @@ impl PreparedStatement {
                 continue;
             }
             if idx < provided_param_types.len() {
-                *param_record = Some(provided_param_types[idx].clone());
+                *param_record = Some(provided_param_types[idx]);
             } else {
                 // If the type information isn't provided implicitly or explicitly, we just assign
                 // it as VARCHAR.
-                *param_record = Some(DataType::Varchar);
+                *param_record = Some(TypeOid::Varchar);
             }
         }
 
@@ -370,17 +360,17 @@ impl PreparedStatement {
     ///
     /// ```ignore
     /// let raw_params = vec!["A".into(), "B".into(), "C".into()];
-    /// let type_description = vec![DataType::Varchar; 3];
+    /// let type_description = vec![TypeOid::Varchar; 3];
     /// let params = parse_params(&type_description, &raw_params,false);
     /// assert_eq!(params, vec!["'A'", "'B'", "'C'"])
     ///
     /// let raw_params = vec!["1".into(), "2".into(), "3.1".into()];
-    /// let type_description = vec![DataType::INT,DataType::INT,DataType::FLOAT4];
+    /// let type_description = vec![TypeOid::INT,TypeOid::INT,TypeOid::FLOAT4];
     /// let params = parse_params(&type_description, &raw_params,false);
     /// assert_eq!(params, vec!["1::INT", "2::INT", "3.1::FLOAT4"])
     /// ```
     fn parse_params(
-        type_description: &[DataType],
+        type_description: &[TypeOid],
         raw_params: &[Bytes],
         param_format: bool,
     ) -> PsqlResult<Vec<String>> {
@@ -397,10 +387,10 @@ impl PreparedStatement {
         let place_hodler = Type::ANY;
         for (type_oid, raw_param) in zip_eq(type_description.iter(), raw_params.iter()) {
             let str = match type_oid {
-                DataType::Varchar => {
+                TypeOid::Varchar => {
                     format!("'{}'", cstr_to_str(raw_param).unwrap())
                 }
-                DataType::Boolean => {
+                TypeOid::Boolean => {
                     if param_format {
                         bool::from_sql(&place_hodler, raw_param)
                             .unwrap()
@@ -409,28 +399,28 @@ impl PreparedStatement {
                         cstr_to_str(raw_param).unwrap().to_string()
                     }
                 }
-                DataType::Int64 => {
+                TypeOid::BigInt => {
                     if param_format {
                         i64::from_sql(&place_hodler, raw_param).unwrap().to_string()
                     } else {
                         cstr_to_str(raw_param).unwrap().to_string()
                     }
                 }
-                DataType::Int16 => {
+                TypeOid::SmallInt => {
                     if param_format {
                         i16::from_sql(&place_hodler, raw_param).unwrap().to_string()
                     } else {
                         cstr_to_str(raw_param).unwrap().to_string()
                     }
                 }
-                DataType::Int32 => {
+                TypeOid::Int => {
                     if param_format {
                         i32::from_sql(&place_hodler, raw_param).unwrap().to_string()
                     } else {
                         cstr_to_str(raw_param).unwrap().to_string()
                     }
                 }
-                DataType::Float32 => {
+                TypeOid::Float4 => {
                     let tmp = if param_format {
                         f32::from_sql(&place_hodler, raw_param).unwrap().to_string()
                     } else {
@@ -438,7 +428,7 @@ impl PreparedStatement {
                     };
                     format!("'{}'::FLOAT4", tmp)
                 }
-                DataType::Float64 => {
+                TypeOid::Float8 => {
                     let tmp = if param_format {
                         f64::from_sql(&place_hodler, raw_param).unwrap().to_string()
                     } else {
@@ -446,7 +436,7 @@ impl PreparedStatement {
                     };
                     format!("'{}'::FLOAT8", tmp)
                 }
-                DataType::Date => {
+                TypeOid::Date => {
                     let tmp = if param_format {
                         chrono::NaiveDate::from_sql(&place_hodler, raw_param)
                             .unwrap()
@@ -456,7 +446,7 @@ impl PreparedStatement {
                     };
                     format!("'{}'::DATE", tmp)
                 }
-                DataType::Time => {
+                TypeOid::Time => {
                     let tmp = if param_format {
                         chrono::NaiveTime::from_sql(&place_hodler, raw_param)
                             .unwrap()
@@ -466,7 +456,7 @@ impl PreparedStatement {
                     };
                     format!("'{}'::TIME", tmp)
                 }
-                DataType::Timestamp => {
+                TypeOid::Timestamp => {
                     let tmp = if param_format {
                         chrono::NaiveDateTime::from_sql(&place_hodler, raw_param)
                             .unwrap()
@@ -476,7 +466,7 @@ impl PreparedStatement {
                     };
                     format!("'{}'::TIMESTAMP", tmp)
                 }
-                DataType::Decimal => {
+                TypeOid::Decimal => {
                     let tmp = if param_format {
                         rust_decimal::Decimal::from_sql(&place_hodler, raw_param)
                             .unwrap()
@@ -486,7 +476,7 @@ impl PreparedStatement {
                     };
                     format!("'{}'::DECIMAL", tmp)
                 }
-                DataType::Timestampz => {
+                TypeOid::Timestamptz => {
                     let tmp = if param_format {
                         chrono::DateTime::<chrono::Utc>::from_sql(&place_hodler, raw_param)
                             .unwrap()
@@ -496,7 +486,7 @@ impl PreparedStatement {
                     };
                     format!("'{}'::TIMESTAMPTZ", tmp)
                 }
-                DataType::Interval => {
+                TypeOid::Interval => {
                     let tmp = if param_format {
                         pg_interval::Interval::from_sql(&place_hodler, raw_param)
                             .unwrap()
@@ -505,12 +495,6 @@ impl PreparedStatement {
                         cstr_to_str(raw_param).unwrap().to_string()
                     };
                     format!("'{}'::INTERVAL", tmp)
-                }
-                DataType::Struct(_) | DataType::List { .. } => {
-                    return Err(PsqlError::Internal(anyhow!(
-                        "Unsupported param type {:?}",
-                        type_oid
-                    )))
                 }
             };
             params.push(str)
@@ -521,31 +505,25 @@ impl PreparedStatement {
 
     /// `default_params` creates default params from type oids for
     /// [`PreparedStatement::instance_default`].
-    fn default_params(type_description: &[DataType]) -> PsqlResult<Vec<String>> {
+    fn default_params(type_description: &[TypeOid]) -> PsqlResult<Vec<String>> {
         let mut params: _ = Vec::new();
         for oid in type_description.iter() {
             match oid {
-                DataType::Boolean => params.push("false".to_string()),
-                DataType::Int64 => params.push("0::BIGINT".to_string()),
-                DataType::Int16 => params.push("0::SMALLINT".to_string()),
-                DataType::Int32 => params.push("0::INT".to_string()),
-                DataType::Float32 => params.push("0::FLOAT4".to_string()),
-                DataType::Float64 => params.push("0::FLOAT8".to_string()),
-                DataType::Varchar => params.push("'0'".to_string()),
-                DataType::Date => params.push("'2021-01-01'::DATE".to_string()),
-                DataType::Time => params.push("'00:00:00'::TIME".to_string()),
-                DataType::Timestamp => params.push("'2021-01-01 00:00:00'::TIMESTAMP".to_string()),
-                DataType::Decimal => params.push("'0'::DECIMAL".to_string()),
-                DataType::Timestampz => {
+                TypeOid::Boolean => params.push("false".to_string()),
+                TypeOid::BigInt => params.push("0::BIGINT".to_string()),
+                TypeOid::SmallInt => params.push("0::SMALLINT".to_string()),
+                TypeOid::Int => params.push("0::INT".to_string()),
+                TypeOid::Float4 => params.push("0::FLOAT4".to_string()),
+                TypeOid::Float8 => params.push("0::FLOAT8".to_string()),
+                TypeOid::Varchar => params.push("'0'".to_string()),
+                TypeOid::Date => params.push("'2021-01-01'::DATE".to_string()),
+                TypeOid::Time => params.push("'00:00:00'::TIME".to_string()),
+                TypeOid::Timestamp => params.push("'2021-01-01 00:00:00'::TIMESTAMP".to_string()),
+                TypeOid::Decimal => params.push("'0'::DECIMAL".to_string()),
+                TypeOid::Timestamptz => {
                     params.push("'2022-10-01 12:00:00+01:00'::timestamptz".to_string())
                 }
-                DataType::Interval => params.push("'2 months ago'::interval".to_string()),
-                DataType::Struct(_) | DataType::List { .. } => {
-                    return Err(PsqlError::Internal(anyhow!(
-                        "Unsupported param type {:?}",
-                        oid
-                    )))
-                }
+                TypeOid::Interval => params.push("'2 months ago'::interval".to_string()),
             };
         }
         Ok(params)
@@ -562,7 +540,7 @@ impl PreparedStatement {
         tmp
     }
 
-    pub fn param_type_description(&self) -> Vec<DataType> {
+    pub fn type_description(&self) -> Vec<TypeOid> {
         self.param_types.clone()
     }
 
@@ -588,10 +566,10 @@ mod tests {
     use pg_interval::Interval;
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use postgres_types::private::BytesMut;
-    use risingwave_common::types::DataType;
     use tokio_postgres::types::{ToSql, Type};
 
     use crate::pg_extended::PreparedStatement;
+    use crate::pg_field_descriptor::TypeOid;
 
     #[test]
     fn test_prepared_statement_without_param() {
@@ -607,19 +585,16 @@ mod tests {
     fn test_prepared_statement_with_explicit_param() {
         let raw_statement = "SELECT * FROM test_table WHERE id = $1".to_string();
         let prepared_statement =
-            PreparedStatement::parse_statement(raw_statement, vec![DataType::INT32.to_oid()])
-                .unwrap();
+            PreparedStatement::parse_statement(raw_statement, vec![TypeOid::Int]).unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table WHERE id = 0::INT" == default_sql);
         let sql = prepared_statement.instance(&["1".into()], false).unwrap();
         assert!("SELECT * FROM test_table WHERE id = 1" == sql);
 
         let raw_statement = "INSERT INTO test (index,data) VALUES ($1,$2)".to_string();
-        let prepared_statement = PreparedStatement::parse_statement(
-            raw_statement,
-            vec![DataType::INT32.to_oid(), DataType::VARCHAR.to_oid()],
-        )
-        .unwrap();
+        let prepared_statement =
+            PreparedStatement::parse_statement(raw_statement, vec![TypeOid::Int, TypeOid::Varchar])
+                .unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("INSERT INTO test (index,data) VALUES (0::INT,'0')" == default_sql);
         let sql = prepared_statement
@@ -628,11 +603,9 @@ mod tests {
         assert!("INSERT INTO test (index,data) VALUES (1,'DATA')" == sql);
 
         let raw_statement = "UPDATE COFFEES SET SALES = $1 WHERE COF_NAME LIKE $2".to_string();
-        let prepared_statement = PreparedStatement::parse_statement(
-            raw_statement,
-            vec![DataType::INT32.to_oid(), DataType::VARCHAR.to_oid()],
-        )
-        .unwrap();
+        let prepared_statement =
+            PreparedStatement::parse_statement(raw_statement, vec![TypeOid::Int, TypeOid::Varchar])
+                .unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("UPDATE COFFEES SET SALES = 0::INT WHERE COF_NAME LIKE '0'" == default_sql);
         let sql = prepared_statement
@@ -643,11 +616,7 @@ mod tests {
         let raw_statement = "SELECT * FROM test_table WHERE id = $1 AND name = $3".to_string();
         let prepared_statement = PreparedStatement::parse_statement(
             raw_statement,
-            vec![
-                DataType::INT32.to_oid(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.to_oid(),
-            ],
+            vec![TypeOid::Int, TypeOid::Varchar, TypeOid::Varchar],
         )
         .unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
@@ -693,8 +662,7 @@ mod tests {
         let raw_statement =
             "SELECT * FROM test_table WHERE id = $1 AND name = $2::VARCHAR".to_string();
         let prepared_statement =
-            PreparedStatement::parse_statement(raw_statement, vec![DataType::INT32.to_oid()])
-                .unwrap();
+            PreparedStatement::parse_statement(raw_statement, vec![TypeOid::Int]).unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table WHERE id = 0::INT AND name = '0'" == default_sql);
         let sql = prepared_statement
@@ -704,8 +672,7 @@ mod tests {
 
         let raw_statement = "INSERT INTO test (index,data) VALUES ($1,$2)".to_string();
         let prepared_statement =
-            PreparedStatement::parse_statement(raw_statement, vec![DataType::INT32.to_oid()])
-                .unwrap();
+            PreparedStatement::parse_statement(raw_statement, vec![TypeOid::Int]).unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("INSERT INTO test (index,data) VALUES (0::INT,'0')" == default_sql);
         let sql = prepared_statement
@@ -716,8 +683,7 @@ mod tests {
         let raw_statement =
             "UPDATE COFFEES SET SALES = $1 WHERE COF_NAME LIKE $2::VARCHAR".to_string();
         let prepared_statement =
-            PreparedStatement::parse_statement(raw_statement, vec![DataType::INT32.to_oid()])
-                .unwrap();
+            PreparedStatement::parse_statement(raw_statement, vec![TypeOid::Int]).unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("UPDATE COFFEES SET SALES = 0::INT WHERE COF_NAME LIKE '0'" == default_sql);
         let sql = prepared_statement
@@ -729,19 +695,19 @@ mod tests {
 
     fn test_parse_params_text() {
         let raw_params = vec!["A".into(), "B".into(), "C".into()];
-        let type_description = vec![DataType::Varchar; 3];
+        let type_description = vec![TypeOid::Varchar; 3];
         let params =
             PreparedStatement::parse_params(&type_description, &raw_params, false).unwrap();
         assert_eq!(params, vec!["'A'", "'B'", "'C'"]);
 
         let raw_params = vec!["false".into(), "true".into()];
-        let type_description = vec![DataType::Boolean; 2];
+        let type_description = vec![TypeOid::Boolean; 2];
         let params =
             PreparedStatement::parse_params(&type_description, &raw_params, false).unwrap();
         assert_eq!(params, vec!["false", "true"]);
 
         let raw_params = vec!["1".into(), "2".into(), "3".into()];
-        let type_description = vec![DataType::Int16, DataType::Int32, DataType::Int64];
+        let type_description = vec![TypeOid::SmallInt, TypeOid::Int, TypeOid::BigInt];
         let params =
             PreparedStatement::parse_params(&type_description, &raw_params, false).unwrap();
         assert_eq!(params, vec!["1", "2", "3"]);
@@ -754,7 +720,7 @@ mod tests {
                 .to_string()
                 .into(),
         ];
-        let type_description = vec![DataType::Float32, DataType::Float64, DataType::Decimal];
+        let type_description = vec![TypeOid::Float4, TypeOid::Float8, TypeOid::Decimal];
         let params =
             PreparedStatement::parse_params(&type_description, &raw_params, false).unwrap();
         assert_eq!(
@@ -769,7 +735,7 @@ mod tests {
                 .to_string()
                 .into(),
         ];
-        let type_description = vec![DataType::Date, DataType::Time, DataType::Timestamp];
+        let type_description = vec![TypeOid::Date, TypeOid::Time, TypeOid::Timestamp];
         let params =
             PreparedStatement::parse_params(&type_description, &raw_params, false).unwrap();
         assert_eq!(
@@ -788,7 +754,7 @@ mod tests {
 
         // Test VACHAR type.
         let raw_params = vec!["A".into(), "B".into(), "C".into()];
-        let type_description = vec![DataType::Varchar; 3];
+        let type_description = vec![TypeOid::Varchar; 3];
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
         assert_eq!(params, vec!["'A'", "'B'", "'C'"]);
 
@@ -800,7 +766,7 @@ mod tests {
             .into_iter()
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
-        let type_description = vec![DataType::Boolean; 2];
+        let type_description = vec![TypeOid::Boolean; 2];
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
         assert_eq!(params, vec!["false", "true"]);
 
@@ -813,7 +779,7 @@ mod tests {
             .into_iter()
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
-        let type_description = vec![DataType::Int16, DataType::Int32, DataType::Int64];
+        let type_description = vec![TypeOid::SmallInt, TypeOid::Int, TypeOid::BigInt];
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
         assert_eq!(params, vec!["1", "2", "3"]);
 
@@ -829,7 +795,7 @@ mod tests {
             .into_iter()
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
-        let type_description = vec![DataType::Float32, DataType::Float64, DataType::Decimal];
+        let type_description = vec![TypeOid::Float4, TypeOid::Float8, TypeOid::Decimal];
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
         assert_eq!(params, vec!["'1'::FLOAT4", "'2'::FLOAT8", "'3'::DECIMAL"]);
 
@@ -845,7 +811,7 @@ mod tests {
             .into_iter()
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
-        let type_description = vec![DataType::Float32, DataType::Float64, DataType::Float64];
+        let type_description = vec![TypeOid::Float4, TypeOid::Float8, TypeOid::Float8];
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
         assert_eq!(
             params,
@@ -867,7 +833,7 @@ mod tests {
             .into_iter()
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
-        let type_description = vec![DataType::Date, DataType::Time, DataType::Timestamp];
+        let type_description = vec![TypeOid::Date, TypeOid::Time, TypeOid::Timestamp];
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
         assert_eq!(
             params,
@@ -889,7 +855,7 @@ mod tests {
             .into_iter()
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
-        let type_description = vec![DataType::Timestampz, DataType::Interval];
+        let type_description = vec![TypeOid::Timestamptz, TypeOid::Interval];
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
         assert_eq!(
             params,

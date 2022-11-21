@@ -24,9 +24,6 @@ pub mod catalog;
 #[cfg_attr(madsim, path = "sim/common.rs")]
 pub mod common;
 #[rustfmt::skip]
-#[cfg_attr(madsim, path = "sim/compute.rs")]
-pub mod compute;
-#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/data.rs")]
 pub mod data;
 #[rustfmt::skip]
@@ -71,12 +68,6 @@ pub mod monitor_service;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/health.rs")]
 pub mod health;
-#[rustfmt::skip]
-#[cfg_attr(madsim, path = "sim/cdc_service.rs")]
-pub mod cdc_service;
-#[rustfmt::skip]
-#[path = "cdc_service.serde.rs"]
-pub mod cdc_service_serde;
 
 #[rustfmt::skip]
 #[path = "catalog.serde.rs"]
@@ -84,9 +75,6 @@ pub mod catalog_serde;
 #[rustfmt::skip]
 #[path = "common.serde.rs"]
 pub mod common_serde;
-#[rustfmt::skip]
-#[path = "compute.serde.rs"]
-pub mod compute_serde;
 #[rustfmt::skip]
 #[path = "data.serde.rs"]
 pub mod data_serde;

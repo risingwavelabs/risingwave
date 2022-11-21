@@ -1,11 +1,7 @@
 [package]
 name = "risingwave_rt"
-version = { workspace = true }
-edition = { workspace = true }
-homepage = { workspace = true }
-keywords = { workspace = true }
-license = { workspace = true }
-repository = { workspace = true }
+version = "0.2.0-alpha"
+edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -15,7 +11,7 @@ console = "0.15"
 console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
-pprof = { version = "0.11", features = ["flamegraph"] }
+pprof = { version = "0.10", features = ["flamegraph"] }
 tokio = { version = "0.2.7", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -30,4 +26,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3.16", features = ["fmt", "parking_lot", "std", "time"] }
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
+workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }

@@ -175,10 +175,15 @@ mod tests {
     use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::Keyspace;
 
     use super::*;
 
     fn new_source() -> TableSource {
+        let store = MemoryStateStore::new();
+        let _keyspace = Keyspace::table_root(store, Default::default());
+
         TableSource::new(vec![ColumnDesc::unnamed(
             ColumnId::from(0),
             DataType::Int64,

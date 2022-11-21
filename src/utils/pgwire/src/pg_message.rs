@@ -22,7 +22,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::error_or_notice::ErrorOrNoticeMessage;
-use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_response::StatementType;
 use crate::pg_server::BoxedError;
 use crate::types::Row;
@@ -374,8 +374,7 @@ pub enum BeMessage<'a> {
     ParseComplete,
     BindComplete,
     PortalSuspended,
-    // array of parameter oid(i32)
-    ParameterDescription(&'a [i32]),
+    ParameterDescription(&'a [TypeOid]),
     NoData,
     DataRow(&'a Row),
     ParameterStatus(BeParameterStatusMessage<'a>),
@@ -562,7 +561,7 @@ impl<'a> BeMessage<'a> {
                         write_cstr(buf, pg_field.get_name().as_bytes())?;
                         buf.put_i32(pg_field.get_table_oid()); // table oid
                         buf.put_i16(pg_field.get_col_attr_num()); // attnum
-                        buf.put_i32(pg_field.get_type_oid());
+                        buf.put_i32(pg_field.get_type_oid().as_number());
                         buf.put_i16(pg_field.get_type_len());
                         buf.put_i32(pg_field.get_type_modifier()); // typmod
                         buf.put_i16(pg_field.get_format_code()); // format code
@@ -609,7 +608,7 @@ impl<'a> BeMessage<'a> {
                 write_body(buf, |buf| {
                     buf.put_i16(para_descs.len() as i16);
                     for oid in para_descs.iter() {
-                        buf.put_i32(*oid);
+                        buf.put_i32(oid.as_number());
                     }
                     Ok(())
                 })?;

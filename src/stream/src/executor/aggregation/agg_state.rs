@@ -13,19 +13,18 @@
 // limitations under the License.
 
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::ArrayImpl;
+use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
-use risingwave_common::row::Row;
 use risingwave_common::types::Datum;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
 use super::table::TableState;
 use super::value::ValueState;
 use super::AggCall;
-use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
 

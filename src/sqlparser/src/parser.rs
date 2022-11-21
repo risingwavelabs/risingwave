@@ -1355,13 +1355,6 @@ impl Parser {
         }
     }
 
-    pub fn peek_nth_any_of_keywords(&mut self, n: usize, keywords: &[Keyword]) -> bool {
-        match self.peek_nth_token(n) {
-            Token::Word(w) => keywords.iter().any(|keyword| *keyword == w.keyword),
-            _ => false,
-        }
-    }
-
     /// Bail out if the current token is not one of the expected keywords, or consume it if it is
     pub fn expect_one_of_keywords(&mut self, keywords: &[Keyword]) -> Result<Keyword, ParserError> {
         if let Some(keyword) = self.parse_one_of_keywords(keywords) {
@@ -2437,18 +2430,15 @@ impl Parser {
 
     pub fn parse_explain(&mut self) -> Result<Statement, ParserError> {
         let mut options = ExplainOptions::default();
-
-        let explain_key_words = [
-            Keyword::VERBOSE,
-            Keyword::TRACE,
-            Keyword::TYPE,
-            Keyword::LOGICAL,
-            Keyword::PHYSICAL,
-            Keyword::DISTSQL,
-        ];
-
         let parse_explain_option = |parser: &mut Parser| -> Result<(), ParserError> {
-            let keyword = parser.expect_one_of_keywords(&explain_key_words)?;
+            let keyword = parser.expect_one_of_keywords(&[
+                Keyword::VERBOSE,
+                Keyword::TRACE,
+                Keyword::TYPE,
+                Keyword::LOGICAL,
+                Keyword::PHYSICAL,
+                Keyword::DISTSQL,
+            ])?;
             match keyword {
                 Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
                 Keyword::TRACE => options.trace = parser.parse_optional_boolean(true),
@@ -2474,12 +2464,7 @@ impl Parser {
         };
 
         let analyze = self.parse_keyword(Keyword::ANALYZE);
-        // In order to support following statement, we need to peek before consume.
-        // explain (select 1) union (select 1)
-        if self.peek_token() == Token::LParen
-            && self.peek_nth_any_of_keywords(1, &explain_key_words)
-            && self.consume_token(&Token::LParen)
-        {
+        if self.consume_token(&Token::LParen) {
             self.parse_comma_separated(parse_explain_option)?;
             self.expect_token(&Token::RParen)?;
         }

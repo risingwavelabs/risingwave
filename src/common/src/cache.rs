@@ -667,11 +667,6 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         }
     }
 
-    unsafe fn inc_reference(&self, handle: *mut LruHandle<K, T>) {
-        let _shard = self.shards[self.shard((*handle).hash)].lock();
-        (*handle).refs += 1;
-    }
-
     pub fn insert(
         self: &Arc<Self>,
         key: K,
@@ -865,18 +860,6 @@ impl<K: LruKey, T: LruValue> Drop for CacheableEntry<K, T> {
     fn drop(&mut self) {
         unsafe {
             self.cache.release(self.handle);
-        }
-    }
-}
-
-impl<K: LruKey, T: LruValue> Clone for CacheableEntry<K, T> {
-    fn clone(&self) -> Self {
-        unsafe {
-            self.cache.inc_reference(self.handle);
-            CacheableEntry {
-                cache: self.cache.clone(),
-                handle: self.handle,
-            }
         }
     }
 }

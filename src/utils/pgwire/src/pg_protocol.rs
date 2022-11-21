@@ -31,7 +31,7 @@ use tracing::warn;
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::{PgPortal, PgStatement, PreparedStatement};
-use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
@@ -363,6 +363,12 @@ where
     async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         tracing::trace!("(extended query)parse query: {}", sql);
+        // Create the types description.
+        let types = msg
+            .type_ids
+            .iter()
+            .map(|x| TypeOid::as_type(*x).map_err(|e| PsqlError::ParseError(Box::new(e))))
+            .collect::<PsqlResult<Vec<TypeOid>>>()?;
 
         // Flag indicate whether statement is a query statement.
         let is_query_sql = {
@@ -372,10 +378,9 @@ where
                 || lower_sql.starts_with("show")
                 || lower_sql.starts_with("with")
                 || lower_sql.starts_with("describe")
-                || lower_sql.starts_with("explain")
         };
 
-        let prepared_statement = PreparedStatement::parse_statement(sql.to_string(), msg.type_ids)?;
+        let prepared_statement = PreparedStatement::parse_statement(sql.to_string(), types)?;
 
         // 2. Create the row description.
         let fields: Vec<PgFieldDescriptor> = if is_query_sql {
@@ -495,9 +500,7 @@ where
 
             // 1. Send parameter description.
             self.stream
-                .write_no_flush(&BeMessage::ParameterDescription(
-                    &statement.param_oid_desc(),
-                ))?;
+                .write_no_flush(&BeMessage::ParameterDescription(&statement.type_desc()))?;
 
             // 2. Send row description.
             if statement.is_query() {

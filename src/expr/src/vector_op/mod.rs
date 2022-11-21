@@ -21,7 +21,6 @@ pub mod cast;
 pub mod cmp;
 pub mod concat_op;
 pub mod conjunction;
-pub mod date_trunc;
 pub mod extract;
 pub mod length;
 pub mod like;

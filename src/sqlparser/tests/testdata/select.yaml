@@ -80,23 +80,3 @@
   formatted_sql: SELECT TIMESTAMP WITH TIME ZONE '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_ast: |
     Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(AtTimeZone { timestamp: TypedString { data_type: Timestamp(true), value: "2022-10-01 12:00:00Z" }, time_zone: "US/Pacific" })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
-
-- input: SELECT 1e6
-  formatted_sql: SELECT 1e6
-  formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("1e6")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
-
-- input: SELECT 1.25E6
-  formatted_sql: SELECT 1.25e6
-  formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("1.25e6")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
-
-- input: SELECT 1e-6
-  formatted_sql: SELECT 1e-6
-  formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("1e-6")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
-
-- input: SELECT -1e6
-  formatted_sql: SELECT -1e6
-  formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("-1e6")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })

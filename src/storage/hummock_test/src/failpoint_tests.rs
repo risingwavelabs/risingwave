@@ -86,7 +86,6 @@ async fn test_failpoints_state_store_read_upload() {
             &anchor,
             1,
             ReadOptions {
-                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -131,7 +130,6 @@ async fn test_failpoints_state_store_read_upload() {
             &anchor,
             2,
             ReadOptions {
-                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -145,7 +143,6 @@ async fn test_failpoints_state_store_read_upload() {
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             2,
             ReadOptions {
-                ignore_range_tombstone: false,
                 check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -160,7 +157,6 @@ async fn test_failpoints_state_store_read_upload() {
             b"ee".as_ref(),
             2,
             ReadOptions {
-                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -194,7 +190,6 @@ async fn test_failpoints_state_store_read_upload() {
             &anchor,
             5,
             ReadOptions {
-                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -210,7 +205,6 @@ async fn test_failpoints_state_store_read_upload() {
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             5,
             ReadOptions {
-                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),

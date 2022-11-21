@@ -250,14 +250,9 @@ export interface UnpinSnapshotBeforeResponse {
   status: Status | undefined;
 }
 
-/**
- * When `right_exclusive=false`, it represents [left, right], of which both boundary are open. When `right_exclusive=true`,
- * it represents [left, right), of which right is exclusive.
- */
 export interface KeyRange {
   left: Uint8Array;
   right: Uint8Array;
-  rightExclusive: boolean;
 }
 
 export interface TableOption {
@@ -1919,7 +1914,7 @@ export const UnpinSnapshotBeforeResponse = {
 };
 
 function createBaseKeyRange(): KeyRange {
-  return { left: new Uint8Array(), right: new Uint8Array(), rightExclusive: false };
+  return { left: new Uint8Array(), right: new Uint8Array() };
 }
 
 export const KeyRange = {
@@ -1927,7 +1922,6 @@ export const KeyRange = {
     return {
       left: isSet(object.left) ? bytesFromBase64(object.left) : new Uint8Array(),
       right: isSet(object.right) ? bytesFromBase64(object.right) : new Uint8Array(),
-      rightExclusive: isSet(object.rightExclusive) ? Boolean(object.rightExclusive) : false,
     };
   },
 
@@ -1937,7 +1931,6 @@ export const KeyRange = {
       (obj.left = base64FromBytes(message.left !== undefined ? message.left : new Uint8Array()));
     message.right !== undefined &&
       (obj.right = base64FromBytes(message.right !== undefined ? message.right : new Uint8Array()));
-    message.rightExclusive !== undefined && (obj.rightExclusive = message.rightExclusive);
     return obj;
   },
 
@@ -1945,7 +1938,6 @@ export const KeyRange = {
     const message = createBaseKeyRange();
     message.left = object.left ?? new Uint8Array();
     message.right = object.right ?? new Uint8Array();
-    message.rightExclusive = object.rightExclusive ?? false;
     return message;
   },
 };

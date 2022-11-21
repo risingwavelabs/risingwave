@@ -1,15 +1,12 @@
 [package]
 name = "risingwave_sqlparser"
+version = "0.2.0-alpha"
 license = "Apache-2.0"
 include = [
     "src/**/*.rs",
     "Cargo.toml",
 ]
-version = { workspace = true }
-edition = { workspace = true }
-homepage = { workspace = true }
-keywords = { workspace = true }
-repository = { workspace = true }
+edition = "2021"
 
 [lib]
 path = "src/lib.rs"

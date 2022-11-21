@@ -15,9 +15,9 @@
 use std::ops::Deref;
 
 use bytes::Bytes;
+use risingwave_common::array::Row;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
-use risingwave_common::row::Row;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
@@ -25,9 +25,9 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder};
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
@@ -151,7 +151,7 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
 pub(crate) mod tests {
     use std::sync::Arc;
 
-    use risingwave_common::row::Row;
+    use risingwave_common::array::Row;
     use risingwave_common::types::{Datum, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_connector::source::kafka::KafkaSplit;

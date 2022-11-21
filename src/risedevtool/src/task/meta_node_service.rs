@@ -61,14 +61,11 @@ impl MetaNodeService {
             Some([]) => {
                 cmd.arg("--backend").arg("mem");
             }
-            Some(etcds) => {
+            Some([etcd]) => {
                 cmd.arg("--backend")
                     .arg("etcd")
                     .arg("--etcd-endpoints")
-                    .arg(format!("{}:{}", etcds[0].address, etcds[0].port));
-                if etcds.len() > 1 {
-                    eprintln!("WARN: more than 1 etcd instance is detected, only using the first one for meta node.");
-                }
+                    .arg(format!("{}:{}", etcd.address, etcd.port));
             }
             _ => {
                 return Err(anyhow!(

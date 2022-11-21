@@ -40,9 +40,6 @@ pub struct CliOpts {
 #[derive(Subcommand)]
 #[clap(infer_subcommands = true)]
 enum Commands {
-    /// Commands for Compute
-    #[clap(subcommand)]
-    Compute(ComputeCommands),
     /// Commands for Hummock
     #[clap(subcommand)]
     Hummock(HummockCommands),
@@ -63,12 +60,6 @@ enum Commands {
         #[clap(short, long = "sleep")]
         sleep: u64,
     },
-}
-
-#[derive(Subcommand)]
-enum ComputeCommands {
-    /// Show all the configuration parameters on compute node
-    ShowConfig { host: String },
 }
 
 #[derive(Subcommand)]
@@ -194,9 +185,6 @@ enum MetaCommands {
 
 pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
-        Commands::Compute(ComputeCommands::ShowConfig { host }) => {
-            cmd_impl::compute::show_config(&host).await?
-        }
         Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
             cmd_impl::hummock::disable_commit_epoch().await?
         }

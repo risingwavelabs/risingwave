@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
-use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use rand::RngCore;
@@ -35,12 +35,10 @@ use risingwave_common::config::{load_config, BatchConfig};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
-use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
@@ -58,7 +56,6 @@ use crate::expr::CorrelatedId;
 use crate::handler::handle;
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
-use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
 use crate::observer::FrontendObserverNode;
@@ -72,7 +69,6 @@ use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterIm
 use crate::user::UserId;
 use crate::utils::WithOptions;
 use crate::{FrontendConfig, FrontendOpts, PgResponseStream, TableCatalog};
-
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
@@ -350,20 +346,6 @@ impl FrontendEnv {
         if opts.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
-
-        let health_srv = HealthServiceImpl::new();
-        let host = opts.health_check_listener_addr.clone();
-        tokio::spawn(async move {
-            tonic::transport::Server::builder()
-                .add_service(HealthServer::new(health_srv))
-                .serve(host.parse().unwrap())
-                .await
-                .unwrap();
-        });
-        tracing::info!(
-            "Health Check RPC Listener is set up on {}",
-            opts.health_check_listener_addr.clone()
-        );
 
         Ok((
             Self {
@@ -811,7 +793,7 @@ impl Session<PgResponseStream> for SessionImpl {
             )));
         }
         let stmt = stmts.swap_remove(0);
-        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescriptor> is same as
+        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescripyor> is same as
         // result of run_statement().
         let rsp = match stmt {
             Statement::Query(_) => infer(self, stmt, sql).map_err(|e| {
@@ -821,74 +803,34 @@ impl Session<PgResponseStream> for SessionImpl {
             Statement::ShowObjects(show_object) => match show_object {
                 ShowObject::Columns { table: _ } => {
                     vec![
-                        PgFieldDescriptor::new(
-                            "Name".to_owned(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Type".to_owned(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
-                        ),
+                        PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
                     ]
                 }
                 _ => {
-                    vec![PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
-                    )]
+                    vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)]
                 }
             },
             Statement::ShowVariable { variable } => {
                 let name = &variable[0].value.to_lowercase();
                 if name.eq_ignore_ascii_case("ALL") {
                     vec![
-                        PgFieldDescriptor::new(
-                            "Name".to_string(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Setting".to_string(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Description".to_string(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
-                        ),
+                        PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
                     ]
                 } else {
                     vec![PgFieldDescriptor::new(
                         name.to_ascii_lowercase(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        TypeOid::Varchar,
                     )]
                 }
             }
             Statement::Describe { name: _ } => {
                 vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Type".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
-                    ),
+                    PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
+                    PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
                 ]
-            }
-            Statement::Explain { .. } => {
-                vec![PgFieldDescriptor::new(
-                    "QUERY PLAN".to_owned(),
-                    DataType::VARCHAR.to_oid(),
-                    DataType::VARCHAR.type_len(),
-                )]
             }
             _ => {
                 panic!("infer_return_type only support query statement");

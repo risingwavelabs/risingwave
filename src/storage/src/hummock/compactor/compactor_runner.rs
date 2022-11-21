@@ -66,7 +66,6 @@ impl CompactorRunner {
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
             right: Bytes::copy_from_slice(task.splits[split_index].get_right()),
-            right_exclusive: true,
         };
         let compactor = Compactor::new(
             context.context.clone(),

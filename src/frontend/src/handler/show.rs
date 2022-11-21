@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowObject};
 
 use super::RwPgResponse;
@@ -107,16 +106,8 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
                 Some(rows.len() as i32),
                 rows.into(),
                 vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Type".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
-                    ),
+                    PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
+                    PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
                 ],
             ));
         }
@@ -131,11 +122,7 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
         StatementType::SHOW_COMMAND,
         Some(rows.len() as i32),
         rows.into(),
-        vec![PgFieldDescriptor::new(
-            "Name".to_owned(),
-            DataType::VARCHAR.to_oid(),
-            DataType::VARCHAR.type_len(),
-        )],
+        vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
     ))
 }
 

@@ -4,12 +4,7 @@
 
 [package]
 name = "workspace-hack"
-version = { workspace = true }
-edition = { workspace = true }
-homepage = { workspace = true }
-keywords = { workspace = true }
-license = { workspace = true }
-repository = { workspace = true }
+version = "0.2.0-alpha"
 description = "workspace-hack package, managed by hakari"
 # You can choose to publish this crate: see https://docs.rs/cargo-hakari/latest/cargo_hakari/publishing.
 publish = false
@@ -21,10 +16,11 @@ publish = false
 ahash = { version = "0.7", features = ["std"] }
 anyhow = { version = "1", features = ["backtrace", "std"] }
 auto_enums = { version = "0.7", features = ["futures", "std"] }
+bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
 chrono = { version = "0.4", features = ["clock", "iana-time-zone", "js-sys", "oldtime", "std", "time", "wasm-bindgen", "wasmbind", "winapi"] }
 clap = { version = "3", features = ["atty", "clap_derive", "color", "derive", "env", "once_cell", "std", "strsim", "suggestions", "termcolor"] }
-criterion = { version = "0.4", features = ["async", "async_futures", "async_tokio", "cargo_bench_support", "futures", "plotters", "rayon", "tokio"] }
+criterion = { version = "0.3", features = ["async", "async_futures", "async_tokio", "cargo_bench_support", "futures", "tokio"] }
 crossbeam-channel = { version = "0.5", features = ["crossbeam-utils", "std"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 crossbeam-epoch = { version = "0.9", features = ["alloc", "once_cell", "std"] }
@@ -48,12 +44,7 @@ hdrhistogram = { version = "7", features = ["base64", "crossbeam-channel", "flat
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["encoding_rs", "mime", "text-decoding"] }
-lexical-core = { version = "0.8", features = ["floats", "format", "integers", "lexical-parse-float", "lexical-parse-integer", "lexical-write-float", "lexical-write-integer", "parse", "parse-floats", "parse-integers", "std", "write", "write-floats", "write-integers"] }
-lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
-lexical-parse-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
-lexical-util = { version = "0.8", default-features = false, features = ["floats", "format", "integers", "parse", "parse-floats", "parse-integers", "std", "write", "write-floats", "write-integers"] }
-lexical-write-float = { version = "0.8", default-features = false, features = ["format", "std"] }
-lexical-write-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
+itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", default-features = false, features = ["libc"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
@@ -61,6 +52,7 @@ log = { version = "0.4", default-features = false, features = ["kv_unstable", "s
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2", features = ["std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
+nix = { version = "0.24", features = ["acct", "aio", "dir", "env", "event", "feature", "fs", "hostname", "inotify", "ioctl", "kmod", "memoffset", "mman", "mount", "mqueue", "net", "personality", "poll", "process", "pthread", "ptrace", "quota", "reboot", "resource", "sched", "signal", "socket", "term", "time", "ucontext", "uio", "user", "zerocopy"] }
 nom = { version = "7", features = ["alloc", "std"] }
 num-integer = { version = "0.1", features = ["i128", "std"] }
 num-traits = { version = "0.2", features = ["i128", "std"] }
@@ -75,8 +67,8 @@ prost = { version = "0.11", features = ["no-recursion-limit", "prost-derive", "s
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 rand_core = { version = "0.6", default-features = false, features = ["alloc", "getrandom", "std"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
+regex-automata = { version = "0.1", features = ["regex-syntax", "std"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
-reqwest = { version = "0.11", features = ["__tls", "default-tls", "hyper-tls", "json", "native-tls-crate", "serde_json", "tokio-native-tls"] }
 rust_decimal = { version = "1", features = ["byteorder", "bytes", "db-tokio-postgres", "postgres", "serde", "std", "tokio-postgres"] }
 scopeguard = { version = "1", features = ["use_std"] }
 serde = { version = "1", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
@@ -86,8 +78,8 @@ stable_deref_trait = { version = "1", features = ["alloc", "std"] }
 strum = { version = "0.24", features = ["derive", "std", "strum_macros"] }
 tikv-jemalloc-sys = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tikv-jemallocator = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
-time = { version = "0.3", features = ["alloc", "formatting", "itoa", "parsing", "std"] }
-tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
+time = { version = "0.3", features = ["alloc", "formatting", "itoa", "parsing", "serde", "serde-well-known", "std"] }
+tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "once_cell", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
 tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
@@ -96,19 +88,20 @@ tracing = { version = "0.1", features = ["attributes", "log", "release_max_level
 tracing-core = { version = "0.1", features = ["once_cell", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
 tracing-subscriber = { version = "0.3", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "parking_lot", "regex", "registry", "sharded-slab", "smallvec", "std", "thread_local", "time", "tracing", "tracing-log"] }
-url = { version = "2", features = ["serde"] }
-uuid = { version = "1", features = ["fast-rng", "getrandom", "rand", "rng", "serde", "std", "v4"] }
+url = { version = "2", default-features = false, features = ["serde"] }
+uuid = { version = "1", features = ["private_getrandom", "rng", "serde", "std", "v4"] }
 
 [build-dependencies]
 ahash = { version = "0.7", features = ["std"] }
 anyhow = { version = "1", features = ["backtrace", "std"] }
 auto_enums = { version = "0.7", features = ["futures", "std"] }
 auto_enums_derive = { version = "0.7", default-features = false, features = ["futures", "futures03", "std"] }
+bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
 cc = { version = "1", default-features = false, features = ["jobserver", "parallel"] }
 chrono = { version = "0.4", features = ["clock", "iana-time-zone", "js-sys", "oldtime", "std", "time", "wasm-bindgen", "wasmbind", "winapi"] }
 clap = { version = "3", features = ["atty", "clap_derive", "color", "derive", "env", "once_cell", "std", "strsim", "suggestions", "termcolor"] }
-criterion = { version = "0.4", features = ["async", "async_futures", "async_tokio", "cargo_bench_support", "futures", "plotters", "rayon", "tokio"] }
+criterion = { version = "0.3", features = ["async", "async_futures", "async_tokio", "cargo_bench_support", "futures", "tokio"] }
 crossbeam-channel = { version = "0.5", features = ["crossbeam-utils", "std"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 crossbeam-epoch = { version = "0.9", features = ["alloc", "once_cell", "std"] }
@@ -132,12 +125,7 @@ hdrhistogram = { version = "7", features = ["base64", "crossbeam-channel", "flat
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["encoding_rs", "mime", "text-decoding"] }
-lexical-core = { version = "0.8", features = ["floats", "format", "integers", "lexical-parse-float", "lexical-parse-integer", "lexical-write-float", "lexical-write-integer", "parse", "parse-floats", "parse-integers", "std", "write", "write-floats", "write-integers"] }
-lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
-lexical-parse-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
-lexical-util = { version = "0.8", default-features = false, features = ["floats", "format", "integers", "parse", "parse-floats", "parse-integers", "std", "write", "write-floats", "write-integers"] }
-lexical-write-float = { version = "0.8", default-features = false, features = ["format", "std"] }
-lexical-write-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
+itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", default-features = false, features = ["libc"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
@@ -145,6 +133,7 @@ log = { version = "0.4", default-features = false, features = ["kv_unstable", "s
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2", features = ["std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
+nix = { version = "0.24", features = ["acct", "aio", "dir", "env", "event", "feature", "fs", "hostname", "inotify", "ioctl", "kmod", "memoffset", "mman", "mount", "mqueue", "net", "personality", "poll", "process", "pthread", "ptrace", "quota", "reboot", "resource", "sched", "signal", "socket", "term", "time", "ucontext", "uio", "user", "zerocopy"] }
 nom = { version = "7", features = ["alloc", "std"] }
 num-integer = { version = "0.1", features = ["i128", "std"] }
 num-traits = { version = "0.2", features = ["i128", "std"] }
@@ -154,14 +143,13 @@ petgraph = { version = "0.6", features = ["graphmap", "matrix_graph", "stable_gr
 phf = { version = "0.11", features = ["std", "uncased"] }
 phf_shared = { version = "0.11", features = ["std", "uncased"] }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
-proc-macro2 = { version = "1", features = ["proc-macro", "span-locations"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
 prost = { version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 rand_core = { version = "0.6", default-features = false, features = ["alloc", "getrandom", "std"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
+regex-automata = { version = "0.1", features = ["regex-syntax", "std"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
-reqwest = { version = "0.11", features = ["__tls", "default-tls", "hyper-tls", "json", "native-tls-crate", "serde_json", "tokio-native-tls"] }
 rust_decimal = { version = "1", features = ["byteorder", "bytes", "db-tokio-postgres", "postgres", "serde", "std", "tokio-postgres"] }
 scopeguard = { version = "1", features = ["use_std"] }
 serde = { version = "1", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
@@ -172,8 +160,8 @@ strum = { version = "0.24", features = ["derive", "std", "strum_macros"] }
 syn = { version = "1", features = ["clone-impls", "derive", "extra-traits", "full", "parsing", "printing", "proc-macro", "quote", "visit", "visit-mut"] }
 tikv-jemalloc-sys = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tikv-jemallocator = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
-time = { version = "0.3", features = ["alloc", "formatting", "itoa", "parsing", "std"] }
-tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
+time = { version = "0.3", features = ["alloc", "formatting", "itoa", "parsing", "serde", "serde-well-known", "std"] }
+tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "once_cell", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
 tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
@@ -182,7 +170,7 @@ tracing = { version = "0.1", features = ["attributes", "log", "release_max_level
 tracing-core = { version = "0.1", features = ["once_cell", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
 tracing-subscriber = { version = "0.3", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "parking_lot", "regex", "registry", "sharded-slab", "smallvec", "std", "thread_local", "time", "tracing", "tracing-log"] }
-url = { version = "2", features = ["serde"] }
-uuid = { version = "1", features = ["fast-rng", "getrandom", "rand", "rng", "serde", "std", "v4"] }
+url = { version = "2", default-features = false, features = ["serde"] }
+uuid = { version = "1", features = ["private_getrandom", "rng", "serde", "std", "v4"] }
 
 ### END HAKARI SECTION

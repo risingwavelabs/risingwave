@@ -263,10 +263,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 if let Err(e) = meta_store.txn(txn).await {
                     match e {
                         MetaStoreError::TransactionAbort() => {
-                            tracing::error!(
-                                "keep lease failed, another node has become new leader"
-                            );
-                            futures::future::pending::<()>().await;
+                            panic!("keep lease failed, another node has become new leader");
                         }
                         MetaStoreError::Internal(e) => {
                             tracing::warn!(

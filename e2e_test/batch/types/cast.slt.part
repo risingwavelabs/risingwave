@@ -136,7 +136,7 @@ values('12:34:56'::time::varchar);
 query T
 values(interval '-3 day'::varchar);
 ----
--3 days
+-3 days 00:00:00
 
 query T
 values('2020-01-01'::date::varchar);

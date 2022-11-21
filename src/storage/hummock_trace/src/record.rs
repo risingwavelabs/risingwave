@@ -79,7 +79,10 @@ pub enum Operation {
     Get {
         key: TraceKey,
         epoch: u64,
-        read_options: TraceReadOptions,
+        prefix_hint: Option<TraceKey>,
+        check_bloom_filter: bool,
+        retention_seconds: Option<u32>,
+        table_id: TableId,
     },
 
     /// Ingest operation of Hummock.
@@ -88,7 +91,8 @@ pub enum Operation {
     Ingest {
         kv_pairs: Vec<(TraceKey, Option<TraceValue>)>,
         delete_ranges: Vec<(TraceKey, TraceKey)>,
-        write_options: TraceWriteOptions,
+        epoch: u64,
+        table_id: TableId,
     },
 
     /// Iter operation of Hummock
@@ -96,7 +100,10 @@ pub enum Operation {
     Iter {
         key_range: (Bound<TraceKey>, Bound<TraceValue>),
         epoch: u64,
-        read_options: TraceReadOptions,
+        prefix_hint: Option<TraceKey>,
+        check_bloom_filter: bool,
+        retention_seconds: Option<u32>,
+        table_id: TableId,
     },
 
     /// Iter.next operation
@@ -130,18 +137,14 @@ impl Operation {
         check_bloom_filter: bool,
         retention_seconds: Option<u32>,
         table_id: TableId,
-        ignore_range_tombstone: bool,
     ) -> Operation {
         Operation::Get {
             key,
             epoch,
-            read_options: TraceReadOptions {
-                prefix_hint,
-                check_bloom_filter,
-                retention_seconds,
-                table_id,
-                ignore_range_tombstone,
-            },
+            prefix_hint,
+            check_bloom_filter,
+            retention_seconds,
+            table_id,
         }
     }
 
@@ -154,7 +157,8 @@ impl Operation {
         Operation::Ingest {
             kv_pairs,
             delete_ranges,
-            write_options: TraceWriteOptions { epoch, table_id },
+            epoch,
+            table_id,
         }
     }
 }
@@ -229,19 +233,6 @@ impl<'de> bincode::BorrowDecode<'de> for TraceSubResp {
     }
 }
 
-#[derive(Encode, Decode, PartialEq, Debug, Clone)]
-pub struct TraceReadOptions {
-    pub prefix_hint: Option<Vec<u8>>,
-    pub ignore_range_tombstone: bool,
-    pub check_bloom_filter: bool,
-    pub retention_seconds: Option<u32>,
-    pub table_id: TableId,
-}
-#[derive(Encode, Decode, PartialEq, Debug, Clone)]
-pub struct TraceWriteOptions {
-    pub epoch: u64,
-    pub table_id: TableId,
-}
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;

@@ -17,10 +17,9 @@ use std::sync::Arc;
 use itertools::Itertools;
 use regex::Regex;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue,
+    Array, ArrayBuilder, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue, Row,
     Utf8Array,
 };
-use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};

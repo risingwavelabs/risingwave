@@ -14,9 +14,10 @@
 
 //! Streaming Aggregators
 
+use risingwave_storage::table::streaming_table::state_table::StateTable;
+
 use super::agg_common::{build_agg_call_from_prost, build_agg_state_storages_from_proto};
 use super::*;
-use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::AggCall;
 use crate::executor::GlobalSimpleAggExecutor;
 

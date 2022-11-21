@@ -18,7 +18,7 @@ use std::cmp::Ordering;
 use futures::future::join;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::row::Row;
+use risingwave_common::array::Row;
 use risingwave_storage::error::StorageError;
 
 /// Zip two streams of primary key and rows into a single stream, sorted by order key.

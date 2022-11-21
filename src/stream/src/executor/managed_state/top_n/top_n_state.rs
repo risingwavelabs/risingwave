@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::row::Row;
+use risingwave_common::array::Row;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::DataType;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::common::iter_state_table;
-use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::top_n::{serialize_pk_to_cache_key, CacheKey, TopNCache};
 

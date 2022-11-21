@@ -12,24 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::Row;
 use risingwave_common::error::Result;
-use risingwave_common::row::{Row, Row2};
 use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::OrderedRowSerde;
 
-pub fn serialize_pk(pk: impl Row2, serializer: &OrderedRowSerde) -> Vec<u8> {
+pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerde) -> Vec<u8> {
     let mut result = vec![];
-    serializer.serialize_datum_refs(pk.iter(), &mut result);
+    serializer.serialize(pk, &mut result);
     result
 }
 
 pub fn serialize_pk_with_vnode(
-    pk: impl Row2,
+    pk: &Row,
     serializer: &OrderedRowSerde,
     vnode: VirtualNode,
 ) -> Vec<u8> {
     let mut result = vnode.to_be_bytes().to_vec();
-    serializer.serialize_datum_refs(pk.iter(), &mut result);
+    serializer.serialize(pk, &mut result);
     result
 }
 

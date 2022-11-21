@@ -13,7 +13,7 @@ create materialized view mv1 as select distinct v1 from t;
 query TTTTT
 select * from mv1;
 ----
-1 day
+1 day 00:00:00
 
 statement ok
 drop materialized view mv1;

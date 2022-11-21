@@ -19,9 +19,8 @@ use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
 use super::{ArrayResult, DataChunkTestExt};
 use crate::array::column::Column;
-use crate::array::{DataChunk, Vis};
+use crate::array::{DataChunk, Row, Vis};
 use crate::buffer::Bitmap;
-use crate::row::Row;
 use crate::types::to_text::ToText;
 use crate::types::DataType;
 

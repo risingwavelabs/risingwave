@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::vec::Vec;
@@ -40,7 +39,6 @@ pub struct TopNExecutor {
     order_pairs: Vec<OrderPair>,
     offset: usize,
     limit: usize,
-    with_ties: bool,
     schema: Schema,
     identity: String,
     chunk_size: usize,
@@ -67,7 +65,6 @@ impl BoxedExecutorBuilder for TopNExecutor {
             order_pairs,
             top_n_node.get_offset() as usize,
             top_n_node.get_limit() as usize,
-            top_n_node.get_with_ties(),
             source.plan_node().get_identity().clone(),
             source.context.get_config().developer.batch_chunk_size,
         )))
@@ -80,7 +77,6 @@ impl TopNExecutor {
         order_pairs: Vec<OrderPair>,
         offset: usize,
         limit: usize,
-        with_ties: bool,
         identity: String,
         chunk_size: usize,
     ) -> Self {
@@ -90,7 +86,6 @@ impl TopNExecutor {
             order_pairs,
             offset,
             limit,
-            with_ties,
             schema,
             identity,
             chunk_size,
@@ -119,17 +114,15 @@ pub struct TopNHeap {
     heap: BinaryHeap<HeapElem>,
     limit: usize,
     offset: usize,
-    with_ties: bool,
 }
 
 impl TopNHeap {
-    pub fn new(limit: usize, offset: usize, with_ties: bool) -> Self {
+    pub fn new(limit: usize, offset: usize) -> Self {
         assert!(limit > 0);
         Self {
             heap: BinaryHeap::with_capacity((limit + offset).min(MAX_TOPN_INIT_HEAP_CAPACITY)),
             limit,
             offset,
-            with_ties,
         }
     }
 
@@ -137,34 +130,9 @@ impl TopNHeap {
         if self.heap.len() < self.limit + self.offset {
             self.heap.push(elem);
         } else {
-            // heap is full
-            if !self.with_ties {
-                let mut peek = self.heap.peek_mut().unwrap();
-                if elem < *peek {
-                    *peek = elem;
-                }
-            } else {
-                let peek = self.heap.peek().unwrap().clone();
-                match elem.cmp(&peek) {
-                    Ordering::Less => {
-                        let mut ties_with_peek = vec![];
-                        // pop all the ties with peek
-                        ties_with_peek.push(self.heap.pop().unwrap());
-                        while let Some(e) = self.heap.peek() && e.encoded_row == peek.encoded_row {
-                            ties_with_peek.push(self.heap.pop().unwrap());
-                        }
-                        self.heap.push(elem);
-                        // If the size is smaller than limit, we can push all the elements back.
-                        if self.heap.len() < self.limit {
-                            self.heap.extend(ties_with_peek);
-                        }
-                    }
-                    Ordering::Equal => {
-                        // It's a tie.
-                        self.heap.push(elem);
-                    }
-                    Ordering::Greater => {}
-                }
+            let mut peek = self.heap.peek_mut().unwrap();
+            if elem < *peek {
+                *peek = elem;
             }
         }
     }
@@ -180,7 +148,6 @@ impl TopNHeap {
     }
 }
 
-#[derive(Clone)]
 pub struct HeapElem {
     pub encoded_row: Vec<u8>,
     pub chunk: Arc<DataChunk>,
@@ -213,7 +180,7 @@ impl TopNExecutor {
         if self.limit == 0 {
             return Ok(());
         }
-        let mut heap = TopNHeap::new(self.limit, self.offset, self.with_ties);
+        let mut heap = TopNHeap::new(self.limit, self.offset);
 
         #[for_await]
         for chunk in self.child.execute() {
@@ -291,7 +258,6 @@ mod tests {
             order_pairs,
             1,
             3,
-            false,
             "TopNExecutor".to_string(),
             CHUNK_SIZE,
         ));
@@ -348,7 +314,6 @@ mod tests {
             order_pairs,
             1,
             0,
-            false,
             "TopNExecutor".to_string(),
             CHUNK_SIZE,
         ));

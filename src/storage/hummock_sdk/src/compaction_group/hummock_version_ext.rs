@@ -120,7 +120,7 @@ pub trait HummockVersionExt {
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
-    ) -> Vec<(HummockSstableId, u64, u32)>;
+    ) -> Vec<(HummockSstableId, u64)>;
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
@@ -252,7 +252,7 @@ impl HummockVersionExt for HummockVersion {
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
-    ) -> Vec<(HummockSstableId, u64, u32)> {
+    ) -> Vec<(HummockSstableId, u64)> {
         let mut split_id_vers = vec![];
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
             || !self.levels.contains_key(&parent_group_id)
@@ -273,11 +273,7 @@ impl HummockVersionExt for HummockVersion {
                         .any(|table_id| member_table_ids.contains(table_id))
                     {
                         table_info.divide_version += 1;
-                        split_id_vers.push((
-                            table_info.get_id(),
-                            table_info.get_divide_version(),
-                            0,
-                        ));
+                        split_id_vers.push((table_info.get_id(), table_info.get_divide_version()));
                         let mut branch_table_info = table_info.clone();
                         branch_table_info.table_ids = table_info
                             .table_ids
@@ -295,7 +291,6 @@ impl HummockVersionExt for HummockVersion {
             }
         }
         for (z, level) in parent_levels.levels.iter_mut().enumerate() {
-            let level_idx = level.get_level_idx();
             for table_info in &mut level.table_infos {
                 if table_info
                     .get_table_ids()
@@ -303,11 +298,7 @@ impl HummockVersionExt for HummockVersion {
                     .any(|table_id| member_table_ids.contains(table_id))
                 {
                     table_info.divide_version += 1;
-                    split_id_vers.push((
-                        table_info.get_id(),
-                        table_info.get_divide_version(),
-                        level_idx,
-                    ));
+                    split_id_vers.push((table_info.get_id(), table_info.get_divide_version()));
                     let mut branch_table_info = table_info.clone();
                     branch_table_info.table_ids = table_info
                         .table_ids

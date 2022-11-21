@@ -23,9 +23,9 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
-use risingwave_stream::common::table::state_table::StateTable;
 
 use crate::common::HummockServiceOpts;
 
@@ -65,7 +65,7 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
         table.pk().iter().map(|x| x.direct.to_order()).collect(),
         table.pk().iter().map(|x| x.index).collect(),
         Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
-        Some(table.value_indices.clone()),
+        table.value_indices.clone(),
     )
     .await
 }

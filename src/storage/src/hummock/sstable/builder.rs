@@ -20,9 +20,9 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
-use risingwave_hummock_sdk::key::{user_key, FullKey};
+use risingwave_hummock_sdk::key::{key_with_epoch, user_key, FullKey};
 use risingwave_hummock_sdk::table_stats::TableStats;
-use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
 
 use super::bloom::Bloom;
@@ -256,32 +256,20 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.finalize_last_table_stats();
 
         self.build_block().await?;
-        let mut right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
         for tombstone in &self.range_tombstones {
             assert!(!tombstone.end_user_key.is_empty());
             if largest_key.is_empty()
-                || KeyComparator::encoded_less_than_unencoded(
-                    user_key(&largest_key),
-                    &tombstone.end_user_key,
-                )
+                || user_key(&largest_key).lt(tombstone.end_user_key.as_slice())
             {
                 // use MAX as epoch because `end_user_key` of the range-tombstone is exclusive, so
                 // we can not include any version of this key.
-                largest_key =
-                    FullKey::from_user_key(tombstone.end_user_key.clone(), HummockEpoch::MAX)
-                        .encode();
-                right_exclusive = true;
+                largest_key = key_with_epoch(tombstone.end_user_key.clone(), HummockEpoch::MAX);
             }
             if smallest_key.is_empty()
-                || KeyComparator::encoded_greater_than_unencoded(
-                    user_key(&smallest_key),
-                    &tombstone.start_user_key,
-                )
+                || user_key(&smallest_key).gt(tombstone.start_user_key.as_slice())
             {
-                smallest_key =
-                    FullKey::from_user_key(tombstone.start_user_key.clone(), tombstone.sequence)
-                        .encode();
+                smallest_key = key_with_epoch(tombstone.start_user_key.clone(), tombstone.sequence);
             }
         }
         self.total_key_count += self.range_tombstones.len() as u64;
@@ -312,7 +300,6 @@ impl<W: SstableWriter> SstableBuilder<W> {
             key_range: Some(risingwave_pb::hummock::KeyRange {
                 left: meta.smallest_key.clone(),
                 right: meta.largest_key.clone(),
-                right_exclusive,
             }),
             file_size: meta.estimated_size as u64,
             table_ids: self.table_ids.into_iter().collect(),

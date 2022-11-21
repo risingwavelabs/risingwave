@@ -15,9 +15,8 @@
 use itertools::Itertools;
 
 use crate::array::column::Column;
-use crate::array::{F32Array, I32Array, I64Array, Op, StreamChunk};
+use crate::array::{F32Array, I32Array, I64Array, Op, Row, StreamChunk};
 use crate::catalog::{Field, Schema};
-use crate::row::Row;
 use crate::types::{DataType, Datum, ScalarImpl};
 
 pub trait TestStreamChunk {

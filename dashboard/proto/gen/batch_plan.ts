@@ -81,7 +81,7 @@ export interface FilterNode {
 
 export interface InsertNode {
   tableSourceId: number;
-  columnIdxs: number[];
+  columnIds: number[];
   /** Id of the materialized view which is used to determine which compute node to execute the dml fragment. */
   associatedMviewId: number;
 }
@@ -116,7 +116,6 @@ export interface TopNNode {
   columnOrders: ColumnOrder[];
   limit: number;
   offset: number;
-  withTies: boolean;
 }
 
 export interface GroupTopNNode {
@@ -124,7 +123,6 @@ export interface GroupTopNNode {
   limit: number;
   offset: number;
   groupKey: number[];
-  withTies: boolean;
 }
 
 export interface LimitNode {
@@ -625,14 +623,14 @@ export const FilterNode = {
 };
 
 function createBaseInsertNode(): InsertNode {
-  return { tableSourceId: 0, columnIdxs: [], associatedMviewId: 0 };
+  return { tableSourceId: 0, columnIds: [], associatedMviewId: 0 };
 }
 
 export const InsertNode = {
   fromJSON(object: any): InsertNode {
     return {
       tableSourceId: isSet(object.tableSourceId) ? Number(object.tableSourceId) : 0,
-      columnIdxs: Array.isArray(object?.columnIdxs) ? object.columnIdxs.map((e: any) => Number(e)) : [],
+      columnIds: Array.isArray(object?.columnIds) ? object.columnIds.map((e: any) => Number(e)) : [],
       associatedMviewId: isSet(object.associatedMviewId) ? Number(object.associatedMviewId) : 0,
     };
   },
@@ -640,10 +638,10 @@ export const InsertNode = {
   toJSON(message: InsertNode): unknown {
     const obj: any = {};
     message.tableSourceId !== undefined && (obj.tableSourceId = Math.round(message.tableSourceId));
-    if (message.columnIdxs) {
-      obj.columnIdxs = message.columnIdxs.map((e) => Math.round(e));
+    if (message.columnIds) {
+      obj.columnIds = message.columnIds.map((e) => Math.round(e));
     } else {
-      obj.columnIdxs = [];
+      obj.columnIds = [];
     }
     message.associatedMviewId !== undefined && (obj.associatedMviewId = Math.round(message.associatedMviewId));
     return obj;
@@ -652,7 +650,7 @@ export const InsertNode = {
   fromPartial<I extends Exact<DeepPartial<InsertNode>, I>>(object: I): InsertNode {
     const message = createBaseInsertNode();
     message.tableSourceId = object.tableSourceId ?? 0;
-    message.columnIdxs = object.columnIdxs?.map((e) => e) || [];
+    message.columnIds = object.columnIds?.map((e) => e) || [];
     message.associatedMviewId = object.associatedMviewId ?? 0;
     return message;
   },
@@ -811,7 +809,7 @@ export const SortNode = {
 };
 
 function createBaseTopNNode(): TopNNode {
-  return { columnOrders: [], limit: 0, offset: 0, withTies: false };
+  return { columnOrders: [], limit: 0, offset: 0 };
 }
 
 export const TopNNode = {
@@ -822,7 +820,6 @@ export const TopNNode = {
         : [],
       limit: isSet(object.limit) ? Number(object.limit) : 0,
       offset: isSet(object.offset) ? Number(object.offset) : 0,
-      withTies: isSet(object.withTies) ? Boolean(object.withTies) : false,
     };
   },
 
@@ -835,7 +832,6 @@ export const TopNNode = {
     }
     message.limit !== undefined && (obj.limit = Math.round(message.limit));
     message.offset !== undefined && (obj.offset = Math.round(message.offset));
-    message.withTies !== undefined && (obj.withTies = message.withTies);
     return obj;
   },
 
@@ -844,13 +840,12 @@ export const TopNNode = {
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.limit = object.limit ?? 0;
     message.offset = object.offset ?? 0;
-    message.withTies = object.withTies ?? false;
     return message;
   },
 };
 
 function createBaseGroupTopNNode(): GroupTopNNode {
-  return { columnOrders: [], limit: 0, offset: 0, groupKey: [], withTies: false };
+  return { columnOrders: [], limit: 0, offset: 0, groupKey: [] };
 }
 
 export const GroupTopNNode = {
@@ -864,7 +859,6 @@ export const GroupTopNNode = {
       groupKey: Array.isArray(object?.groupKey)
         ? object.groupKey.map((e: any) => Number(e))
         : [],
-      withTies: isSet(object.withTies) ? Boolean(object.withTies) : false,
     };
   },
 
@@ -882,7 +876,6 @@ export const GroupTopNNode = {
     } else {
       obj.groupKey = [];
     }
-    message.withTies !== undefined && (obj.withTies = message.withTies);
     return obj;
   },
 
@@ -892,7 +885,6 @@ export const GroupTopNNode = {
     message.limit = object.limit ?? 0;
     message.offset = object.offset ?? 0;
     message.groupKey = object.groupKey?.map((e) => e) || [];
-    message.withTies = object.withTies ?? false;
     return message;
   },
 };

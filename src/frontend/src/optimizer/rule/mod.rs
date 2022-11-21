@@ -69,8 +69,6 @@ mod join_commute;
 mod over_agg_to_topn;
 pub use join_commute::*;
 pub use over_agg_to_topn::*;
-mod union_to_distinct;
-pub use union_to_distinct::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -96,7 +94,6 @@ macro_rules! for_all_rules {
             ,{IndexSelectionRule}
             ,{OverAggToTopNRule}
             ,{JoinCommuteRule}
-            ,{UnionToDistinctRule}
         }
     };
 }

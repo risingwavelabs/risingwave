@@ -62,7 +62,6 @@ impl PlanTreeNode for BatchUnion {
     }
 
     fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
-        // For batch query, we don't need to clone `source_col`, so just use new.
         Self::new(LogicalUnion::new(self.logical.all(), inputs.to_owned())).into()
     }
 }

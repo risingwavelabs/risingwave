@@ -98,7 +98,7 @@ steps:
           environment:
             - CODECOV_TOKEN
             - RW_RANDOM_SEED_SQLSMITH: true
-    timeout_in_minutes: 18
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
@@ -138,7 +138,7 @@ steps:
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "KILL_RATE=1.0 timeout 14m ci/scripts/deterministic-recovery-test.sh"
+    command: "timeout 10m ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -149,6 +149,7 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
+    soft_fail: true
 
   - label: "misc check"
     command: "ci/scripts/misc-check.sh"

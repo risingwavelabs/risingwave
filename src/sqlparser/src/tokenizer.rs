@@ -451,22 +451,6 @@ impl<'a> Tokenizer<'a> {
                         return Ok(Some(Token::Period));
                     }
 
-                    match chars.peek() {
-                        // Number is a scientific number (1e6)
-                        Some('e') | Some('E') => {
-                            s.push('e');
-                            chars.next();
-
-                            if let Some('-') = chars.peek() {
-                                s.push('-');
-                                chars.next();
-                            }
-                            s += &peeking_take_while(chars, |ch| matches!(ch, '0'..='9'));
-                            return Ok(Some(Token::Number(s)));
-                        }
-                        // Not a scientific number
-                        _ => {}
-                    };
                     Ok(Some(Token::Number(s)))
                 }
                 // punctuation
@@ -824,7 +808,6 @@ mod tests {
 
         compare(expected, tokens);
     }
-
     #[test]
     fn tokenize_bitwise_op() {
         let sql = String::from("SELECT one | two ^ three");
@@ -1041,7 +1024,7 @@ mod tests {
             Err(TokenizerError {
                 message: "Unterminated string literal".to_string(),
                 line: 1,
-                col: 8,
+                col: 8
             })
         );
     }
@@ -1171,7 +1154,7 @@ mod tests {
             Err(TokenizerError {
                 message: "Expected close delimiter '\"' before EOF.".to_string(),
                 line: 1,
-                col: 1,
+                col: 1
             })
         );
     }

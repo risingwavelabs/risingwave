@@ -23,7 +23,6 @@ macro_rules! trace {
                 $opt.check_bloom_filter,
                 $opt.retention_seconds,
                 $opt.table_id.table_id,
-                $opt.ignore_range_tombstone,
             ),
             $storage_type
         )
@@ -47,15 +46,12 @@ macro_rules! trace {
     (ITER, $range:ident, $epoch:ident, $opt:ident, $storage_type:expr) => {
         risingwave_hummock_trace::new_global_span!(
             risingwave_hummock_trace::Operation::Iter {
+                prefix_hint: $opt.prefix_hint.clone(),
                 key_range: $range.clone(),
                 epoch: $epoch,
-                read_options: risingwave_hummock_trace::TraceReadOptions {
-                    prefix_hint: $opt.prefix_hint.clone(),
-                    table_id: $opt.table_id.table_id,
-                    retention_seconds: $opt.retention_seconds,
-                    check_bloom_filter: $opt.check_bloom_filter,
-                    ignore_range_tombstone: $opt.ignore_range_tombstone,
-                }
+                table_id: $opt.table_id.table_id,
+                retention_seconds: $opt.retention_seconds,
+                check_bloom_filter: $opt.check_bloom_filter,
             },
             $storage_type
         );

@@ -271,6 +271,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates aggregate expressions. For internal / unsupported aggregators, we return `None`.
     fn make_agg_expr(&mut self, func: AggKind, exprs: &[Expr], distinct: bool) -> Option<Expr> {
         use AggKind as A;
+
         match func {
             A::Sum | A::Sum0 => Some(Expr::Function(make_agg_func("sum", exprs, distinct))),
             A::Min => Some(Expr::Function(make_agg_func("min", exprs, distinct))),
@@ -399,17 +400,19 @@ fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
 /// This is the function that generate aggregate function.
 /// DISTINCT , ORDER BY or FILTER is allowed in aggregation functions。
 /// Currently, distinct is allowed only, other and others rule is TODO: <https://github.com/risingwavelabs/risingwave/issues/3933>
-fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool) -> Function {
+fn make_agg_func(func_name: &str, exprs: &[Expr], _distinct: bool) -> Function {
     let args = exprs
         .iter()
         .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
         .collect();
 
+    // Distinct Aggregate shall be workaround until the following issue is resolved
+    // https://github.com/risingwavelabs/risingwave/issues/4220
     Function {
         name: ObjectName(vec![Ident::new(func_name)]),
         args,
         over: None,
-        distinct,
+        distinct: false,
         order_by: vec![],
         filter: None,
     }

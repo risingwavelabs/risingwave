@@ -326,7 +326,6 @@ mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
 
-mod stream_union;
 pub mod utils;
 
 pub use batch_delete::BatchDelete;
@@ -391,7 +390,6 @@ pub use stream_sink::StreamSink;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
-pub use stream_union::StreamUnion;
 
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -475,7 +473,6 @@ macro_rules! for_all_plan_nodes {
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
             , { Stream, GroupTopN }
-            , { Stream, Union }
         }
     };
 }
@@ -567,7 +564,6 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
             , { Stream, GroupTopN }
-            , { Stream, Union }
         }
     };
 }

@@ -17,10 +17,9 @@ use std::sync::Arc;
 
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 
-use crate::array::{Array, ArrayImpl, DataChunk};
+use crate::array::{Array, ArrayImpl, DataChunk, Row};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-use crate::row::Row;
 use crate::types::ScalarImpl;
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
@@ -259,8 +258,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::{compare_rows, OrderPair, OrderType};
-    use crate::array::{DataChunk, ListValue, StructValue};
-    use crate::row::Row;
+    use crate::array::{DataChunk, ListValue, Row, StructValue};
     use crate::types::{DataType, ScalarImpl};
     use crate::util::sort_util::compare_rows_in_chunk;
 

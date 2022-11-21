@@ -24,7 +24,7 @@ pub use runner::*;
 pub(crate) use worker::*;
 
 use crate::error::Result;
-use crate::{Record, TraceReadOptions, TraceWriteOptions};
+use crate::Record;
 
 type ReplayGroup = Record;
 
@@ -48,20 +48,27 @@ pub trait Replayable: Send + Sync {
     async fn get(
         &self,
         key: Vec<u8>,
+        check_bloom_filter: bool,
         epoch: u64,
-        read_options: TraceReadOptions,
+        prefix_hint: Option<Vec<u8>>,
+        table_id: u32,
+        retention_seconds: Option<u32>,
     ) -> Result<Option<Vec<u8>>>;
     async fn ingest(
         &self,
         kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
         delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
-        write_options: TraceWriteOptions,
+        epoch: u64,
+        table_id: u32,
     ) -> Result<usize>;
     async fn iter(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
-        read_options: TraceReadOptions,
+        prefix_hint: Option<Vec<u8>>,
+        check_bloom_filter: bool,
+        retention_seconds: Option<u32>,
+        table_id: u32,
     ) -> Result<Box<dyn ReplayIter>>;
     async fn sync(&self, id: u64) -> Result<usize>;
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
@@ -77,7 +84,7 @@ pub trait ReplayIter: Send + Sync {
 
 #[macro_export]
 macro_rules! dispatch_replay {
-    ($storage_type:ident, $replay:ident, $local_storages:ident, $table_id:expr) => {
+    ($storage_type:ident, $replay:ident, $local_storages:ident, $table_id:ident) => {
         match $storage_type {
             StorageType::Global => $replay,
             StorageType::Local(_) => {

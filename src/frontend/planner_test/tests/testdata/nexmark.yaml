@@ -92,7 +92,8 @@
 - id: nexmark_q2
   before:
   - create_tables
-  sql: SELECT auction, price FROM bid WHERE auction = 1007 OR auction = 1020 OR auction = 2001 OR auction = 2019 OR auction = 2087;
+  sql: SELECT auction, price FROM bid WHERE auction = 1007 OR auction = 1020 OR auction
+    = 2001 OR auction = 2019 OR auction = 2087;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR (bid.auction = 2001:Int32)) OR (bid.auction = 2019:Int32)) OR (bid.auction = 2087:Int32)) }

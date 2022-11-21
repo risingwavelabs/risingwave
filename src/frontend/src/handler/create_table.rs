@@ -232,9 +232,6 @@ pub(crate) fn gen_materialized_source_plan(
         // Manually assemble the materialization plan for the table.
         let source_node: PlanRef = LogicalSource::new(Rc::new((&source).into()), context).into();
         let row_id_index = source.row_id_index.as_ref().map(|index| index.index as _);
-        // row_id_index is Some means that the user has not specified pk, then we will add a hidden
-        // column to store pk, and materialize executor do not need to handle pk conflict.
-        let handle_pk_conflict = row_id_index.is_none();
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
         required_cols.toggle_range(..);
         let mut out_names = source_node.schema().names();
@@ -250,7 +247,7 @@ pub(crate) fn gen_materialized_source_plan(
             required_cols,
             out_names,
         )
-        .gen_create_mv_plan(source.name.clone(), "".into(), None, handle_pk_conflict)?
+        .gen_create_mv_plan(source.name.clone(), "".into(), None)?
     };
     let mut table = materialize
         .table()

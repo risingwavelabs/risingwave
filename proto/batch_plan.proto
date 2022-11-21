@@ -65,7 +65,7 @@ message FilterNode {
 
 message InsertNode {
   uint32 table_source_id = 1;
-  repeated uint32 column_idxs = 2;
+  repeated int32 column_ids = 2;
   // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
   uint32 associated_mview_id = 3;
 }
@@ -99,7 +99,6 @@ message TopNNode {
   repeated plan_common.ColumnOrder column_orders = 1;
   uint64 limit = 2;
   uint64 offset = 3;
-  bool with_ties = 4;
 }
 
 message GroupTopNNode {
@@ -107,7 +106,6 @@ message GroupTopNNode {
   uint64 limit = 2;
   uint64 offset = 3;
   repeated uint32 group_key = 4;
-  bool with_ties = 5;
 }
 
 message LimitNode {

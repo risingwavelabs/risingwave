@@ -96,15 +96,7 @@ mod tests {
         let actor_1 = vec![
             (
                 0,
-                Operation::get(
-                    vec![0, 1, 2, 3],
-                    123,
-                    None,
-                    true,
-                    Some(12),
-                    table_id1,
-                    false,
-                ),
+                Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), table_id1),
             ),
             (
                 0,
@@ -129,15 +121,7 @@ mod tests {
         let actor_2 = vec![
             (
                 1,
-                Operation::get(
-                    vec![0, 1, 2, 3],
-                    123,
-                    None,
-                    true,
-                    Some(12),
-                    table_id2,
-                    false,
-                ),
+                Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), table_id2),
             ),
             (
                 1,
@@ -162,15 +146,7 @@ mod tests {
         let actor_3 = vec![
             (
                 4,
-                Operation::get(
-                    vec![0, 1, 2, 3],
-                    123,
-                    None,
-                    true,
-                    Some(12),
-                    table_id3,
-                    false,
-                ),
+                Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), table_id3),
             ),
             (
                 4,
@@ -231,12 +207,12 @@ mod tests {
             mock_local
                 .expect_get()
                 .times(1)
-                .returning(move |_, _, _| Ok(Some(vec![54, 32, 198, 236, 24])));
+                .returning(move |_, _, _, _, _, _| Ok(Some(vec![54, 32, 198, 236, 24])));
 
             mock_local
                 .expect_ingest()
                 .times(1)
-                .returning(move |_, _, _| Ok(ingest_result));
+                .returning(move |_, _, _, _| Ok(ingest_result));
 
             Box::new(mock_local)
         });

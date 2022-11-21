@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::anyhow;
 use risingwave_pb::user::UserInfo;
 
-use super::database::DatabaseManager;
 use super::UserId;
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
@@ -29,37 +27,17 @@ pub struct UserManager {
     pub(super) user_info: BTreeMap<UserId, UserInfo>,
     /// The mapping from privilege grantor to their granted users.
     pub(super) user_grant_relation: HashMap<UserId, HashSet<UserId>>,
-    /// The number of catalog whose owner is the user.
-    pub(super) catalog_create_ref_count: HashMap<UserId, usize>,
 }
 
 impl UserManager {
-    pub async fn new<S: MetaStore>(
-        env: MetaSrvEnv<S>,
-        database: &DatabaseManager,
-    ) -> MetaResult<Self> {
+    pub async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let users = UserInfo::list(env.meta_store()).await?;
         let user_info = BTreeMap::from_iter(users.into_iter().map(|user| (user.id, user)));
-
         let mut user_manager = Self {
             user_info,
             user_grant_relation: HashMap::new(),
-            catalog_create_ref_count: HashMap::new(),
         };
         user_manager.build_grant_relation_map();
-
-        database
-            .databases
-            .values()
-            .map(|database| database.owner)
-            .chain(database.schemas.values().map(|schema| schema.owner))
-            .chain(database.sources.values().map(|source| source.owner))
-            .chain(database.sinks.values().map(|sink| sink.owner))
-            .chain(database.indexes.values().map(|index| index.owner))
-            .chain(database.tables.values().map(|table| table.owner))
-            .chain(database.views.values().map(|view| view.owner))
-            .for_each(|owner_id| user_manager.increase_ref(owner_id));
-
         Ok(user_manager)
     }
 
@@ -91,36 +69,6 @@ impl UserManager {
                         .insert(*user_id);
                 }
             }
-        }
-    }
-
-    #[inline(always)]
-    pub fn increase_ref(&mut self, user_id: UserId) {
-        self.increase_ref_count(user_id, 1)
-    }
-
-    pub fn increase_ref_count(&mut self, user_id: UserId, count: usize) {
-        self.catalog_create_ref_count
-            .entry(user_id)
-            .and_modify(|c| *c += count)
-            .or_insert(count);
-    }
-
-    #[inline(always)]
-    pub fn decrease_ref(&mut self, user_id: UserId) {
-        self.decrease_ref_count(user_id, 1)
-    }
-
-    pub fn decrease_ref_count(&mut self, user_id: UserId, count: usize) {
-        match self.catalog_create_ref_count.entry(user_id) {
-            Entry::Occupied(mut o) => {
-                assert!(*o.get_mut() >= count);
-                *o.get_mut() -= count;
-                if *o.get() == 0 {
-                    o.remove_entry();
-                }
-            }
-            Entry::Vacant(_) => unreachable!(),
         }
     }
 }

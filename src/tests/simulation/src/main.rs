@@ -169,7 +169,7 @@ async fn main() {
         })
         .build();
     // wait for the service to be ready
-    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 
     // frontend node
     let mut frontend_ip = vec![];
@@ -326,7 +326,7 @@ async fn main() {
         });
 
     // wait for the service to be ready
-    tokio::time::sleep(Duration::from_secs(15)).await;
+    tokio::time::sleep(Duration::from_secs(30)).await;
     // client
     let client_node = handle
         .create_node()
@@ -416,11 +416,6 @@ async fn run_slt_task(glob: &str, host: &str) {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
-        if kill && (path.ends_with("tpch_snapshot.slt") || path.ends_with("tpch_upstream.slt")) {
-            // Simply ignore the tpch test cases when enable kill nodes.
-            continue;
-        }
-
         // XXX: hack for kafka source test
         let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
         let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
@@ -561,7 +556,7 @@ impl Risingwave {
                 tracing::error!("postgres connection error: {e}");
             }
         });
-        if ARGS.kill_frontend {
+        if ARGS.kill_compute || ARGS.kill_meta {
             client
                 .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
                 .await?;

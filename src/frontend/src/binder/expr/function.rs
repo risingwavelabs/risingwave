@@ -127,7 +127,6 @@ impl Binder {
             "abs" => ExprType::Abs,
             // temporal/chrono
             "to_timestamp" => ExprType::ToTimestamp,
-            "date_trunc" => ExprType::DateTrunc,
             // string
             "substr" => ExprType::Substr,
             "length" => ExprType::Length,

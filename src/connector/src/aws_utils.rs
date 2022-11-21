@@ -20,9 +20,10 @@ use anyhow::anyhow;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::default_provider::region::DefaultRegionChain;
 use aws_config::sts::AssumeRoleProvider;
-use aws_config::timeout::TimeoutConfig;
 use aws_sdk_s3::{client as s3_client, config as s3_config};
 use aws_smithy_http::endpoint::Endpoint;
+use aws_smithy_types::timeout::Http;
+use aws_smithy_types::tristate::TriState;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
 use http::Uri;
@@ -198,11 +199,12 @@ pub fn s3_client(
     let s3_config_obj = if let Some(config) = config_pairs {
         let s3_config = AwsCustomConfig::from(config);
         let retry_conf =
-            aws_config::retry::RetryConfig::standard().with_max_attempts(s3_config.retry_times);
-        let timeout_conf = TimeoutConfig::builder()
-            .connect_timeout(s3_config.conn_timeout)
-            .read_timeout(s3_config.read_timeout)
-            .build();
+            aws_config::RetryConfig::standard().with_max_attempts(s3_config.retry_times);
+        let timeout_conf = aws_config::timeout::Config::new().with_http_timeouts(
+            Http::new()
+                .with_connect_timeout(TriState::Set(s3_config.conn_timeout))
+                .with_read_timeout(TriState::Set(s3_config.read_timeout)),
+        );
 
         s3_config::Builder::from(&sdk_config.clone())
             .retry_config(retry_conf)

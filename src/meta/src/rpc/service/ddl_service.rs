@@ -599,7 +599,7 @@ where
                     .finish_create_materialized_source_procedure(
                         source,
                         table,
-                        &ctx.internal_tables()[0],
+                        ctx.internal_tables(),
                     )
                     .await?
             }

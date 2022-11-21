@@ -287,7 +287,7 @@ impl PlanRoot {
         plan = self.optimize_by_rules(
             plan,
             "Convert Distinct Aggregation".to_string(),
-            vec![UnionToDistinctRule::create(), DistinctAggRule::create()],
+            vec![DistinctAggRule::create()],
             ApplyOrder::TopDown,
         );
 
@@ -482,7 +482,6 @@ impl PlanRoot {
         mv_name: String,
         definition: String,
         col_names: Option<Vec<String>>,
-        handle_pk_conflict: bool,
     ) -> Result<StreamMaterialize> {
         let out_names = if let Some(col_names) = col_names {
             col_names
@@ -499,7 +498,6 @@ impl PlanRoot {
             out_names,
             false,
             definition,
-            handle_pk_conflict,
         )
     }
 
@@ -515,7 +513,6 @@ impl PlanRoot {
             self.out_names.clone(),
             true,
             "".into(),
-            false,
         )
     }
 

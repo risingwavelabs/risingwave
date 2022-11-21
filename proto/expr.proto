@@ -42,7 +42,6 @@ message ExprNode {
     TUMBLE_START = 103;
     TO_TIMESTAMP = 104;
     AT_TIME_ZONE = 105;
-    DATE_TRUNC = 106;
     // other functions
     CAST = 201;
     SUBSTR = 202;

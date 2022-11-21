@@ -17,7 +17,7 @@ use std::cmp;
 use risingwave_pb::hummock::KeyRange;
 
 use crate::key_range::KeyRangeCommon;
-use crate::{impl_key_range_common, key_range_cmp, user_key, KeyComparator};
+use crate::{impl_key_range_common, key_range_cmp, KeyComparator};
 
 impl_key_range_common!(KeyRange);
 
@@ -34,16 +34,11 @@ impl KeyRangeExt for KeyRange {
         Self {
             left: vec![],
             right: vec![],
-            right_exclusive: false,
         }
     }
 
     fn new(left: Vec<u8>, right: Vec<u8>) -> Self {
-        Self {
-            left,
-            right,
-            right_exclusive: false,
-        }
+        Self { left, right }
     }
 
     fn compare(&self, other: &Self) -> cmp::Ordering {

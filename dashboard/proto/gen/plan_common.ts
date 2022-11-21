@@ -132,7 +132,6 @@ export const RowFormatType = {
   DEBEZIUM_JSON: "DEBEZIUM_JSON",
   AVRO: "AVRO",
   MAXWELL: "MAXWELL",
-  CANAL_JSON: "CANAL_JSON",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -158,9 +157,6 @@ export function rowFormatTypeFromJSON(object: any): RowFormatType {
     case 5:
     case "MAXWELL":
       return RowFormatType.MAXWELL;
-    case 6:
-    case "CANAL_JSON":
-      return RowFormatType.CANAL_JSON;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -182,8 +178,6 @@ export function rowFormatTypeToJSON(object: RowFormatType): string {
       return "AVRO";
     case RowFormatType.MAXWELL:
       return "MAXWELL";
-    case RowFormatType.CANAL_JSON:
-      return "CANAL_JSON";
     case RowFormatType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -199,10 +193,7 @@ export interface Field {
 export interface ColumnDesc {
   columnType: DataType | undefined;
   columnId: number;
-  /**
-   * we store the column name in column desc now just for debug, but in future
-   * we should store it in ColumnCatalog but not here
-   */
+  /** we store the column name in column desc now just for debug, but in future we should store it in ColumnCatalog but not here */
   name: string;
   /** For STRUCT type. */
   fieldDescs: ColumnDesc[];

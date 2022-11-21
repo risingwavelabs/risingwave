@@ -314,7 +314,7 @@ export interface MaterializeNode {
     | Table
     | undefined;
   /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  handlePkConflict: boolean;
+  ignoreOnConflict: boolean;
 }
 
 export interface AggCallState {
@@ -557,7 +557,7 @@ export interface ArrangeNode {
     | Table
     | undefined;
   /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  handlePkConflict: boolean;
+  ignoreOnConflict: boolean;
 }
 
 /** Special node for shared state. LookupNode will join an arrangement with a stream. */
@@ -1781,7 +1781,7 @@ export const FilterNode = {
 };
 
 function createBaseMaterializeNode(): MaterializeNode {
-  return { tableId: 0, columnOrders: [], table: undefined, handlePkConflict: false };
+  return { tableId: 0, columnOrders: [], table: undefined, ignoreOnConflict: false };
 }
 
 export const MaterializeNode = {
@@ -1792,7 +1792,7 @@ export const MaterializeNode = {
         ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
         : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      ignoreOnConflict: isSet(object.ignoreOnConflict) ? Boolean(object.ignoreOnConflict) : false,
     };
   },
 
@@ -1805,7 +1805,7 @@ export const MaterializeNode = {
       obj.columnOrders = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.ignoreOnConflict !== undefined && (obj.ignoreOnConflict = message.ignoreOnConflict);
     return obj;
   },
 
@@ -1814,7 +1814,7 @@ export const MaterializeNode = {
     message.tableId = object.tableId ?? 0;
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.ignoreOnConflict = object.ignoreOnConflict ?? false;
     return message;
   },
 };
@@ -2625,7 +2625,7 @@ export const ArrangementInfo = {
 };
 
 function createBaseArrangeNode(): ArrangeNode {
-  return { tableInfo: undefined, distributionKey: [], table: undefined, handlePkConflict: false };
+  return { tableInfo: undefined, distributionKey: [], table: undefined, ignoreOnConflict: false };
 }
 
 export const ArrangeNode = {
@@ -2634,7 +2634,7 @@ export const ArrangeNode = {
       tableInfo: isSet(object.tableInfo) ? ArrangementInfo.fromJSON(object.tableInfo) : undefined,
       distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      ignoreOnConflict: isSet(object.ignoreOnConflict) ? Boolean(object.ignoreOnConflict) : false,
     };
   },
 
@@ -2648,7 +2648,7 @@ export const ArrangeNode = {
       obj.distributionKey = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.ignoreOnConflict !== undefined && (obj.ignoreOnConflict = message.ignoreOnConflict);
     return obj;
   },
 
@@ -2659,7 +2659,7 @@ export const ArrangeNode = {
       : undefined;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.ignoreOnConflict = object.ignoreOnConflict ?? false;
     return message;
   },
 };

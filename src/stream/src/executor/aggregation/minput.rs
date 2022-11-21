@@ -18,14 +18,14 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayImpl, Op};
+use risingwave_common::array::{ArrayImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
 use risingwave_common::types::{Datum, DatumRef, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 use smallvec::SmallVec;
 
@@ -34,7 +34,6 @@ use super::state_cache::extreme::ExtremeAgg;
 use super::state_cache::string_agg::StringAgg;
 use super::state_cache::{CacheKey, GenericStateCache, StateCache};
 use super::AggCall;
-use crate::common::table::state_table::StateTable;
 use crate::common::{iter_state_table, StateTableColumnMapping};
 use crate::executor::{PkIndices, StreamExecutorResult};
 
@@ -285,19 +284,18 @@ mod tests {
     use itertools::Itertools;
     use rand::seq::IteratorRandom;
     use rand::Rng;
-    use risingwave_common::array::StreamChunk;
+    use risingwave_common::array::{Row, StreamChunk};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::streaming_table::state_table::StateTable;
     use risingwave_storage::StateStore;
 
     use super::MaterializedInputState;
-    use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::StreamExecutorResult;

@@ -15,7 +15,6 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
-use futures::future::ready;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use serde_derive::{Deserialize, Serialize};
@@ -23,7 +22,7 @@ use serde_json::Value;
 
 use super::operators::*;
 use crate::parser::common::json_parse_value;
-use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MaxwellEvent {
@@ -38,12 +37,8 @@ pub struct MaxwellEvent {
 #[derive(Debug)]
 pub struct MaxwellParser;
 
-impl MaxwellParser {
-    fn parse_inner(
-        &self,
-        payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+impl SourceParser for MaxwellParser {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         let event: MaxwellEvent = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
@@ -94,22 +89,6 @@ impl MaxwellParser {
                 other
             )))),
         }
-    }
-}
-
-impl SourceParser for MaxwellParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        ready(self.parse_inner(payload, writer))
     }
 }
 

@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::future::ready;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
-use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for JSON format
 #[derive(Debug)]
@@ -28,16 +27,11 @@ pub struct JsonParser;
     target_feature = "neon",
     target_feature = "simd128"
 )))]
-impl JsonParser {
-    fn parse_inner(
-        &self,
-        payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+impl SourceParser for JsonParser {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         use serde_json::Value;
 
         use crate::parser::common::json_parse_value;
-
         let value: Value = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
@@ -54,44 +48,17 @@ impl JsonParser {
     }
 }
 
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-impl SourceParser for JsonParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        ready(self.parse_inner(payload, writer))
-    }
-}
-
 #[cfg(any(
     target_feature = "sse4.2",
     target_feature = "avx2",
     target_feature = "neon",
     target_feature = "simd128"
 ))]
-impl JsonParser {
-    fn parse_inner(
-        &self,
-        payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+impl SourceParser for JsonParser {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         use simd_json::{BorrowedValue, ValueAccess};
 
         use crate::parser::common::simd_json_parse_value;
-
         let mut payload_mut = payload.to_vec();
 
         let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
@@ -110,28 +77,6 @@ impl JsonParser {
     }
 }
 
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
-impl SourceParser for JsonParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        ready(self.parse_inner(payload, writer))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -145,8 +90,8 @@ mod tests {
 
     use crate::{JsonParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
-    #[tokio::test]
-    async fn test_json_parser() {
+    #[test]
+    fn test_json_parser() {
         let parser = JsonParser;
         let descs = vec![
             SourceColumnDesc::simple("i32", DataType::Int32, 0.into()),
@@ -168,7 +113,7 @@ mod tests {
             br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
         ] {
             let writer = builder.row_writer();
-            parser.parse(payload, writer).await.unwrap();
+            parser.parse(payload, writer).unwrap();
         }
 
         let chunk = builder.finish();
@@ -195,6 +140,14 @@ mod tests {
                 row.value_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Float32(1.23.into())))
             );
+            // Usage of avx2 or neon(used by M1) results in a floating point error. Since it is
+            // very small (close to precision of f64) we ignore it.
+            #[cfg(any(target_feature = "avx2", target_feature = "neon"))]
+            assert_eq!(
+                row.value_at(5).to_owned_datum(),
+                (Some(ScalarImpl::Float64(1.2345000000000002.into())))
+            );
+            #[cfg(not(any(target_feature = "avx2", target_feature = "neon")))]
             assert_eq!(
                 row.value_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(1.2345.into())))
@@ -244,8 +197,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_json_parser_failed() {
+    #[test]
+    fn test_json_parser_failed() {
         let parser = JsonParser;
         let descs = vec![
             SourceColumnDesc::simple("v1", DataType::Int32, 0.into()),
@@ -258,7 +211,7 @@ mod tests {
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
-            parser.parse(payload, writer).await.unwrap();
+            parser.parse(payload, writer).unwrap();
         }
 
         // Parse an incorrect record.
@@ -266,14 +219,14 @@ mod tests {
             let writer = builder.row_writer();
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#;
-            parser.parse(payload, writer).await.unwrap_err();
+            parser.parse(payload, writer).unwrap_err();
         }
 
         // Parse a correct record.
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
-            parser.parse(payload, writer).await.unwrap();
+            parser.parse(payload, writer).unwrap();
         }
 
         let chunk = builder.finish();
@@ -282,8 +235,8 @@ mod tests {
         assert_eq!(chunk.cardinality(), 2);
     }
 
-    #[tokio::test]
-    async fn test_json_parse_struct() {
+    #[test]
+    fn test_json_parse_struct() {
         let parser = JsonParser;
 
         let descs = vec![
@@ -332,7 +285,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
         {
             let writer = builder.row_writer();
-            parser.parse(payload, writer).await.unwrap();
+            parser.parse(payload, writer).unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();

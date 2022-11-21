@@ -22,18 +22,6 @@ select coalesce(1, 1 / (v1-v1)) from generate_series(1, 3, 1) as t(v1) where v1 
 1
 1
 
-query I
-select true or (1 / (v1-v1) > 2) from generate_series(1, 3, 1) as t(v1) where v1 != 2;
-----
-t
-t
-
-query I
-select false and (1 / (v1-v1) > 2) from generate_series(1, 3, 1) as t(v1) where v1 != 2;
-----
-f
-f
-
 statement ok
 create table t1 (v1 int, v2 int, v3 int);
 

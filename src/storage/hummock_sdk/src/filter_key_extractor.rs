@@ -359,9 +359,9 @@ mod tests {
 
     use bytes::{BufMut, BytesMut};
     use itertools::Itertools;
+    use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
-    use risingwave_common::row::Row;
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::types::{DataType, VIRTUAL_NODE_SIZE};
     use risingwave_common::util::ordered::OrderedRowSerde;
@@ -476,7 +476,6 @@ mod tests {
             vnode_col_idx: None,
             value_indices: vec![0],
             definition: "".into(),
-            handle_pk_conflict: false,
         }
     }
 

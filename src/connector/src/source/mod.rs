@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod base;
-pub mod cdc;
 pub mod datagen;
 pub mod dummy_connector;
 pub mod filesystem;
@@ -24,6 +23,6 @@ pub mod pulsar;
 pub use base::*;
 pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
+pub use nexmark::NEXMARK_CONNECTOR;
 
-pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
