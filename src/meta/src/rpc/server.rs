@@ -321,16 +321,18 @@ async fn get_infos<S: MetaStore>(meta_store: &Arc<S>) -> Option<(Vec<u8>, Vec<u8
 }
 
 // TODO: write docstring
+// returns true if current node is leader
 pub async fn register_leader_for_meta<S: MetaStore>(
     addr: String, // Address of this node
     meta_store: Arc<S>,
     lease_time: u64, // seconds
-) -> MetaResult<(MetaLeaderInfo, JoinHandle<()>, Sender<()>)> {
+) -> MetaResult<(MetaLeaderInfo, JoinHandle<()>, Sender<()>, bool)> {
     tracing::info!(
         "addr: {}, meta_store: ???, lease_time: {}",
-        addr,
+        addr.clone(),
         lease_time
     );
+    let addr_clone = addr.clone();
 
     let mut tick_interval = tokio::time::interval(Duration::from_secs(lease_time / 2));
     loop {
@@ -338,7 +340,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         tick_interval.tick().await;
 
         // run the initial election
-        let election_outcome = run_election(&meta_store, &addr, lease_time).await;
+        let election_outcome = run_election(&meta_store, &addr_clone, lease_time).await;
         let (leader, _) = match election_outcome {
             Some(infos) => {
                 let (leader, lease) = infos;
@@ -368,7 +370,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     _ = ticker.tick() => {},
                 }
 
-                let election_result = run_election(&meta_store, &addr, lease_time).await;
+                let election_result = run_election(&meta_store, &addr_clone, lease_time).await;
                 let (leader_info, lease_info) = match election_result {
                     None => continue 'election,
                     Some(infos) => {
@@ -393,7 +395,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     // maybe use etcd_client?
                     // renew the current lease
                     let now = since_epoch();
-                    if addr == lease_info.leader.as_ref().unwrap().node_address {
+                    if addr_clone == lease_info.leader.as_ref().unwrap().node_address {
                         let mut txn = Transaction::default();
                         let lease_info = MetaLeaseInfo {
                             leader: Some(leader_info.clone()),
@@ -473,7 +475,8 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 }
             }
         });
-        return Ok((leader, handle, shutdown_tx));
+        let node_is_leader = (&leader).node_address.eq(&addr);
+        return Ok((leader, handle, shutdown_tx, node_is_leader));
     }
 }
 
@@ -485,12 +488,26 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, Sender<()>)> {
     // Initialize managers.
-    let (info, lease_handle, lease_shutdown) = register_leader_for_meta(
+    let (info, lease_handle, lease_shutdown, node_is_leader) = register_leader_for_meta(
         address_info.addr.clone(),
         meta_store.clone(),
         lease_interval_secs,
     )
     .await?;
+    let node_state = if node_is_leader { "leader" } else { "follower" };
+    tracing::info!("This node currently is a {}", node_state);
+    // TODO How do I do this properly?
+    if !node_is_leader {
+        let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+            }
+        });
+
+        return Ok((join_handle, shutdown_send));
+    }
+
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
@@ -507,6 +524,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .await
             .unwrap(),
     );
+    // If node is not leader it should not start other services
+    // probably this panic is caused because some other meta node does something
     let hummock_manager = Arc::new(
         hummock::HummockManager::new(
             env.clone(),
