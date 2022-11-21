@@ -92,7 +92,7 @@ where
 
     async fn wait_init_notification(&mut self) {
         let mut notification_vec = Vec::new();
-        let mut init_notification = loop {
+        let init_notification = loop {
             // notification before init notification must be received successfully.
             let notification = self.rx.message().await.unwrap().unwrap();
             if !matches!(notification.info.as_ref().unwrap(), &Info::Snapshot(_)) {
@@ -130,18 +130,12 @@ where
             Info::Snapshot(_) => unreachable!(),
         });
 
-        let init_notification_version = init_notification.version - notification_vec.len() as u64;
-        init_notification.version = init_notification_version;
         self.observer_states
             .handle_initialization_notification(init_notification);
 
-        notification_vec
-            .into_iter()
-            .enumerate()
-            .for_each(|(index, mut notification)| {
-                notification.version = init_notification_version + index as u64 + 1;
-                self.observer_states.handle_notification(notification);
-            });
+        for notification in notification_vec {
+            self.observer_states.handle_notification(notification);
+        }
     }
 
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and

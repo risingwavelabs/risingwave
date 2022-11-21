@@ -128,9 +128,10 @@ impl ObserverState for FrontendObserverNode {
         self.hummock_snapshot_manager
             .update_epoch(snapshot.hummock_snapshot.unwrap());
 
-        catalog_guard.set_version(resp.version);
+        let snapshot_version = snapshot.version.unwrap();
+        catalog_guard.set_version(snapshot_version.catalog_version);
         self.catalog_updated_tx.send(resp.version).unwrap();
-        user_guard.set_version(resp.version);
+        user_guard.set_version(snapshot_version.worker_node_version);
         self.user_info_updated_tx.send(resp.version).unwrap();
     }
 }

@@ -36,16 +36,18 @@ impl ObserverState for CompactorObserverNode {
             return;
         };
 
-        assert!(
-            resp.version > self.version,
-            "resp version={:?}, current version={:?}",
-            resp.version,
-            self.version
-        );
-
         match info.to_owned() {
             Info::Table(table_catalog) => {
+                assert!(
+                    resp.version > self.version,
+                    "resp version={:?}, current version={:?}",
+                    resp.version,
+                    self.version
+                );
+
                 self.handle_catalog_notification(resp.operation(), table_catalog);
+
+                self.version = resp.version;
             }
 
             Info::HummockVersionDeltas(_) => {}
@@ -54,8 +56,6 @@ impl ObserverState for CompactorObserverNode {
                 panic!("error type notification");
             }
         }
-
-        self.version = resp.version;
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
@@ -63,7 +63,8 @@ impl ObserverState for CompactorObserverNode {
             unreachable!();
         };
         self.handle_catalog_snapshot(snapshot.tables);
-        self.version = resp.version;
+        let snapshot_version = snapshot.version.unwrap();
+        self.version = snapshot_version.catalog_version;
     }
 }
 
