@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::stream_plan::UnionNode;
+
 use super::*;
 use crate::executor::UnionExecutor;
 
@@ -19,13 +21,14 @@ pub struct UnionExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for UnionExecutorBuilder {
+    type Node = UnionNode;
+
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        _node: &Self::Node,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        try_match_expand!(node.get_node_body().unwrap(), NodeBody::Union)?;
         Ok(UnionExecutor::new(params.pk_indices, params.input).boxed())
     }
 }
