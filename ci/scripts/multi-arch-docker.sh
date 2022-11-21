@@ -79,7 +79,7 @@ do
   fi
 done
 
-echo "delete the manifest images from dockerhub"
+echo "--- delete the manifest images from dockerhub"
 docker run --rm lumir/remove-dockerhub-tag \
   --user "risingwavelabs" --password "$DOCKER_TOKEN" \
   "${dockerhubaddr}:${BUILDKITE_COMMIT}-x86_64" \
