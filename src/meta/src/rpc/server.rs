@@ -154,11 +154,12 @@ async fn run_election<S: MetaStore>(
     };
 
     let now = since_epoch();
-    if false && !old_leader_lease.is_empty() {
-        // TODO: why do we need this part? Deactivate for now
+    if !old_leader_lease.is_empty() {
+        // TODO: why do we need this part?
         tracing::info!("old_leader_lease is not empty");
         let lease_info = MetaLeaseInfo::decode(&mut old_leader_lease.as_slice()).unwrap();
 
+        // Lease did not yet expire
         if lease_info.lease_expire_time > now.as_secs()
             && lease_info.leader.as_ref().unwrap().node_address != *addr
         {
@@ -223,7 +224,8 @@ async fn run_election<S: MetaStore>(
                 "new cluster put leader info failed, MetaStoreError: {:?}",
                 e
             );
-            // continue;
+            // continue; // TODO: Should I return none here?
+            return None;
         }
         txn.check_equal(
             META_CF_NAME.to_string(),
@@ -337,7 +339,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     let addr_clone = addr.clone();
 
     let mut tick_interval = tokio::time::interval(Duration::from_secs(lease_time / 2));
-    loop {
+    'initial_election: loop {
         // TODO: maybe also shut down?
         tick_interval.tick().await;
 
@@ -348,7 +350,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 let (leader, lease) = infos;
                 (leader, lease)
             }
-            None => continue,
+            None => continue 'initial_election,
         };
         tracing::info!("current leader is {:?}", leader);
 
@@ -371,6 +373,8 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     }
                     _ = ticker.tick() => {},
                 }
+                break 'election; // TODO: remove this line
+                                 // TODO: error is in the election loop
 
                 let election_result = run_election(&meta_store, &addr_clone, lease_time).await;
                 let (leader_info, lease_info) = match election_result {
