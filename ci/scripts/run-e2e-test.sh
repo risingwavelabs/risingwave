@@ -45,7 +45,7 @@ echo "--- e2e, ci-1cn-1fe, cdc source"
 # install mysql client
 apt-get -y install mysql-client
 # import data to mysql
-mysql -u root -p123456 < ./e2e_test/source/mysql_cdc.sql
+mysql --host=127.0.0.1 --port=3306  -u root -p123456 < ./e2e_test/source/mysql_cdc.sql
 # start risingwave cluster
 cargo make ci-start ci-1cn-1fe
 # start cdc connector node
