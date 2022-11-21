@@ -42,14 +42,6 @@ cargo build \
     -p risingwave_compaction_test \
     --features "static-link static-log-level" --profile "$profile"
 
-
-echo "--- Build Java connector node"
-git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
-cd risingwave-connector-node
-mvn package
-echo "--- Upload Java artifacts"
-buildkite-agent artifact upload service/target/service-1.0-SNAPSHOT.jar
-
 echo "--- Compress debug info for artifacts"
 objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave
 objcopy --compress-debug-sections=zlib-gnu target/"$target"/sqlsmith
@@ -71,3 +63,10 @@ buildkite-agent artifact upload risedev-dev-"$profile"
 buildkite-agent artifact upload risingwave_regress_test-"$profile"
 buildkite-agent artifact upload ./sqlsmith-"$profile"
 buildkite-agent artifact upload ./compaction-test-"$profile"
+
+echo "--- Build Java connector node"
+git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
+cd risingwave-connector-node
+mvn package -Dmaven.test.skip=true
+echo "--- Upload Java artifacts"
+buildkite-agent artifact upload service/target/service-1.0-SNAPSHOT.jar

@@ -30,9 +30,6 @@ mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 echo "--- Download connector node jar"
 buildkite-agent artifact download service-1.0-SNAPSHOT.jar target/debug/
 
-echo "--- Import data to MySQL"
-mysql -u root -p123456 < ./e2e_test/source/mysql_cdc.sql
-
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
 chmod +x ./target/debug/risedev-dev
@@ -43,6 +40,16 @@ cp ci/risedev-components.ci.env risedev-components.user.env
 echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
 cargo make link-all-in-one-binaries
+
+echo "--- e2e, ci-1cn-1fe, cdc source"
+# import data to mysql
+mysql -u root -p123456 < ./e2e_test/source/mysql_cdc.sql
+# start risingwave cluster
+cargo make ci-start ci-1cn-1fe
+# start cdc connector node
+java -cp ./target/debug/service-1.0-SNAPSHOT.jar com.risingwave.sourcenode.service.SourceServiceMain
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc.slt'
+
 
 echo "--- e2e, ci-3cn-1fe, streaming"
 cargo make ci-start ci-3cn-1fe

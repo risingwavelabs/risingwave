@@ -1,0 +1,84 @@
+# CDC source basic test
+
+statement ok
+create materialized source products ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) with (
+ connector = 'cdc',
+ database.hostname = '127.0.0.1',
+ database.port = '3306',
+ database.user = 'root',
+ database.password = '123456',
+ database.name = 'mydb',
+ table.name = 'products'
+) row format debezium_json;
+
+# Since timestamp type cannot parse properly, use bigint for order_date instead
+statement ok
+create materialized source orders (
+   order_id int,
+   order_date bigint,
+   customer_name string,
+   price decimal,
+   product_id int,
+   order_status smallint,
+   PRIMARY KEY (order_id)
+) with (
+ connector = 'cdc',
+ database.hostname = '127.0.0.1',
+ database.port = '3306',
+ database.user = 'root',
+ database.password = '123456',
+ database.name = 'mydb',
+ table.name = 'orders'
+) row format debezium_json;
+
+statement ok
+create materialized source shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived smallint,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'cdc',
+ database.hostname = '127.0.0.1',
+ database.port = '3306',
+ database.user = 'root',
+ database.password = '123456',
+ database.name = 'mydb',
+ table.name = 'shipments'
+) row format debezium_json;
+
+
+# Create a mview upon above three tables
+statement ok
+create materialized view enriched_orders as SELECT o.*, p.name, p.description, s.shipment_id, s.origin, s.destination, s.is_arrived
+ FROM orders AS o
+ LEFT JOIN products AS p ON o.product_id = p.id
+ LEFT JOIN shipments AS s ON o.order_id = s.order_id;
+
+query I
+select count(*) as cnt from products;
+----
+9
+
+query II
+select count(*) as cnt from orders;
+----
+3
+
+query III
+select count(*) as cnt from shipments;
+----
+3
+
+query IIII
+select order_id, product_id, shipment_id from enriched_orders order by order_id;
+----
+10001  102   1001
+10002  105   1002
+10003  106   1003
