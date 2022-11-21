@@ -1,7 +1,11 @@
 [package]
-edition = "2021"
 name = "risingwave_compute"
-version = "0.2.0-alpha"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
@@ -66,7 +70,7 @@ twox-hash = "1"
 url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 futures-async-stream = "0.2"

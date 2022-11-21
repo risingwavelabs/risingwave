@@ -63,19 +63,18 @@ pub(crate) struct RescheduleContext {
     actor_status: BTreeMap<ActorId, ActorStatus>,
     /// Meta information of all `Fragment`, used to find the `Fragment`'s `Actor`
     fragment_map: HashMap<FragmentId, Fragment>,
-    /// The downstream list of `Fragment`, which will be embedded in `FragmentManager` in the
-    /// future
-    downstream_fragment_id_map: HashMap<FragmentId, HashSet<FragmentId>>,
     /// Indexes for all `Worker`s
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     /// Index of all `Actor` upstreams, specific to `Dispatcher`
-    upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, ActorId, DispatcherId)>>,
+    upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, DispatcherId, DispatcherType)>>,
     /// Fragments with stream source
     stream_source_fragment_ids: HashSet<FragmentId>,
     /// Target fragments in NoShuffle relation
     no_shuffle_target_fragment_ids: HashSet<FragmentId>,
     /// Source fragments in NoShuffle relation
     no_shuffle_source_fragment_ids: HashSet<FragmentId>,
+    // index for dispatcher type from upstream fragment to downstream fragment
+    fragment_dispatcher_map: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
 }
 
 impl RescheduleContext {
@@ -358,16 +357,18 @@ where
         let mut no_shuffle_source_fragment_ids = HashSet::new();
         let mut no_shuffle_target_fragment_ids = HashSet::new();
 
-        // Index the downstream fragment
-        let mut downstream_fragment_id_map = HashMap::new();
+        let mut fragment_dispatcher_map = HashMap::new();
+
         for actor in actor_map.values() {
+            // Question(peng): will a fragment use multiple different dispatchers to connect to the
+            // same downstream fragment?
             for dispatcher in &actor.dispatcher {
                 for downstream_actor_id in &dispatcher.downstream_actor_id {
                     if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
-                        downstream_fragment_id_map
-                            .entry(actor.fragment_id as FragmentId)
-                            .or_insert_with(HashSet::new)
-                            .insert(downstream_actor.fragment_id as FragmentId);
+                        fragment_dispatcher_map
+                            .entry(actor.fragment_id)
+                            .or_insert(HashMap::new())
+                            .insert(downstream_actor.fragment_id, dispatcher.r#type());
 
                         // Checking for no shuffle dispatchers
                         if dispatcher.r#type() == DispatcherType::NoShuffle {
@@ -380,9 +381,11 @@ where
         }
 
         // Then, we collect all available upstream
-        let mut upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, ActorId, DispatcherId)>> =
-            HashMap::new();
-        for (actor_id, stream_actor) in &actor_map {
+        let mut upstream_dispatchers: HashMap<
+            ActorId,
+            Vec<(FragmentId, DispatcherId, DispatcherType)>,
+        > = HashMap::new();
+        for stream_actor in actor_map.values() {
             for dispatcher in &stream_actor.dispatcher {
                 for downstream_actor_id in &dispatcher.downstream_actor_id {
                     upstream_dispatchers
@@ -390,8 +393,8 @@ where
                         .or_default()
                         .push((
                             stream_actor.fragment_id as FragmentId,
-                            *actor_id as ActorId,
                             dispatcher.dispatcher_id as DispatcherId,
+                            dispatcher.r#type(),
                         ));
                 }
             }
@@ -433,10 +436,10 @@ where
             // correspondence, so we need to clone the reschedule plan to the downstream of all
             // cascading relations.
             if no_shuffle_source_fragment_ids.contains(fragment_id) {
-                let mut queue: VecDeque<_> = downstream_fragment_id_map
+                let mut queue: VecDeque<_> = fragment_dispatcher_map
                     .get(fragment_id)
                     .unwrap()
-                    .iter()
+                    .keys()
                     .cloned()
                     .collect();
 
@@ -445,10 +448,9 @@ where
                         continue;
                     }
 
-                    if let Some(downstream_fragment_ids) =
-                        downstream_fragment_id_map.get(&downstream_id)
+                    if let Some(downstream_fragments) = fragment_dispatcher_map.get(&downstream_id)
                     {
-                        queue.extend(downstream_fragment_ids);
+                        queue.extend(downstream_fragments.keys().cloned());
                     }
 
                     no_shuffle_reschedule.insert(
@@ -504,6 +506,16 @@ where
                     );
                 }
             }
+
+            match fragment.distribution_type() {
+                FragmentDistributionType::Hash => {}
+                FragmentDistributionType::Single => {
+                    if added_parallel_units.len() != removed_parallel_units.len() {
+                        bail!("single distribution fragment only support migration");
+                    }
+                }
+                FragmentDistributionType::Unspecified => unreachable!(),
+            }
         }
 
         if !no_shuffle_reschedule.is_empty() {
@@ -521,12 +533,12 @@ where
             actor_map,
             actor_status,
             fragment_map,
-            downstream_fragment_id_map,
             worker_nodes,
             upstream_dispatchers,
             stream_source_fragment_ids,
             no_shuffle_target_fragment_ids,
             no_shuffle_source_fragment_ids,
+            fragment_dispatcher_map,
         })
     }
 
@@ -687,8 +699,8 @@ where
                 .try_insert(*fragment_id, fragment_bitmap)
                 .unwrap();
 
-            if let Some(downstream_fragment_ids) = ctx.downstream_fragment_id_map.get(fragment_id) {
-                for downstream_fragment_id in downstream_fragment_ids {
+            if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(fragment_id) {
+                for downstream_fragment_id in downstream_fragments.keys() {
                     arrange_no_shuffle_relation(
                         ctx,
                         downstream_fragment_id,
@@ -710,10 +722,8 @@ where
             if ctx.no_shuffle_source_fragment_ids.contains(fragment_id)
                 && !ctx.no_shuffle_target_fragment_ids.contains(fragment_id)
             {
-                if let Some(downstream_fragment_ids) =
-                    ctx.downstream_fragment_id_map.get(fragment_id)
-                {
-                    for downstream_fragment_id in downstream_fragment_ids {
+                if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(fragment_id) {
+                    for downstream_fragment_id in downstream_fragments.keys() {
                         arrange_no_shuffle_relation(
                             &ctx,
                             downstream_fragment_id,
@@ -754,26 +764,29 @@ where
 
                 let worker = ctx.parallel_unit_id_to_worker(new_parallel_unit_id)?;
 
-                // for chain (no shuffle) downstreams, we don't need to create hanging channels
-                if !ctx.no_shuffle_target_fragment_ids.contains(fragment_id) {
-                    for upstream_actor_id in &new_actor.upstream_actor_id {
-                        let upstream_worker_id = ctx
-                            .actor_id_to_parallel_unit(upstream_actor_id)?
-                            .worker_node_id;
-                        worker_hanging_channels
-                            .entry(upstream_worker_id)
-                            .or_default()
-                            .push(HangingChannel {
-                                upstream: Some(ActorInfo {
-                                    actor_id: *upstream_actor_id,
-                                    host: None,
-                                }),
-                                downstream: Some(ActorInfo {
-                                    actor_id: *new_actor_id,
-                                    host: worker.host.clone(),
-                                }),
-                            });
-                    }
+                // Because of the transferability of no shuffle, the upstream and downstream actors
+                // of no shuffle are always created at the same time, so the upstream and downstream
+                // scaling process of 1-1 no shuffle does not need to create a hanging channel,
+                // but for the downstream of no shuffle with multiple upstreams (e.g. dynamic filter
+                // actor), the hanging channel from the remaining upstreams to the new actor needs
+                // to be created
+                for upstream_actor_id in &new_actor.upstream_actor_id {
+                    let upstream_worker_id = ctx
+                        .actor_id_to_parallel_unit(upstream_actor_id)?
+                        .worker_node_id;
+                    worker_hanging_channels
+                        .entry(upstream_worker_id)
+                        .or_default()
+                        .push(HangingChannel {
+                            upstream: Some(ActorInfo {
+                                actor_id: *upstream_actor_id,
+                                host: None,
+                            }),
+                            downstream: Some(ActorInfo {
+                                actor_id: *new_actor_id,
+                                host: worker.host.clone(),
+                            }),
+                        });
                 }
 
                 // This should be assigned before the `modify_actor_upstream_and_downstream` call,
@@ -784,6 +797,7 @@ where
                 Self::modify_actor_upstream_and_downstream(
                     &ctx.fragment_map,
                     &ctx.actor_map,
+                    &ctx.fragment_dispatcher_map,
                     &fragment_actors_to_remove,
                     &fragment_actors_to_create,
                     &fragment_actor_bitmap,
@@ -934,99 +948,77 @@ where
 
             let fragment = ctx.fragment_map.get(&fragment_id).unwrap();
 
-            let upstream_dispatcher_mapping =
-                // Skip NoShuffle's upstream
-                if !ctx.no_shuffle_target_fragment_ids.contains(&fragment.fragment_id) {
-                    match fragment.distribution_type() {
-                        FragmentDistributionType::Hash => {
-                            if parallel_unit_to_actor_after_reschedule.len() == 1 {
-                                Some(ActorMapping {
-                                    original_indices: vec![VIRTUAL_NODE_COUNT as u64 - 1],
-                                    data: vec![
-                                        *parallel_unit_to_actor_after_reschedule
-                                            .first_key_value()
-                                            .unwrap()
-                                            .1,
-                                    ],
-                                })
-                            } else {
-                                Some(actor_mapping_from_bitmaps(
-                                    fragment_actor_bitmap.get(&fragment_id).unwrap(),
-                                ))
-                            }
-                        }
-                        FragmentDistributionType::Single => None,
-                        FragmentDistributionType::Unspecified => unreachable!(),
-                    }
-                } else {
-                    let upstream_fragment_id =
-                        fragment.upstream_fragment_ids.iter().exactly_one().unwrap();
-                    let upstream_fragment = ctx.fragment_map.get(upstream_fragment_id).unwrap();
-
-                    let upstream_fragment_dispatcher_types = upstream_fragment
-                        .actors
-                        .iter()
-                        .flat_map(|actor| {
-                            actor
-                                .dispatcher
-                                .iter()
-                                .map(|dispatcher| dispatcher.r#type() as DispatcherType)
+            let in_degree_types: HashSet<_> = fragment
+                .upstream_fragment_ids
+                .iter()
+                .flat_map(|upstream_fragment_id| {
+                    ctx.fragment_dispatcher_map
+                        .get(upstream_fragment_id)
+                        .and_then(|dispatcher_map| {
+                            dispatcher_map.get(&fragment.fragment_id).cloned()
                         })
-                        .dedup()
-                        .collect_vec();
+                })
+                .collect();
 
-                    // The dispatcher upstream of NoShuffle should have one and only one type which is NoShuffle
-                    assert!(matches!(
-                        upstream_fragment_dispatcher_types
-                            .iter()
-                            .exactly_one()
-                            .cloned()
-                            .unwrap(),
-                        DispatcherType::NoShuffle
-                    ));
-
-                    None
-                };
+            let upstream_dispatcher_mapping = match fragment.distribution_type() {
+                FragmentDistributionType::Hash => {
+                    if !in_degree_types.contains(&DispatcherType::Hash) {
+                        None
+                    } else if parallel_unit_to_actor_after_reschedule.len() == 1 {
+                        Some(ActorMapping {
+                            original_indices: vec![VIRTUAL_NODE_COUNT as u64 - 1],
+                            data: vec![
+                                *parallel_unit_to_actor_after_reschedule
+                                    .first_key_value()
+                                    .unwrap()
+                                    .1,
+                            ],
+                        })
+                    } else {
+                        Some(actor_mapping_from_bitmaps(
+                            fragment_actor_bitmap.get(&fragment_id).unwrap(),
+                        ))
+                    }
+                }
+                FragmentDistributionType::Single => None,
+                FragmentDistributionType::Unspecified => unreachable!(),
+            };
 
             let mut upstream_fragment_dispatcher_set = BTreeSet::new();
 
-            // NoShuffle's upstream dispatcher will not be modified,
-            // the `upstream_fragment_dispatcher_ids` of NoShuffle fragment will always be empty.
-            if !ctx
-                .no_shuffle_target_fragment_ids
-                .contains(&fragment.fragment_id)
-            {
-                for actor in &fragment.actors {
-                    if let Some(upstream_actor_tuples) =
-                        ctx.upstream_dispatchers.get(&actor.actor_id)
+            for actor in &fragment.actors {
+                if let Some(upstream_actor_tuples) = ctx.upstream_dispatchers.get(&actor.actor_id) {
+                    for (upstream_fragment_id, upstream_dispatcher_id, upstream_dispatcher_type) in
+                        upstream_actor_tuples
                     {
-                        for (upstream_fragment_id, _, upstream_dispatcher_id) in
-                            upstream_actor_tuples
-                        {
-                            upstream_fragment_dispatcher_set
-                                .insert((*upstream_fragment_id, *upstream_dispatcher_id));
+                        match upstream_dispatcher_type {
+                            DispatcherType::Unspecified => unreachable!(),
+                            DispatcherType::NoShuffle => {}
+                            _ => {
+                                upstream_fragment_dispatcher_set
+                                    .insert((*upstream_fragment_id, *upstream_dispatcher_id));
+                            }
                         }
                     }
                 }
             }
 
-            let downstream_fragment_id = if let Some(downstream_fragment_ids) =
-                ctx.downstream_fragment_id_map.get(&fragment_id)
-            {
-                // Skip NoShuffle fragments' downstream
-                if ctx
-                    .no_shuffle_source_fragment_ids
-                    .contains(&fragment.fragment_id)
-                {
-                    None
+            let downstream_fragment_id =
+                if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(&fragment_id) {
+                    // Skip NoShuffle fragments' downstream
+                    if ctx
+                        .no_shuffle_source_fragment_ids
+                        .contains(&fragment.fragment_id)
+                    {
+                        None
+                    } else {
+                        let downstream_fragment_id =
+                            downstream_fragments.iter().exactly_one().unwrap().0;
+                        Some(*downstream_fragment_id as FragmentId)
+                    }
                 } else {
-                    let downstream_fragment_id =
-                        downstream_fragment_ids.iter().exactly_one().unwrap();
-                    Some(*downstream_fragment_id as FragmentId)
-                }
-            } else {
-                None
-            };
+                    None
+                };
 
             let mut vnode_bitmap_updates = fragment_actor_bitmap.remove(&fragment_id).unwrap();
 
@@ -1272,6 +1264,7 @@ where
     fn modify_actor_upstream_and_downstream(
         fragment_map: &HashMap<FragmentId, Fragment>,
         actor_map: &HashMap<ActorId, StreamActor>,
+        fragment_relation_map: &HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
         fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
@@ -1279,110 +1272,82 @@ where
         no_shuffle_downstream_actors_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         new_actor: &mut StreamActor,
     ) -> MetaResult<()> {
-        if let Some(no_shuffle_actor_id) = no_shuffle_upstream_actor_map.get(&new_actor.actor_id) {
-            assert_eq!(new_actor.upstream_actor_id.len(), 1);
-            new_actor.upstream_actor_id = vec![*no_shuffle_actor_id as ActorId];
-        } else {
-            let upstream_fragment_ids: HashSet<_> = new_actor
-                .upstream_actor_id
-                .iter()
-                .filter_map(|actor_id| actor_map.get(actor_id).map(|actor| actor.fragment_id))
-                .collect();
+        let fragment = fragment_map.get(&new_actor.fragment_id).unwrap();
+        let mut applied_upstream_fragment_actor_ids = HashMap::new();
 
-            for upstream_fragment_id in &upstream_fragment_ids {
-                let upstream_fragment = fragment_map.get(upstream_fragment_id).unwrap();
+        for upstream_fragment_id in &fragment.upstream_fragment_ids {
+            let upstream_dispatch_type = fragment_relation_map
+                .get(upstream_fragment_id)
+                .and_then(|map| map.get(&fragment.fragment_id))
+                .unwrap();
 
-                match upstream_fragment.distribution_type() {
-                    FragmentDistributionType::Hash => {}
-                    FragmentDistributionType::Single => {
-                        let upstream_actors_to_create =
-                            fragment_actors_to_create.get(upstream_fragment_id);
-                        let upstream_actors_to_remove =
-                            fragment_actors_to_remove.get(upstream_fragment_id);
+            match upstream_dispatch_type {
+                DispatcherType::Unspecified => unreachable!(),
+                DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
+                    let upstream_fragment = fragment_map.get(upstream_fragment_id).unwrap();
+                    let mut upstream_actor_ids = upstream_fragment
+                        .actors
+                        .iter()
+                        .map(|actor| actor.actor_id as ActorId)
+                        .collect_vec();
 
-                        match (upstream_actors_to_create, upstream_actors_to_remove) {
-                            (Some(create), Some(remove)) if create.len() == remove.len() => {}
-                            (None, None) => {}
-                            _ => bail!("single distribution only support migration"),
-                        }
-                    }
-                    FragmentDistributionType::Unspecified => unreachable!(),
-                }
-            }
-
-            let mut upstream_actors_to_remove = HashSet::new();
-            for upstream_fragment_id in &upstream_fragment_ids {
-                if let Some(actors_to_remove) = fragment_actors_to_remove.get(upstream_fragment_id)
-                {
-                    upstream_actors_to_remove.extend(actors_to_remove.keys().cloned());
-                }
-            }
-
-            // update upstream actor ids
-            new_actor
-                .upstream_actor_id
-                .drain_filter(|actor_id| upstream_actors_to_remove.contains(actor_id));
-
-            for upstream_fragment_id in &upstream_fragment_ids {
-                if let Some(upstream_actors_to_create) =
-                    fragment_actors_to_create.get(upstream_fragment_id)
-                {
-                    new_actor
-                        .upstream_actor_id
-                        .extend(upstream_actors_to_create.keys().cloned())
-                }
-            }
-        }
-
-        fn replace_merge_node_upstream(
-            stream_node: &mut StreamNode,
-            fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
-            fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
-            no_shuffle_upstream_actor_id: Option<&ActorId>,
-        ) {
-            if let Some(NodeBody::Merge(s)) = stream_node.node_body.as_mut() {
-                if let Some(upstream_actor_id) = no_shuffle_upstream_actor_id {
-                    assert_eq!(s.upstream_actor_id.len(), 1);
-                    assert!(matches!(
-                        s.upstream_dispatcher_type(),
-                        DispatcherType::NoShuffle
-                    ));
-                    s.upstream_actor_id = vec![*upstream_actor_id as ActorId];
-                } else {
                     if let Some(upstream_actors_to_remove) =
-                        fragment_actors_to_remove.get(&s.upstream_fragment_id)
+                        fragment_actors_to_remove.get(upstream_fragment_id)
                     {
-                        s.upstream_actor_id.drain_filter(|actor_id| {
+                        upstream_actor_ids.drain_filter(|actor_id| {
                             upstream_actors_to_remove.contains_key(actor_id)
                         });
                     }
 
                     if let Some(upstream_actors_to_create) =
-                        fragment_actors_to_create.get(&s.upstream_fragment_id)
+                        fragment_actors_to_create.get(upstream_fragment_id)
                     {
-                        s.upstream_actor_id
-                            .extend(upstream_actors_to_create.keys().cloned());
+                        upstream_actor_ids.extend(upstream_actors_to_create.keys().cloned());
                     }
+
+                    applied_upstream_fragment_actor_ids.insert(
+                        *upstream_fragment_id as FragmentId,
+                        upstream_actor_ids.clone(),
+                    );
                 }
+                DispatcherType::NoShuffle => {
+                    let no_shuffle_upstream_actor_id = no_shuffle_upstream_actor_map
+                        .get(&new_actor.actor_id)
+                        .cloned()
+                        .unwrap();
+
+                    applied_upstream_fragment_actor_ids.insert(
+                        *upstream_fragment_id as FragmentId,
+                        vec![no_shuffle_upstream_actor_id as ActorId],
+                    );
+                }
+            }
+        }
+
+        new_actor.upstream_actor_id = applied_upstream_fragment_actor_ids
+            .values()
+            .flatten()
+            .cloned()
+            .collect_vec();
+
+        fn replace_merge_node_upstream(
+            stream_node: &mut StreamNode,
+            applied_upstream_fragment_actor_ids: &HashMap<FragmentId, Vec<ActorId>>,
+        ) {
+            if let Some(NodeBody::Merge(s)) = stream_node.node_body.as_mut() {
+                s.upstream_actor_id = applied_upstream_fragment_actor_ids
+                    .get(&s.upstream_fragment_id)
+                    .cloned()
+                    .unwrap();
             }
 
             for child in &mut stream_node.input {
-                replace_merge_node_upstream(
-                    child,
-                    fragment_actors_to_remove,
-                    fragment_actors_to_create,
-                    no_shuffle_upstream_actor_id,
-                );
+                replace_merge_node_upstream(child, applied_upstream_fragment_actor_ids);
             }
         }
 
         if let Some(node) = new_actor.nodes.as_mut() {
-            replace_merge_node_upstream(
-                node,
-                fragment_actors_to_remove,
-                fragment_actors_to_create,
-                no_shuffle_upstream_actor_map.get(&new_actor.actor_id),
-            );
+            replace_merge_node_upstream(node, &applied_upstream_fragment_actor_ids);
         }
 
         // Update downstream actor ids

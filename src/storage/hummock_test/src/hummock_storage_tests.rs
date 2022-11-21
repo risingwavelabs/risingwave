@@ -29,10 +29,8 @@ use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::Context;
-use risingwave_storage::hummock::event_handler::hummock_event_handler::BufferTracker;
 use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::store::version::{
     read_filter_for_batch, read_filter_for_local, HummockVersionReader,
@@ -76,21 +74,8 @@ pub async fn prepare_hummock_event_handler(
         Arc::new(risingwave_tracing::RwTracingService::new()),
     ));
 
-    let buffer_tracker = BufferTracker::from_storage_config(&opt);
-
-    let local_version_manager = LocalVersionManager::new(
-        pinned_version.clone(),
-        compactor_context.clone(),
-        buffer_tracker,
-        event_tx.clone(),
-    );
-
-    let hummock_event_handler = HummockEventHandler::new(
-        local_version_manager,
-        event_rx,
-        pinned_version,
-        compactor_context,
-    );
+    let hummock_event_handler =
+        HummockEventHandler::new(event_rx, pinned_version, compactor_context);
 
     (hummock_event_handler, event_tx)
 }
@@ -114,7 +99,7 @@ async fn sync_epoch(event_tx: &UnboundedSender<HummockEvent>, epoch: HummockEpoc
         .unwrap();
     let (tx, rx) = oneshot::channel();
     event_tx
-        .send(HummockEvent::SyncEpoch {
+        .send(HummockEvent::AwaitSyncEpoch {
             new_sync_epoch: epoch,
             sync_result_sender: tx,
         })

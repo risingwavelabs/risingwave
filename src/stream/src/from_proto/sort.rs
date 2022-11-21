@@ -14,9 +14,8 @@
 
 use std::sync::Arc;
 
-use risingwave_storage::table::streaming_table::state_table::StateTable;
-
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::SortExecutor;
 
 pub struct SortExecutorBuilder;

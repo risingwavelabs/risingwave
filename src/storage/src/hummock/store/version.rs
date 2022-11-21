@@ -28,8 +28,10 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, user_key, FullKey, TableKey, TableKeyRange, UserKey,
 };
-use risingwave_hummock_sdk::{can_concat, HummockEpoch};
+use risingwave_hummock_sdk::key_range::KeyRangeCommon;
+use risingwave_hummock_sdk::{can_concat, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
+use sync_point::sync_point;
 
 use super::memtable::{ImmId, ImmutableMemtable};
 use super::state_store::StagingDataIterator;
@@ -42,9 +44,7 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::store::state_store::HummockStorageIterator;
-use crate::hummock::utils::{
-    check_subset_preserve_order, filter_single_sst, prune_ssts, range_overlap, search_sst_idx,
-};
+use crate::hummock::utils::{filter_single_sst, prune_ssts, range_overlap, search_sst_idx};
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, DeleteRangeAggregator,
     SstableDeleteRangeIterator, SstableIterator,
@@ -62,22 +62,23 @@ pub type CommittedVersion = PinnedVersion;
 /// - Uncommitted SST: data that has been uploaded to persistent storage but not committed to
 ///   hummock version.
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StagingSstableInfo {
     // newer data comes first
-    sstable_infos: Vec<SstableInfo>,
+    sstable_infos: Vec<LocalSstableInfo>,
     /// Epochs whose data are included in the Sstable. The newer epoch comes first.
     /// The field must not be empty.
     epochs: Vec<HummockEpoch>,
-    #[allow(dead_code)]
     imm_ids: Vec<ImmId>,
+    imm_size: usize,
 }
 
 impl StagingSstableInfo {
     pub fn new(
-        sstable_infos: Vec<SstableInfo>,
+        sstable_infos: Vec<LocalSstableInfo>,
         epochs: Vec<HummockEpoch>,
         imm_ids: Vec<ImmId>,
+        imm_size: usize,
     ) -> Self {
         // the epochs are sorted from higher epoch to lower epoch
         assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2.partial_cmp(epoch1)));
@@ -85,11 +86,24 @@ impl StagingSstableInfo {
             sstable_infos,
             epochs,
             imm_ids,
+            imm_size,
         }
     }
 
-    pub fn sstable_infos(&self) -> &Vec<SstableInfo> {
+    pub fn sstable_infos(&self) -> &Vec<LocalSstableInfo> {
         &self.sstable_infos
+    }
+
+    pub fn imm_size(&self) -> usize {
+        self.imm_size
+    }
+
+    pub fn epochs(&self) -> &Vec<HummockEpoch> {
+        &self.epochs
+    }
+
+    pub fn imm_ids(&self) -> &Vec<ImmId> {
+        &self.imm_ids
     }
 }
 
@@ -155,6 +169,7 @@ impl StagingVersion {
                 staging_sst
                     .sstable_infos
                     .iter()
+                    .map(|sstable| &sstable.sst_info)
                     .filter(move |sstable| filter_single_sst(sstable, table_id, table_key_range))
             });
         (overlapped_imms, overlapped_ssts)
@@ -196,44 +211,27 @@ impl HummockReadVersion {
                 // the batch id of imm at the front
                 StagingData::ImmMem(imm) => self.staging.imm.push_front(imm),
                 StagingData::Sst(staging_sst) => {
-                    // TODO: enable this stricter check after each streaming table owns a read
-                    // version. assert!(self.staging.imm.len() >=
-                    // staging_sst.imm_ids.len()); assert!(staging_sst
-                    //     .imm_ids
-                    //     .is_sorted_by(|batch_id1, batch_id2| batch_id2.partial_cmp(batch_id1)));
-                    // assert!(
-                    //     check_subset_preserve_order(
-                    //         staging_sst.imm_ids.iter().cloned(),
-                    //         self.staging.imm.iter().map(|imm| imm.batch_id()),
-                    //     ),
-                    //     "the imm id of staging sstable info not preserve the imm order. staging
-                    // sst imm ids: {:?}, current imm ids: {:?}",
-                    //     staging_sst.imm_ids.iter().collect_vec(),
-                    //     self.staging.imm.iter().map(|imm| imm.batch_id()).collect_vec()
-                    // );
-                    // for clear_imm_id in staging_sst.imm_ids.iter().rev() {
-                    //     let item = self.staging.imm.back().unwrap();
-                    //     assert_eq!(*clear_imm_id, item.batch_id());
-                    //     self.staging.imm.pop_back();
-                    // }
-
-                    debug_assert!(
-                        check_subset_preserve_order(
-                            staging_sst.imm_ids.iter().cloned().sorted(),
-                            self.staging.imm.iter().map(|imm| imm.batch_id()).sorted()
-                        ),
-                        "the set of imm ids in the staging_sst {:?} is not a subset of current staging imms {:?}",
-                        staging_sst.imm_ids.iter().cloned().sorted().collect_vec(),
-                        self.staging.imm.iter().map(|imm| imm.batch_id()).sorted().collect_vec(),
-                    );
-
-                    let imm_id_set: HashSet<ImmId> =
-                        HashSet::from_iter(staging_sst.imm_ids.iter().cloned());
-                    self.staging
+                    let staging_imm_ids_from_sst: HashSet<u64> =
+                        staging_sst.imm_ids.iter().cloned().sorted().collect();
+                    let staging_imm_ids_from_imms: HashSet<u64> = self
+                        .staging
                         .imm
-                        .retain(|imm| !imm_id_set.contains(&imm.batch_id()));
+                        .iter()
+                        .map(|imm| imm.batch_id())
+                        .sorted()
+                        .collect();
+                    let intersection =
+                        staging_imm_ids_from_imms.intersection(&staging_imm_ids_from_sst);
 
-                    self.staging.sst.push_front(staging_sst);
+                    if intersection.count() > 0 {
+                        let imm_id_set: HashSet<ImmId> =
+                            HashSet::from_iter(staging_sst.imm_ids.iter().cloned());
+                        self.staging
+                            .imm
+                            .retain(|imm| !imm_id_set.contains(&imm.batch_id()));
+
+                        self.staging.sst.push_front(staging_sst);
+                    }
                 }
             },
 
@@ -441,16 +439,14 @@ impl HummockVersionReader {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = user_key(
-                        &level.table_infos[table_info_idx]
-                            .key_range
-                            .as_ref()
-                            .unwrap()
-                            .right,
-                    )
-                    .cmp(encoded_user_key.as_ref());
+                    let ord = level.table_infos[table_info_idx]
+                        .key_range
+                        .as_ref()
+                        .unwrap()
+                        .compare_right_with_user_key(&encoded_user_key);
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
+                        sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_FILE");
                         continue;
                     }
 

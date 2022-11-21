@@ -28,7 +28,6 @@ use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -38,6 +37,7 @@ use super::monitor::StreamingMetrics;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
+use crate::common::table::state_table::StateTable;
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::expect_first_barrier_from_aligned_stream;
 
@@ -51,7 +51,6 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     comparator: ExprNodeType,
     range_cache: RangeCache<S>,
     right_table: StateTable<S>,
-    is_right_table_writer: bool,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time.
@@ -70,7 +69,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         comparator: ExprNodeType,
         mut state_table_l: StateTable<S>,
         mut state_table_r: StateTable<S>,
-        is_right_table_writer: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         vnodes: Arc<Bitmap>,
@@ -90,7 +88,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             comparator,
             range_cache: RangeCache::new(state_table_l, usize::MAX, vnodes),
             right_table: state_table_r,
-            is_right_table_writer,
             metrics,
             schema,
             chunk_size,
@@ -221,7 +218,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let is_insert = matches!(self.comparator, GreaterThan | GreaterThanOrEqual);
                     (range, true, is_insert)
                 } else {
-                    // p > c
+                    // c > p
                     let range = match self.comparator {
                         GreaterThan | LessThanOrEqual => (Excluded(p), Included(c)),
                         GreaterThanOrEqual | LessThan => (Included(p), Excluded(c)),
@@ -378,12 +375,13 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         }
                     }
 
-                    if self.is_right_table_writer {
+                    // Only write the RHS value if this actor is in charge of vnode 0
+                    if self.range_cache.state_table.vnode_bitmap().is_set(0) {
                         if last_committed_epoch_row != current_epoch_row {
                             // If both `None`, then this branch is inactive.
                             // Hence, at least one is `Some`, hence at least one update.
-                            if let Some(old_row) = &last_committed_epoch_row {
-                                self.right_table.delete(old_row.clone());
+                            if let Some(old_row) = last_committed_epoch_row.take() {
+                                self.right_table.delete(old_row);
                             }
                             if let Some(row) = &current_epoch_row {
                                 self.right_table.insert(row.clone());
@@ -494,7 +492,6 @@ mod tests {
             comparator,
             mem_state_l,
             mem_state_r,
-            true,
             Arc::new(StreamingMetrics::unused()),
             1024,
             fallback.vnodes,

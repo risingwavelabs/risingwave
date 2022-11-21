@@ -29,7 +29,6 @@ use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::HummockVersion;
 use risingwave_storage::hummock::compactor::Context;
 use risingwave_storage::hummock::event_handler::hummock_event_handler::BufferTracker;
-use risingwave_storage::hummock::event_handler::HummockEventHandler;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::{
     LocalVersionManager, LocalVersionManagerRef,
@@ -43,7 +42,6 @@ use risingwave_storage::hummock::SstableIdManager;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_tracing::RwTracingService;
-use tokio::spawn;
 
 use crate::test_utils::prepare_first_valid_version;
 
@@ -53,7 +51,7 @@ pub async fn prepare_local_version_manager(
     hummock_manager_ref: HummockManagerRef<MemStore>,
     worker_node: WorkerNode,
 ) -> LocalVersionManagerRef {
-    let (pinned_version, event_tx, event_rx) =
+    let (pinned_version, _, _) =
         prepare_first_valid_version(env, hummock_manager_ref.clone(), worker_node.clone()).await;
 
     let sstable_store = mock_sstable_store();
@@ -79,22 +77,7 @@ pub async fn prepare_local_version_manager(
         Arc::new(RwTracingService::new()),
     ));
 
-    let local_version_manager = LocalVersionManager::new(
-        pinned_version.clone(),
-        compactor_context.clone(),
-        buffer_tracker,
-        event_tx,
-    );
-
-    let hummock_event_handler = HummockEventHandler::new(
-        local_version_manager.clone(),
-        event_rx,
-        pinned_version,
-        compactor_context,
-    );
-    spawn(hummock_event_handler.start_hummock_event_handler_worker());
-
-    local_version_manager
+    LocalVersionManager::new(pinned_version, compactor_context, buffer_tracker)
 }
 
 #[tokio::test]
@@ -468,7 +451,7 @@ async fn test_clear_shared_buffer() {
     }
 
     // Clear shared buffer and check
-    local_version_manager.clear_shared_buffer().await;
+    local_version_manager.clear_shared_buffer();
     let local_version = local_version_manager.get_local_version();
     assert_eq!(local_version.iter_shared_buffer().count(), 0);
 

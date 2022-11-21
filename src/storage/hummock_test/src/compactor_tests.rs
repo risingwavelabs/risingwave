@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
 
     use std::collections::{BTreeSet, HashMap};
     use std::ops::Bound;
@@ -56,14 +56,13 @@ mod tests {
     use risingwave_storage::store::{
         ReadOptions, StateStoreReadExt, StateStoreWrite, WriteOptions,
     };
-    use risingwave_storage::Keyspace;
 
     use crate::test_utils::{
         get_test_notification_client, HummockV2MixedStateStore,
         HummockV2MixedStateStore as HummockStorage,
     };
 
-    async fn get_hummock_storage(
+    pub(crate) async fn get_hummock_storage(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
         table_id: TableId,
@@ -447,7 +446,7 @@ mod tests {
         assert!(compact_task.is_none());
     }
 
-    async fn flush_and_commit(
+    pub(crate) async fn flush_and_commit(
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         storage: &HummockStorage,
         epoch: u64,
@@ -462,7 +461,6 @@ mod tests {
 
     async fn prepare_data(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        keyspace: &Keyspace<HummockStorage>,
         storage: &HummockStorage,
         existing_table_id: u32,
         keys_per_epoch: usize,
@@ -474,7 +472,7 @@ mod tests {
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
         for idx in 0..kv_count {
             epoch += 1;
-            let mut local = keyspace.start_write_batch(WriteOptions {
+            let mut local = storage.local.start_write_batch(WriteOptions {
                 epoch,
                 table_id: existing_table_id.into(),
             });
@@ -546,14 +544,9 @@ mod tests {
             existing_table_id,
         )
         .await;
-        let keyspace = Keyspace::table_root(
-            storage_existing_table_id.clone(),
-            TableId::new(existing_table_id),
-        );
 
         prepare_data(
             hummock_meta_client.clone(),
-            &keyspace,
             &storage_existing_table_id,
             existing_table_id,
             1,
@@ -673,7 +666,6 @@ mod tests {
             } else {
                 (existing_table_ids, storage_2.clone())
             };
-            let keyspace = Keyspace::table_root(storage.clone(), TableId::new(table_id));
             register_table_ids_to_compaction_group(
                 &hummock_manager_ref,
                 &[table_id],
@@ -681,7 +673,7 @@ mod tests {
             )
             .await;
             epoch += 1;
-            let mut local = keyspace.start_write_batch(WriteOptions {
+            let mut local = storage.start_write_batch(WriteOptions {
                 epoch,
                 table_id: TableId::from(table_id),
             });
@@ -836,7 +828,6 @@ mod tests {
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
-        let keyspace = Keyspace::table_root(storage.clone(), TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
             &hummock_manager_ref,
             &[existing_table_id],
@@ -847,7 +838,7 @@ mod tests {
         for _ in 0..kv_count {
             epoch += millisec_interval_epoch;
             epoch_set.insert(epoch);
-            let mut local = keyspace.start_write_batch(WriteOptions {
+            let mut local = storage.start_write_batch(WriteOptions {
                 epoch,
                 table_id: TableId::from(existing_table_id),
             });
@@ -1011,10 +1002,9 @@ mod tests {
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
-        let keyspace = Keyspace::table_root(storage.clone(), TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
             &hummock_manager_ref,
-            &[keyspace.table_id().table_id],
+            &[existing_table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
         .await;
@@ -1022,9 +1012,9 @@ mod tests {
         for _ in 0..kv_count {
             epoch += millisec_interval_epoch;
             epoch_set.insert(epoch);
-            let mut local = keyspace.start_write_batch(WriteOptions {
+            let mut local = storage.start_write_batch(WriteOptions {
                 epoch,
-                table_id: keyspace.table_id(),
+                table_id: TableId::new(existing_table_id),
             });
 
             let ramdom_key = [key_prefix, &rand::thread_rng().gen::<[u8; 32]>()].concat();
@@ -1170,16 +1160,8 @@ mod tests {
         )
         .await;
 
-        let keyspace = Keyspace::table_root(storage.clone(), TableId::new(existing_table_id));
-        prepare_data(
-            hummock_meta_client.clone(),
-            &keyspace,
-            &storage,
-            existing_table_id,
-            2,
-        )
-        .await;
-        let mut local = keyspace.start_write_batch(WriteOptions {
+        prepare_data(hummock_meta_client.clone(), &storage, existing_table_id, 2).await;
+        let mut local = storage.start_write_batch(WriteOptions {
             epoch: 130,
             table_id: existing_table_id.into(),
         });
