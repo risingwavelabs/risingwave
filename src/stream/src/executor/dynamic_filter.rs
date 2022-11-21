@@ -357,9 +357,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 AlignedMessage::Barrier(barrier) => {
                     // Flush the difference between the `prev_value` and `current_value`
                     //
-                    // This block is guaranteed to be idempotent even if we may encounter multiple barriers
-                    // since `prev_epoch_value` is always be reset to the equivalent of `current_epoch_value` 
-                    // at the end of this block. Likewise, `last_commited_epoch_row` will always be equal to 
+                    // This block is guaranteed to be idempotent even if we may encounter multiple
+                    // barriers since `prev_epoch_value` is always be reset to
+                    // the equivalent of `current_epoch_value` at the end of
+                    // this block. Likewise, `last_commited_epoch_row` will always be equal to
                     // `current_epoch_row`.
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
