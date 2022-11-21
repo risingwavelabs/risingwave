@@ -44,7 +44,7 @@ cargo build \
 
 
 echo "--- Build Java connector node"
-git clone git@github.com:risingwavelabs/risingwave-connector-node.git
+git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
 cd risingwave-connector-node
 mvn package
 echo "--- Upload Java artifacts"
