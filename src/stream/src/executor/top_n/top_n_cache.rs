@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use risingwave_common::array::{Op, RowDeserializer, RowRef};
-use risingwave_common::row::{CompactedRow, Row};
+use risingwave_common::row::{CompactedRow, Row, Row2};
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
@@ -73,7 +73,7 @@ pub trait TopNCacheTrait {
     fn insert(
         &mut self,
         cache_key: CacheKey,
-        row: Row,
+        row: impl Row2,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     );
@@ -92,7 +92,7 @@ pub trait TopNCacheTrait {
         group_key: Option<&Row>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: Row,
+        row: impl Row2 + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) -> StreamExecutorResult<()>;
@@ -170,7 +170,7 @@ impl TopNCacheTrait for TopNCache<false> {
     fn insert(
         &mut self,
         cache_key: CacheKey,
-        row: Row,
+        row: impl Row2,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) {
@@ -236,7 +236,7 @@ impl TopNCacheTrait for TopNCache<false> {
         group_key: Option<&Row>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: Row,
+        row: impl Row2 + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) -> StreamExecutorResult<()> {
@@ -314,7 +314,7 @@ impl TopNCacheTrait for TopNCache<true> {
     fn insert(
         &mut self,
         cache_key: CacheKey,
-        row: Row,
+        row: impl Row2,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) {
@@ -412,7 +412,7 @@ impl TopNCacheTrait for TopNCache<true> {
         group_key: Option<&Row>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: Row,
+        row: impl Row2 + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) -> StreamExecutorResult<()> {

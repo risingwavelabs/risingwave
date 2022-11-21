@@ -239,9 +239,9 @@ where
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
-                    self.managed_state.insert(row_ref);
+                    self.managed_state.insert(row_ref.clone());
                     self.cache
-                        .insert(cache_key, row, &mut res_ops, &mut res_rows)
+                        .insert(cache_key, row_ref, &mut res_ops, &mut res_rows)
                 }
 
                 Op::Delete | Op::UpdateDelete => {
