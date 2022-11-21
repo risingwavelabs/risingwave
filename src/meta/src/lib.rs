@@ -37,6 +37,7 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
+mod backup_restore;
 mod barrier;
 #[cfg(not(madsim))] // no need in simulation test
 mod dashboard;

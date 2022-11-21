@@ -27,9 +27,22 @@ use risingwave_pb::hummock::{
     HummockVersionStats,
 };
 
-use crate::hummock::manager::read_lock;
+use crate::hummock::manager::{read_lock, write_lock};
 use crate::hummock::HummockManager;
 use crate::storage::MetaStore;
+
+/// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
+#[derive(Clone, PartialEq, Eq)]
+pub struct HummockVersionSafePoint {
+    id: HummockVersionId,
+}
+
+impl Drop for HummockVersionSafePoint {
+    fn drop(&mut self) {
+        // TODO #6482: invoke unregister_safe_point
+        todo!()
+    }
+}
 
 #[derive(Default)]
 pub struct Versioning {
@@ -37,7 +50,6 @@ pub struct Versioning {
     /// Avoide commit epoch epochs
     /// Don't persist compaction version delta to meta store
     pub disable_commit_epochs: bool,
-
     /// Latest hummock version
     pub current_version: HummockVersion,
     /// These SSTs should be deleted from object store.
@@ -45,14 +57,17 @@ pub struct Versioning {
     pub ssts_to_delete: BTreeMap<HummockSstableId, HummockVersionId>,
     /// These deltas should be deleted from meta store.
     /// A delta can be deleted if
-    /// - It's version id <= checkpoint version id. Currently we only make checkpoint for version
-    ///   id <= min_pinned_version_id.
+    /// - Its version id <= checkpoint version id. Currently we only make checkpoint for version id
+    ///   <= min_pinned_version_id.
     /// - AND It either contains no SST to delete, or all these SSTs has been deleted. See
     ///   `extend_ssts_to_delete_from_deltas`.
     pub deltas_to_delete: Vec<HummockVersionId>,
     /// SST which is referenced more than once
     pub branched_ssts:
         BTreeMap<HummockSstableId, HashMap<CompactionGroupId, /* divide version */ u64>>,
+    /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
+    /// Hummock versions GE than min(safe_point) should not be GCed.
+    pub version_safe_points: Vec<HummockVersionSafePoint>,
 
     // Persistent states below
     /// Mapping from id of each hummock version which succeeds checkpoint to its
@@ -68,8 +83,13 @@ pub struct Versioning {
 impl Versioning {
     pub fn min_pinned_version_id(&self) -> HummockVersionId {
         let mut min_pinned_version_id = HummockVersionId::MAX;
-        for version_pin in self.pinned_versions.values() {
-            min_pinned_version_id = cmp::min(version_pin.min_pinned_id, min_pinned_version_id);
+        for id in self
+            .pinned_versions
+            .values()
+            .map(|v| v.min_pinned_id)
+            .chain(self.version_safe_points.iter().map(|v| v.id))
+        {
+            min_pinned_version_id = cmp::min(id, min_pinned_version_id);
         }
         min_pinned_version_id
     }
@@ -140,6 +160,27 @@ where
     #[named]
     pub async fn get_version_stats(&self) -> HummockVersionStats {
         read_lock!(self, versioning).await.version_stats.clone()
+    }
+
+    #[named]
+    pub async fn register_safe_point(&self) -> HummockVersionSafePoint {
+        let mut wl = write_lock!(self, versioning).await;
+        let safe_point = HummockVersionSafePoint {
+            id: wl.current_version.id,
+        };
+        wl.version_safe_points.push(safe_point.clone());
+        safe_point
+    }
+
+    #[named]
+    pub async fn unregister_safe_point(&self, safe_point: HummockVersionSafePoint) {
+        let mut wl = write_lock!(self, versioning).await;
+        for (idx, sp) in wl.version_safe_points.iter().enumerate() {
+            if *sp == safe_point {
+                wl.version_safe_points.remove(idx);
+                break;
+            }
+        }
     }
 }
 

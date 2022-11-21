@@ -39,6 +39,7 @@ use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
+use crate::backup_restore::{BackupManager, DummyBackupStorage};
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
@@ -402,9 +403,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .unwrap();
 
     // Initialize services.
-    let vacuum_trigger = Arc::new(hummock::VacuumManager::new(
+    // TODO #6482 use correct backup storage
+    let backup_storage = Box::new(DummyBackupStorage {});
+    let backup_manager =
+        Arc::new(BackupManager::new(env.clone(), hummock_manager.clone(), backup_storage).await?);
+    let vacuum_manager = Arc::new(hummock::VacuumManager::new(
         env.clone(),
         hummock_manager.clone(),
+        backup_manager.clone(),
         compactor_manager.clone(),
     ));
 
@@ -438,7 +444,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
-        vacuum_trigger.clone(),
+        vacuum_manager.clone(),
         fragment_manager.clone(),
     );
     let notification_manager = env.notification_manager_ref();
@@ -467,7 +473,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let mut sub_tasks = hummock::start_hummock_workers(
         hummock_manager.clone(),
         compactor_manager,
-        vacuum_trigger,
+        vacuum_manager,
         notification_manager,
         compaction_scheduler,
         &env.opts,
