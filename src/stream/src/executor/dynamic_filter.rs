@@ -362,6 +362,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     // the equivalent of `current_epoch_value` at the end of
                     // this block. Likewise, `last_committed_epoch_row` will always be equal to
                     // `current_epoch_row`.
+                    // It is thus guaranteed not to commit state or produce chunks as long as
+                    // no new chunks have arrived since the previous barrier.
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
                     let row_deserializer = RowDeserializer::new(self.schema.data_types());
