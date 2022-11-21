@@ -12,13 +12,24 @@ use super::{
     PkIndicesRef,
 };
 
+/// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
+/// table. The two streams will be merged into one and then sent to downstream.
 pub struct DmlExecutor {
     upstream: BoxedExecutor,
+
     schema: Schema,
+
     pk_indices: PkIndices,
+
     identity: String,
+
+    /// Stores the information of batch data channels.
     dml_manager: DmlManagerRef,
+
+    // Id of the table on which DML performs.
     table_id: TableId,
+
+    // Column descriptions of the table.
     column_descs: Vec<ColumnDesc>,
 }
 
@@ -47,32 +58,35 @@ impl DmlExecutor {
     async fn execute_inner(self: Box<Self>) {
         let mut upstream = self.upstream.execute();
 
+        // Construct the reader of batch data (DML from users).
         let batch_reader = self
             .dml_manager
             .register_reader(&self.table_id, &self.column_descs);
-
         let batch_reader = batch_reader
             .stream_reader_v2()
             .into_stream_v2()
             .map(Either::Right);
 
-        let barrier = expect_first_barrier(&mut upstream).await?;
-
         // The first barrier message should be propagated.
+        let barrier = expect_first_barrier(&mut upstream).await?;
         yield Message::Barrier(barrier);
 
+        // Stream data from the upstream executor.
         let upstream = upstream.map(Either::Left);
 
+        // Merge the two streams.
         let stream = select(upstream, batch_reader);
 
         #[for_await]
         for input_msg in stream {
             match input_msg {
                 Either::Left(msg) => {
+                    // Stream data.
                     let msg: Message = msg?;
                     yield msg;
                 }
                 Either::Right(chunk) => {
+                    // Batch data.
                     let chunk: StreamChunk = chunk.map_err(StreamExecutorError::connector_error)?;
                     yield Message::Chunk(chunk);
                 }

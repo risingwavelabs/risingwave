@@ -11,15 +11,20 @@ use crate::{TableSource, TableSourceRef};
 
 pub type DmlManagerRef = Arc<DmlManager>;
 
-#[derive(Default)]
+/// [`DmlManager`] manages the communication between batch data manipulation and streaming
+/// processing.
+/// NOTE: `TableSource` is used here as an out-of-the-box solution. It should be renamed
+/// as `BatchDml` later. We should further optimize its implementation (e.g. directly expose a
+/// channel instead of offering a `write_chunk` interface).
+#[derive(Default, Debug)]
 pub struct DmlManager {
-    senders: Mutex<HashMap<TableId, TableSourceRef>>,
+    batch_dmls: Mutex<HashMap<TableId, TableSourceRef>>,
 }
 
 impl DmlManager {
     pub fn new() -> Self {
         Self {
-            senders: Mutex::new(HashMap::new()),
+            batch_dmls: Mutex::new(HashMap::new()),
         }
     }
 
@@ -28,12 +33,12 @@ impl DmlManager {
         table_id: &TableId,
         column_descs: &[ColumnDesc],
     ) -> TableSourceRef {
-        let mut senders = self.senders.lock();
-        if !senders.contains_key(table_id) {
-            let sender = Arc::new(TableSource::new(column_descs.to_vec()));
-            senders.insert(*table_id, sender);
+        let mut batch_dmls = self.batch_dmls.lock();
+        if !batch_dmls.contains_key(table_id) {
+            let batch_dml = Arc::new(TableSource::new(column_descs.to_vec()));
+            batch_dmls.insert(*table_id, batch_dml);
         }
-        senders.get(table_id).unwrap().clone()
+        batch_dmls.get(table_id).unwrap().clone()
     }
 
     pub fn write_chunk(
@@ -41,7 +46,7 @@ impl DmlManager {
         table_id: &TableId,
         chunk: StreamChunk,
     ) -> Result<oneshot::Receiver<usize>> {
-        let senders = self.senders.lock();
-        senders.get(table_id).unwrap().write_chunk(chunk)
+        let batch_dmls = self.batch_dmls.lock();
+        batch_dmls.get(table_id).unwrap().write_chunk(chunk)
     }
 }

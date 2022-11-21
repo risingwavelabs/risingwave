@@ -17,6 +17,7 @@
 mod agg_common;
 mod batch_query;
 mod chain;
+mod dml;
 mod dynamic_filter;
 mod expand;
 mod filter;
@@ -48,6 +49,7 @@ use risingwave_storage::StateStore;
 
 use self::batch_query::*;
 use self::chain::*;
+use self::dml::*;
 use self::dynamic_filter::*;
 use self::expand::*;
 use self::filter::*;
@@ -137,5 +139,6 @@ pub async fn create_executor(
         NodeBody::GroupTopN => GroupTopNExecutorBuilder,
         NodeBody::Sort => SortExecutorBuilder,
         NodeBody::WatermarkFilter => WatermarkFilterBuilder,
+        NodeBody::Dml => DmlExecutorBuilder,
     }
 }

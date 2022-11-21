@@ -54,7 +54,7 @@ pub mod aggregation;
 mod batch_query;
 mod chain;
 mod dispatch;
-mod dml;
+pub mod dml;
 mod dynamic_filter;
 mod error;
 mod expand;
