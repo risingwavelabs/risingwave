@@ -34,12 +34,6 @@ function pushDockerhub() {
       --amend "${dockerhubaddr}:${BUILDKITE_COMMIT}-x86_64" \
       --amend "${dockerhubaddr}:${BUILDKITE_COMMIT}-aarch64"
     docker manifest push --insecure "$DOCKERTAG"
-
-    echo "delete the manifest images from dockerhub"
-    docker run --rm lumir/remove-dockerhub-tag \
-      --user "risingwavelabs" --password "$DOCKER_TOKEN" \
-      "${dockerhubaddr}:${BUILDKITE_COMMIT}-x86_64" \
-      "${dockerhubaddr}:${BUILDKITE_COMMIT}-aarch64"
   fi
 }
 
@@ -58,9 +52,18 @@ do
     pushGchr ${component} ${TAG}
   fi
 
-  if [ "${BUILDKITE_SOURCE}" == "schedule" ] || [ "${BUILDKITE_SOURCE}" == "ui" ]; then
-    # If this is a schedule/ui build, tag the image with the date.
+  if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
+    # If this is a schedule build, tag the image with the date.
     TAG="nightly-${date}"
+    pushGchr ${component} ${TAG}
+    pushDockerhub ${component} ${TAG}
+    TAG="latest"
+    pushGchr ${component} ${TAG}
+  fi
+
+  if [ "${BUILDKITE_SOURCE}" == "ui" ] && [[ -n "${IMAGE_TAG+x}" ]]; then
+    # If this is a ui build, tag the image with the $imagetag.
+    TAG="${IMAGE_TAG}"
     pushGchr ${component} ${TAG}
     pushDockerhub ${component} ${TAG}
   fi
@@ -74,7 +77,10 @@ do
     TAG="latest"
     pushDockerhub ${component} ${TAG}
   fi
-
-  TAG="latest"
-  pushGchr ${component} ${TAG}
 done
+
+echo "delete the manifest images from dockerhub"
+docker run --rm lumir/remove-dockerhub-tag \
+  --user "risingwavelabs" --password "$DOCKER_TOKEN" \
+  "${dockerhubaddr}:${BUILDKITE_COMMIT}-x86_64" \
+  "${dockerhubaddr}:${BUILDKITE_COMMIT}-aarch64"
