@@ -17,6 +17,3 @@ data_directory = "hummock_001"
 block_cache_capacity_mb = 4096
 meta_cache_capacity_mb = 1024
 object_store_use_batch_delete = true
-
-[connector]
-connector_addr = "127.0.0.1:50051"

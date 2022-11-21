@@ -38,9 +38,9 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .map(|i| ColumnId::from(*i))
             .collect::<Vec<ColumnId>>();
 
-        let connector_params = params.env.connector_addr().map(|addr| RemoteSinkParams {
-            connector_addr: addr,
-        });
+        let connector_params = RemoteSinkParams{
+            connector_addr: params.env.connector_sink_endpoint()
+        };
 
         Ok(Box::new(SinkExecutor::new(
             materialize_executor,
@@ -48,7 +48,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             stream.streaming_metrics.clone(),
             node.properties.clone(),
             params.executor_id,
-            connector_params,
+            Some(connector_params),
         )))
     }
 }

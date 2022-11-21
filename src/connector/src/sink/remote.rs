@@ -21,7 +21,6 @@ use risingwave_common::array::{stream_chunk, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
-use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::sink_config::table_schema::Column;
 use risingwave_pb::connector_service::sink_config::TableSchema;
@@ -81,19 +80,17 @@ pub enum RemoteSinkResponseImpl {
 }
 
 impl RemoteSinkResponseImpl {
-    pub async fn on_response_ok(&mut self) -> std::result::Result<(), SinkError> {
+    pub async fn on_response_ok(&mut self) -> std::result::Result<SinkResponse, SinkError> {
         return match self {
             RemoteSinkResponseImpl::Grpc(ref mut response) => response
                 .next()
                 .await
                 .unwrap_or_else(|| Err(Status::cancelled("response stream closed unexpectedly")))
-                .map_err(|e| SinkError::Remote(e.message().to_string()))
-                .map(|_| ()),
+                .map_err(|e| SinkError::Remote(e.message().to_string())),
             RemoteSinkResponseImpl::Receiver(ref mut receiver) => receiver
                 .recv()
                 .await
                 .ok_or_else(|| SinkError::Remote("response stream closed unexpectedly".to_string()))
-                .map(|_| ()),
         };
     }
 }
@@ -117,7 +114,7 @@ pub struct RemoteSink {
 }
 
 pub struct RemoteSinkParams {
-    pub connector_addr: HostAddr,
+    pub connector_addr: String,
 }
 
 impl RemoteSink {
@@ -272,7 +269,7 @@ impl Sink for RemoteSink {
                 request: Some(SinkRequest::Sync(SyncBatch { epoch })),
             })
             .map_err(|e| SinkError::Remote(e.to_string()))?;
-        self.response_stream.on_response_ok().await
+        self.response_stream.on_response_ok().await.map(|_| ())
     }
 
     async fn abort(&mut self) -> Result<()> {

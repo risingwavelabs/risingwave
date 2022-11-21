@@ -123,7 +123,9 @@ impl SinkImpl {
                     cfg,
                     schema,
                     pk_indices,
-                    sink_params.expect("remote sink params not found"),
+                    sink_params.ok_or_else(|| {
+                        SinkError::Config("remote sink requires sink_params".to_string())
+                    })?,
                 )
                 .await?,
             )),

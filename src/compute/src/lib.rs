@@ -82,13 +82,17 @@ pub struct ComputeNodeOpts {
     /// Endpoint of the connector node
     #[clap(long, default_value = "127.0.0.1:60061")]
     pub connector_source_endpoint: String,
+
+    /// Endpoint of connector sink node
+    #[clap(long, default_value = "127.0.0.1:50051")]
+    pub connector_sink_endpoint: String,
 }
 
 use std::future::Future;
 use std::pin::Pin;
 
 use risingwave_common::config::{
-    BatchConfig, ConnectorConfig, ServerConfig, StorageConfig, StreamingConfig,
+    BatchConfig, ServerConfig, StorageConfig, StreamingConfig,
 };
 
 use crate::server::compute_node_serve;
@@ -141,8 +145,4 @@ pub struct ComputeNodeConfig {
     // Below for Hummock.
     #[serde(default)]
     pub storage: StorageConfig,
-
-    // Below for connector
-    #[serde(default)]
-    pub connector: ConnectorConfig,
 }
