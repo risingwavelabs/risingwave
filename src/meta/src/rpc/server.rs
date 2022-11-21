@@ -136,6 +136,37 @@ fn since_epoch() -> Duration {
         .expect("Time went backwards")
 }
 
+// getting leader_info and leader_lease or defaulting to none
+async fn get_infos<S: MetaStore>(meta_store: &Arc<S>) -> Option<(Vec<u8>, Vec<u8>)> {
+    let old_leader_info = match meta_store
+        .get_cf(META_CF_NAME, META_LEADER_KEY.as_bytes())
+        .await
+    {
+        Err(MetaStoreError::ItemNotFound(_)) => vec![],
+        Ok(v) => v,
+        _ => {
+            return None;
+        }
+    };
+    tracing::info!(
+        "Old_leader_info: {:?}",
+        String::from_utf8_lossy(&old_leader_info)
+    );
+    let old_leader_lease = match meta_store
+        .get_cf(META_CF_NAME, META_LEASE_KEY.as_bytes())
+        .await
+    {
+        Err(MetaStoreError::ItemNotFound(_)) => vec![],
+        Ok(v) => v,
+        _ => return None,
+    };
+    tracing::info!(
+        "old_leader_lease: {:?}",
+        String::from_utf8_lossy(&old_leader_lease)
+    );
+    Some((old_leader_info, old_leader_lease))
+}
+
 // TODO: write docstring
 pub async fn register_leader_for_meta<S: MetaStore>(
     addr: String, // Address of this node
@@ -148,129 +179,14 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         lease_time
     );
 
-    let mut tick_interval = tokio::time::interval(Duration::from_secs(lease_time / 2));
+    //  let mut tick_interval = tokio::time::interval(Duration::from_secs(lease_time / 2));
     loop {
         // TODO: maybe also shut down?
-        tick_interval.tick().await;
+        //   tick_interval.tick().await;
 
-        // get old leader info and lease
-        // TODO: make below calls as functions to simplify them
-        let old_leader_info = match meta_store
-            .get_cf(META_CF_NAME, META_LEADER_KEY.as_bytes())
-            .await
-        {
-            Err(MetaStoreError::ItemNotFound(_)) => vec![],
-            Ok(v) => v,
-            _ => {
-                continue;
-            }
-        };
-        tracing::info!(
-            "Old_leader_info: {:?}",
-            String::from_utf8_lossy(&old_leader_info)
-        );
-        let old_leader_lease = match meta_store
-            .get_cf(META_CF_NAME, META_LEASE_KEY.as_bytes())
-            .await
-        {
-            Err(MetaStoreError::ItemNotFound(_)) => vec![],
-            Ok(v) => v,
-            _ => {
-                continue;
-            }
-        };
-        tracing::info!(
-            "old_leader_lease: {:?}",
-            String::from_utf8_lossy(&old_leader_lease)
-        );
+        //  let leader = leader_info.clone(); // TODO: fix this
+        let leader: Vec<u8> = vec![];
 
-        let now = since_epoch();
-
-        if !old_leader_lease.is_empty() {
-            tracing::info!("old_leader_lease is not empty");
-            let lease_info = MetaLeaseInfo::decode(&mut old_leader_lease.as_slice()).unwrap();
-
-            if lease_info.lease_expire_time > now.as_secs()
-                && lease_info.leader.as_ref().unwrap().node_address != addr
-            {
-                let err_info = format!(
-                    "the lease {:?} does not expire, now time: {}",
-                    lease_info,
-                    now.as_secs(),
-                );
-                tracing::error!("{}", err_info);
-                bail!(err_info);
-            }
-        }
-        // TODO: are we sure we want to update like this? We could miss a lease update?
-        // Why not a random number?
-        let mut lease_id = if !old_leader_info.is_empty() {
-            let leader_info = MetaLeaderInfo::decode(&mut old_leader_info.as_slice()).unwrap();
-            leader_info.lease_id + 1
-        } else {
-            0
-        };
-        tracing::info!("lease_id: {}", lease_id);
-
-        let mut txn = Transaction::default();
-        let leader_info = MetaLeaderInfo {
-            lease_id,
-            node_address: addr.to_string(),
-        };
-        tracing::info!("lease_info: {:?}", leader_info);
-
-        let lease_info = MetaLeaseInfo {
-            leader: Some(leader_info.clone()),
-            lease_register_time: now.as_secs(),
-            lease_expire_time: now.as_secs() + lease_time,
-        };
-        tracing::info!("lease_info: {:?}", lease_info);
-
-        if !old_leader_info.is_empty() {
-            txn.check_equal(
-                META_CF_NAME.to_string(),
-                META_LEADER_KEY.as_bytes().to_vec(),
-                old_leader_info,
-            );
-            txn.put(
-                META_CF_NAME.to_string(),
-                META_LEADER_KEY.as_bytes().to_vec(),
-                leader_info.encode_to_vec(),
-            );
-        } else {
-            if let Err(e) = meta_store
-                .put_cf(
-                    META_CF_NAME,
-                    META_LEADER_KEY.as_bytes().to_vec(),
-                    leader_info.encode_to_vec(),
-                )
-                .await
-            {
-                tracing::warn!(
-                    "new cluster put leader info failed, MetaStoreError: {:?}",
-                    e
-                );
-                continue;
-            }
-            txn.check_equal(
-                META_CF_NAME.to_string(),
-                META_LEADER_KEY.as_bytes().to_vec(),
-                leader_info.encode_to_vec(),
-            );
-        }
-        txn.put(
-            META_CF_NAME.to_string(),
-            META_LEASE_KEY.as_bytes().to_vec(),
-            lease_info.encode_to_vec(),
-        );
-        if let Err(e) = meta_store.txn(txn).await {
-            tracing::warn!(
-                "add leader info failed, MetaStoreError: {:?}, try again later",
-                e
-            );
-            continue;
-        }
-        let leader = leader_info.clone();
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let handle = tokio::spawn(async move {
             // How can I properly do random things within this thread?
@@ -281,29 +197,138 @@ pub async fn register_leader_for_meta<S: MetaStore>(
 
             // election
             'election: loop {
-                // define lease
-                let mut txn = Transaction::default();
+                // also my code below
+                tokio::select! {
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Register leader info is stopped");
+                        return;
+                    }
+                    _ = ticker.tick() => {},
+                }
+
+                // below is old code
+                // get old leader info and lease
+                let infos = get_infos(&meta_store).await;
+                if infos.is_none() {
+                    continue;
+                }
+                let (old_leader_info, old_leader_lease) = infos.unwrap();
+
                 let now = since_epoch();
+                if false && !old_leader_lease.is_empty() {
+                    // TODO: why do we need this part? Deactivate for now
+                    tracing::info!("old_leader_lease is not empty");
+                    let lease_info =
+                        MetaLeaseInfo::decode(&mut old_leader_lease.as_slice()).unwrap();
+
+                    if lease_info.lease_expire_time > now.as_secs()
+                        && lease_info.leader.as_ref().unwrap().node_address != addr
+                    {
+                        let err_info = format!(
+                            "the lease {:?} does not expire, now time: {}",
+                            lease_info,
+                            now.as_secs(),
+                        );
+                        tracing::error!("{}", err_info);
+                        bail!(err_info);
+                    }
+                }
+
+                // TODO: are we sure we want to update like this? We could miss a lease update?
+                // Why not a random number?
+                let lease_id = if !old_leader_info.is_empty() {
+                    let leader_info =
+                        MetaLeaderInfo::decode(&mut old_leader_info.as_slice()).unwrap();
+                    leader_info.lease_id + 1
+                } else {
+                    0
+                };
+                tracing::info!("lease_id: {}", lease_id);
+
+                let mut txn = Transaction::default();
+                let leader_info = MetaLeaderInfo {
+                    lease_id,
+                    node_address: addr.to_string(),
+                };
+                tracing::info!("lease_info: {:?}", leader_info);
+
                 let lease_info = MetaLeaseInfo {
-                    leader: Some(leader_info.clone()), // TODO: Get new leader_info
+                    leader: Some(leader_info.clone()),
                     lease_register_time: now.as_secs(),
                     lease_expire_time: now.as_secs() + lease_time,
                 };
-                txn.check_equal(
-                    META_CF_NAME.to_string(),
-                    META_LEADER_KEY.as_bytes().to_vec(),
-                    leader_info.encode_to_vec(),
-                );
+                tracing::info!("lease_info: {:?}", lease_info);
+
+                if !old_leader_info.is_empty() {
+                    // cluster has leader
+                    txn.check_equal(
+                        META_CF_NAME.to_string(),
+                        META_LEADER_KEY.as_bytes().to_vec(),
+                        old_leader_info,
+                    );
+                    txn.put(
+                        META_CF_NAME.to_string(),
+                        META_LEADER_KEY.as_bytes().to_vec(),
+                        leader_info.encode_to_vec(),
+                    );
+                } else {
+                    // cluster has no leader
+                    if let Err(e) = meta_store
+                        .put_cf(
+                            META_CF_NAME,
+                            META_LEADER_KEY.as_bytes().to_vec(),
+                            leader_info.encode_to_vec(),
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            "new cluster put leader info failed, MetaStoreError: {:?}",
+                            e
+                        );
+                        // continue;
+                    }
+                    txn.check_equal(
+                        META_CF_NAME.to_string(),
+                        META_LEADER_KEY.as_bytes().to_vec(),
+                        leader_info.encode_to_vec(),
+                    );
+                }
                 txn.put(
                     META_CF_NAME.to_string(),
                     META_LEASE_KEY.as_bytes().to_vec(),
                     lease_info.encode_to_vec(),
                 );
+                if let Err(e) = meta_store.txn(txn).await {
+                    tracing::warn!(
+                        "add leader info failed, MetaStoreError: {:?}, try again later",
+                        e
+                    );
+                    continue;
+                }
 
-                // TODO: Do I already do this stuff above?
+                // below is my code
 
+                // define lease
+                //    let mut txn = Transaction::default();
+                // let now = since_epoch();
+                // let lease_info = MetaLeaseInfo {
+                // leader: Some(leader_info.clone()), // TODO: Get new leader_info
+                // lease_register_time: now.as_secs(),
+                // lease_expire_time: now.as_secs() + lease_time,
+                // };
+                // txn.check_equal(
+                // META_CF_NAME.to_string(),
+                // META_LEADER_KEY.as_bytes().to_vec(),
+                // leader_info.encode_to_vec(),
+                // );
+                // txn.put(
+                // META_CF_NAME.to_string(),
+                // META_LEASE_KEY.as_bytes().to_vec(),
+                // lease_info.encode_to_vec(),
+                // );
+
+                // TODO: not sure if we need to do this
                 // try to acquire lease
-                let mut this_is_leader = false;
                 if let Err(e) = meta_store.txn(txn).await {
                     match e {
                         MetaStoreError::TransactionAbort() => {
@@ -317,7 +342,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                                 e
                             );
                             // TODO: DO I need this delay here?
-                            tokio::select! { _ = ticker.tick() => {}}
+                            // tokio::select! { _ = ticker.tick() => {}}
                             continue 'election;
                         }
                         MetaStoreError::ItemNotFound(e) => {
@@ -326,8 +351,9 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     }
                 } else {
                     tracing::info!("Current node is leader");
-                    this_is_leader = true;
                 }
+
+                tracing::info!("Election done. Entering term"); // TODO: remove log line
 
                 // election done. Enter current term in loop below
                 'term: loop {
@@ -341,11 +367,10 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     }
 
                     // renew the current lease
-                    if this_is_leader {
+                    if addr == lease_info.leader.as_ref().unwrap().node_address {
                         let mut txn = Transaction::default();
-                        lease_id = lease_id + 1;
                         let lease_info = MetaLeaseInfo {
-                            leader: Some(leader_info.clone()), // TODO: Change leader info here
+                            leader: Some(leader_info.clone()),
                             lease_register_time: now.as_secs(),
                             lease_expire_time: now.as_secs() + lease_time,
                         };
@@ -365,13 +390,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
 
                     // TODO: How do we know we are talking to the correct ETCD node?
                     // get leader info
-                    let lease_info = meta_store
-                        .snapshot()
-                        .await
-                        .get_cf(META_CF_NAME, META_LEADER_KEY.as_bytes())
-                        .await
-                        .unwrap_or_default();
-
+                    let infos = get_infos(&meta_store).await;
+                    if infos.is_none() {
+                        continue 'election;
+                    }
+                    let (_, lease_info) = infos.unwrap();
                     if lease_info.is_empty() {
                         // ETCD does not have leader lease. Elect new leader
                         tracing::info!("ETCD does not have leader lease. Elect new leader");
