@@ -360,7 +360,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     // This block is guaranteed to be idempotent even if we may encounter multiple
                     // barriers since `prev_epoch_value` is always be reset to
                     // the equivalent of `current_epoch_value` at the end of
-                    // this block. Likewise, `last_commited_epoch_row` will always be equal to
+                    // this block. Likewise, `last_committed_epoch_row` will always be equal to
                     // `current_epoch_row`.
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
@@ -381,7 +381,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         }
                     }
 
-                    // Update the commited value on RHS if it has changed.
+                    // Update the committed value on RHS if it has changed.
                     if last_committed_epoch_row != current_epoch_row {
                         // Only write the RHS value if this actor is in charge of vnode 0
                         // Otherwise, we only actively replicate the changes.
@@ -398,8 +398,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         } else {
                             self.right_table.commit_no_data_expected(barrier.epoch);
                         }
-                        // Update the last commited row since it has changed
-                        last_commited_epoch_row = current_epoch_row.clone();
+                        // Update the last committed row since it has changed
+                        last_committed_epoch_row = current_epoch_row.clone();
                     } else {
                         self.right_table.commit_no_data_expected(barrier.epoch);
                     }
@@ -408,7 +408,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     prev_epoch_value = Some(curr);
 
-                    debug_assert_eq!(last_commited_epoch_row, current_epoch_row);
+                    debug_assert_eq!(last_committed_epoch_row, current_epoch_row);
 
                     // Update the vnode bitmap for the left state table if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
