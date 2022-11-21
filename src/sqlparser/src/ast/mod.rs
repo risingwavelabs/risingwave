@@ -88,10 +88,10 @@ where
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ident {
     /// The value of the identifier without quotes.
-    pub value: String,
+    pub(crate) value: String,
     /// The starting quote if any. Valid quote characters are the single quote,
     /// double quote, backtick, and opening square bracket.
-    pub quote_style: Option<char>,
+    pub(crate) quote_style: Option<char>,
 }
 
 impl Ident {

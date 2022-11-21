@@ -468,10 +468,7 @@ fn parse_select_with_date_column_name() {
     let sql = "SELECT date";
     let select = verified_only_select(sql);
     assert_eq!(
-        &Expr::Identifier(Ident {
-            value: "date".into(),
-            quote_style: None
-        }),
+        &Expr::Identifier(Ident::new("date")),
         expr_from_projection(only(&select.projection)),
     );
 }
@@ -2689,14 +2686,8 @@ fn parse_recursive_cte() {
     assert_eq!(with.cte_tables.len(), 1);
     let expected = Cte {
         alias: TableAlias {
-            name: Ident {
-                value: "nums".to_string(),
-                quote_style: None,
-            },
-            columns: vec![Ident {
-                value: "val".to_string(),
-                quote_style: None,
-            }],
+            name: Ident::new("nums"),
+            columns: vec![Ident::new("val")],
         },
         query: cte_query,
         from: None,
@@ -3552,16 +3543,7 @@ fn parse_grant() {
                         Action::Select { columns: None },
                         Action::Insert { columns: None },
                         Action::Update {
-                            columns: Some(vec![
-                                Ident {
-                                    value: "shape".into(),
-                                    quote_style: None
-                                },
-                                Ident {
-                                    value: "size".into(),
-                                    quote_style: None
-                                }
-                            ])
+                            columns: Some(vec![Ident::new("shape"), Ident::new("size")])
                         },
                         Action::Usage,
                         Action::Delete,
