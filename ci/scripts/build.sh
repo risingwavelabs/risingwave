@@ -69,4 +69,5 @@ git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector
 cd risingwave-connector-node
 mvn package -Dmaven.test.skip=true
 echo "--- Upload Java artifacts"
-buildkite-agent artifact upload service/target/service-1.0-SNAPSHOT.jar
+cp service/target/service-*.jar ./connector-service.jar
+buildkite-agent artifact upload ./connector-service.jar
