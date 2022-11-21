@@ -28,7 +28,7 @@ mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
 echo "--- Download connector node jar"
-buildkite-agent artifact download connector-service.jar target/debug/
+buildkite-agent artifact download connector-service.jar ./
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
@@ -45,12 +45,16 @@ echo "--- e2e, ci-1cn-1fe, cdc source"
 # install mysql client
 apt-get -y install mysql-client
 # import data to mysql
-mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/mysql_cdc.sql
+mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
 # start risingwave cluster
 cargo make ci-start ci-1cn-1fe
 # start cdc connector node
-nohup java -cp ./connector-node.jar  com.risingwave.sourcenode.service.SourceServiceMain > .risingwave/log/connector-source.log &
-sqllogictest -p 4566 -d dev './e2e_test/source/cdc.slt'
+nohup java -cp ./connector-service.jar com.risingwave.sourcenode.service.SourceServiceMain > .risingwave/log/connector-source.log 2>&1 &
+sleep 1
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
+# wait for cdc loading
+sleep 4
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
 echo "--- Kill cluster"
 cargo make ci-kill

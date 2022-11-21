@@ -15,6 +15,9 @@ create materialized source products ( id INT,
  table.name = 'products'
 ) row format debezium_json;
 
+statement ok
+create materialized view products_cnt as select count(*) as cnt from products;
+
 # Since timestamp type cannot parse properly, use bigint for order_date instead
 statement ok
 create materialized source orders (
@@ -36,6 +39,9 @@ create materialized source orders (
 ) row format debezium_json;
 
 statement ok
+create materialized view orders_cnt as select count(*) as cnt from orders;
+
+statement ok
 create materialized source shipments (
   shipment_id INTEGER,
   order_id INTEGER,
@@ -53,6 +59,8 @@ create materialized source shipments (
  table.name = 'shipments'
 ) row format debezium_json;
 
+statement ok
+create materialized view shipments_cnt as select count(*) as cnt from shipments;
 
 # Create a mview upon above three tables
 statement ok
@@ -60,25 +68,3 @@ create materialized view enriched_orders as SELECT o.*, p.name, p.description, s
  FROM orders AS o
  LEFT JOIN products AS p ON o.product_id = p.id
  LEFT JOIN shipments AS s ON o.order_id = s.order_id;
-
-query I
-select count(*) as cnt from products;
-----
-9
-
-query II
-select count(*) as cnt from orders;
-----
-3
-
-query III
-select count(*) as cnt from shipments;
-----
-3
-
-query IIII
-select order_id, product_id, shipment_id from enriched_orders order by order_id;
-----
-10001  102   1001
-10002  105   1002
-10003  106   1003
