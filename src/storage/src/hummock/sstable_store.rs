@@ -14,7 +14,6 @@
 use std::clone::Clone;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Instant;
 
 use async_stack_trace::StackTrace;
 use bytes::{Buf, BufMut, Bytes};
@@ -330,38 +329,32 @@ impl SstableStore {
     ) -> HummockResult<TableHolder> {
         stats.cache_meta_block_total += 1;
         let sst_id = sst.id;
-        loop {
-            if let Ok(ret) = self
-                .meta_cache
-                .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {
-                    let store = self.store.clone();
-                    let meta_path = self.get_sst_data_path(sst_id);
-                    stats.cache_meta_block_miss += 1;
-                    let stats_ptr = stats.remote_io_time.clone();
-                    let loc = BlockLocation {
-                        offset: sst.meta_offset as usize,
-                        size: (sst.file_size - sst.meta_offset) as usize,
-                    };
-                    async move {
-                        let now = Instant::now();
-                        let buf = store
-                            .read(&meta_path, Some(loc))
-                            .await
-                            .map_err(HummockError::object_io_error)?;
-                        let meta = SstableMeta::decode(&mut &buf[..])?;
-                        let sst = Sstable::new(sst_id, meta);
-                        let charge = sst.meta.encoded_size();
-                        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
-                        stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-                        Ok((Box::new(sst), charge))
-                    }
-                })
-                .verbose_stack_trace("meta_cache_lookup")
-                .await
-            {
-                return ret;
-            }
-        }
+        self.meta_cache
+            .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {
+                let store = self.store.clone();
+                let meta_path = self.get_sst_data_path(sst_id);
+                stats.cache_meta_block_miss += 1;
+                let stats_ptr = stats.remote_io_time.clone();
+                let loc = BlockLocation {
+                    offset: sst.meta_offset as usize,
+                    size: (sst.file_size - sst.meta_offset) as usize,
+                };
+                async move {
+                    let now = minstant::Instant::now();
+                    let buf = store
+                        .read(&meta_path, Some(loc))
+                        .await
+                        .map_err(HummockError::object_io_error)?;
+                    let meta = SstableMeta::decode(&mut &buf[..])?;
+                    let sst = Sstable::new(sst_id, meta);
+                    let charge = sst.meta.encoded_size();
+                    let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+                    stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
+                    Ok((Box::new(sst), charge))
+                }
+            })
+            .verbose_stack_trace("meta_cache_lookup")
+            .await
     }
 
     pub async fn list_ssts_from_object_store(&self) -> HummockResult<Vec<ObjectMetadata>> {
