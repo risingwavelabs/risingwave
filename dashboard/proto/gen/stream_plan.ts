@@ -17,6 +17,56 @@ import { ConnectorSplits } from "./source";
 
 export const protobufPackage = "stream_plan";
 
+export const ChainType = {
+  CHAIN_UNSPECIFIED: "CHAIN_UNSPECIFIED",
+  /** CHAIN - CHAIN is corresponding to the chain executor. */
+  CHAIN: "CHAIN",
+  /** REARRANGE - REARRANGE is corresponding to the rearranged chain executor. */
+  REARRANGE: "REARRANGE",
+  /** BACKFILL - BACKFILL is corresponding to the backfill executor. */
+  BACKFILL: "BACKFILL",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type ChainType = typeof ChainType[keyof typeof ChainType];
+
+export function chainTypeFromJSON(object: any): ChainType {
+  switch (object) {
+    case 0:
+    case "CHAIN_UNSPECIFIED":
+      return ChainType.CHAIN_UNSPECIFIED;
+    case 1:
+    case "CHAIN":
+      return ChainType.CHAIN;
+    case 2:
+    case "REARRANGE":
+      return ChainType.REARRANGE;
+    case 3:
+    case "BACKFILL":
+      return ChainType.BACKFILL;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return ChainType.UNRECOGNIZED;
+  }
+}
+
+export function chainTypeToJSON(object: ChainType): string {
+  switch (object) {
+    case ChainType.CHAIN_UNSPECIFIED:
+      return "CHAIN_UNSPECIFIED";
+    case ChainType.CHAIN:
+      return "CHAIN";
+    case ChainType.REARRANGE:
+      return "REARRANGE";
+    case ChainType.BACKFILL:
+      return "BACKFILL";
+    case ChainType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export const DispatcherType = {
   UNSPECIFIED: "UNSPECIFIED",
   /** HASH - Dispatch by hash key, hashed by consistent hash. */
@@ -508,9 +558,9 @@ export interface ChainNode {
    * Generally, the barrier needs to be rearranged during the MV creation process, so that data can
    * be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
    * large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
-   * This option is used to disable barrier rearrangement.
+   * ChainType is used to decide which implementation for the ChainNode.
    */
-  disableRearrange: boolean;
+  chainType: ChainType;
   /** Whether to place this chain on the same worker node as upstream actors. */
   sameWorkerNode: boolean;
   /**
@@ -519,6 +569,8 @@ export interface ChainNode {
    * fragment in the downstream mview. Remove this when we refactor the fragmenter.
    */
   isSingleton: boolean;
+  /** The upstream materialized view info used by backfill. */
+  tableDesc: StorageTableDesc | undefined;
 }
 
 /**
@@ -2498,9 +2550,10 @@ function createBaseChainNode(): ChainNode {
     tableId: 0,
     upstreamFields: [],
     upstreamColumnIndices: [],
-    disableRearrange: false,
+    chainType: ChainType.CHAIN_UNSPECIFIED,
     sameWorkerNode: false,
     isSingleton: false,
+    tableDesc: undefined,
   };
 }
 
@@ -2514,9 +2567,10 @@ export const ChainNode = {
       upstreamColumnIndices: Array.isArray(object?.upstreamColumnIndices)
         ? object.upstreamColumnIndices.map((e: any) => Number(e))
         : [],
-      disableRearrange: isSet(object.disableRearrange) ? Boolean(object.disableRearrange) : false,
+      chainType: isSet(object.chainType) ? chainTypeFromJSON(object.chainType) : ChainType.CHAIN_UNSPECIFIED,
       sameWorkerNode: isSet(object.sameWorkerNode) ? Boolean(object.sameWorkerNode) : false,
       isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
+      tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
     };
   },
 
@@ -2533,9 +2587,11 @@ export const ChainNode = {
     } else {
       obj.upstreamColumnIndices = [];
     }
-    message.disableRearrange !== undefined && (obj.disableRearrange = message.disableRearrange);
+    message.chainType !== undefined && (obj.chainType = chainTypeToJSON(message.chainType));
     message.sameWorkerNode !== undefined && (obj.sameWorkerNode = message.sameWorkerNode);
     message.isSingleton !== undefined && (obj.isSingleton = message.isSingleton);
+    message.tableDesc !== undefined &&
+      (obj.tableDesc = message.tableDesc ? StorageTableDesc.toJSON(message.tableDesc) : undefined);
     return obj;
   },
 
@@ -2544,9 +2600,12 @@ export const ChainNode = {
     message.tableId = object.tableId ?? 0;
     message.upstreamFields = object.upstreamFields?.map((e) => Field.fromPartial(e)) || [];
     message.upstreamColumnIndices = object.upstreamColumnIndices?.map((e) => e) || [];
-    message.disableRearrange = object.disableRearrange ?? false;
+    message.chainType = object.chainType ?? ChainType.CHAIN_UNSPECIFIED;
     message.sameWorkerNode = object.sameWorkerNode ?? false;
     message.isSingleton = object.isSingleton ?? false;
+    message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
+      ? StorageTableDesc.fromPartial(object.tableDesc)
+      : undefined;
     return message;
   },
 };

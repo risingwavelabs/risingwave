@@ -221,7 +221,7 @@ impl Binder {
         let index = match expr {
             Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => match *index != usize::MAX {
                 true => *index,
-                false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.value)).into()),
+                false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.real_value())).into()),
             }
             Expr::Value(Value::Number(number)) => match number.parse::<usize>() {
                 Ok(index) if 1 <= index && index <= visible_output_num => index - 1,
