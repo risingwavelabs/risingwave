@@ -1,4 +1,3 @@
-DROP DATABASE mydb;
 CREATE DATABASE mydb;
 
 USE mydb;

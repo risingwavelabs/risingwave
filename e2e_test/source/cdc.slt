@@ -7,7 +7,7 @@ create materialized source products ( id INT,
  PRIMARY KEY (id)
 ) with (
  connector = 'cdc',
- database.hostname = '127.0.0.1',
+ database.hostname = 'mysql',
  database.port = '3306',
  database.user = 'root',
  database.password = '123456',
@@ -27,7 +27,7 @@ create materialized source orders (
    PRIMARY KEY (order_id)
 ) with (
  connector = 'cdc',
- database.hostname = '127.0.0.1',
+ database.hostname = 'mysql',
  database.port = '3306',
  database.user = 'root',
  database.password = '123456',
@@ -45,7 +45,7 @@ create materialized source shipments (
  PRIMARY KEY (shipment_id)
 ) with (
  connector = 'cdc',
- database.hostname = '127.0.0.1',
+ database.hostname = 'mysql',
  database.port = '3306',
  database.user = 'root',
  database.password = '123456',
