@@ -60,7 +60,7 @@ enum BarrierState {
 /// barriers to and collect them from all actors, and finally report the progress.
 pub struct LocalBarrierManager {
     /// Stores all streaming job source sender.
-    senders: HashMap<ActorId, UnboundedSender<Barrier>>,
+    senders: HashMap<ActorId, Vec<UnboundedSender<Barrier>>>,
 
     /// Span of the current epoch.
     #[expect(dead_code)]
@@ -101,7 +101,7 @@ impl LocalBarrierManager {
     /// Register sender for source actors, used to send barriers.
     pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
         tracing::trace!(actor_id = actor_id, "register sender");
-        self.senders.insert(actor_id, sender);
+        self.senders.entry(actor_id).or_default().push(sender);
     }
 
     /// Return all senders.
@@ -150,11 +150,13 @@ impl LocalBarrierManager {
 
         for actor_id in to_send {
             match self.senders.get(&actor_id) {
-                Some(sender) => {
+                Some(senders) => {
+                    for sender in senders {
                     if let Err(err) = sender.send(barrier.clone()) {
                         // return err to trigger recovery.
                         bail!("failed to send barrier to actor {}: {:?}", actor_id, err)
                     }
+                }
                 }
                 None => {
                     bail!("sender for actor {} does not exist", actor_id)
