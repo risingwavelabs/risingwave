@@ -29,6 +29,7 @@ lru = { git = "https://github.com/risingwavelabs/lru-rs.git", branch = "evict_by
 memcomparable = { path = "../utils/memcomparable" }
 more-asserts = "0.3"
 num-traits = "0.2"
+num_cpus= "1.0"
 parking_lot = "0.12"
 parse-display = "0.6"
 paste = "1"

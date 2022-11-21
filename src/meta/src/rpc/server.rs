@@ -19,7 +19,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use prost::Message;
 use risingwave_common::bail;
-use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::monitor::process_prometheus::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
