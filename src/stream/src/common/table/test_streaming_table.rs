@@ -13,21 +13,21 @@
 // limitations under the License.
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+use risingwave_common::row::{self, Row};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::table::DEFAULT_VNODE;
 
-use crate::error::StorageResult;
-use crate::memory::MemoryStateStore;
-use crate::table::streaming_table::state_table::StateTable;
-use crate::table::DEFAULT_VNODE;
+use crate::common::table::state_table::StateTable;
 
 // test state table
 #[tokio::test]
-async fn test_state_table() -> StorageResult<()> {
+async fn test_state_table() {
     let state_store = MemoryStateStore::new();
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
@@ -147,12 +147,10 @@ async fn test_state_table() -> StorageResult<()> {
         .await
         .unwrap();
     assert_eq!(row4_delete, None);
-
-    Ok(())
 }
 
 #[tokio::test]
-async fn test_state_table_update_insert() -> StorageResult<()> {
+async fn test_state_table_update_insert() {
     let state_store = MemoryStateStore::new();
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
@@ -318,7 +316,6 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
         .await
         .unwrap();
     assert_eq!(row1_commit, None);
-    Ok(())
 }
 
 #[tokio::test]
@@ -751,7 +748,7 @@ async fn test_state_table_iter_with_pk_range() {
 
     let pk_range = (
         std::ops::Bound::Included(Row(vec![Some(2_i32.into())])),
-        std::ops::Bound::Unbounded,
+        std::ops::Bound::<row::Empty>::Unbounded,
     );
     let iter = state
         .iter_with_pk_range(&pk_range, DEFAULT_VNODE)

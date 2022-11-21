@@ -43,6 +43,33 @@ impl KeyComparator {
             .cmp(&unencoded.table_id.table_id())
             .then_with(|| encoded[TABLE_PREFIX_LEN..].cmp(unencoded.table_key.as_ref()))
     }
+
+    #[inline(always)]
+    /// Used to compare [`UserKey`] and its encoded format.
+    pub fn encoded_less_than_unencoded(
+        encoded: impl AsRef<[u8]>,
+        unencoded: &UserKey<impl AsRef<[u8]>>,
+    ) -> bool {
+        Self::compare_user_key_cross_format(encoded, unencoded) == Ordering::Less
+    }
+
+    #[inline(always)]
+    /// Used to compare [`UserKey`] and its encoded format.
+    pub fn encoded_less_equal_unencoded(
+        encoded: impl AsRef<[u8]>,
+        unencoded: &UserKey<impl AsRef<[u8]>>,
+    ) -> bool {
+        Self::compare_user_key_cross_format(encoded, unencoded) != Ordering::Greater
+    }
+
+    #[inline(always)]
+    /// Used to compare [`UserKey`] and its encoded format.
+    pub fn encoded_greater_than_unencoded(
+        encoded: impl AsRef<[u8]>,
+        unencoded: &UserKey<impl AsRef<[u8]>>,
+    ) -> bool {
+        Self::compare_user_key_cross_format(encoded, unencoded) == Ordering::Greater
+    }
 }
 
 #[cfg(test)]

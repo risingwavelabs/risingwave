@@ -21,16 +21,14 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
-use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::row::CompactedRow;
+use risingwave_common::row::{CompactedRow, Row};
 use risingwave_common::types::{ScalarImpl, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_storage::table::streaming_table::state_table::{
-    prefix_range_to_memcomparable, StateTable,
-};
 use risingwave_storage::StateStore;
 
+use crate::cache::cache_may_stale;
+use crate::common::table::state_table::{prefix_range_to_memcomparable, StateTable};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
@@ -190,13 +188,22 @@ impl<S: StateStore> RangeCache<S> {
     /// owned.
     pub fn update_vnodes(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         let old_vnodes = self.state_table.update_vnode_bitmap(new_vnodes.clone());
-        for (vnode, (old, new)) in old_vnodes.iter().zip_eq(new_vnodes.iter()).enumerate() {
-            if old && !new {
-                let vnode = vnode.try_into().unwrap();
-                self.cache.remove(&vnode);
+
+        // if new vnodes is not subset of old vnodes, clear cache and range, else delete the stale
+        // vnodes
+        if cache_may_stale(old_vnodes.as_ref(), new_vnodes.as_ref()) {
+            self.range = None;
+            self.cache = HashMap::new();
+        } else {
+            for (vnode, (old, new)) in old_vnodes.iter().zip_eq(new_vnodes.iter()).enumerate() {
+                if old && !new {
+                    let vnode = vnode.try_into().unwrap();
+                    self.cache.remove(&vnode);
+                }
             }
         }
         self.vnodes = new_vnodes;
+
         old_vnodes
     }
 

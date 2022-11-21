@@ -20,7 +20,9 @@ use risingwave_common::error::Result as RwResult;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_trace::{ReplayIter, Replayable, Result, TraceError, TraceSubResp};
+use risingwave_hummock_trace::{
+    ReplayIter, Replayable, Result, TraceError, TraceReadOptions, TraceSubResp, TraceWriteOptions,
+};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
@@ -58,23 +60,38 @@ pub(crate) enum Replay {
     Local(LocalReplayInterface),
 }
 
+impl Replay {
+    fn from_trace_read_options(opt: TraceReadOptions) -> ReadOptions {
+        ReadOptions {
+            prefix_hint: opt.prefix_hint,
+            ignore_range_tombstone: opt.ignore_range_tombstone,
+            check_bloom_filter: opt.check_bloom_filter,
+            retention_seconds: opt.retention_seconds,
+            table_id: TableId {
+                table_id: opt.table_id,
+            },
+        }
+    }
+
+    fn from_trace_write_options(opt: TraceWriteOptions) -> WriteOptions {
+        WriteOptions {
+            epoch: opt.epoch,
+            table_id: TableId {
+                table_id: opt.table_id,
+            },
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl Replayable for Replay {
     async fn get(
         &self,
         key: Vec<u8>,
-        check_bloom_filter: bool,
         epoch: u64,
-        prefix_hint: Option<Vec<u8>>,
-        table_id: u32,
-        retention_seconds: Option<u32>,
+        read_options: TraceReadOptions,
     ) -> Result<Option<Vec<u8>>> {
-        let read_options = ReadOptions {
-            prefix_hint,
-            check_bloom_filter,
-            retention_seconds,
-            table_id: TableId { table_id },
-        };
+        let read_options = Self::from_trace_read_options(read_options);
         let value = match &self {
             Replay::Global(interface) => interface
                 .store
@@ -91,8 +108,7 @@ impl Replayable for Replay {
         &self,
         mut kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
         mut delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
-        epoch: u64,
-        table_id: u32,
+        write_options: TraceWriteOptions,
     ) -> Result<usize> {
         let kv_pairs = kv_pairs
             .drain(..)
@@ -111,9 +127,7 @@ impl Replayable for Replay {
             .map(|(left, right)| (Bytes::from(left), Bytes::from(right)))
             .collect();
 
-        let table_id = TableId { table_id };
-
-        let write_options = WriteOptions { epoch, table_id };
+        let write_options = Self::from_trace_write_options(write_options);
 
         let size = match &self {
             Replay::Global(_) => {
@@ -133,18 +147,9 @@ impl Replayable for Replay {
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
-        prefix_hint: Option<Vec<u8>>,
-        check_bloom_filter: bool,
-        retention_seconds: Option<u32>,
-        table_id: u32,
+        read_options: TraceReadOptions,
     ) -> Result<Box<dyn ReplayIter>> {
-        let table_id = TableId { table_id };
-        let read_options = ReadOptions {
-            prefix_hint,
-            check_bloom_filter,
-            retention_seconds,
-            table_id,
-        };
+        let read_options = Self::from_trace_read_options(read_options);
 
         let iter = match &self {
             Replay::Global(interface) => interface.store.iter(key_range, epoch, read_options).await,

@@ -13,11 +13,18 @@ rustflags = [
     "-Clink-arg=-Wl,--no-rosegment", #4574
 ]
 
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-Clink-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld"
+]
+
 # Flags for all targets.
 [target.'cfg(all())']
 rustflags = [
     "--cfg",
     "tokio_unstable",
+    "--cfg",
+    "hm_trace",
     # lints
     # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
     "-Funused_must_use",

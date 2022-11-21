@@ -765,7 +765,7 @@ mod tests {
         let pk_column_ids = vec![0];
         let stream_source_info = StreamSourceInfo {
             row_format: ProstRowFormatType::Json as i32,
-            row_schema_location: "".to_string(),
+            ..Default::default()
         };
         let source_manager = Arc::new(TableSourceManager::default());
         SourceDescBuilder::new(
@@ -776,6 +776,7 @@ mod tests {
             properties,
             ProstSourceInfo::StreamSource(stream_source_info),
             source_manager,
+            Default::default(),
         )
     }
 
@@ -836,6 +837,9 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids.clone(),
             2,
+            None,
+            0,
+            false,
         )
         .await
         .boxed()

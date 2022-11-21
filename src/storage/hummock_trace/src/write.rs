@@ -118,7 +118,7 @@ mod test {
 
     #[test]
     fn test_bincode_serialize() {
-        let op = Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), 123);
+        let op = Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), 123, false);
         let expected = Record::new_local_none(0, op);
         let serializer = BincodeSerializer::new();
         let mut buf = Vec::new();

@@ -18,10 +18,10 @@ use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
 use crate::cache::LruManagerRef;
+use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, PkIndices};

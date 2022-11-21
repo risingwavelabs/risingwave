@@ -38,6 +38,7 @@ pub struct ComputeNodeConfig {
     pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub user_managed: bool,
     pub enable_in_memory_kv_state_backend: bool,
+    pub connector_source_endpoint: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -83,6 +84,7 @@ pub struct FrontendConfig {
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
+    pub health_check_port: u16,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
@@ -152,6 +154,8 @@ pub struct EtcdConfig {
     pub unsafe_no_fsync: bool,
 
     pub exporter_port: u16,
+
+    pub provide_etcd: Option<Vec<EtcdConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

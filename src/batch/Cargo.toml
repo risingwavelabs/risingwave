@@ -1,7 +1,11 @@
 [package]
-edition = "2021"
 name = "risingwave_batch"
-version = "0.2.0-alpha"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
@@ -11,7 +15,7 @@ async-stream = "0.3"
 async-trait = "0.1"
 byteorder = "1"
 bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.22", default-features = false, features = ["clock", "std"] }
 crc32fast = "1"
 either = "1"
 farmhash = "1"
@@ -60,10 +64,10 @@ url = "2"
 uuid = "1"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-criterion = { version = "0.3.5", features = ["async_tokio", "async"] }
+criterion = { version = "0.4", features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
 tikv-jemallocator = "0.5"
