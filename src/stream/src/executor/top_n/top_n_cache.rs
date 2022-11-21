@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use risingwave_common::array::{Op, RowDeserializer};
+use risingwave_common::array::{Op, RowDeserializer, RowRef};
 use risingwave_common::row::{CompactedRow, Row};
 use risingwave_storage::StateStore;
 
@@ -490,7 +490,7 @@ pub trait AppendOnlyTopNCacheTrait {
     fn insert<S: StateStore>(
         &mut self,
         cache_key: CacheKey,
-        row: Row,
+        row_ref: RowRef<'_>,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
         managed_state: &mut ManagedTopNState<S>,
@@ -503,7 +503,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
     fn insert<S: StateStore>(
         &mut self,
         cache_key: CacheKey,
-        row: Row,
+        row_ref: RowRef<'_>,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
         managed_state: &mut ManagedTopNState<S>,
@@ -512,7 +512,8 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
         if self.is_middle_cache_full() && &cache_key >= self.middle.last_key_value().unwrap().0 {
             return Ok(());
         }
-        managed_state.insert(row.clone());
+        let row = row_ref.to_owned_row();
+        managed_state.insert(row_ref);
 
         // Then insert input row to corresponding cache range according to its order key
         if !self.is_low_cache_full() {
@@ -566,7 +567,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
     fn insert<S: StateStore>(
         &mut self,
         cache_key: CacheKey,
-        row: Row,
+        row_ref: RowRef<'_>,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
         managed_state: &mut ManagedTopNState<S>,
@@ -576,17 +577,15 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
             self.low.is_empty(),
             "Offset is not supported yet for WITH TIES, so low cache should be empty"
         );
-
-        let elem_to_compare_with_middle = (cache_key, row);
+        let elem_to_compare_with_middle = (cache_key, row_ref);
 
         if !self.is_middle_cache_full() {
-            managed_state.insert(elem_to_compare_with_middle.1.clone());
-            self.middle.insert(
-                elem_to_compare_with_middle.0.clone(),
-                (&elem_to_compare_with_middle.1).into(),
-            );
+            let row = elem_to_compare_with_middle.1.to_owned_row();
+            managed_state.insert(elem_to_compare_with_middle.1);
+            self.middle
+                .insert(elem_to_compare_with_middle.0.clone(), (&row).into());
             res_ops.push(Op::Insert);
-            res_rows.push((&elem_to_compare_with_middle.1).into());
+            res_rows.push((&row).into());
             return Ok(());
         }
 

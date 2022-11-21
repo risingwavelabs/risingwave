@@ -241,7 +241,7 @@ where
             // apply the chunk to state table
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.managed_state.insert(row.clone());
+                    self.managed_state.insert(row_ref);
                     cache.insert(cache_key, row, &mut res_ops, &mut res_rows);
                 }
 

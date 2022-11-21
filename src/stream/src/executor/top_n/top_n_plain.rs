@@ -239,7 +239,7 @@ where
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
-                    self.managed_state.insert(row.clone());
+                    self.managed_state.insert(row_ref);
                     self.cache
                         .insert(cache_key, row, &mut res_ops, &mut res_rows)
                 }
