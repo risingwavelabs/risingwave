@@ -35,7 +35,7 @@ pub fn handle_set(
     // We remark that the name of session parameter is always case-insensitive.
     context
         .session_ctx
-        .set_config(&name.value.to_lowercase(), string_vals)?;
+        .set_config(&name.real_value().to_lowercase(), string_vals)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_OPTION))
 }
