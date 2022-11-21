@@ -145,11 +145,13 @@ async fn run_election<S: MetaStore>(
 ) -> Option<(MetaLeaderInfo, MetaLeaseInfo)> {
     // below is old code
     // get old leader info and lease
-    let infos = get_infos(&meta_store).await;
-    if infos.is_none() {
-        return None;
-    }
-    let (old_leader_info, old_leader_lease) = infos.unwrap();
+    let (old_leader_info, old_leader_lease) = match get_infos(&meta_store).await {
+        None => return None,
+        Some(infos) => {
+            let (leader, lease) = infos;
+            (leader, lease)
+        }
+    };
 
     let now = since_epoch();
     if false && !old_leader_lease.is_empty() {
@@ -186,7 +188,7 @@ async fn run_election<S: MetaStore>(
         lease_id,
         node_address: addr.to_string(),
     };
-    tracing::info!("lease_info: {:?}", leader_info);
+    tracing::info!("leader_info: {:?}", leader_info);
 
     let lease_info = MetaLeaseInfo {
         leader: Some(leader_info.clone()),
@@ -379,7 +381,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     }
                 };
 
-                tracing::info!("Election done. Entering term"); // TODO: remove log line
+                tracing::info!("Election done. Entering term");
+
+                // TODO: remove log line
+                // TODO: where is the error? Has to be in election loop
+                // Try to isolate the error
 
                 // election done. Enter current term in loop below
                 'term: loop {
@@ -448,7 +454,8 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                             match e {
                                 MetaStoreError::TransactionAbort() => {
                                     tracing::info!(
-                                        // How can we make sure that we delete exactly that lease?
+                                        // How can we make sure that we delete exactly that
+                                        // lease?
                                         // Is randomizing the tick good enough?
                                         "Deleting lease failed: New leader already elected"
                                     );
@@ -526,6 +533,19 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
     // If node is not leader it should not start other services
     // probably this panic is caused because some other meta node does something
+
+    let new_hm = hummock::HummockManager::new(
+        env.clone(),
+        cluster_manager.clone(),
+        meta_metrics.clone(),
+        compactor_manager.clone(),
+    )
+    .await;
+
+    if new_hm.is_err() {
+        tracing::error!("found error {}", new_hm.err().unwrap());
+    }
+
     let hummock_manager = Arc::new(
         hummock::HummockManager::new(
             env.clone(),
@@ -786,7 +806,7 @@ mod tests {
         closer.send(()).unwrap();
         handle.await.unwrap();
         sleep(Duration::from_secs(3)).await;
-        rpc_serve_with_store(
+        let x = rpc_serve_with_store(
             meta_store.clone(),
             info2,
             Duration::from_secs(10),
