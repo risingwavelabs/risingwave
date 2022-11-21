@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
-use futures::future::try_join_all;
+use std::convert::identity;
+
+use anyhow::anyhow;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
@@ -25,6 +27,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::TableSourceManagerRef;
 
+use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -119,11 +122,11 @@ impl InsertExecutor {
         }
 
         // Wait for all chunks to be taken / written.
-        let rows_inserted = try_join_all(notifiers)
-            .await
-            .context("failed to wait chunks to be written")?
-            .into_iter()
-            .sum::<usize>();
+        let rows_inserted = futures::stream::iter(notifiers)
+            .then(identity)
+            .map_err(|_| BatchError::Internal(anyhow!("failed to wait chunks to be written")))
+            .try_fold(0_usize, |acc, x| async move { Ok(acc + x) })
+            .await?;
 
         // create ret value
         {

@@ -18,8 +18,7 @@ use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
 use auto_enums::auto_enum;
-use futures::future::try_join_all;
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
@@ -288,6 +287,9 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 
 /// Iterators
 impl<S: StateStore> StorageTable<S> {
+    /// The concurrency for constructing and flatten-polling the iterators.
+    const ITERATOR_CONCURRENCY: usize = 4;
+
     /// Get multiple [`StorageTableIter`] based on the specified vnodes of this table with
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
@@ -319,7 +321,7 @@ impl<S: StateStore> StorageTable<S> {
         // For each vnode, construct an iterator.
         // TODO: if there're some vnodes continuously in the range and we don't care about order, we
         // can use a single iterator.
-        let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
+        let iterators: Vec<_> = futures::stream::iter(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
             let prefix_hint = prefix_hint
                 .clone()
@@ -348,6 +350,8 @@ impl<S: StateStore> StorageTable<S> {
                 Ok::<_, StorageError>(iter)
             }
         }))
+        .buffer_unordered(Self::ITERATOR_CONCURRENCY)
+        .try_collect()
         .await?;
 
         #[auto_enum(futures::Stream)]
@@ -355,7 +359,8 @@ impl<S: StateStore> StorageTable<S> {
             0 => unreachable!(),
             1 => iterators.into_iter().next().unwrap(),
             // Concat all iterators if not to preserve order.
-            _ if !ordered => futures::stream::iter(iterators).flatten(),
+            _ if !ordered => futures::stream::iter(iterators.into_iter().map(Box::pin))
+                .flatten_unordered(Self::ITERATOR_CONCURRENCY),
             // Merge all iterators if to preserve order.
             _ => iter_utils::merge_sort(iterators.into_iter().map(Box::pin).collect()),
         };

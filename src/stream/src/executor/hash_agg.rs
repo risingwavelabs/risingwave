@@ -466,6 +466,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             }
 
             // Commit all state tables.
+            // Note: we assume there won't be too many agg calls, so `join_all` without limiting the
+            // concurrency is fine.
             futures::future::try_join_all(
                 iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
             )

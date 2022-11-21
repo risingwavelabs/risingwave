@@ -214,6 +214,8 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             agg_group.flush_state_if_needed(storages).await?;
 
             // Commit all state tables except for result table.
+            // Note: we assume there won't be too many agg calls, so `join_all` without limiting the
+            // concurrency is fine.
             futures::future::try_join_all(
                 iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
             )

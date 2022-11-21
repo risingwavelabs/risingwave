@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::identity;
+
 use anyhow::anyhow;
-use futures::future::try_join_all;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
@@ -137,13 +139,11 @@ impl UpdateExecutor {
         }
 
         // Wait for all chunks to be taken / written.
-        let rows_updated = try_join_all(notifiers)
-            .await
-            .map_err(|_| {
-                BatchError::Internal(anyhow!("failed to wait chunks to be written".to_owned(),))
-            })?
-            .into_iter()
-            .sum::<usize>()
+        let rows_updated = futures::stream::iter(notifiers)
+            .then(identity)
+            .map_err(|_| BatchError::Internal(anyhow!("failed to wait chunks to be written")))
+            .try_fold(0_usize, |acc, x| async move { Ok(acc + x) })
+            .await?
             / 2;
 
         // Create ret value

@@ -96,6 +96,8 @@ impl<S: StateStore> AggGroup<S> {
             })
             .unwrap_or(0);
 
+        // Note: we assume there won't be too many agg calls, so `join_all` without limiting the
+        // concurrency is fine.
         let states =
             futures::future::try_join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
                 AggState::create(
@@ -157,6 +159,8 @@ impl<S: StateStore> AggGroup<S> {
         &self,
         storages: &mut [AggStateStorage<S>],
     ) -> StreamExecutorResult<()> {
+        // Note: we assume there won't be too many agg calls, so `join_all` without limiting the
+        // concurrency is fine.
         futures::future::try_join_all(self.states.iter().zip_eq(storages).filter_map(
             |(state, storage)| match state {
                 AggState::Table(state) => Some(state.flush_state_if_needed(
@@ -176,6 +180,8 @@ impl<S: StateStore> AggGroup<S> {
         &mut self,
         storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<Vec<Datum>> {
+        // Note: we assume there won't be too many agg calls, so `join_all` without limiting the
+        // concurrency is fine.
         futures::future::try_join_all(
             self.states
                 .iter_mut()

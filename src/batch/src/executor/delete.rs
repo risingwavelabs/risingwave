@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::identity;
+
 use anyhow::anyhow;
-use futures::future::try_join_all;
+use futures::stream::TryStreamExt;
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
@@ -94,11 +97,11 @@ impl DeleteExecutor {
         }
 
         // Wait for all chunks to be taken / written.
-        let rows_deleted = try_join_all(notifiers)
-            .await
-            .map_err(|_| BatchError::Internal(anyhow!("failed to wait chunks to be written")))?
-            .into_iter()
-            .sum::<usize>();
+        let rows_deleted = futures::stream::iter(notifiers)
+            .then(identity)
+            .map_err(|_| BatchError::Internal(anyhow!("failed to wait chunks to be written")))
+            .try_fold(0_usize, |acc, x| async move { Ok(acc + x) })
+            .await?;
 
         // create ret value
         {
