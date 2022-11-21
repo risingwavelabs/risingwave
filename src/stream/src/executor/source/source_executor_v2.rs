@@ -647,6 +647,9 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             2,
+            None,
+            0,
+            false,
         )
         .await
         .boxed()

@@ -185,6 +185,7 @@ pub struct ConnectorSource {
 }
 
 impl ConnectorSource {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         format: SourceFormat,
         row_schema_location: &str,
@@ -192,10 +193,18 @@ impl ConnectorSource {
         proto_message_name: String,
         properties: HashMap<String, String>,
         columns: Vec<SourceColumnDesc>,
+        connector_node_addr: String,
         connector_message_buffer_size: usize,
     ) -> Result<Self> {
-        let config = ConnectorProperties::extract(properties.clone())
-            .map_err(|e| ConnectorError(e.into()))?;
+        // Store the connector node address to properties for later use.
+        let mut source_props: HashMap<String, String> =
+            HashMap::from_iter(properties.clone().into_iter());
+        source_props.insert(
+            "connector_node_addr".to_string(),
+            connector_node_addr.clone(),
+        );
+        let config =
+            ConnectorProperties::extract(source_props).map_err(|e| ConnectorError(e.into()))?;
         let parser = SourceParserImpl::create(
             &format,
             &properties,
@@ -289,10 +298,12 @@ pub struct SourceDescBuilderV2 {
     pk_column_ids: Vec<i32>,
     properties: HashMap<String, String>,
     source_info: ProstStreamSourceInfo,
+    connector_node_addr: String,
     connector_message_buffer_size: usize,
 }
 
 impl SourceDescBuilderV2 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         row_id_index: Option<ProstColumnIndex>,
         columns: Vec<ProstColumnCatalog>,
@@ -300,6 +311,7 @@ impl SourceDescBuilderV2 {
         pk_column_ids: Vec<i32>,
         properties: HashMap<String, String>,
         source_info: ProstStreamSourceInfo,
+        connector_node_addr: String,
         connector_message_buffer_size: usize,
     ) -> Self {
         Self {
@@ -309,6 +321,7 @@ impl SourceDescBuilderV2 {
             pk_column_ids,
             properties,
             source_info,
+            connector_node_addr,
             connector_message_buffer_size,
         }
     }
@@ -320,6 +333,7 @@ impl SourceDescBuilderV2 {
             ProstRowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
             ProstRowFormatType::Avro => SourceFormat::Avro,
             ProstRowFormatType::Maxwell => SourceFormat::Maxwell,
+            ProstRowFormatType::CanalJson => SourceFormat::CanalJson,
             ProstRowFormatType::RowUnspecified => unreachable!(),
         };
 
@@ -347,6 +361,7 @@ impl SourceDescBuilderV2 {
             self.source_info.proto_message_name,
             self.properties,
             columns.clone(),
+            self.connector_node_addr,
             self.connector_message_buffer_size,
         )
         .await?;
@@ -403,6 +418,7 @@ pub mod test_utils {
             pk_column_ids,
             properties,
             source_info,
+            connector_node_addr: "127.0.0.1:60061".to_string(),
             connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
         }
     }
