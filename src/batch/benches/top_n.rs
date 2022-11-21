@@ -62,6 +62,7 @@ fn create_top_n_executor(
         order_pairs,
         offset,
         limit,
+        false,
         "TopNExecutor".into(),
         CHUNK_SIZE,
     ))

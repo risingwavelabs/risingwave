@@ -205,7 +205,6 @@ pub async fn handle_create_source(
                 },
             )
         }
-
         SourceSchema::DebeziumJson => {
             // return err if user has not specified a pk
             if row_id_index.is_some() {
@@ -218,6 +217,22 @@ pub async fn handle_create_source(
                 columns,
                 StreamSourceInfo {
                     row_format: RowFormatType::DebeziumJson as i32,
+                    ..Default::default()
+                },
+            )
+        }
+        SourceSchema::CanalJson => {
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format cannal_json."
+                        .to_string(),
+                )));
+            }
+            (
+                columns,
+                StreamSourceInfo {
+                    row_format: RowFormatType::CanalJson as i32,
                     ..Default::default()
                 },
             )

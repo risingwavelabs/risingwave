@@ -27,7 +27,9 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, State};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{
+    Dispatcher, DispatcherType, FragmentType, StreamActor, StreamNode,
+};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
@@ -639,6 +641,7 @@ where
 
                 let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
 
+                // First step, update self fragment
                 // Add actors to this fragment: set the state to `Running`.
                 for actor_id in &added_actors {
                     table_fragment
@@ -701,10 +704,13 @@ where
                     }
                 }
 
+                // Second step, update upstream fragments
                 // Update the dispatcher of the upstream fragments.
                 for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
-                    // TODO: here we assume the upstream fragment is in the same streaming job
-                    // as this fragment.
+                    // here we assume the upstream fragment is in the same streaming job as this
+                    // fragment. Cross-table references only occur in the case
+                    // of Chain fragment, and the scale of Chain fragment does not introduce updates
+                    // to the upstream Fragment (because of NoShuffle)
                     let upstream_fragment = table_fragment
                         .fragments
                         .get_mut(&upstream_fragment_id)
@@ -717,7 +723,10 @@ where
 
                         for dispatcher in &mut upstream_actor.dispatcher {
                             if dispatcher.dispatcher_id == dispatcher_id {
-                                dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
+                                if let DispatcherType::Hash = dispatcher.r#type() {
+                                    dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
+                                }
+
                                 update_actors(
                                     dispatcher.downstream_actor_id.as_mut(),
                                     &removed_actor_ids,
