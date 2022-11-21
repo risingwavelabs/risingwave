@@ -15,9 +15,9 @@
 use std::sync::Arc;
 
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::AppendOnlyTopNExecutor;
 
 pub struct AppendOnlyTopNExecutorBuilder;
@@ -38,9 +38,19 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
         let order_pairs = table.get_pk().iter().map(OrderPair::from_prost).collect();
         if node.with_ties {
-            unreachable!("Not supported yet. Banned in planner");
+            Ok(AppendOnlyTopNExecutor::new_with_ties(
+                input,
+                params.actor_context,
+                order_pairs,
+                (node.offset as usize, node.limit as usize),
+                node.order_by_len as usize,
+                params.pk_indices,
+                params.executor_id,
+                state_table,
+            )?
+            .boxed())
         } else {
-            Ok(AppendOnlyTopNExecutor::new(
+            Ok(AppendOnlyTopNExecutor::new_without_ties(
                 input,
                 params.actor_context,
                 order_pairs,

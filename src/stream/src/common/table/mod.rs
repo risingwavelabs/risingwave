@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
-/// Executors need to serialize Row into `CompactedRow` before writing into cache.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct CompactedRow {
-    pub row: Vec<u8>,
-}
+pub mod state_table;
+
+#[cfg(test)]
+pub mod test_batch_table;
+#[cfg(test)]
+pub mod test_streaming_table;

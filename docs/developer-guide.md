@@ -16,6 +16,7 @@ To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/rising
   - [Set up the development environment](#set-up-the-development-environment)
   - [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
     - [Configure additional components](#configure-additional-components)
+    - [Configure system variables](#configure-system-variables)
     - [Start the playground with RiseDev](#start-the-playground-with-risedev)
     - [Start the playground with cargo](#start-the-playground-with-cargo)
   - [Develop the dashboard](#develop-the-dashboard)
@@ -66,11 +67,12 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 * OpenSSL
 * PostgreSQL (psql) (>= 14.1)
 * Tmux
+* LLVM 15 (To workaround some bugs in macOS toolchain, see https://github.com/risingwavelabs/risingwave/issues/6205).
 
 To install the dependencies on macOS, run:
 
 ```shell
-brew install postgresql cmake protobuf openssl tmux cyrus-sasl
+brew install postgresql cmake protobuf openssl tmux cyrus-sasl llvm
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 

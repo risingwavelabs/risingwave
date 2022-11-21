@@ -393,6 +393,13 @@ impl<T: AsRef<[u8]>> UserKey<T> {
         buf.put_slice(self.table_key.as_ref());
     }
 
+    /// Encode in to a buffer.
+    pub fn encode_length_prefixed(&self, buf: &mut impl BufMut) {
+        buf.put_u32(self.table_id.table_id());
+        buf.put_u32(self.table_key.as_ref().len() as u32);
+        buf.put_slice(self.table_key.as_ref());
+    }
+
     pub fn encode(&self) -> Vec<u8> {
         let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + self.table_key.as_ref().len());
         self.encode_into(&mut ret);
@@ -427,6 +434,20 @@ impl<'a> UserKey<&'a [u8]> {
 }
 
 impl UserKey<Vec<u8>> {
+    pub fn decode_length_prefixed(buf: &mut &[u8]) -> Self {
+        let table_id = buf.get_u32();
+        let len = buf.get_u32() as usize;
+        let data = buf[..len].to_vec();
+        buf.advance(len);
+        UserKey::new(TableId::new(table_id), TableKey(data))
+    }
+
+    pub fn extend_from_other(&mut self, other: &UserKey<&[u8]>) {
+        self.table_id = other.table_id;
+        self.table_key.0.clear();
+        self.table_key.0.extend_from_slice(other.table_key.as_ref());
+    }
+
     pub fn as_ref(&self) -> UserKey<&[u8]> {
         UserKey::new(self.table_id, TableKey(self.table_key.as_slice()))
     }
@@ -464,6 +485,10 @@ impl<T: AsRef<[u8]>> FullKey<T> {
             user_key: UserKey::new(table_id, table_key),
             epoch,
         }
+    }
+
+    pub fn from_user_key(user_key: UserKey<T>, epoch: HummockEpoch) -> Self {
+        Self { user_key, epoch }
     }
 
     /// Pass the inner type of `table_key` to make the code less verbose.
@@ -710,5 +735,19 @@ mod tests {
             prev_full_key(&key_with_epoch(b"\x00".to_vec(), HummockEpoch::MAX)),
             Vec::<u8>::new()
         );
+    }
+
+    #[test]
+    fn test_uesr_key_order() {
+        let a = UserKey::new(TableId::new(1), TableKey(b"aaa".to_vec()));
+        let b = UserKey::new(TableId::new(2), TableKey(b"aaa".to_vec()));
+        let c = UserKey::new(TableId::new(2), TableKey(b"bbb".to_vec()));
+        assert!(a.lt(&b));
+        assert!(b.lt(&c));
+        let a = a.encode();
+        let b = b.encode();
+        let c = c.encode();
+        assert!(a.lt(&b));
+        assert!(b.lt(&c));
     }
 }

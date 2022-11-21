@@ -29,10 +29,8 @@ use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::Context;
-use risingwave_storage::hummock::event_handler::hummock_event_handler::BufferTracker;
 use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::store::version::{
     read_filter_for_batch, read_filter_for_local, HummockVersionReader,
@@ -75,21 +73,8 @@ pub async fn prepare_hummock_event_handler(
         Arc::new(FilterKeyExtractorManager::default()),
     ));
 
-    let buffer_tracker = BufferTracker::from_storage_config(&opt);
-
-    let local_version_manager = LocalVersionManager::new(
-        pinned_version.clone(),
-        compactor_context.clone(),
-        buffer_tracker,
-        event_tx.clone(),
-    );
-
-    let hummock_event_handler = HummockEventHandler::new(
-        local_version_manager,
-        event_rx,
-        pinned_version,
-        compactor_context,
-    );
+    let hummock_event_handler =
+        HummockEventHandler::new(event_rx, pinned_version, compactor_context);
 
     (hummock_event_handler, event_tx)
 }
@@ -113,7 +98,7 @@ async fn sync_epoch(event_tx: &UnboundedSender<HummockEvent>, epoch: HummockEpoc
         .unwrap();
     let (tx, rx) = oneshot::channel();
     event_tx
-        .send(HummockEvent::SyncEpoch {
+        .send(HummockEvent::AwaitSyncEpoch {
             new_sync_epoch: epoch,
             sync_result_sender: tx,
         })
@@ -204,6 +189,7 @@ async fn test_storage_basic() {
             &Bytes::from("aa"),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
@@ -219,6 +205,7 @@ async fn test_storage_basic() {
             &Bytes::from("bb"),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
@@ -236,6 +223,7 @@ async fn test_storage_basic() {
             &Bytes::from("ab"),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
@@ -265,6 +253,7 @@ async fn test_storage_basic() {
             &Bytes::from("aa"),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
@@ -296,6 +285,7 @@ async fn test_storage_basic() {
             &Bytes::from("aa"),
             epoch3,
             ReadOptions {
+                ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
@@ -312,6 +302,7 @@ async fn test_storage_basic() {
             &Bytes::from("ff"),
             epoch3,
             ReadOptions {
+                ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
@@ -328,6 +319,7 @@ async fn test_storage_basic() {
             (Unbounded, Included(b"ee".to_vec())),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
@@ -358,6 +350,7 @@ async fn test_storage_basic() {
             &Bytes::from("aa"),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
@@ -375,6 +368,7 @@ async fn test_storage_basic() {
             &Bytes::from("aa"),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
@@ -391,6 +385,7 @@ async fn test_storage_basic() {
             (Unbounded, Included(b"ee".to_vec())),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
@@ -428,6 +423,7 @@ async fn test_storage_basic() {
             (Unbounded, Included(b"ee".to_vec())),
             epoch3,
             ReadOptions {
+                ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
@@ -589,6 +585,7 @@ async fn test_state_store_sync() {
                     k.as_bytes(),
                     epoch1,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
@@ -631,6 +628,7 @@ async fn test_state_store_sync() {
                     k.as_bytes(),
                     epoch2,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
@@ -651,6 +649,7 @@ async fn test_state_store_sync() {
                 (Unbounded, Included(b"eeee".to_vec())),
                 epoch1,
                 ReadOptions {
+                    ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,
                     check_bloom_filter: true,
@@ -688,6 +687,7 @@ async fn test_state_store_sync() {
                 (Unbounded, Included(b"eeee".to_vec())),
                 epoch2,
                 ReadOptions {
+                    ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,
                     check_bloom_filter: true,
@@ -801,6 +801,7 @@ async fn test_delete_get() {
             "bb".as_bytes(),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 prefix_hint: None,
                 check_bloom_filter: true,
                 table_id: Default::default(),
@@ -904,6 +905,7 @@ async fn test_multiple_epoch_sync() {
                         "bb".as_bytes(),
                         epoch1,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
@@ -920,6 +922,7 @@ async fn test_multiple_epoch_sync() {
                     "bb".as_bytes(),
                     epoch2,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
@@ -935,6 +938,7 @@ async fn test_multiple_epoch_sync() {
                         "bb".as_bytes(),
                         epoch3,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
@@ -1066,6 +1070,7 @@ async fn test_iter_with_min_epoch() {
                     (Unbounded, Unbounded),
                     epoch1,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
@@ -1085,6 +1090,7 @@ async fn test_iter_with_min_epoch() {
                     (Unbounded, Unbounded),
                     epoch2,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
@@ -1104,6 +1110,7 @@ async fn test_iter_with_min_epoch() {
                     (Unbounded, Unbounded),
                     epoch2,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: Some(1),
                         check_bloom_filter: true,
@@ -1140,6 +1147,7 @@ async fn test_iter_with_min_epoch() {
                     (Unbounded, Unbounded),
                     epoch1,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
@@ -1159,6 +1167,7 @@ async fn test_iter_with_min_epoch() {
                     (Unbounded, Unbounded),
                     epoch2,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
@@ -1178,6 +1187,7 @@ async fn test_iter_with_min_epoch() {
                     (Unbounded, Unbounded),
                     epoch2,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: Some(1),
                         check_bloom_filter: true,
@@ -1326,6 +1336,7 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch1,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
@@ -1354,6 +1365,7 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch2,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
@@ -1382,6 +1394,7 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch2,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: Some(1),
                             check_bloom_filter: true,
@@ -1448,6 +1461,7 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch1,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
@@ -1485,6 +1499,7 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch2,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
@@ -1522,6 +1537,7 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch2,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: Some(1),
                             check_bloom_filter: true,
@@ -1559,6 +1575,7 @@ async fn test_hummock_version_reader() {
                         (Unbounded, Unbounded),
                         epoch3,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
@@ -1602,6 +1619,7 @@ async fn test_hummock_version_reader() {
                             key_range.clone(),
                             epoch2,
                             ReadOptions {
+                                ignore_range_tombstone: false,
                                 table_id: Default::default(),
                                 retention_seconds: None,
                                 check_bloom_filter: true,
@@ -1639,6 +1657,7 @@ async fn test_hummock_version_reader() {
                             key_range.clone(),
                             epoch3,
                             ReadOptions {
+                                ignore_range_tombstone: false,
                                 table_id: Default::default(),
                                 retention_seconds: None,
                                 check_bloom_filter: true,

@@ -17,22 +17,29 @@ use std::cmp;
 use bytes::Bytes;
 
 use super::key_cmp::KeyComparator;
+use crate::user_key;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct KeyRange {
     pub left: Bytes,
     pub right: Bytes,
+    pub right_exclusive: bool,
 }
 
 impl KeyRange {
     pub fn new(left: Bytes, right: Bytes) -> Self {
-        Self { left, right }
+        Self {
+            left,
+            right,
+            right_exclusive: false,
+        }
     }
 
     pub fn inf() -> Self {
         Self {
             left: Bytes::new(),
             right: Bytes::new(),
+            right_exclusive: false,
         }
     }
 
@@ -50,6 +57,11 @@ impl KeyRange {
 pub trait KeyRangeCommon {
     fn full_key_overlap(&self, other: &Self) -> bool;
     fn full_key_extend(&mut self, other: &Self);
+    fn sstable_overlap(&self, other: &Self) -> bool;
+    fn compare_right_with(&self, full_key: &[u8]) -> std::cmp::Ordering {
+        self.compare_right_with_user_key(user_key(full_key))
+    }
+    fn compare_right_with_user_key(&self, ukey: &[u8]) -> std::cmp::Ordering;
 }
 
 #[macro_export]
@@ -81,6 +93,25 @@ macro_rules! impl_key_range_common {
                             == cmp::Ordering::Greater)
                 {
                     self.right = other.right.clone();
+                    self.right_exclusive = other.right_exclusive;
+                }
+            }
+
+            fn sstable_overlap(&self, other: &Self) -> bool {
+                (self.end_bound_inf()
+                    || other.start_bound_inf()
+                    || self.compare_right_with(&other.left) != std::cmp::Ordering::Less)
+                    && (other.end_bound_inf()
+                        || self.start_bound_inf()
+                        || other.compare_right_with(&self.left) != std::cmp::Ordering::Less)
+            }
+
+            fn compare_right_with_user_key(&self, ukey: &[u8]) -> std::cmp::Ordering {
+                let ret = user_key(&self.right).cmp(ukey);
+                if ret == cmp::Ordering::Equal && self.right_exclusive {
+                    cmp::Ordering::Less
+                } else {
+                    ret
                 }
             }
         }
@@ -133,16 +164,18 @@ impl From<KeyRange> for risingwave_pb::hummock::KeyRange {
         risingwave_pb::hummock::KeyRange {
             left: kr.left.to_vec(),
             right: kr.right.to_vec(),
+            right_exclusive: kr.right_exclusive,
         }
     }
 }
 
 impl From<&risingwave_pb::hummock::KeyRange> for KeyRange {
     fn from(kr: &risingwave_pb::hummock::KeyRange) -> Self {
-        KeyRange::new(
-            Bytes::copy_from_slice(&kr.left),
-            Bytes::copy_from_slice(&kr.right),
-        )
+        KeyRange {
+            left: Bytes::copy_from_slice(&kr.left),
+            right: Bytes::copy_from_slice(&kr.right),
+            right_exclusive: kr.right_exclusive,
+        }
     }
 }
 

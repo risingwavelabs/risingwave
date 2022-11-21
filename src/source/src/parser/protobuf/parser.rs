@@ -15,64 +15,73 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use hyper::http::uri::InvalidUri;
-use hyper_tls::HttpsConnector;
+use futures::future::ready;
 use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
     ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::ErrorCode::{
-    InternalError, InvalidConfigValue, InvalidParameterValue, NotImplemented, ProtocolError,
-};
+use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
-use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
-use crate::{SourceParser, WriteGuard};
-
-const PB_SCHEMA_LOCATION_S3_REGION: &str = "region";
+use super::schema_resolver::*;
+use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::util::get_kafka_topic;
+use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 #[derive(Debug, Clone)]
 pub struct ProtobufParser {
-    pub message_descriptor: MessageDescriptor,
+    message_descriptor: MessageDescriptor,
+    confluent_wire_type: bool,
 }
 
 impl ProtobufParser {
     pub async fn new(
         location: &str,
         message_name: &str,
+        use_schema_registry: bool,
         props: HashMap<String, String>,
     ) -> Result<Self> {
         let url = Url::parse(location)
             .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
 
-        let schema_bytes = match url.scheme() {
-            // TODO(Tao): support local file only when it's compiled in debug mode.
-            "file" => {
-                let path = url.to_file_path().map_err(|_| {
-                    RwError::from(InternalError(format!("illegal path: {}", location)))
-                })?;
+        let schema_bytes = if use_schema_registry {
+            let kafka_topic = get_kafka_topic(&props)?;
+            let client = Client::new(url)?;
+            compile_file_descriptor_from_schema_registry(
+                format!("{}-value", kafka_topic).as_str(),
+                &client,
+            )
+            .await?
+        } else {
+            match url.scheme() {
+                // TODO(Tao): support local file only when it's compiled in debug mode.
+                "file" => {
+                    let path = url.to_file_path().map_err(|_| {
+                        RwError::from(InternalError(format!("illegal path: {}", location)))
+                    })?;
 
-                if path.is_dir() {
-                    return Err(RwError::from(ProtocolError(
-                        "schema file location must not be a directory".to_string(),
-                    )));
+                    if path.is_dir() {
+                        return Err(RwError::from(ProtocolError(
+                            "schema file location must not be a directory".to_string(),
+                        )));
+                    }
+                    Self::local_read_to_bytes(&path)
                 }
-                Self::local_read_to_bytes(&path)
-            }
-            "s3" => load_bytes_from_s3(&url, props).await,
-            "https" => load_bytes_from_https(&url).await,
-            scheme => Err(RwError::from(ProtocolError(format!(
-                "path scheme {} is not supported",
-                scheme
-            )))),
-        }?;
+                "s3" => load_file_descriptor_from_s3(&url, props).await,
+                "https" | "http" => load_file_descriptor_from_http(&url).await,
+                scheme => Err(RwError::from(ProtocolError(format!(
+                    "path scheme {} is not supported",
+                    scheme
+                )))),
+            }?
+        };
 
-        let pool = DescriptorPool::decode(&schema_bytes[..]).map_err(|e| {
+        let pool = DescriptorPool::decode(schema_bytes.as_slice()).map_err(|e| {
             ProtocolError(format!(
                 "cannot build descriptor pool from schema: {}, error: {}",
                 location, e
@@ -84,7 +93,10 @@ impl ProtobufParser {
                 message_name, location, pool
             ))
         })?;
-        Ok(Self { message_descriptor })
+        Ok(Self {
+            message_descriptor,
+            confluent_wire_type: use_schema_registry,
+        })
     }
 
     /// read binary schema from a local file
@@ -141,63 +153,39 @@ impl ProtobufParser {
             })
         }
     }
-}
 
-// TODO(Tao): Probably we should never allow to use S3 URI.
-async fn load_bytes_from_s3(
-    location: &Url,
-    properties: HashMap<String, String>,
-) -> Result<Vec<u8>> {
-    let bucket = location.domain().ok_or_else(|| {
-        RwError::from(InternalError(format!(
-            "Illegal Protobuf schema path {}",
-            location
-        )))
-    })?;
-    if properties.get(PB_SCHEMA_LOCATION_S3_REGION).is_none() {
-        return Err(RwError::from(InvalidConfigValue {
-            config_entry: PB_SCHEMA_LOCATION_S3_REGION.to_string(),
-            config_value: "NONE".to_string(),
-        }));
+    fn parse_inner(
+        &self,
+        mut payload: &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
+        if self.confluent_wire_type {
+            let raw_payload = resolve_pb_header(payload)?;
+            payload = raw_payload;
+        }
+
+        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
+            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
+        writer.insert(|column_desc| {
+            let field_desc = message
+                .descriptor()
+                .get_field_by_name(&column_desc.name)
+                .ok_or_else(|| {
+                    let err_msg = format!("protobuf schema don't have field {}", column_desc.name);
+                    tracing::error!(err_msg);
+                    RwError::from(ProtocolError(err_msg))
+                })?;
+            let value = message.get_field(&field_desc);
+            from_protobuf_value(&field_desc, &value).map_err(|e| {
+                tracing::error!(
+                    "failed to process value ({}): {}",
+                    String::from_utf8_lossy(payload),
+                    e
+                );
+                e
+            })
+        })
     }
-    let key = location.path().replace('/', "");
-    let config = AwsConfigV2::from(properties.clone());
-    let sdk_config = config.load_config(None).await;
-    let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
-    let response = s3_client
-        .get_object()
-        .bucket(bucket.to_string())
-        .key(&key)
-        .send()
-        .await
-        .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-
-    let body = response.body.collect().await.map_err(|e| {
-        RwError::from(InternalError(format!(
-            "Read Protobuf schema file from s3 {}",
-            e
-        )))
-    })?;
-    Ok(body.into_bytes().to_vec())
-}
-
-async fn load_bytes_from_https(location: &Url) -> Result<Vec<u8>> {
-    let client = hyper::Client::builder().build::<_, hyper::Body>(HttpsConnector::new());
-    let res = client
-        .get(
-            location
-                .to_string()
-                .parse()
-                .map_err(|e: InvalidUri| InvalidParameterValue(e.to_string()))?,
-        )
-        .await
-        .map_err(|e| {
-            InvalidParameterValue(format!("failed to read from URL {}: {}", location, e))
-        })?;
-    let buf = hyper::body::to_bytes(res)
-        .await
-        .map_err(|e| InvalidParameterValue(format!("failed to read HTTP body: {}", e)))?;
-    Ok(buf.to_vec())
 }
 
 fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
@@ -300,33 +288,35 @@ fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType>
     Ok(t)
 }
 
+pub(crate) fn resolve_pb_header(payload: &[u8]) -> Result<&[u8]> {
+    // there's a message index array at the front of payload
+    // if it is the first message in proto def, the array is just and `0`
+    // TODO: support parsing more complex indec array
+    let (_, remained) = extract_schema_id(payload)?;
+    match remained.first() {
+        Some(0) => Ok(&remained[1..]),
+        Some(i) => {
+            Err(RwError::from(ProtocolError(format!("The payload message must be the first message in protobuf schema def, but the message index is {}", i))))
+        }
+        None => {
+            Err(RwError::from(ProtocolError("The proto payload is empty".to_owned())))
+        }
+    }
+}
+
 impl SourceParser for ProtobufParser {
-    fn parse(
-        &self,
-        payload: &[u8],
-        writer: crate::SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
-            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
-        writer.insert(|column_desc| {
-            let field_desc = message
-                .descriptor()
-                .get_field_by_name(&column_desc.name)
-                .ok_or_else(|| {
-                    let err_msg = format!("protobuf schema don't have field {}", column_desc.name);
-                    tracing::error!(err_msg);
-                    RwError::from(ProtocolError(err_msg))
-                })?;
-            let value = message.get_field(&field_desc);
-            from_protobuf_value(&field_desc, &value).map_err(|e| {
-                tracing::error!(
-                    "failed to process value ({}): {}",
-                    String::from_utf8_lossy(payload),
-                    e
-                );
-                e
-            })
-        })
+    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
+
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a,
+    {
+        ready(self.parse_inner(payload, writer))
     }
 }
 
@@ -360,7 +350,7 @@ mod test {
         let location = schema_dir() + "/simple-schema";
         let message_name = "test.TestRecord";
         println!("location: {}", location);
-        let parser = ProtobufParser::new(&location, message_name, HashMap::new()).await?;
+        let parser = ProtobufParser::new(&location, message_name, false, HashMap::new()).await?;
         let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
         assert_eq!(
@@ -396,7 +386,7 @@ mod test {
         let location = schema_dir() + "/complex-schema";
         let message_name = "test.User";
 
-        let parser = ProtobufParser::new(&location, message_name, HashMap::new()).await?;
+        let parser = ProtobufParser::new(&location, message_name, false, HashMap::new()).await?;
         let columns = parser.map_to_columns().unwrap();
 
         assert_eq!(columns[0].name, "id".to_string());

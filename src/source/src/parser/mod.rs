@@ -16,11 +16,13 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub use avro_parser::*;
+pub use avro::*;
+pub use canal::*;
 pub use debezium::*;
+use futures::Future;
 use itertools::Itertools;
 pub use json_parser::*;
-pub use pb_parser::*;
+pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
@@ -29,12 +31,16 @@ use risingwave_common::types::Datum;
 use crate::parser::maxwell::MaxwellParser;
 use crate::{SourceColumnDesc, SourceFormat};
 
-mod avro_parser;
+mod avro;
+mod canal;
 mod common;
 mod debezium;
 mod json_parser;
+mod macros;
 mod maxwell;
-mod pb_parser;
+mod protobuf;
+mod schema_registry;
+mod util;
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
@@ -245,11 +251,14 @@ impl SourceStreamChunkRowWriter<'_> {
     }
 }
 
+pub trait ParseFuture<'a, Out> = Future<Output = Out> + Send + 'a;
+
 /// `SourceParser` is the message parser, `ChunkReader` will parse the messages in `SourceReader`
 /// one by one through `SourceParser` and assemble them into `DataChunk`
 /// Note that the `skip_parse` parameter in `SourceColumnDesc`, when it is true, should skip the
 /// parse and return `Datum` of `None`
-pub trait SourceParser: Send + Sync + Debug + 'static {
+pub trait SourceParser: Send + Debug + 'static {
+    type ParseResult<'a>: ParseFuture<'a, Result<WriteGuard>>;
     /// Parse the payload and append the result to the [`StreamChunk`] directly.
     ///
     /// # Arguments
@@ -261,7 +270,14 @@ pub trait SourceParser: Send + Sync + Debug + 'static {
     /// # Returns
     ///
     /// A [`WriteGuard`] to ensure that at least one record was appended or error occurred.
-    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard>;
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a;
 }
 
 #[derive(Debug)]
@@ -271,20 +287,22 @@ pub enum SourceParserImpl {
     DebeziumJson(DebeziumJsonParser),
     Avro(AvroParser),
     Maxwell(MaxwellParser),
+    CanalJson(CanalJsonParser),
 }
 
 impl SourceParserImpl {
-    pub fn parse(
+    pub async fn parse(
         &self,
         payload: &[u8],
         writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         match self {
-            Self::Json(parser) => parser.parse(payload, writer),
-            Self::Protobuf(parser) => parser.parse(payload, writer),
-            Self::DebeziumJson(parser) => parser.parse(payload, writer),
-            Self::Avro(avro_parser) => avro_parser.parse(payload, writer),
-            Self::Maxwell(maxwell_parser) => maxwell_parser.parse(payload, writer),
+            Self::Json(parser) => parser.parse(payload, writer).await,
+            Self::Protobuf(parser) => parser.parse(payload, writer).await,
+            Self::DebeziumJson(parser) => parser.parse(payload, writer).await,
+            Self::Avro(avro_parser) => avro_parser.parse(payload, writer).await,
+            Self::Maxwell(maxwell_parser) => maxwell_parser.parse(payload, writer).await,
+            Self::CanalJson(parser) => parser.parse(payload, writer).await,
         }
     }
 
@@ -292,26 +310,28 @@ impl SourceParserImpl {
         format: &SourceFormat,
         properties: &HashMap<String, String>,
         schema_location: &str,
+        use_schema_registry: bool,
+        proto_message_name: String,
     ) -> Result<Arc<Self>> {
         const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
+        const USE_SCHEMA_REGISTRY: &str = "use_schema_registry";
         let parser = match format {
             SourceFormat::Json => SourceParserImpl::Json(JsonParser),
-            SourceFormat::Protobuf => {
-                let message_name = properties.get(PROTOBUF_MESSAGE_KEY).ok_or_else(|| {
-                    RwError::from(ProtocolError(format!(
-                        "Must specify '{}' in WITH clause",
-                        PROTOBUF_MESSAGE_KEY
-                    )))
-                })?;
-                SourceParserImpl::Protobuf(
-                    ProtobufParser::new(schema_location, message_name, properties.clone()).await?,
+            SourceFormat::Protobuf => SourceParserImpl::Protobuf(
+                ProtobufParser::new(
+                    schema_location,
+                    &proto_message_name,
+                    use_schema_registry,
+                    properties.clone(),
                 )
-            }
+                .await?,
+            ),
             SourceFormat::DebeziumJson => SourceParserImpl::DebeziumJson(DebeziumJsonParser),
-            SourceFormat::Avro => {
-                SourceParserImpl::Avro(AvroParser::new(schema_location, properties.clone()).await?)
-            }
+            SourceFormat::Avro => SourceParserImpl::Avro(
+                AvroParser::new(schema_location, use_schema_registry, properties.clone()).await?,
+            ),
             SourceFormat::Maxwell => SourceParserImpl::Maxwell(MaxwellParser),
+            SourceFormat::CanalJson => SourceParserImpl::CanalJson(CanalJsonParser),
             _ => {
                 return Err(RwError::from(ProtocolError(
                     "format not support".to_string(),

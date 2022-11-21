@@ -33,6 +33,7 @@ use risingwave_pb::hummock::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key::user_key;
+use crate::key_range::KeyRangeCommon;
 use crate::table_stats::TableStats;
 
 pub mod compact;
@@ -68,6 +69,14 @@ impl LocalSstableInfo {
         Self {
             compaction_group_id,
             sst_info: sstable_info,
+            table_stats: Default::default(),
+        }
+    }
+
+    pub fn for_test(sst_info: SstableInfo) -> Self {
+        Self {
+            compaction_group_id: StaticCompactionGroupId::StateDefault as CompactionGroupId,
+            sst_info,
             table_stats: Default::default(),
         }
     }
@@ -153,9 +162,12 @@ impl SstIdRange {
 pub fn can_concat(ssts: &[impl Deref<Target = SstableInfo>]) -> bool {
     let len = ssts.len();
     for i in 0..len - 1 {
-        if user_key(&ssts[i].get_key_range().as_ref().unwrap().right).cmp(user_key(
-            &ssts[i + 1].get_key_range().as_ref().unwrap().left,
-        )) != Ordering::Less
+        if ssts[i]
+            .key_range
+            .as_ref()
+            .unwrap()
+            .compare_right_with(&ssts[i + 1].key_range.as_ref().unwrap().left)
+            != Ordering::Less
         {
             return false;
         }

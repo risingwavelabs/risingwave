@@ -162,7 +162,7 @@ mod tests {
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
-    use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+    use crate::pg_field_descriptor::PgFieldDescriptor;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{pg_serve, Session, SessionId, SessionManager, UserAuthenticator};
     use crate::types::Row;
@@ -218,8 +218,12 @@ mod tests {
                 StatementType::SELECT,
                 Some(1),
                 futures::stream::iter(vec![Ok(vec![Row::new(res)])]).boxed(),
-                // NOTE: Extended mode don't need.
-                vec![PgFieldDescriptor::new("".to_string(), TypeOid::Varchar); len],
+                vec![
+                    // 1043 is the oid of varchar type.
+                    // -1 is the type len of varchar type.
+                    PgFieldDescriptor::new("".to_string(), 1043, -1);
+                    len
+                ],
             ))
         }
 
@@ -233,7 +237,13 @@ mod tests {
         ) -> Result<Vec<PgFieldDescriptor>, super::BoxedError> {
             let count = sql.split(&[' ', ',', ';']).skip(1).count();
             Ok(vec![
-                PgFieldDescriptor::new("".to_string(), TypeOid::Varchar,);
+                // 1043 is the oid of varchar type.
+                // -1 is the type len of varchar type.
+                PgFieldDescriptor::new(
+                    "".to_string(),
+                    1043,
+                    -1
+                );
                 count
             ])
         }

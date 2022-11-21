@@ -14,8 +14,9 @@
 
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayImpl, ArrayRef, BoolArray, DataChunk, Row};
+use risingwave_common::array::{ArrayImpl, ArrayRef, BoolArray, DataChunk};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
@@ -100,7 +101,8 @@ impl Expression for IsNotNullExpression {
 mod tests {
     use std::str::FromStr;
 
-    use risingwave_common::array::{ArrayBuilder, DataChunk, DecimalArrayBuilder, Row};
+    use risingwave_common::array::{ArrayBuilder, DataChunk, DecimalArrayBuilder};
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Decimal};
 
     use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};

@@ -36,7 +36,7 @@ use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::UserKey;
+use risingwave_hummock_sdk::key::{TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -45,7 +45,8 @@ mod delete_range_aggregator;
 mod sstable_id_manager;
 mod utils;
 pub use delete_range_aggregator::{
-    DeleteRangeAggregator, DeleteRangeAggregatorBuilder, RangeTombstonesCollector,
+    get_delete_range_epoch_from_sstable, DeleteRangeAggregator, DeleteRangeAggregatorBuilder,
+    RangeTombstonesCollector, SstableDeleteRangeIterator,
 };
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
@@ -61,9 +62,24 @@ const VERSION: u32 = 1;
 #[derive(Clone, PartialEq, Eq, Debug)]
 // delete keys located in [start_user_key, end_user_key)
 pub struct DeleteRangeTombstone {
-    pub start_user_key: Vec<u8>,
-    pub end_user_key: Vec<u8>,
+    pub start_user_key: UserKey<Vec<u8>>,
+    pub end_user_key: UserKey<Vec<u8>>,
     pub sequence: HummockEpoch,
+}
+
+impl PartialOrd for DeleteRangeTombstone {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DeleteRangeTombstone {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.start_user_key
+            .cmp(&other.start_user_key)
+            .then_with(|| self.end_user_key.cmp(&other.end_user_key))
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
 }
 
 impl DeleteRangeTombstone {
@@ -74,21 +90,21 @@ impl DeleteRangeTombstone {
         sequence: HummockEpoch,
     ) -> Self {
         Self {
-            start_user_key: UserKey::for_test(table_id, start_table_key).encode(),
-            end_user_key: UserKey::for_test(table_id, end_table_key).encode(),
+            start_user_key: UserKey::new(table_id, TableKey(start_table_key)),
+            end_user_key: UserKey::new(table_id, TableKey(end_table_key)),
             sequence,
         }
     }
 
     pub fn encode(&self, buf: &mut Vec<u8>) {
-        put_length_prefixed_slice(buf, &self.start_user_key);
-        put_length_prefixed_slice(buf, &self.end_user_key);
+        self.start_user_key.encode_length_prefixed(buf);
+        self.end_user_key.encode_length_prefixed(buf);
         buf.put_u64_le(self.sequence);
     }
 
     pub fn decode(buf: &mut &[u8]) -> Self {
-        let start_user_key = get_length_prefixed_slice(buf);
-        let end_user_key = get_length_prefixed_slice(buf);
+        let start_user_key = UserKey::decode_length_prefixed(buf);
+        let end_user_key = UserKey::decode_length_prefixed(buf);
         let sequence = buf.get_u64_le();
         Self {
             start_user_key,
@@ -153,6 +169,7 @@ impl Sstable {
             key_range: Some(KeyRange {
                 left: self.meta.smallest_key.clone(),
                 right: self.meta.largest_key.clone(),
+                right_exclusive: false,
             }),
             file_size: self.meta.estimated_size as u64,
             table_ids: vec![],
@@ -322,7 +339,7 @@ impl SstableMeta {
             + self
             .range_tombstone_list
             .iter()
-            .map(| tombstone| 16 + tombstone.start_user_key.len() + tombstone.end_user_key.len())
+            .map(| tombstone| 16 + tombstone.start_user_key.encoded_len() + tombstone.end_user_key.encoded_len())
             .sum::<usize>()
             + 4 // bloom filter len
             + self.bloom_filter.len()

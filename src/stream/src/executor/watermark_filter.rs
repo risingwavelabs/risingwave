@@ -18,14 +18,13 @@ use futures::future::join_all;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::Row;
 use risingwave_common::bail;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl, VIRTUAL_NODE_COUNT};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
@@ -33,6 +32,7 @@ use super::filter::SimpleFilterExecutor;
 use super::{
     ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, StreamExecutorResult,
 };
+use crate::common::table::state_table::StateTable;
 use crate::common::InfallibleExpression;
 use crate::executor::{expect_first_barrier, Watermark};
 
@@ -313,7 +313,7 @@ mod tests {
             order_types.to_vec(),
             pk_indices.to_vec(),
             Distribution::all_vnodes(vec![0]),
-            val_indices.to_vec(),
+            Some(val_indices.to_vec()),
         )
         .await
     }

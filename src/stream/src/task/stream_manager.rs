@@ -235,7 +235,7 @@ impl LocalStreamManager {
             .complete_receiver
             .expect("no rx for local mode")
             .await
-            .context("failed to collect barrier")?;
+            .context("failed to collect barrier")??;
         complete_receiver
             .barrier_inflight_timer
             .expect("no timer for test")
@@ -347,6 +347,11 @@ impl LocalStreamManager {
     ) -> StreamResult<()> {
         let mut core = self.core.lock().await;
         core.build_actors(actors, env).await
+    }
+
+    pub async fn config(&self) -> StreamingConfig {
+        let core = self.core.lock().await;
+        core.config.clone()
     }
 }
 
@@ -620,11 +625,13 @@ impl LocalStreamManagerCore {
                 .map(|(m, _)| m.register(actor_id));
 
             let handle = {
+                let context = self.context.clone();
                 let actor = async move {
-                    let _ = actor.run().await.inspect_err(|err| {
+                    if let Err(err) = actor.run().await {
                         // TODO: check error type and panic if it's unexpected.
                         tracing::error!(actor=%actor_id, error=%err, "actor exit");
-                    });
+                        context.lock_barrier_manager().notify_failure(actor_id, err);
+                    }
                 };
                 #[auto_enums::auto_enum(Future)]
                 let traced = match trace_reporter {

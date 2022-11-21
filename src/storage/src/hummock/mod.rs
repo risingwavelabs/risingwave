@@ -29,6 +29,7 @@ use risingwave_pb::hummock::HummockVersion;
 use risingwave_pb::hummock::{pin_version_response, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::watch;
 use tracing::log::error;
 
 mod block_cache;
@@ -95,6 +96,7 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::{HummockReadVersion, HummockVersionReader};
 use crate::monitor::StoreLocalStatistic;
+use crate::store::ReadOptions;
 
 struct HummockStorageShutdownGuard {
     shutdown_sender: UnboundedSender<HummockEvent>,
@@ -184,21 +186,8 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
         ));
 
-        let buffer_tracker = BufferTracker::from_storage_config(&options);
-
-        let local_version_manager = LocalVersionManager::new(
-            pinned_version.clone(),
-            compactor_context.clone(),
-            buffer_tracker,
-            event_tx.clone(),
-        );
-
-        let hummock_event_handler = HummockEventHandler::new(
-            local_version_manager,
-            event_rx,
-            pinned_version,
-            compactor_context.clone(),
-        );
+        let hummock_event_handler =
+            HummockEventHandler::new(event_rx, pinned_version, compactor_context.clone());
 
         let read_version = hummock_event_handler.read_version();
 
@@ -318,15 +307,23 @@ pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
     sstable_info: &SstableInfo,
     full_key: FullKey<&[u8]>,
-    check_bloom_filter: bool,
+    read_options: &ReadOptions,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
     let ukey = &full_key.user_key;
-    if check_bloom_filter
+    let delete_epoch = if read_options.ignore_range_tombstone {
+        None
+    } else {
+        get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
+    };
+    if read_options.check_bloom_filter
         && !hit_sstable_bloom_filter(sstable.value(), ukey.encode().as_slice(), local_stats)
     {
+        if delete_epoch.is_some() {
+            return Ok(Some(HummockValue::Delete));
+        }
         return Ok(None);
     }
 
@@ -340,14 +337,27 @@ pub async fn get_from_sstable_info(
     iter.seek(full_key).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
+        if delete_epoch.is_some() {
+            return Ok(Some(HummockValue::Delete));
+        }
         return Ok(None);
     }
 
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
-    let value = match iter.key().user_key == *ukey {
-        true => Some(iter.value().to_bytes()),
-        false => None,
+    let value = if iter.key().user_key == *ukey {
+        if delete_epoch
+            .map(|epoch| epoch >= iter.key().epoch)
+            .unwrap_or(false)
+        {
+            Some(HummockValue::Delete)
+        } else {
+            Some(iter.value().to_bytes())
+        }
+    } else if delete_epoch.is_some() {
+        Some(HummockValue::Delete)
+    } else {
+        None
     };
     iter.collect_local_statistic(local_stats);
 
@@ -375,7 +385,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
     order_sorted_uncommitted_data: OrderSortedUncommittedData,
     full_key: FullKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
-    check_bloom_filter: bool,
+    read_options: &ReadOptions,
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
     let epoch = full_key.epoch;
@@ -398,7 +408,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
                         sstable_store_ref.clone(),
                         &sst_info,
                         full_key,
-                        check_bloom_filter,
+                        read_options,
                         local_stats,
                     )
                     .await?
@@ -418,6 +428,9 @@ pub fn get_from_batch(
     table_key: TableKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
+    if batch.check_delete_by_range(table_key) {
+        return Some(HummockValue::Delete);
+    }
     batch.get(table_key).map(|v| {
         local_stats.get_shared_buffer_hit_counts += 1;
         v
@@ -444,8 +457,6 @@ pub struct HummockStorageV1 {
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
-
-    seal_epoch: Arc<AtomicU64>,
 
     #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
@@ -504,19 +515,35 @@ impl HummockStorageV1 {
 
         let buffer_tracker = BufferTracker::from_storage_config(&options);
 
-        let local_version_manager = LocalVersionManager::new(
-            pinned_version.clone(),
-            compactor_context.clone(),
-            buffer_tracker,
-            event_tx.clone(),
-        );
+        let local_version_manager =
+            LocalVersionManager::new(pinned_version.clone(), compactor_context, buffer_tracker);
 
-        let hummock_event_handler = HummockEventHandler::new(
-            local_version_manager.clone(),
-            event_rx,
-            pinned_version,
-            compactor_context,
-        );
+        let local_version_manager_clone = local_version_manager.clone();
+        let (epoch_update_tx, _) = watch::channel(pinned_version.max_committed_epoch());
+        let epoch_update_tx = Arc::new(epoch_update_tx);
+        let epoch_update_tx_clone = epoch_update_tx.clone();
+
+        tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                match event {
+                    HummockEvent::Shutdown => {
+                        break;
+                    }
+                    HummockEvent::VersionUpdate(version_update) => {
+                        local_version_manager_clone.try_update_pinned_version(version_update);
+                        // TODO: this is
+                        epoch_update_tx.send_replace(
+                            local_version_manager_clone
+                                .get_pinned_version()
+                                .max_committed_epoch(),
+                        );
+                    }
+                    _ => {
+                        unreachable!("for hummock v1, there should only be shutdown and version update event");
+                    }
+                }
+            }
+        });
 
         let instance = Self {
             options,
@@ -528,14 +555,11 @@ impl HummockStorageV1 {
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx.clone(),
             }),
-            version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
-            seal_epoch: hummock_event_handler.sealed_epoch(),
+            version_update_notifier_tx: epoch_update_tx_clone,
             hummock_event_sender: event_tx,
             #[cfg(not(madsim))]
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
         };
-
-        tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
         Ok(instance)
     }

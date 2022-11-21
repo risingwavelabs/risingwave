@@ -22,6 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_files = vec![
         "catalog",
         "common",
+        "compute",
         "data",
         "ddl_service",
         "expr",
@@ -37,6 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "source",
         "monitor_service",
         "health",
+        "cdc_service",
     ];
     let protos: Vec<String> = proto_files
         .iter()

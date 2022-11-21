@@ -24,7 +24,7 @@ use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
     HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
 };
-use risingwave_storage::StateStoreImpl;
+use risingwave_storage::{StateStore, StateStoreImpl};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
@@ -122,8 +122,14 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
         )
         .await?;
 
-        if let StateStoreImpl::HummockStateStore(hummock_state_store) = state_store_impl {
-            Ok((meta_client, hummock_state_store, metrics))
+        if let Some(hummock_state_store) = state_store_impl.as_hummock() {
+            Ok((
+                meta_client,
+                hummock_state_store
+                    .clone()
+                    .monitored(metrics.state_store_metrics.clone()),
+                metrics,
+            ))
         } else {
             Err(anyhow!("only Hummock state store is supported in risectl"))
         }

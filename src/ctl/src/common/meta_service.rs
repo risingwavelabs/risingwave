@@ -43,6 +43,7 @@ For `./risedev d` use cases, please do the following:
 
 For `./risedev apply-compose-deploy` users,
 * `RW_META_ADDR` will be printed out when deploying. Please copy the bash exports to your console.
+* `RW_META_ADDR` default value is 'http://127.0.0.1:5690'
 
 risectl requires a full persistent cluster to operate. Please make sure you're not running in minimum mode.";
                 bail!(MESSAGE);

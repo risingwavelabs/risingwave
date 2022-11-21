@@ -18,9 +18,10 @@ pub mod streaming_table;
 use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::{Row, Row2, RowExt};
 use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 
@@ -107,13 +108,11 @@ pub trait TableIter: Send {
 }
 
 /// Get vnode value with `indices` on the given `row`.
-fn compute_vnode(row: &Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
+pub fn compute_vnode(row: impl Row2, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {
-        let vnode = row
-            .hash_by_indices(indices, &Crc32FastBuilder {})
-            .to_vnode();
+        let vnode = (&row).project(indices).hash(Crc32FastBuilder {}).to_vnode();
         check_vnode_is_set(vnode, vnodes);
         vnode
     };
@@ -124,7 +123,11 @@ fn compute_vnode(row: &Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
 }
 
 /// Get vnode values with `indices` on the given `chunk`.
-fn compute_chunk_vnode(chunk: &DataChunk, indices: &[usize], vnodes: &Bitmap) -> Vec<VirtualNode> {
+pub fn compute_chunk_vnode(
+    chunk: &DataChunk,
+    indices: &[usize],
+    vnodes: &Bitmap,
+) -> Vec<VirtualNode> {
     if indices.is_empty() {
         vec![DEFAULT_VNODE; chunk.capacity()]
     } else {
