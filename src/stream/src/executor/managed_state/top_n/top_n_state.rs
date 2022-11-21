@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::array::RowRef;
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, Row2};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -76,11 +75,11 @@ impl<S: StateStore> ManagedTopNState<S> {
         }
     }
 
-    pub fn insert(&mut self, value: RowRef<'_>) {
+    pub fn insert(&mut self, value: impl Row2) {
         self.state_table.insert(value);
     }
 
-    pub fn delete(&mut self, value: Row) {
+    pub fn delete(&mut self, value: impl Row2) {
         self.state_table.delete(value);
     }
 
@@ -288,7 +287,6 @@ impl<S: StateStore> ManagedTopNState<S> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::DataChunk;
     use risingwave_common::types::DataType;
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
@@ -356,8 +354,7 @@ mod tests {
         let row4_bytes = serialize_row_to_cache_key(row4.clone(), 1, &cache_key_serde);
         let rows = vec![row1, row2, row3, row4];
         let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes];
-        let data_chunk = DataChunk::from_rows(&rows, &data_types);
-        managed_state.insert(data_chunk.row_at_unchecked_vis(3));
+        managed_state.insert(rows[3].clone());
 
         // now ("ab", 4)
         let valid_rows = managed_state.find_range(None, 0, Some(1), 1).await.unwrap();
@@ -365,12 +362,12 @@ mod tests {
         assert_eq!(valid_rows.len(), 1);
         assert_eq!(valid_rows[0].cache_key, ordered_rows[3].clone());
 
-        managed_state.insert(data_chunk.row_at_unchecked_vis(2));
+        managed_state.insert(rows[2].clone());
         let valid_rows = managed_state.find_range(None, 1, Some(1), 1).await.unwrap();
         assert_eq!(valid_rows.len(), 1);
         assert_eq!(valid_rows[0].cache_key, ordered_rows[2].clone());
 
-        managed_state.insert(data_chunk.row_at_unchecked_vis(1));
+        managed_state.insert(rows[1].clone());
 
         let valid_rows = managed_state.find_range(None, 1, Some(2), 1).await.unwrap();
         assert_eq!(valid_rows.len(), 2);
@@ -387,7 +384,7 @@ mod tests {
         managed_state.delete(rows[1].clone());
 
         // insert ("abc", 2)
-        managed_state.insert(data_chunk.row_at_unchecked_vis(0));
+        managed_state.insert(rows[0].clone());
 
         let valid_rows = managed_state.find_range(None, 0, Some(3), 1).await.unwrap();
 
@@ -441,12 +438,11 @@ mod tests {
         let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes, row5_bytes];
 
         let mut cache = TopNCache::<false>::new(1, 1, 1);
-        let data_chunk = DataChunk::from_rows(&rows, &data_types);
 
-        managed_state.insert(data_chunk.row_at_unchecked_vis(3));
-        managed_state.insert(data_chunk.row_at_unchecked_vis(1));
-        managed_state.insert(data_chunk.row_at_unchecked_vis(2));
-        managed_state.insert(data_chunk.row_at_unchecked_vis(4));
+        managed_state.insert(rows[3].clone());
+        managed_state.insert(rows[1].clone());
+        managed_state.insert(rows[2].clone());
+        managed_state.insert(rows[4].clone());
 
         managed_state
             .fill_high_cache(None, &mut cache, ordered_rows[3].clone(), 2, 1)

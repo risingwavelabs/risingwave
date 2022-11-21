@@ -246,7 +246,7 @@ where
                 }
 
                 Op::Delete | Op::UpdateDelete => {
-                    self.managed_state.delete(row.clone());
+                    self.managed_state.delete(row_ref);
                     cache
                         .delete(
                             Some(&pk_prefix),

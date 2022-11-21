@@ -580,12 +580,12 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
         let elem_to_compare_with_middle = (cache_key, row_ref);
 
         if !self.is_middle_cache_full() {
-            let row = elem_to_compare_with_middle.1.to_owned_row();
+            let row: CompactedRow = elem_to_compare_with_middle.1.clone().into();
             managed_state.insert(elem_to_compare_with_middle.1);
             self.middle
-                .insert(elem_to_compare_with_middle.0.clone(), (&row).into());
+                .insert(elem_to_compare_with_middle.0.clone(), row.clone());
             res_ops.push(Op::Insert);
-            res_rows.push((&row).into());
+            res_rows.push(row);
             return Ok(());
         }
 

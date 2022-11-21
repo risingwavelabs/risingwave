@@ -246,7 +246,7 @@ where
 
                 Op::Delete | Op::UpdateDelete => {
                     // First remove the row from state store
-                    self.managed_state.delete(row.clone());
+                    self.managed_state.delete(row_ref);
                     self.cache
                         .delete(
                             None,
