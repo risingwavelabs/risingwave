@@ -17,11 +17,12 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::CompactionConfig;
+use risingwave_pb::hummock::{CompactionConfig, Level, OverlappingLevel};
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
@@ -36,6 +37,11 @@ const SCORE_BASE: u64 = 100;
 
 pub trait LevelSelector: Sync + Send {
     fn need_compaction(&self, levels: &Levels, level_handlers: &[LevelHandler]) -> bool;
+    fn pending_schedule_compaction_bytes(
+        &self,
+        levels: &Levels,
+        level_handlers: &[LevelHandler],
+    ) -> u64;
 
     fn pick_compaction(
         &self,
@@ -81,6 +87,81 @@ impl DynamicLevelSelector {
         Self {
             inner: LevelSelectorCore::new(config, overlap_strategy),
         }
+    }
+
+    fn calculate_l0_overlap(
+        &self,
+        l0: &OverlappingLevel,
+        base_level: &Level,
+        handlers: &[LevelHandler],
+    ) -> u64 {
+        let total_level_size = l0.total_file_size - handlers[0].get_pending_file_size();
+        let mut overlap_info = self.inner.overlap_strategy.create_overlap_info();
+        for sub_level in &l0.sub_levels {
+            for table_info in &sub_level.table_infos {
+                if handlers[0].is_pending_compact(&table_info.id) {
+                    overlap_info.update(table_info);
+                }
+            }
+        }
+        let mut next_level_size = 0;
+        let output_files = handlers[base_level.level_idx as usize].get_pending_output_file();
+        let overlap_files = overlap_info.check_multiple_overlap(&base_level.table_infos);
+
+        for sst in &overlap_files {
+            // this file would not stay in current-level because this data would be moved to the
+            // next level. But for other files, even if it is pending in another compact
+            // task and would be deleted after compact task end, the data of which would
+            // still stay in this level.
+            if output_files.contains(&sst.id) {
+                continue;
+            }
+            next_level_size += sst.file_size;
+        }
+        next_level_size + total_level_size
+    }
+
+    fn calculate_base_level_overlap(
+        &self,
+        target_bytes: u64,
+        select_level: &Level,
+        target_level: &Level,
+        handlers: &[LevelHandler],
+    ) -> u64 {
+        if select_level.total_file_size <= target_bytes {
+            return 0;
+        }
+        let compacting_file_size = handlers[select_level.level_idx as usize]
+            .get_pending_output_file_size(target_level.level_idx);
+        if select_level.total_file_size - compacting_file_size <= target_bytes {
+            return 0;
+        }
+        let output_files = handlers[select_level.level_idx as usize].get_pending_output_file();
+        let mut info = self.inner.overlap_strategy.create_overlap_info();
+        let mut compact_bytes = 0;
+        for sst in &select_level.table_infos {
+            if compact_bytes + compacting_file_size + target_bytes >= select_level.total_file_size {
+                break;
+            }
+            if output_files.contains(&sst.id) {
+                continue;
+            }
+            info.update(sst);
+            compact_bytes += sst.file_size;
+        }
+        let output_files = if target_level.level_idx as usize + 1 >= handlers.len() {
+            HashSet::default()
+        } else {
+            handlers[target_level.level_idx as usize].get_pending_output_file()
+        };
+        let overlap_files = info.check_multiple_overlap(&target_level.table_infos);
+        for sst in overlap_files {
+            if output_files.contains(&sst.id) {
+                continue;
+            }
+            compact_bytes += sst.file_size;
+        }
+        compact_bytes
     }
 }
 
@@ -282,6 +363,34 @@ impl LevelSelector for DynamicLevelSelector {
             .first()
             .map(|(score, _, _)| *score > SCORE_BASE)
             .unwrap_or(false)
+    }
+
+    fn pending_schedule_compaction_bytes(
+        &self,
+        levels: &Levels,
+        level_handlers: &[LevelHandler],
+    ) -> u64 {
+        let ctx = self.inner.calculate_level_base_size(levels);
+        let mut pending_compaction_bytes = 0;
+        pending_compaction_bytes += self.calculate_l0_overlap(
+            levels.l0.as_ref().unwrap(),
+            &levels.levels[ctx.base_level],
+            level_handlers,
+        );
+        for level in &levels.levels {
+            let level_idx = level.level_idx as usize;
+            // The data of last level would not be compact to other level.
+            if level_idx < ctx.base_level || level_idx >= levels.levels.len() {
+                continue;
+            }
+            pending_compaction_bytes += self.calculate_base_level_overlap(
+                ctx.level_max_bytes[level_idx],
+                level,
+                &levels.levels[level_idx],
+                level_handlers,
+            );
+        }
+        pending_compaction_bytes
     }
 
     fn pick_compaction(

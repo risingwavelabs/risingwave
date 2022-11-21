@@ -24,7 +24,7 @@ use risingwave_pb::hummock::{
 };
 
 use super::overlap_strategy::OverlapInfo;
-use crate::hummock::compaction::level_selector::{LevelSelector, LevelSelectorCore};
+use crate::hummock::compaction::level_selector::LevelSelectorCore;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapInfo};
 use crate::hummock::compaction::{
     CompactionInput, CompactionPicker, CompactionTask, ManualCompactionOption,
@@ -334,18 +334,8 @@ impl ManualCompactionSelector {
             option,
         }
     }
-}
 
-impl LevelSelector for ManualCompactionSelector {
-    fn need_compaction(&self, levels: &Levels, _: &[LevelHandler]) -> bool {
-        let ctx = self.inner.calculate_level_base_size(levels);
-        if self.option.level > 0 && self.option.level < ctx.base_level {
-            return false;
-        }
-        true
-    }
-
-    fn pick_compaction(
+    pub fn pick_compaction(
         &self,
         task_id: HummockCompactionTaskId,
         levels: &Levels,
@@ -371,10 +361,6 @@ impl LevelSelector for ManualCompactionSelector {
         let ret = picker.pick_compaction(levels, level_handlers)?;
         ret.add_pending_task(task_id, level_handlers);
         Some(self.inner.create_compaction_task(ret, ctx.base_level))
-    }
-
-    fn name(&self) -> &'static str {
-        "ManualCompactionSelector"
     }
 }
 
