@@ -58,6 +58,9 @@ pub trait TopNExecutorBase: Send + 'static {
         unreachable!()
     }
 
+    fn evict(&mut self) {
+        unreachable!()
+    }
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 }
 
@@ -116,9 +119,10 @@ where
                 Message::Barrier(barrier) => {
                     self.inner.flush_data(barrier.epoch).await?;
 
-                    // Update the vnode bitmap, only used by Group Top-N.
+                    // Update the vnode bitmap and evict cache, only used by Group Top-N.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.inner.update_vnode_bitmap(vnode_bitmap);
+                        self.inner.evict();
                     }
 
                     yield Message::Barrier(barrier)

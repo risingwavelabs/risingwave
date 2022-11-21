@@ -241,6 +241,10 @@ impl<const WITH_TIES: bool> GroupTopNCache<WITH_TIES> {
     fn insert(&mut self, key: Vec<Datum>, value: TopNCache<WITH_TIES>) {
         self.data.push(key, value);
     }
+
+    fn evict(&mut self) {
+        self.data.evict()
+    }
 }
 #[async_trait]
 impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase
@@ -328,6 +332,10 @@ where
         if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
             self.caches.clear();
         }
+    }
+
+    fn evict(&mut self) {
+        self.caches.evict()
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
