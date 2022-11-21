@@ -17,11 +17,13 @@ use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::config::StorageConfig;
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_object_store::object::{
     parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
 };
+use tracing::info;
 
 use crate::error::StorageResult;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -77,10 +79,23 @@ fn may_dynamic_dispatch(
 }
 
 fn may_verify(state_store: impl StateStore + AsHummockTrait) -> impl StateStore + AsHummockTrait {
-    // TODO: enable by config
-    VerifyStateStore {
-        actual: state_store,
-        expected: SledStateStore::new_temp(),
+    #[cfg(not(debug_assertions))]
+    {
+        state_store
+    }
+    #[cfg(debug_assertions)]
+    {
+        let expected = if env_var_is_true("ENABLE_STATE_STORE_VERIFY") {
+            info!("enable verify state store");
+            Some(SledStateStore::new_temp())
+        } else {
+            info!("verify state store is not enabled");
+            None
+        };
+        VerifyStateStore {
+            actual: state_store,
+            expected,
+        }
     }
 }
 
@@ -215,6 +230,7 @@ macro_rules! dispatch_state_store {
     }};
 }
 
+#[cfg(debug_assertions)]
 pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;
@@ -255,7 +271,7 @@ pub mod verify {
 
     pub struct VerifyStateStore<A, E> {
         pub actual: A,
-        pub expected: E,
+        pub expected: Option<E>,
     }
 
     impl<A: AsHummockTrait, E> AsHummockTrait for VerifyStateStore<A, E> {
@@ -274,8 +290,10 @@ pub mod verify {
         fn next(&mut self) -> Self::NextFuture<'_> {
             async {
                 let actual = self.actual.next().await;
-                let expected = self.expected.next().await;
-                assert_result_eq(&actual, &expected);
+                if let Some(expected) = &mut self.expected {
+                    let expected = expected.next().await;
+                    assert_result_eq(&actual, &expected);
+                }
                 actual
             }
         }
@@ -294,8 +312,10 @@ pub mod verify {
         ) -> Self::GetFuture<'_> {
             async move {
                 let actual = self.actual.get(key, epoch, read_options.clone()).await;
-                let expected = self.expected.get(key, epoch, read_options).await;
-                assert_result_eq(&actual, &expected);
+                if let Some(expected) = &self.expected {
+                    let expected = expected.get(key, epoch, read_options).await;
+                    assert_result_eq(&actual, &expected);
+                }
                 actual
             }
         }
@@ -311,7 +331,11 @@ pub mod verify {
                     .actual
                     .iter(key_range.clone(), epoch, read_options.clone())
                     .await?;
-                let expected = self.expected.iter(key_range, epoch, read_options).await?;
+                let expected = if let Some(expected) = &self.expected {
+                    Some(expected.iter(key_range, epoch, read_options).await?)
+                } else {
+                    None
+                };
                 Ok(VerifyStateStore { actual, expected })
             }
         }
@@ -335,11 +359,12 @@ pub mod verify {
                         write_options.clone(),
                     )
                     .await;
-                let expected = self
-                    .expected
-                    .ingest_batch(kv_pairs, delete_ranges, write_options)
-                    .await;
-                assert_eq!(actual.is_err(), expected.is_err());
+                if let Some(expected) = &self.expected {
+                    let expected = expected
+                        .ingest_batch(kv_pairs, delete_ranges, write_options)
+                        .await;
+                    assert_eq!(actual.is_err(), expected.is_err());
+                }
                 actual
             }
         }
@@ -369,7 +394,9 @@ pub mod verify {
 
         fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
             async move {
-                let _ = self.expected.sync(epoch).await;
+                if let Some(expected) = &self.expected {
+                    let _ = expected.sync(epoch).await;
+                }
                 self.actual.sync(epoch).await
             }
         }
@@ -384,9 +411,14 @@ pub mod verify {
 
         fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
             async move {
+                let expected = if let Some(expected) = &self.expected {
+                    Some(expected.new_local(table_id).await)
+                } else {
+                    None
+                };
                 VerifyStateStore {
                     actual: self.actual.new_local(table_id).await,
-                    expected: self.expected.new_local(table_id).await,
+                    expected,
                 }
             }
         }
