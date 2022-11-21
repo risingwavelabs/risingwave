@@ -58,9 +58,7 @@ pub trait TopNExecutorBase: Send + 'static {
         unreachable!()
     }
 
-    fn evict(&mut self) {
-        unreachable!()
-    }
+    fn evict(&mut self) {}
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 }
 
