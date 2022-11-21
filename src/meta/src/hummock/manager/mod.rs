@@ -31,8 +31,9 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, HummockLevelsExt, HummockVersionExt,
 };
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
-    HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID, INVALID_VERSION_ID,
+    CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId,
+    HummockEpoch, HummockSstableId, HummockVersionId, SstIdRange, FIRST_VERSION_ID,
+    INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::group_delta::DeltaType;
@@ -155,8 +156,7 @@ macro_rules! read_lock {
 pub(crate) use read_lock;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::{
-    add_table_stats_map, from_prost_table_stats_map, purge_table_stats, to_prost_table_stats_map,
-    TableStatsMap,
+    add_prost_table_stats_map, purge_prost_table_stats, ProstTableStatsMap,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::pin_version_response::Payload;
@@ -1016,7 +1016,7 @@ where
         &self,
         context_id: HummockContextId,
         compact_task: &mut CompactTask,
-        table_stats_change: Option<TableStatsMap>,
+        table_stats_change: Option<ProstTableStatsMap>,
     ) -> Result<bool> {
         let ret = self
             .report_compact_task_impl(Some(context_id), compact_task, None, table_stats_change)
@@ -1038,7 +1038,7 @@ where
         context_id: Option<HummockContextId>,
         compact_task: &mut CompactTask,
         compaction_guard: Option<RwLockWriteGuard<'_, Compaction>>,
-        table_stats_change: Option<TableStatsMap>,
+        table_stats_change: Option<ProstTableStatsMap>,
     ) -> Result<bool> {
         let mut compaction_guard = match compaction_guard {
             None => write_lock!(self, compaction).await,
@@ -1133,9 +1133,7 @@ where
                 );
                 let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
                 if let Some(table_stats_change) = table_stats_change {
-                    let mut agg = from_prost_table_stats_map(&version_stats.table_stats);
-                    add_table_stats_map(&mut agg, &table_stats_change);
-                    version_stats.table_stats = to_prost_table_stats_map(agg);
+                    add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
                 }
 
                 commit_multi_var!(
@@ -1475,9 +1473,10 @@ where
     pub async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
-        mut sstables: Vec<LocalSstableInfo>,
+        sstables: Vec<impl Into<ExtendedSstableInfo>>,
         sst_to_context: HashMap<HummockSstableId, HummockContextId>,
     ) -> Result<()> {
+        let mut sstables = sstables.into_iter().map(|s| s.into()).collect_vec();
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         // Prevent commit new epochs if this flag is set
@@ -1502,9 +1501,9 @@ where
         .await?;
 
         // Consume and aggregate table stats.
-        let mut table_stats_change = TableStatsMap::default();
+        let mut table_stats_change = ProstTableStatsMap::default();
         for s in &mut sstables {
-            add_table_stats_map(&mut table_stats_change, &std::mem::take(&mut s.table_stats));
+            add_prost_table_stats_map(&mut table_stats_change, &std::mem::take(&mut s.table_stats));
         }
 
         let old_version = versioning.current_version.clone();
@@ -1525,7 +1524,7 @@ where
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         let mut branch_sstables = vec![];
         sstables.retain_mut(|local_sst_info| {
-            let LocalSstableInfo {
+            let ExtendedSstableInfo {
                 compaction_group_id,
                 sst_info: sst,
                 ..
@@ -1566,7 +1565,7 @@ where
                 for (group_id, match_ids) in group_table_ids {
                     let mut branch_sst = sst.clone();
                     branch_sst.table_ids = match_ids;
-                    branch_sstables.push(LocalSstableInfo::with_compaction_group(
+                    branch_sstables.push(ExtendedSstableInfo::with_compaction_group(
                         group_id, branch_sst,
                     ));
                     branch_groups.insert(group_id, sst.get_divide_version());
@@ -1586,13 +1585,13 @@ where
             // the sort is stable sort, and will not change the order within compaction group.
             // Do a sort so that sst in the same compaction group can be consecutive
             .sorted_by_key(
-                |LocalSstableInfo {
+                |ExtendedSstableInfo {
                      compaction_group_id,
                      ..
                  }| *compaction_group_id,
             )
             .group_by(
-                |LocalSstableInfo {
+                |ExtendedSstableInfo {
                      compaction_group_id,
                      ..
                  }| *compaction_group_id,
@@ -1601,7 +1600,7 @@ where
             modified_compaction_groups.push(compaction_group_id);
             let group_sstables = sstables
                 .into_iter()
-                .map(|LocalSstableInfo { sst_info, .. }| sst_info)
+                .map(|ExtendedSstableInfo { sst_info, .. }| sst_info)
                 .collect_vec();
             let group_deltas = &mut new_version_delta
                 .group_deltas
@@ -1638,10 +1637,8 @@ where
 
         // Apply stats changes.
         let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
-        let mut agg = from_prost_table_stats_map(&version_stats.table_stats);
-        add_table_stats_map(&mut agg, &table_stats_change);
-        purge_table_stats(&mut agg, &new_hummock_version);
-        version_stats.table_stats = to_prost_table_stats_map(agg);
+        add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
+        purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version);
 
         commit_multi_var!(
             self,

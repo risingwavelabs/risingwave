@@ -21,7 +21,7 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
+use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
 // use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
@@ -1310,7 +1310,7 @@ async fn test_version_stats() {
         .report_compact_task(
             worker_node.id,
             &mut compact_task,
-            Some(compact_table_stats_change),
+            Some(to_prost_table_stats_map(compact_table_stats_change)),
         )
         .await
         .unwrap();

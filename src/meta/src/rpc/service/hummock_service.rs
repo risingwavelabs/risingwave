@@ -160,7 +160,11 @@ where
             })),
             Some(mut compact_task) => {
                 self.hummock_manager
-                    .report_compact_task(req.context_id, &mut compact_task, None)
+                    .report_compact_task(
+                        req.context_id,
+                        &mut compact_task,
+                        Some(req.table_stats_change),
+                    )
                     .await?;
                 Ok(Response::new(ReportCompactionTasksResponse {
                     status: None,

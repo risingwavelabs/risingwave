@@ -21,6 +21,8 @@ use crate::compaction_group::hummock_version_ext::HummockVersionExt;
 
 pub type TableStatsMap = HashMap<u32, TableStats>;
 
+pub type ProstTableStatsMap = HashMap<u32, ProstTableStats>;
+
 #[derive(Default, Debug, Clone)]
 pub struct TableStats {
     pub total_key_size: i64,
@@ -66,18 +68,23 @@ impl TableStats {
     }
 }
 
+pub fn add_prost_table_stats(this: &mut ProstTableStats, other: &ProstTableStats) {
+    this.total_key_size += other.total_key_size;
+    this.total_value_size += other.total_value_size;
+    this.total_key_count += other.total_key_count;
+    this.stale_key_count += other.stale_key_count;
+}
+
+pub fn add_prost_table_stats_map(this: &mut ProstTableStatsMap, other: &ProstTableStatsMap) {
+    for (table_id, stats) in other {
+        add_prost_table_stats(this.entry(*table_id).or_default(), stats);
+    }
+}
+
 pub fn add_table_stats_map(this: &mut TableStatsMap, other: &TableStatsMap) {
     for (table_id, stats) in other {
         this.entry(*table_id).or_default().add(stats);
     }
-}
-
-pub fn sum_table_stats_map(table_stats: &[&TableStatsMap]) -> TableStatsMap {
-    let mut agg = TableStatsMap::default();
-    for s in table_stats {
-        add_table_stats_map(&mut agg, s);
-    }
-    agg
 }
 
 pub fn to_prost_table_stats_map(
@@ -100,7 +107,10 @@ pub fn from_prost_table_stats_map(
         .collect()
 }
 
-pub fn purge_table_stats(table_stats: &mut TableStatsMap, hummock_version: &HummockVersion) {
+pub fn purge_prost_table_stats(
+    table_stats: &mut ProstTableStatsMap,
+    hummock_version: &HummockVersion,
+) {
     let mut all_tables_in_version: HashSet<u32> = HashSet::default();
     for group in hummock_version.levels.keys() {
         hummock_version.level_iter(*group, |level| {

@@ -33,7 +33,7 @@ use risingwave_pb::hummock::SstableInfo;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key::user_key;
 use crate::key_range::KeyRangeCommon;
-use crate::table_stats::TableStatsMap;
+use crate::table_stats::{to_prost_table_stats_map, ProstTableStatsMap, TableStatsMap};
 
 pub mod compact;
 pub mod compaction_group;
@@ -93,6 +93,44 @@ impl LocalSstableInfo {
 
     pub fn file_size(&self) -> u64 {
         self.sst_info.file_size
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExtendedSstableInfo {
+    pub compaction_group_id: CompactionGroupId,
+    pub sst_info: SstableInfo,
+    pub table_stats: ProstTableStatsMap,
+}
+
+impl ExtendedSstableInfo {
+    pub fn new(
+        compaction_group_id: CompactionGroupId,
+        sst_info: SstableInfo,
+        table_stats: ProstTableStatsMap,
+    ) -> Self {
+        Self {
+            compaction_group_id,
+            sst_info,
+            table_stats,
+        }
+    }
+
+    pub fn with_compaction_group(
+        compaction_group_id: CompactionGroupId,
+        sst_info: SstableInfo,
+    ) -> Self {
+        Self::new(compaction_group_id, sst_info, ProstTableStatsMap::default())
+    }
+}
+
+impl From<LocalSstableInfo> for ExtendedSstableInfo {
+    fn from(value: LocalSstableInfo) -> Self {
+        Self {
+            compaction_group_id: value.compaction_group_id,
+            sst_info: value.sst_info,
+            table_stats: to_prost_table_stats_map(value.table_stats),
+        }
     }
 }
 
