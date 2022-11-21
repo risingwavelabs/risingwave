@@ -30,7 +30,7 @@ use risingwave_storage::StateStore;
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
-use crate::cache::cache_may_stale;
+use crate::cache::{cache_may_stale, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
@@ -203,6 +203,14 @@ impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIE
     }
 }
 
+
+pub struct GroupTopNCache< const WITH_TIES: bool> {
+    data: ExecutorCache<Vec<Datum>, TopNCache<WITH_TIES>>,
+}
+
+impl<const WITH_TIES: bool> GroupTopNCache< const WITH_TIES: bool>{
+
+}
 #[async_trait]
 impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase
     for InnerGroupTopNExecutorNew<S, WITH_TIES>
