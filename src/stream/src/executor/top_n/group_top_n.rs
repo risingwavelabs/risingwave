@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry::Vacant;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -29,7 +28,7 @@ use risingwave_storage::StateStore;
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
-use crate::cache::cache_may_stale;
+use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
@@ -51,6 +50,8 @@ impl<S: StateStore> GroupTopNExecutor<S, false> {
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
+        lru_manager: Option<LruManagerRef>,
+        cache_size: usize,
     ) -> StreamResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
@@ -67,6 +68,8 @@ impl<S: StateStore> GroupTopNExecutor<S, false> {
                 executor_id,
                 group_by,
                 state_table,
+                lru_manager,
+                cache_size,
             )?,
         })
     }
@@ -84,6 +87,8 @@ impl<S: StateStore> GroupTopNExecutor<S, true> {
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
+        lru_manager: Option<LruManagerRef>,
+        cache_size: usize,
     ) -> StreamResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
@@ -101,6 +106,8 @@ impl<S: StateStore> GroupTopNExecutor<S, true> {
                 executor_id,
                 group_by,
                 state_table,
+                lru_manager,
+                cache_size,
             )?,
         })
     }
@@ -131,7 +138,7 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     group_by: Vec<usize>,
 
     /// group key -> cache for this group
-    caches: HashMap<Vec<Datum>, TopNCache<WITH_TIES>>,
+    caches: GroupTopNCache<WITH_TIES>,
 
     /// The number of fields of the ORDER BY clause, and will be used to split key into `CacheKey`.
     order_by_len: usize,
@@ -152,6 +159,8 @@ impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIE
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
+        lru_manager: Option<LruManagerRef>,
+        cache_size: usize,
     ) -> StreamResult<Self> {
         // order_pairs is superset of pk
         assert!(order_pairs
@@ -195,13 +204,47 @@ impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIE
             pk_indices,
             internal_key_indices,
             group_by,
-            caches: HashMap::new(),
+            caches: GroupTopNCache::new(lru_manager, cache_size),
             order_by_len,
             cache_key_serde,
         })
     }
 }
 
+pub struct GroupTopNCache<const WITH_TIES: bool> {
+    data: ExecutorCache<Vec<Datum>, TopNCache<WITH_TIES>>,
+}
+
+impl<const WITH_TIES: bool> GroupTopNCache<WITH_TIES> {
+    pub fn new(lru_manager: Option<LruManagerRef>, cache_size: usize) -> Self {
+        let cache = if let Some(lru_manager) = lru_manager {
+            ExecutorCache::Managed(lru_manager.create_cache())
+        } else {
+            ExecutorCache::Local(EvictableHashMap::new(cache_size))
+        };
+        Self { data: cache }
+    }
+
+    fn clear(&mut self) {
+        self.data.clear()
+    }
+
+    fn get_mut(&mut self, key: &[Datum]) -> Option<&mut TopNCache<WITH_TIES>> {
+        self.data.get_mut(key)
+    }
+
+    fn contains(&mut self, key: &[Datum]) -> bool {
+        self.data.contains(key)
+    }
+
+    fn insert(&mut self, key: Vec<Datum>, value: TopNCache<WITH_TIES>) {
+        self.data.push(key, value);
+    }
+
+    fn evict(&mut self) {
+        self.data.evict()
+    }
+}
 #[async_trait]
 impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase
     for InnerGroupTopNExecutorNew<S, WITH_TIES>
@@ -223,12 +266,12 @@ where
 
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
-            if let Vacant(entry) = self.caches.entry(group_key.0) {
+            if !self.caches.contains(&group_key.0) {
                 let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
                 self.managed_state
                     .init_topn_cache(Some(&pk_prefix), &mut topn_cache, self.order_by_len)
                     .await?;
-                entry.insert(topn_cache);
+                self.caches.insert(group_key.0, topn_cache);
             }
             let cache = self.caches.get_mut(&pk_prefix.0).unwrap();
 
@@ -283,6 +326,10 @@ where
         if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
             self.caches.clear();
         }
+    }
+
+    fn evict(&mut self) {
+        self.caches.evict()
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -400,6 +447,8 @@ mod tests {
                 1,
                 vec![1],
                 state_table,
+                None,
+                0,
             )
             .unwrap(),
         );
@@ -498,6 +547,8 @@ mod tests {
                 1,
                 vec![1],
                 state_table,
+                None,
+                0,
             )
             .unwrap(),
         );
@@ -588,6 +639,8 @@ mod tests {
                 1,
                 vec![1, 2],
                 state_table,
+                None,
+                0,
             )
             .unwrap(),
         );

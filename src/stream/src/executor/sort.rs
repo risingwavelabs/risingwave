@@ -123,13 +123,17 @@ impl<S: StateStore> SortExecutor<S> {
         for msg in input {
             match msg? {
                 Message::Watermark(watermark) => {
-                    let Watermark { col_idx, val } = watermark.clone();
+                    let Watermark {
+                        col_idx,
+                        val,
+                        data_type: _,
+                    } = &watermark;
 
                     // Sort executor only sends a stream chunk to downstream when
                     // `self.sort_column_index` matches the watermark's column index. Otherwise, it
                     // just forwards the watermark message to downstream without sending a stream
                     // chunk message.
-                    if col_idx == self.sort_column_index {
+                    if *col_idx == self.sort_column_index {
                         let watermark_value = val.clone();
 
                         // Find out the records to send to downstream.
@@ -173,7 +177,7 @@ impl<S: StateStore> SortExecutor<S> {
                         }
 
                         // Update previous watermark, which is used for range delete.
-                        self._prev_watermark = Some(val);
+                        self._prev_watermark = Some(val.clone());
                     }
 
                     // Forward the watermark message.
@@ -333,7 +337,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -357,8 +361,8 @@ mod tests {
             + 37 5
             + 60 8",
         );
-        let watermark1 = ScalarImpl::Int64(3);
-        let watermark2 = ScalarImpl::Int64(7);
+        let watermark1 = 3_i64;
+        let watermark2 = 7_i64;
 
         let state_table = create_state_table().await;
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table);
@@ -370,8 +374,8 @@ mod tests {
         sort_executor.next().await.unwrap().unwrap();
 
         // Init watermark
-        tx.push_watermark(0, ScalarImpl::Int64(0));
-        tx.push_watermark(sort_column_index, ScalarImpl::Int64(0));
+        tx.push_int64_watermark(0, 0_i64);
+        tx.push_int64_watermark(sort_column_index, 0_i64);
 
         // Consume the watermark
         sort_executor.next().await.unwrap().unwrap();
@@ -381,13 +385,13 @@ mod tests {
         tx.push_chunk(chunk1);
 
         // Push watermark1 on an irrelevant column
-        tx.push_watermark(0, watermark1.clone());
+        tx.push_int64_watermark(0, watermark1);
 
         // Consume the watermark
         sort_executor.next().await.unwrap().unwrap();
 
         // Push watermark1 on sorted column
-        tx.push_watermark(sort_column_index, watermark1);
+        tx.push_int64_watermark(sort_column_index, watermark1);
 
         // Consume the data chunk
         let chunk_msg = sort_executor.next().await.unwrap().unwrap();
@@ -414,13 +418,13 @@ mod tests {
         sort_executor.next().await.unwrap().unwrap();
 
         // Push watermark2 on an irrelevant column
-        tx.push_watermark(0, watermark2.clone());
+        tx.push_int64_watermark(0, watermark2);
 
         // Consume the watermark
         sort_executor.next().await.unwrap().unwrap();
 
         // Push watermark2 on sorted column
-        tx.push_watermark(sort_column_index, watermark2);
+        tx.push_int64_watermark(sort_column_index, watermark2);
 
         // Consume the data chunk
         let chunk_msg = sort_executor.next().await.unwrap().unwrap();
@@ -448,7 +452,7 @@ mod tests {
             + 3 6
             + 4 7",
         );
-        let watermark = ScalarImpl::Int64(3);
+        let watermark = 3_i64;
 
         let state_table = create_state_table().await;
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table.clone());
@@ -460,8 +464,8 @@ mod tests {
         sort_executor.next().await.unwrap().unwrap();
 
         // Init watermark
-        tx.push_watermark(0, ScalarImpl::Int64(0));
-        tx.push_watermark(sort_column_index, ScalarImpl::Int64(0));
+        tx.push_int64_watermark(0, 0_i64);
+        tx.push_int64_watermark(sort_column_index, 0_i64);
 
         // Consume the watermark
         sort_executor.next().await.unwrap().unwrap();
@@ -487,7 +491,7 @@ mod tests {
         recovered_sort_executor.next().await.unwrap().unwrap();
 
         // Push watermark on sorted column
-        recovered_tx.push_watermark(sort_column_index, watermark);
+        recovered_tx.push_int64_watermark(sort_column_index, watermark);
 
         // Consume the data chunk
         let chunk_msg = recovered_sort_executor.next().await.unwrap().unwrap();

@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
+use risingwave_pb::stream_plan::HashAggNode;
 
 use super::agg_common::{build_agg_call_from_prost, build_agg_state_storages_from_proto};
 use super::*;
@@ -75,13 +76,14 @@ pub struct HashAggExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for HashAggExecutorBuilder {
+    type Node = HashAggNode;
+
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashAgg)?;
         let group_key_indices = node
             .get_group_key()
             .iter()
