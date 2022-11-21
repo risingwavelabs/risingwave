@@ -829,7 +829,7 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
                     })
                     .await
                     .unwrap();
-                    if let Ok(_) = ret.as_ref() {
+                    if ret.is_ok() {
                         guard.success = true;
                     }
                     return ret;
