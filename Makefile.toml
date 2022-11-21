@@ -133,12 +133,12 @@ err () {
   exit 1
 }
 
-if [[ -z "$1" ]]; then 
+if [[ -z "$1" ]]; then
   echo "Please pass a parameter to this script, defining which node you want to delete"
   err
 fi
 
-if [[ -z $(risedev_ls | grep "$1" ) ]]; then 
+if [[ -z $(risedev_ls | grep "$1" ) ]]; then
   echo "Please select a node that is currently running"
   err
 fi
@@ -156,7 +156,7 @@ script = '''
 #!/bin/bash
 set -e
 
-if [[ -z "$1" ]]; then 
+if [[ -z "$1" ]]; then
   echo "Please pass a parameter to this script, defining which logs you want to follow"
   echo "Available logs are..."
   ls ${PREFIX_LOG}
@@ -168,7 +168,7 @@ if [[ ! -f ${PREFIX_LOG}/$1 ]]; then
   echo "Available logs are..."
   ls ${PREFIX_LOG}
   exit 1
-fi 
+fi
 
 tail -f -n 5 ${PREFIX_LOG}/$1
 '''
@@ -398,6 +398,7 @@ category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
 script = '''
 #!/bin/bash
+
 set -e
 
 echo "Use \`./risedev d\` instead if you want to start a full cluster."
