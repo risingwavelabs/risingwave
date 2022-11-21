@@ -53,6 +53,8 @@ use tracing::trace;
 
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
+const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
+
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
@@ -110,6 +112,9 @@ pub struct StateTable<S: StateStore> {
 
     /// last watermark that is used to construct delete ranges in `ingest`
     last_watermark: Option<ScalarImpl>,
+
+    /// number of commits since the last time we did state cleaning by watermark
+    num_commits_since_last_clean: usize,
 }
 
 // initialize
@@ -224,6 +229,7 @@ impl<S: StateStore> StateTable<S> {
             value_indices,
             epoch: None,
             last_watermark: None,
+            num_commits_since_last_clean: 0,
         }
     }
 
@@ -327,6 +333,7 @@ impl<S: StateStore> StateTable<S> {
             value_indices,
             epoch: None,
             last_watermark: None,
+            num_commits_since_last_clean: 0,
         }
     }
 
@@ -645,8 +652,17 @@ impl<S: StateStore> StateTable<S> {
     ) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch.prev, watermark)
-            .await?;
+        self.num_commits_since_last_clean += 1;
+        self.batch_write_rows(
+            mem_table,
+            new_epoch.prev,
+            if self.num_commits_since_last_clean >= STATE_CLEANING_PERIOD_EPOCH {
+                watermark
+            } else {
+                None
+            },
+        )
+        .await?;
         self.update_epoch(new_epoch);
         Ok(())
     }
@@ -741,6 +757,7 @@ impl<S: StateStore> StateTable<S> {
         write_batch.ingest().await?;
         if let Some(watermark) = watermark {
             self.last_watermark = Some(watermark.clone());
+            self.num_commits_since_last_clean = 0;
         }
         Ok(())
     }
