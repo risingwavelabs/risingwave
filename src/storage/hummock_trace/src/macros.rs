@@ -15,8 +15,8 @@
 #[macro_export]
 macro_rules! trace {
     (GET, $key:ident, $epoch:ident, $opt:ident, $storage_type:expr) => {
-        $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::get(
+        risingwave_hummock_trace::new_global_span!(
+            risingwave_hummock_trace::Operation::get(
                 $key.to_vec(),
                 $epoch,
                 $opt.prefix_hint.clone(),
@@ -24,12 +24,12 @@ macro_rules! trace {
                 $opt.retention_seconds,
                 $opt.table_id.table_id,
             ),
-            $storage_type,
-        );
+            $storage_type
+        )
     };
     (INGEST, $kvs:ident, $delete_range:ident, $opt:ident, $storage_type:expr) => {
-        $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::ingest(
+        risingwave_hummock_trace::new_global_span!(
+            risingwave_hummock_trace::Operation::ingest(
                 $kvs.iter()
                     .map(|(k, v)| (k.to_vec(), v.user_value.clone().map(|b| b.to_vec())))
                     .collect(),
@@ -40,12 +40,12 @@ macro_rules! trace {
                 $opt.epoch,
                 $opt.table_id.table_id,
             ),
-            $storage_type,
+            $storage_type
         );
     };
     (ITER, $range:ident, $epoch:ident, $opt:ident, $storage_type:expr) => {
-        $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::Iter {
+        risingwave_hummock_trace::new_global_span!(
+            risingwave_hummock_trace::Operation::Iter {
                 prefix_hint: $opt.prefix_hint.clone(),
                 key_range: $range.clone(),
                 epoch: $epoch,
@@ -53,39 +53,33 @@ macro_rules! trace {
                 retention_seconds: $opt.retention_seconds,
                 check_bloom_filter: $opt.check_bloom_filter,
             },
-            $storage_type,
+            $storage_type
         );
     };
     (ITER_NEXT, $id:expr, $storage_type:expr) => {
-        $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::IterNext($id),
-            $storage_type,
+        risingwave_hummock_trace::new_global_span!(
+            risingwave_hummock_trace::Operation::IterNext($id),
+            $storage_type
         );
     };
     (SYNC, $epoch:ident, $storage_type:expr) => {
-        $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::Sync($epoch),
-            $storage_type,
+        risingwave_hummock_trace::new_global_span!(
+            risingwave_hummock_trace::Operation::Sync($epoch),
+            $storage_type
         );
     };
     (SEAL, $epoch:ident, $check_point:ident, $storage_type:expr) => {
-        let _span = $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::Seal($epoch, $check_point),
-            $storage_type,
-        );
-    };
-    (VERSION) => {
-        let _span = $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::UpdateVersion(),
-            risingwave_common::hm_trace::TraceLocalId::None,
+        let _span = risingwave_hummock_trace::new_global_span!(
+            risingwave_hummock_trace::Operation::Seal($epoch, $check_point),
+            $storage_type
         );
     };
     (METAMSG, $resp:ident) => {
-        let _span = $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::MetaMessage(Box::new($crate::record::TraceSubResp(
-                $resp.clone(),
-            ))),
-            $crate::collector::StorageType::Global,
+        let _span = risingwave_hummock_trace::new_global_span!(
+            risingwave_hummock_trace::Operation::MetaMessage(Box::new(
+                risingwave_hummock_trace::TraceSubResp($resp.clone(),)
+            )),
+            risingwave_hummock_trace::StorageType::Global
         );
     };
 }
@@ -93,26 +87,61 @@ macro_rules! trace {
 #[macro_export]
 macro_rules! trace_result {
     (GET, $span:ident, $result:ident) => {
-        let res: TraceResult<Option<Vec<u8>>> =
-            TraceResult::from($result.as_ref().map(|o| o.as_ref().map(|b| b.to_vec())));
-        $span.send_result(OperationResult::Get(res));
+        risingwave_hummock_trace::send_result!(
+            $span,
+            OperationResult::Get(TraceResult::from(
+                $result.as_ref().map(|o| o.as_ref().map(|b| b.to_vec()))
+            ))
+        )
     };
     (INGEST, $span:ident, $result:ident) => {
-        let res = TraceResult::from($result.as_ref().map(|b| *b));
-        $span.send_result(OperationResult::Ingest(res));
+        risingwave_hummock_trace::send_result!(
+            $span,
+            OperationResult::Ingest(TraceResult::from($result.as_ref().map(|b| *b)))
+        )
     };
     (ITER, $span:ident, $result:ident) => {
-        let res = TraceResult::from($result.as_ref().map(|_| ()));
-        $span.send_result(OperationResult::Iter(res));
+        risingwave_hummock_trace::send_result!(
+            $span,
+            OperationResult::Iter(TraceResult::from($result.as_ref().map(|_| ())))
+        )
     };
     (ITER_NEXT, $span:expr, $pair:ident) => {
-        let res = $pair
-            .as_ref()
-            .map(|(k, v)| (k.user_key.table_key.to_vec(), v.to_vec()));
-        $span.send_result(OperationResult::IterNext(TraceResult::Ok(res)));
+        risingwave_hummock_trace::send_result!(
+            $span,
+            OperationResult::IterNext(TraceResult::Ok(
+                $pair
+                    .as_ref()
+                    .map(|(k, v)| (k.user_key.table_key.to_vec(), v.to_vec()))
+            ))
+        )
     };
     (SYNC, $span:ident, $result:ident) => {
-        let res = TraceResult::from($result.as_ref().map(|res| res.sync_size.clone()));
-        $span.send_result(OperationResult::Sync(res));
+        risingwave_hummock_trace::send_result!(
+            $span,
+            OperationResult::Sync(TraceResult::from(
+                $result.as_ref().map(|res| res.sync_size.clone())
+            ))
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! new_global_span {
+    ($op:expr, $storage_type:expr) => {
+        if risingwave_hummock_trace::should_use_trace() {
+            risingwave_hummock_trace::TraceSpan::new_to_global($op, $storage_type)
+        } else {
+            risingwave_hummock_trace::TraceSpan::none()
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! send_result {
+    ($span:expr, $result:expr) => {
+        if risingwave_hummock_trace::should_use_trace() {
+            $span.send_result($result);
+        }
     };
 }

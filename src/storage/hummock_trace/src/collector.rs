@@ -28,11 +28,25 @@ use crate::{Operation, OperationResult, Record, RecordId, RecordIdGenerator};
 lazy_static! {
     static ref GLOBAL_COLLECTOR: GlobalCollector = GlobalCollector::new();
     static ref GLOBAL_RECORD_ID: RecordIdGenerator = RecordIdGenerator::new();
+    static ref SHOULD_USE_TRACE: bool = set_use_trace();
 }
 
+const USE_TRACE: &str = "USE_HM_TRACE";
 const LOG_PATH: &str = "HM_TRACE_PATH";
 const DEFAULT_PATH: &str = ".trace/hummock.ht";
 const WRITER_BUFFER_SIZE: usize = 1024;
+
+pub fn should_use_trace() -> bool {
+    *SHOULD_USE_TRACE
+}
+
+fn set_use_trace() -> bool {
+    if let Ok(v) = std::env::var(USE_TRACE) {
+        v.parse().unwrap()
+    } else {
+        false
+    }
+}
 
 /// Initialize the `GLOBAL_COLLECTOR` with configured log file
 pub fn init_collector() {
@@ -54,7 +68,7 @@ pub fn init_collector() {
         .create(true)
         .open(path)
         .expect("failed to open log file");
-    //
+
     let writer = BufWriter::with_capacity(WRITER_BUFFER_SIZE, f);
     let writer = TraceWriterImpl::new_bincode(writer).unwrap();
     tokio::spawn(GLOBAL_COLLECTOR.run(Box::new(writer)));
@@ -162,24 +176,32 @@ impl Drop for GlobalCollector {
 #[must_use = "TraceSpan Lifetime is important"]
 #[derive(Clone)]
 pub struct TraceSpan {
-    tx: Sender<RecordMsg>,
-    id: RecordId,
-    storage_type: StorageType,
+    tx: Option<Sender<RecordMsg>>,
+    id: Option<RecordId>,
+    storage_type: Option<StorageType>,
 }
 
 impl TraceSpan {
     pub fn new(tx: Sender<RecordMsg>, id: RecordId, storage_type: StorageType) -> Self {
         Self {
-            tx,
-            id,
-            storage_type,
+            tx: Some(tx),
+            id: Some(id),
+            storage_type: Some(storage_type),
         }
     }
 
     pub fn send(&self, op: Operation) {
-        self.tx
-            .send(Either::Left(Record::new(self.storage_type, self.id, op)))
-            .expect("failed to log record");
+        match &self.tx {
+            Some(tx) => {
+                tx.send(Either::Left(Record::new(
+                    self.storage_type(),
+                    self.id(),
+                    op,
+                )))
+                .expect("failed to log record");
+            }
+            None => {}
+        }
     }
 
     pub fn send_result(&self, res: OperationResult) {
@@ -187,17 +209,17 @@ impl TraceSpan {
     }
 
     pub fn finish(&self) {
-        self.tx
-            .send(Either::Left(Record::new(
-                self.storage_type,
-                self.id,
-                Operation::Finish,
-            )))
-            .expect("failed to finish a record");
+        if self.tx.is_some() {
+            self.send(Operation::Finish);
+        }
     }
 
     pub fn id(&self) -> RecordId {
-        self.id
+        self.id.unwrap()
+    }
+
+    fn storage_type(&self) -> StorageType {
+        self.storage_type.unwrap()
     }
 
     /// Create a span and send operation to the `GLOBAL_COLLECTOR`
@@ -205,6 +227,14 @@ impl TraceSpan {
         let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next(), storage_type);
         span.send(op);
         span
+    }
+
+    pub fn none() -> Self {
+        TraceSpan {
+            tx: None,
+            id: None,
+            storage_type: None,
+        }
     }
 
     #[cfg(test)]

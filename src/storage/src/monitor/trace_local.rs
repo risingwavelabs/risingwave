@@ -1,7 +1,10 @@
 use futures::Future;
 use tokio::task_local;
 #[cfg(all(not(madsim), hm_trace))]
-use {std::sync::atomic::AtomicU64, tokio::task::futures::TaskLocalFuture};
+use {
+    std::sync::atomic::{AtomicU64, Ordering},
+    tokio::task::futures::TaskLocalFuture,
+};
 
 #[cfg(all(not(madsim), hm_trace))]
 static CONCURRENT_ID: AtomicU64 = AtomicU64::new(0);

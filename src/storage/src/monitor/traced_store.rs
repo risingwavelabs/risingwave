@@ -20,8 +20,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
-    init_collector, trace, trace_result, Operation, OperationResult, RecordId, StorageType,
-    TraceResult, TraceSpan,
+    init_collector, should_use_trace, trace, trace_result, Operation, OperationResult, RecordId,
+    StorageType, TraceResult, TraceSpan,
 };
 
 use super::get_concurrent_id;
@@ -43,7 +43,10 @@ pub struct TracedStateStore<S> {
 
 impl<S> TracedStateStore<S> {
     pub fn new(inner: S, storage_type: StorageType) -> Self {
-        init_collector();
+        if should_use_trace() {
+            init_collector();
+            tracing::info!("Hummock Tracing Enabled");
+        }
         Self {
             inner,
             storage_type,
@@ -222,8 +225,9 @@ where
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            self.span.send(Operation::IterNext(self.record_id));
-            // let span = trace!(ITER_NEXT, self.record_id, self.storage_type);
+            if should_use_trace() {
+                self.span.send(Operation::IterNext(self.record_id));
+            }
             let kv_pair: _ = self.inner.next().await?;
             trace_result!(ITER_NEXT, self.span, kv_pair);
             Ok(kv_pair)

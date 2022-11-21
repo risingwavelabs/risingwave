@@ -15,11 +15,11 @@
 #[macro_use]
 extern crate lazy_static;
 
-pub mod collector;
+mod collector;
 mod error;
 mod macros;
 mod read;
-pub mod record;
+mod record;
 mod replay;
 mod write;
 
