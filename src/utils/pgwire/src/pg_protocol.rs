@@ -372,6 +372,7 @@ where
                 || lower_sql.starts_with("show")
                 || lower_sql.starts_with("with")
                 || lower_sql.starts_with("describe")
+                || lower_sql.starts_with("explain")
         };
 
         let prepared_statement = PreparedStatement::parse_statement(sql.to_string(), msg.type_ids)?;

@@ -776,6 +776,7 @@ mod tests {
             properties,
             ProstSourceInfo::StreamSource(stream_source_info),
             source_manager,
+            Default::default(),
         )
     }
 
@@ -836,6 +837,9 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids.clone(),
             2,
+            None,
+            0,
+            false,
         )
         .await
         .boxed()

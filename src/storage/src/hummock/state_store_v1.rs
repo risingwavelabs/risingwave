@@ -30,6 +30,7 @@ use risingwave_hummock_sdk::key::{
     bound_table_key_range, map_table_key_range, next_key, user_key, FullKey, TableKey,
     TableKeyRange, UserKey,
 };
+use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 use tokio::sync::oneshot;
@@ -124,7 +125,7 @@ impl HummockStorageV1 {
 
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
-        let encoded_user_key = UserKey::for_test(read_options.table_id, table_key).encode();
+        let encoded_user_key = UserKey::new(read_options.table_id, table_key).encode();
         // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
         // read/write path.
         assert!(pinned_version.is_valid());
@@ -162,14 +163,11 @@ impl HummockStorageV1 {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = user_key(
-                        &level.table_infos[table_info_idx]
-                            .key_range
-                            .as_ref()
-                            .unwrap()
-                            .right,
-                    )
-                    .cmp(encoded_user_key.as_ref());
+                    let ord = level.table_infos[table_info_idx]
+                        .key_range
+                        .as_ref()
+                        .unwrap()
+                        .compare_right_with_user_key(&encoded_user_key);
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
                         continue;
@@ -298,6 +296,12 @@ impl HummockStorageV1 {
             user_key_range.1.as_ref().map(UserKey::encode),
         );
         assert!(pinned_version.is_valid());
+        // encode once
+        let bloom_filter_key = if let Some(prefix) = read_options.prefix_hint.as_ref() {
+            Some(UserKey::new(read_options.table_id, TableKey(prefix)).encode())
+        } else {
+            None
+        };
         for level in pinned_version.levels(table_id) {
             let table_infos = prune_ssts(level.table_infos.iter(), table_id, &table_key_range);
             if table_infos.is_empty() {
@@ -323,7 +327,7 @@ impl HummockStorageV1 {
 
                 let mut sstables = vec![];
                 for sstable_info in pruned_sstables {
-                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
+                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref() {
                         let sstable = self
                             .sstable_store
                             .sstable(sstable_info, &mut local_stats)
@@ -332,9 +336,7 @@ impl HummockStorageV1 {
 
                         if hit_sstable_bloom_filter(
                             sstable.value(),
-                            UserKey::for_test(read_options.table_id, bloom_filter_key)
-                                .encode()
-                                .as_slice(),
+                            bloom_filter_key.as_slice(),
                             &mut local_stats,
                         ) {
                             sstables.push((*sstable_info).clone());
@@ -358,14 +360,14 @@ impl HummockStorageV1 {
                         .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
-                        if !hit_sstable_bloom_filter(
+                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref()
+                        && !hit_sstable_bloom_filter(
                             sstable.value(),
-                            bloom_filter_key,
+                            bloom_filter_key.as_slice(),
                             &mut local_stats,
-                        ) {
-                            continue;
-                        }
+                        )
+                    {
+                        continue;
                     }
 
                     overlapped_iters.push(HummockIteratorUnion::Fourth(
@@ -498,11 +500,6 @@ impl StateStoreWrite for HummockStorageV1 {
     /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
     /// * Locally unique. There should not be two or more operations on the same key in one write
     ///   batch.
-    /// * Globally unique. The streaming operators should ensure that different operators won't
-    ///   operate on the same key. The operator operating on one keyspace should always wait for all
-    ///   changes to be committed before reading and writing new keys to the engine. That is because
-    ///   that the table with lower epoch might be committed after a table with higher epoch has
-    ///   been committed. If such case happens, the outcome is non-predictable.
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,

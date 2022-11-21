@@ -54,6 +54,7 @@ mod meta_client;
 pub mod test_utils;
 mod user;
 
+pub mod health_service;
 mod monitor;
 
 use std::ffi::OsString;
@@ -88,6 +89,9 @@ pub struct FrontendOpts {
 
     #[clap(long, default_value = "127.0.0.1:2222")]
     pub prometheus_listener_addr: String,
+
+    #[clap(long, default_value = "127.0.0.1:6786")]
+    pub health_check_listener_addr: String,
 
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics

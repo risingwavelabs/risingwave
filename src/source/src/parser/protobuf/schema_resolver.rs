@@ -18,14 +18,13 @@ use std::path::Path;
 
 use protobuf_native::compiler::{SourceTreeDescriptorDatabase, VirtualSourceTree};
 use protobuf_native::MessageLite;
-use risingwave_common::error::ErrorCode::{
-    InternalError, InvalidConfigValue, InvalidParameterValue, ProtocolError,
-};
+use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
 use url::Url;
 
 use crate::parser::schema_registry::Client;
+use crate::parser::util::download_from_http;
 
 const PB_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
@@ -68,24 +67,8 @@ pub(super) async fn load_file_descriptor_from_s3(
 }
 
 pub(super) async fn load_file_descriptor_from_http(location: &Url) -> Result<Vec<u8>> {
-    let res = reqwest::get(location.clone()).await.map_err(|e| {
-        InvalidParameterValue(format!(
-            "failed to make request to URL: {}, err: {}",
-            location, e
-        ))
-    })?;
-    if !res.status().is_success() {
-        return Err(RwError::from(InvalidParameterValue(format!(
-            "Http request err, URL: {}, status code: {}",
-            location,
-            res.status()
-        ))));
-    }
-    let body = res
-        .bytes()
-        .await
-        .map_err(|e| InvalidParameterValue(format!("failed to read HTTP body: {}", e)))?;
-    Ok(body.to_vec())
+    let schema_bytes = download_from_http(location).await?;
+    Ok(schema_bytes.to_vec())
 }
 
 // Pull protobuf schema and all it's deps from the confluent schema regitry,

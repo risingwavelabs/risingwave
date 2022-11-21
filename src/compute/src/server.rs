@@ -124,7 +124,7 @@ pub async fn compute_node_serve(
     .unwrap();
 
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
-    if let Some(storage) = state_store.as_hummock() {
+    if let Some(storage) = state_store.as_hummock_trait() {
         extra_info_sources.push(storage.sstable_id_manager().clone());
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.
@@ -225,6 +225,7 @@ pub async fn compute_node_serve(
     let stream_env = StreamEnvironment::new(
         source_mgr,
         client_addr.clone(),
+        opts.connector_source_endpoint,
         stream_config,
         worker_id,
         state_store,
