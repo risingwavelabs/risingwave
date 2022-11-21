@@ -50,13 +50,17 @@ impl BatchSource {
             .map(|f| f.name.clone())
             .collect()
     }
+
+    pub fn logical(&self) -> &LogicalSource {
+        &self.logical
+    }
 }
 
 impl_plan_tree_node_for_leaf! { BatchSource }
 
 impl fmt::Display for BatchSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamSource");
+        let mut builder = f.debug_struct("BatchSource");
         builder
             .field("source", &self.logical.source_catalog().name)
             .field(
