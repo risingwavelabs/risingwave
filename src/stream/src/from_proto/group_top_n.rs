@@ -31,7 +31,7 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         mut params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let group_by = node
             .get_group_key()
@@ -54,6 +54,8 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
                 params.executor_id,
                 group_by,
                 state_table,
+                stream.context.lru_manager.clone(),
+                1 << 16,
             )?
             .boxed())
         } else {
@@ -67,6 +69,8 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
                 params.executor_id,
                 group_by,
                 state_table,
+                stream.context.lru_manager.clone(),
+                1 << 16,
             )?
             .boxed())
         }
