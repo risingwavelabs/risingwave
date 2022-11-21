@@ -235,7 +235,6 @@ where
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
             let cache_key =
                 serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
-            let row = row_ref.to_owned_row();
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
@@ -246,13 +245,13 @@ where
 
                 Op::Delete | Op::UpdateDelete => {
                     // First remove the row from state store
-                    self.managed_state.delete(row_ref);
+                    self.managed_state.delete(row_ref.clone());
                     self.cache
                         .delete(
                             None,
                             &mut self.managed_state,
                             cache_key,
-                            row,
+                            row_ref,
                             &mut res_ops,
                             &mut res_rows,
                         )

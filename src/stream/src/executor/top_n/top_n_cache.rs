@@ -512,12 +512,11 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
         if self.is_middle_cache_full() && &cache_key >= self.middle.last_key_value().unwrap().0 {
             return Ok(());
         }
-        let row = row_ref.to_owned_row();
-        managed_state.insert(row_ref);
+        managed_state.insert(row_ref.clone());
 
         // Then insert input row to corresponding cache range according to its order key
         if !self.is_low_cache_full() {
-            self.low.insert(cache_key, (&row).into());
+            self.low.insert(cache_key, row_ref.into());
             return Ok(());
         }
 
@@ -526,10 +525,10 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
                 && &cache_key <= low_last.key() {
                 // Take the last element of `cache.low` and insert input row to it.
                 let low_last = low_last.remove_entry();
-                self.low.insert(cache_key, (&row).into());
+                self.low.insert(cache_key, row_ref.into());
                 low_last
             } else {
-                (cache_key, (&row).into())
+                (cache_key, row_ref.into())
             };
 
         if !self.is_middle_cache_full() {
