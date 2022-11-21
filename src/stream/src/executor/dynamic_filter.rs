@@ -356,6 +356,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 }
                 AlignedMessage::Barrier(barrier) => {
                     // Flush the difference between the `prev_value` and `current_value`
+                    //
+                    // This block is guaranteed to be idempotent even if we may encounter multiple
+                    // barriers since `prev_epoch_value` is always be reset to
+                    // the equivalent of `current_epoch_value` at the end of
+                    // this block. Likewise, `last_committed_epoch_row` will always be equal to
+                    // `current_epoch_row`.
+                    // It is thus guaranteed not to commit state or produce chunks as long as
+                    // no new chunks have arrived since the previous barrier.
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
                     let row_deserializer = RowDeserializer::new(self.schema.data_types());
@@ -375,9 +383,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         }
                     }
 
-                    // Only write the RHS value if this actor is in charge of vnode 0
-                    if self.range_cache.state_table.vnode_bitmap().is_set(0) {
-                        if last_committed_epoch_row != current_epoch_row {
+                    // Update the committed value on RHS if it has changed.
+                    if last_committed_epoch_row != current_epoch_row {
+                        // Only write the RHS value if this actor is in charge of vnode 0
+                        // Otherwise, we only actively replicate the changes.
+                        if self.range_cache.state_table.vnode_bitmap().is_set(0) {
                             // If both `None`, then this branch is inactive.
                             // Hence, at least one is `Some`, hence at least one update.
                             if let Some(old_row) = last_committed_epoch_row.take() {
@@ -385,21 +395,27 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             }
                             if let Some(row) = &current_epoch_row {
                                 self.right_table.insert(row.clone());
-                                last_committed_epoch_row = Some(row.clone());
                             }
                             self.right_table.commit(barrier.epoch).await?;
                         } else {
                             self.right_table.commit_no_data_expected(barrier.epoch);
                         }
+                        // Update the last committed row since it has changed
+                        last_committed_epoch_row = current_epoch_row.clone();
+                    } else {
+                        self.right_table.commit_no_data_expected(barrier.epoch);
                     }
 
                     self.range_cache.flush(barrier.epoch).await?;
 
                     prev_epoch_value = Some(curr);
 
+                    debug_assert_eq!(last_committed_epoch_row, current_epoch_row);
+
                     // Update the vnode bitmap for the left state table if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let _previous_vnode_bitmap = self.range_cache.update_vnodes(vnode_bitmap);
+                        let _previous_vnode_bitmap =
+                            self.range_cache.update_vnodes(vnode_bitmap).await?;
                     }
 
                     yield Message::Barrier(barrier);
