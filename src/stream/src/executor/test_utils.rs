@@ -15,7 +15,7 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
@@ -49,9 +49,13 @@ impl MessageSender {
     }
 
     #[allow(dead_code)]
-    pub fn push_watermark(&mut self, col_idx: usize, val: ScalarImpl) {
+    pub fn push_int64_watermark(&mut self, col_idx: usize, val: i64) {
         self.0
-            .send(Message::Watermark(Watermark { col_idx, val }))
+            .send(Message::Watermark(Watermark {
+                col_idx,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(val),
+            }))
             .unwrap();
     }
 }

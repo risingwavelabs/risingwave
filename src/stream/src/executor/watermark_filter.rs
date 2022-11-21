@@ -124,6 +124,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
         yield Message::Watermark(Watermark::new(
             event_time_col_idx,
+            watermark_type.clone(),
             current_watermark.clone(),
         ));
 
@@ -171,6 +172,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
                     yield Message::Watermark(Watermark::new(
                         event_time_col_idx,
+                        watermark_type.clone(),
                         current_watermark.clone(),
                     ));
                 }
@@ -182,6 +184,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             current_watermark = watermark;
                             yield Message::Watermark(Watermark::new(
                                 event_time_col_idx,
+                                watermark_type.clone(),
                                 current_watermark.clone(),
                             ));
                         }
@@ -401,7 +404,7 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            Watermark::new(1, WATERMARK_TYPE.min())
+            Watermark::new(1, WATERMARK_TYPE.clone(), WATERMARK_TYPE.min())
         );
 
         // push the 1st chunk
@@ -421,6 +424,7 @@ mod tests {
             watermark.into_watermark().unwrap(),
             Watermark::new(
                 1,
+                WATERMARK_TYPE.clone(),
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
                     NaiveDate::from_ymd(2022, 11, 7).and_hms(0, 0, 0)
                 ))
@@ -447,6 +451,7 @@ mod tests {
             watermark.into_watermark().unwrap(),
             Watermark::new(
                 1,
+                WATERMARK_TYPE.clone(),
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
                     NaiveDate::from_ymd(2022, 11, 9).and_hms(0, 0, 0)
                 ))
@@ -474,6 +479,7 @@ mod tests {
             watermark.into_watermark().unwrap(),
             Watermark::new(
                 1,
+                WATERMARK_TYPE.clone(),
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
                     NaiveDate::from_ymd(2022, 11, 9).and_hms(0, 0, 0)
                 ))
@@ -496,6 +502,7 @@ mod tests {
             watermark.into_watermark().unwrap(),
             Watermark::new(
                 1,
+                WATERMARK_TYPE.clone(),
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
                     NaiveDate::from_ymd(2022, 11, 13).and_hms(0, 0, 0)
                 ))

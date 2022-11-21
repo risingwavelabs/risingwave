@@ -97,14 +97,16 @@ message Barrier {
 message Watermark {
   // the watermark column's index in the stream's schema
   uint32 col_idx = 1;
+  data.DataType data_type = 2;
   // the watermark value, there will be no record having a greater value in the watermark column
-  data.Datum val = 2;
+  data.Datum val = 3;
 }
 
 message StreamMessage {
   oneof stream_message {
     data.StreamChunk stream_chunk = 1;
     Barrier barrier = 2;
+    Watermark watermark = 3;
   }
 }
 
