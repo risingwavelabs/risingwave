@@ -192,7 +192,7 @@ impl StreamTableScan {
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
                 same_worker_node: false,
-                disable_rearrange: false,
+                chain_type: ChainType::Backfill as i32,
                 // The fields from upstream
                 upstream_fields: self
                     .logical
@@ -212,6 +212,8 @@ impl StreamTableScan {
                     .map(|&i| i as _)
                     .collect(),
                 is_singleton: *self.distribution() == Distribution::Single,
+                // The table desc used by backfill executor
+                table_desc: Some(self.logical.table_desc().to_protobuf()),
             })),
             stream_key,
             operator_id: self.base.id.0 as u64,
