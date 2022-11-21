@@ -56,6 +56,14 @@ pub enum StateStoreImpl {
     /// store misses some critical implementation to ensure the correctness of persisting streaming
     /// state. (e.g., no read_epoch support, no async checkpoint)
     MemoryStateStore(Monitored<MemoryStateStoreType>),
+    /// RocksDB state store. This is meant for benchmarking purposes. It should not be used in 
+    /// a production setting and is not maintained on the `main` branch, but rather on the `rocksdb`
+    /// branch.
+    /// The state store cannot recover from failure. It may possibly undergo scaling on a single-node,
+    /// but it may not work correctly.
+    /// This implementation runs a single RocksDB instance for a single compute node.
+    #[cfg(feature = "rocksdb_store")]
+    RocksDBStateStore(Monitored<RocksDBStateStoreType>),
 }
 
 fn may_dynamic_dispatch(
@@ -98,6 +106,11 @@ impl StateStoreImpl {
     }
 
     pub fn shared_in_memory_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
+        Self::in_memory(MemoryStateStore::shared(), state_store_metrics)
+    }
+
+
+    pub fn rocksdb_state_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
         Self::in_memory(MemoryStateStore::shared(), state_store_metrics)
     }
 
