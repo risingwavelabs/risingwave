@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::stream_plan::ChainNode;
+
 use super::*;
 use crate::executor::{ChainExecutor, RearrangedChainExecutor};
 
@@ -19,13 +21,14 @@ pub struct ChainExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for ChainExecutorBuilder {
+    type Node = ChainNode;
+
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Chain)?;
         let [mview, snapshot]: [_; 2] = params.input.try_into().unwrap();
 
         let upstream_indices: Vec<usize> = node
