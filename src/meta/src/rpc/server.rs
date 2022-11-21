@@ -129,9 +129,16 @@ pub async fn rpc_serve(
     }
 }
 
+// get duration since epoch
+fn since_epoch() -> Duration {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+}
+
 // TODO: write docstring
 pub async fn register_leader_for_meta<S: MetaStore>(
-    addr: String,
+    addr: String, // Address of this node
     meta_store: Arc<S>,
     lease_time: u64, // seconds
 ) -> MetaResult<(MetaLeaderInfo, JoinHandle<()>, Sender<()>)> {
@@ -143,7 +150,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
 
     let mut tick_interval = tokio::time::interval(Duration::from_secs(lease_time / 2));
     loop {
+        // TODO: maybe also shut down?
         tick_interval.tick().await;
+
+        // get old leader info and lease
+        // TODO: make below calls as functions to simplify them
         let old_leader_info = match meta_store
             .get_cf(META_CF_NAME, META_LEADER_KEY.as_bytes())
             .await
@@ -158,7 +169,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
             "Old_leader_info: {:?}",
             String::from_utf8_lossy(&old_leader_info)
         );
-
         let old_leader_lease = match meta_store
             .get_cf(META_CF_NAME, META_LEASE_KEY.as_bytes())
             .await
@@ -174,9 +184,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
             String::from_utf8_lossy(&old_leader_lease)
         );
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards");
+        let now = since_epoch();
 
         if !old_leader_lease.is_empty() {
             tracing::info!("old_leader_lease is not empty");
@@ -266,11 +274,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let handle = tokio::spawn(async move {
             // How can I properly do random things within this thread?
-            let rand_delay = (SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Time went backwards")
-                .as_micros()
-                % 100) as u64;
+            let rand_delay = (since_epoch().as_micros() % 100) as u64;
             tracing::info!("Pseudo random delay is {}ms", rand_delay);
             let mut ticker =
                 tokio::time::interval(Duration::from_millis(rand_delay / 2 + rand_delay)); // + random to reduce load
@@ -279,9 +283,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
             'election: loop {
                 // define lease
                 let mut txn = Transaction::default();
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards");
+                let now = since_epoch();
                 let lease_info = MetaLeaseInfo {
                     leader: Some(leader_info.clone()), // TODO: Get new leader_info
                     lease_register_time: now.as_secs(),
