@@ -14,8 +14,8 @@ message ColumnIndex {
   uint64 index = 1;
 }
 
-message SourceInfo{
-  oneof SourceInfo{
+message SourceInfo {
+  oneof source_info {
     StreamSourceInfo stream_source = 1;
     TableSourceInfo table_source = 2;
   }

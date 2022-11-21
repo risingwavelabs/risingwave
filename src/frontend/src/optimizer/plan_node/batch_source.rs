@@ -18,10 +18,10 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
-use risingwave_pb::catalog::{ColumnIndex, SourceInfo};
+use risingwave_pb::catalog::SourceInfo;
 
 use super::{LogicalSource, PlanBase, PlanRef, ToBatchProst, ToDistributedBatch, ToLocalBatch};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, Order};
 
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone)]
@@ -32,13 +32,12 @@ pub struct BatchSource {
 
 impl BatchSource {
     pub fn new(logical: LogicalSource) -> Self {
-        let base = PlanBase::new_stream(
+        let base = PlanBase::new_batch(
             logical.ctx(),
             logical.schema().clone(),
-            logical.logical_pk().to_vec(),
-            logical.functional_dependency().clone(),
+            // Use `Single` by default, will be updated later with `clone_with_dist`.
             Distribution::Single,
-            logical.source_catalog().append_only,
+            Order::any(),
         );
         Self { base, logical }
     }
@@ -53,6 +52,15 @@ impl BatchSource {
 
     pub fn logical(&self) -> &LogicalSource {
         &self.logical
+    }
+
+    pub fn clone_with_dist(&self) -> Self {
+        let mut base = self.base.clone();
+        base.dist = Distribution::SomeShard;
+        Self {
+            base,
+            logical: self.logical.clone(),
+        }
     }
 }
 
@@ -73,13 +81,13 @@ impl fmt::Display for BatchSource {
 
 impl ToLocalBatch for BatchSource {
     fn to_local(&self) -> Result<PlanRef> {
-        Ok(self.clone().into())
+        Ok(self.clone_with_dist().into())
     }
 }
 
 impl ToDistributedBatch for BatchSource {
     fn to_distributed(&self) -> Result<PlanRef> {
-        Ok(self.clone().into())
+        Ok(self.clone_with_dist().into())
     }
 }
 
@@ -91,18 +99,10 @@ impl ToBatchProst for BatchSource {
             info: Some(SourceInfo {
                 source_info: Some(source_catalog.info.clone()),
             }),
-            row_id_index: source_catalog
-                .row_id_index
-                .map(|index| ColumnIndex { index: index as _ }),
             columns: source_catalog
                 .columns
                 .iter()
                 .map(|c| c.to_protobuf())
-                .collect_vec(),
-            pk_column_ids: source_catalog
-                .pk_col_ids
-                .iter()
-                .map(Into::into)
                 .collect_vec(),
             properties: source_catalog.properties.clone(),
             split: vec![],

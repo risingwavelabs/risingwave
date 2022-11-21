@@ -193,12 +193,12 @@ impl Query {
 }
 
 #[derive(Clone, Debug)]
-pub struct SourceInfo {
+pub struct SourceScanInfo {
     /// Split Info
     split_info: Vec<SplitImpl>,
 }
 
-impl SourceInfo {
+impl SourceScanInfo {
     pub fn new(split_info: Vec<SplitImpl>) -> Self {
         Self { split_info }
     }
@@ -270,7 +270,7 @@ pub struct QueryStage {
     pub parallelism: u32,
     /// Indicates whether this stage contains a table scan node and the table's information if so.
     pub table_scan_info: Option<TableScanInfo>,
-    pub source_info: Option<SourceInfo>,
+    pub source_info: Option<SourceScanInfo>,
 }
 
 impl QueryStage {
@@ -318,7 +318,7 @@ struct QueryStageBuilder {
     children_stages: Vec<QueryStageRef>,
     /// See also [`QueryStage::table_scan_info`].
     table_scan_info: Option<TableScanInfo>,
-    source_info: Option<SourceInfo>,
+    source_info: Option<SourceScanInfo>,
 }
 
 impl QueryStageBuilder {
@@ -328,7 +328,7 @@ impl QueryStageBuilder {
         parallelism: u32,
         exchange_info: ExchangeInfo,
         table_scan_info: Option<TableScanInfo>,
-        source_info: Option<SourceInfo>,
+        source_info: Option<SourceScanInfo>,
     ) -> Self {
         Self {
             query_id,
@@ -463,7 +463,6 @@ impl BatchPlanFragmenter {
         root: PlanRef,
         exchange_info: ExchangeInfo,
     ) -> SchedulerResult<QueryStageRef> {
-        println!("new_stage: {}", root.explain_to_string().unwrap());
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
 
@@ -590,7 +589,7 @@ impl BatchPlanFragmenter {
     /// If so, use  `SplitEnumeratorImpl` to get the split info from exteneral source.
     ///
     /// For current implementation, we can guarantee that each stage has only one source.
-    fn collect_stage_source(node: PlanRef) -> SchedulerResult<Option<SourceInfo>> {
+    fn collect_stage_source(node: PlanRef) -> SchedulerResult<Option<SourceScanInfo>> {
         if node.node_type() == PlanNodeType::BatchExchange {
             // Do not visit next stage.
             return Ok(None);
@@ -602,7 +601,7 @@ impl BatchPlanFragmenter {
             )?;
             let mut enumerator = block_on(SplitEnumeratorImpl::create(property))?;
             let split_info = block_on(enumerator.list_splits())?;
-            Ok(Some(SourceInfo::new(split_info)))
+            Ok(Some(SourceScanInfo::new(split_info)))
         } else {
             node.inputs()
                 .into_iter()

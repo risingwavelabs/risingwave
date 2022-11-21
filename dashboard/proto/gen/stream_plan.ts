@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { ColumnIndex, StreamSourceInfo, Table, TableSourceInfo } from "./catalog";
+import { ColumnIndex, SourceInfo, Table } from "./catalog";
 import { Buffer } from "./common";
 import { Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem } from "./expr";
@@ -266,10 +266,7 @@ export interface SourceNode {
   columns: ColumnCatalog[];
   pkColumnIds: number[];
   properties: { [key: string]: string };
-  info?: { $case: "streamSource"; streamSource: StreamSourceInfo } | {
-    $case: "tableSource";
-    tableSource: TableSourceInfo;
-  };
+  info: SourceInfo | undefined;
 }
 
 export interface SourceNode_PropertiesEntry {
@@ -1551,11 +1548,7 @@ export const SourceNode = {
           return acc;
         }, {})
         : {},
-      info: isSet(object.streamSource)
-        ? { $case: "streamSource", streamSource: StreamSourceInfo.fromJSON(object.streamSource) }
-        : isSet(object.tableSource)
-        ? { $case: "tableSource", tableSource: TableSourceInfo.fromJSON(object.tableSource) }
-        : undefined,
+      info: isSet(object.info) ? SourceInfo.fromJSON(object.info) : undefined,
     };
   },
 
@@ -1582,10 +1575,7 @@ export const SourceNode = {
         obj.properties[k] = v;
       });
     }
-    message.info?.$case === "streamSource" &&
-      (obj.streamSource = message.info?.streamSource ? StreamSourceInfo.toJSON(message.info?.streamSource) : undefined);
-    message.info?.$case === "tableSource" &&
-      (obj.tableSource = message.info?.tableSource ? TableSourceInfo.toJSON(message.info?.tableSource) : undefined);
+    message.info !== undefined && (obj.info = message.info ? SourceInfo.toJSON(message.info) : undefined);
     return obj;
   },
 
@@ -1609,20 +1599,9 @@ export const SourceNode = {
       },
       {},
     );
-    if (
-      object.info?.$case === "streamSource" &&
-      object.info?.streamSource !== undefined &&
-      object.info?.streamSource !== null
-    ) {
-      message.info = { $case: "streamSource", streamSource: StreamSourceInfo.fromPartial(object.info.streamSource) };
-    }
-    if (
-      object.info?.$case === "tableSource" &&
-      object.info?.tableSource !== undefined &&
-      object.info?.tableSource !== null
-    ) {
-      message.info = { $case: "tableSource", tableSource: TableSourceInfo.fromPartial(object.info.tableSource) };
-    }
+    message.info = (object.info !== undefined && object.info !== null)
+      ? SourceInfo.fromPartial(object.info)
+      : undefined;
     return message;
   },
 };
