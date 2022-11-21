@@ -313,7 +313,6 @@ impl LevelSelector for DynamicLevelSelector {
 
 #[cfg(test)]
 pub mod tests {
-    use std::collections::HashSet;
     use std::ops::Range;
 
     use itertools::Itertools;

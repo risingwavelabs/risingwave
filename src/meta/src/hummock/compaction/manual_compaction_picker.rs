@@ -1146,7 +1146,7 @@ pub mod tests {
     }
 
     #[test]
-    fn test_manual_compaction_picker_l0() {
+    fn test_manual_compaction_selector_l0() {
         let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
         let l0 = generate_l0_nonoverlapping_sublevels(vec![
             generate_table(0, 1, 0, 500, 1),
@@ -1222,7 +1222,7 @@ pub mod tests {
                 level: 0,
             };
             let selector = ManualCompactionSelector::new(
-                config.clone(),
+                config,
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
             );
@@ -1240,7 +1240,7 @@ pub mod tests {
 
     /// tests `DynamicLevelSelector::manual_pick_compaction`
     #[test]
-    fn test_manual_compaction_picker() {
+    fn test_manual_compaction_selector() {
         let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);

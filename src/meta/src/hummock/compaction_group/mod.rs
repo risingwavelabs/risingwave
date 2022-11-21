@@ -23,7 +23,7 @@ use risingwave_pb::hummock::CompactionConfig;
 
 use crate::model::{MetadataModel, MetadataModelResult};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompactionGroup {
     pub(crate) group_id: CompactionGroupId,
     pub(crate) parent_group_id: CompactionGroupId,
