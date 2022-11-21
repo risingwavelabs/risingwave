@@ -19,6 +19,7 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::future::try_join_all;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
@@ -154,8 +155,14 @@ impl<S: StateStore> RangeCache<S> {
 
         let own_vnodes = self.vnodes.ones().collect_vec();
         for pk_range in missing_ranges {
-            for vnode in &own_vnodes {
-                self.add_vnode_range(*vnode, &pk_range).await?;
+            for (vnode, mut map) in try_join_all(
+                own_vnodes
+                    .iter()
+                    .map(|vnode| self.fetch_vnode_range(*vnode, &pk_range)),
+            )
+            .await?
+            {
+                self.cache.entry(vnode).or_default().append(&mut map);
             }
         }
 
@@ -169,20 +176,20 @@ impl<S: StateStore> RangeCache<S> {
         ))
     }
 
-    async fn add_vnode_range(
-        &mut self,
+    async fn fetch_vnode_range(
+        &self,
         vnode: usize,
         pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<(u8, BTreeMap<Vec<u8>, CompactedRow>)> {
         let vnode = vnode.try_into().unwrap();
-        // TODO: do this concurrently over each vnode.
         let row_stream = self
             .state_table
             .iter_key_and_val_with_pk_range(pk_range, vnode)
             .await?;
         pin_mut!(row_stream);
 
-        let map = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
+        let mut map = BTreeMap::new();
+        // row stream output is sorted by its pk, aka left key (and then original pk)
         while let Some(res) = row_stream.next().await {
             let (key_bytes, row) = res?;
 
@@ -192,7 +199,7 @@ impl<S: StateStore> RangeCache<S> {
             );
         }
 
-        Ok(())
+        Ok((vnode, map))
     }
 
     /// Updates the vnodes for `RangeCache`, purging the rows of the vnodes that are no longer
@@ -213,10 +220,15 @@ impl<S: StateStore> RangeCache<S> {
                 Self::to_row_bound(self_range.0.clone()),
                 Self::to_row_bound(self_range.1.clone()),
             );
-            for (vnode, (old, new)) in old_vnodes.iter().zip_eq(new_vnodes.iter()).enumerate() {
-                if new && !old {
-                    self.add_vnode_range(vnode, &current_range).await?;
-                }
+            let newly_owned_vnodes = Bitmap::bit_saturate_subtract(&new_vnodes, &old_vnodes);
+            for (vnode, map) in try_join_all(
+                newly_owned_vnodes
+                    .ones()
+                    .map(|vnode| self.fetch_vnode_range(vnode, &current_range)),
+            )
+            .await?
+            {
+                self.cache.insert(vnode, map);
             }
         }
         self.vnodes = new_vnodes;
