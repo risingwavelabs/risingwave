@@ -39,6 +39,7 @@ use crate::StateStore;
 pub type HummockStorageType = impl StateStore + AsHummockTrait;
 pub type HummockStorageV1Type = impl StateStore + AsHummockTrait;
 pub type MemoryStateStoreType = impl StateStore + AsHummockTrait;
+pub type SledStateStoreType = impl StateStore + AsHummockTrait;
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -58,6 +59,7 @@ pub enum StateStoreImpl {
     /// store misses some critical implementation to ensure the correctness of persisting streaming
     /// state. (e.g., no read_epoch support, no async checkpoint)
     MemoryStateStore(Monitored<MemoryStateStoreType>),
+    SledStateStore(Monitored<SledStateStoreType>),
 }
 
 fn may_dynamic_dispatch(
@@ -109,6 +111,10 @@ impl StateStoreImpl {
         Self::HummockStateStoreV1(
             may_dynamic_dispatch(may_verify(state_store)).monitored(state_store_metrics),
         )
+    }
+
+    pub fn sled(state_store: SledStateStore, state_store_metrics: Arc<StateStoreMetrics>) -> Self {
+        Self::SledStateStore(may_dynamic_dispatch(state_store).monitored(state_store_metrics))
     }
 
     pub fn shared_in_memory_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
@@ -163,6 +169,7 @@ impl Debug for StateStoreImpl {
             StateStoreImpl::HummockStateStore(_) => write!(f, "HummockStateStore"),
             StateStoreImpl::HummockStateStoreV1(_) => write!(f, "HummockStateStoreV1"),
             StateStoreImpl::MemoryStateStore(_) => write!(f, "MemoryStateStore"),
+            StateStoreImpl::SledStateStore(_) => write!(f, "SledStateStore"),
         }
     }
 }
@@ -184,6 +191,20 @@ macro_rules! dispatch_state_store {
                 {
                     let _store = $store;
                     unimplemented!("memory state store should never be used in release mode");
+                }
+            }
+
+            StateStoreImpl::SledStateStore($store) => {
+                // WARNING: don't change this. Enabling memory backend will cause monomorphization
+                // explosion and thus slow compile time in release mode.
+                #[cfg(debug_assertions)]
+                {
+                    $body
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    let _store = $store;
+                    unimplemented!("sled state store should never be used in release mode");
                 }
             }
 
@@ -480,6 +501,12 @@ impl StateStoreImpl {
                 StateStoreImpl::shared_in_memory_store(state_store_stats.clone())
             }
 
+            sled if sled.starts_with("sled://") => {
+                tracing::warn!("sled state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
+                let path = sled.strip_prefix("sled://").unwrap();
+                StateStoreImpl::sled(SledStateStore::new(path), state_store_stats.clone())
+            }
+
             other => unimplemented!("{} state store is not supported", other),
         };
 
@@ -560,6 +587,13 @@ impl AsHummockTrait for MemoryStateStore {
         None
     }
 }
+
+impl AsHummockTrait for SledStateStore {
+    fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
+        None
+    }
+}
+
 #[cfg(debug_assertions)]
 pub mod boxed_state_store {
     use std::future::Future;

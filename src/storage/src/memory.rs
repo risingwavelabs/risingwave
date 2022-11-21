@@ -273,6 +273,7 @@ mod batched_iter {
             test_iter_chaos_inner(map, 1000);
         }
 
+        #[cfg(not(madsim))]
         #[test]
         fn test_sled_iter_chaos() {
             let map = SledRangeKv::new_temp();
@@ -624,6 +625,7 @@ mod tests {
         test_snapshot_isolation_inner(state_store).await;
     }
 
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_snapshot_isolation_sled() {
         let state_store = SledStateStore::new_temp();
