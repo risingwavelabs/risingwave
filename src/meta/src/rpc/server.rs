@@ -18,8 +18,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use prost::Message;
-use rand::distributions::{Distribution, Uniform};
-use rand::Rng;
 use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -196,7 +194,9 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 bail!(err_info);
             }
         }
-        let lease_id = if !old_leader_info.is_empty() {
+        // TODO: are we sure we want to update like this? We could miss a lease update?
+        // Why not a random number?
+        let mut lease_id = if !old_leader_info.is_empty() {
             let leader_info = MetaLeaderInfo::decode(&mut old_leader_info.as_slice()).unwrap();
             leader_info.lease_id + 1
         } else {
@@ -271,9 +271,9 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 .expect("Time went backwards")
                 .as_micros()
                 % 100) as u64;
+            tracing::info!("Pseudo random delay is {}ms", rand_delay);
             let mut ticker =
                 tokio::time::interval(Duration::from_millis(rand_delay / 2 + rand_delay)); // + random to reduce load
-            tracing::info!("Pseudo random delay is {}ms", rand_delay);
 
             // election
             'election: loop {
@@ -283,7 +283,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     .duration_since(UNIX_EPOCH)
                     .expect("Time went backwards");
                 let lease_info = MetaLeaseInfo {
-                    leader: Some(leader_info.clone()),
+                    leader: Some(leader_info.clone()), // TODO: Get new leader_info
                     lease_register_time: now.as_secs(),
                     lease_expire_time: now.as_secs() + lease_time,
                 };
@@ -338,9 +338,26 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         _ = ticker.tick() => {},
                     }
 
-                    // update the current lease
+                    // renew the current lease
                     if this_is_leader {
-                        // TODO: renew lease
+                        let mut txn = Transaction::default();
+                        lease_id = lease_id + 1;
+                        let lease_info = MetaLeaseInfo {
+                            leader: Some(leader_info.clone()), // TODO: Change leader info here
+                            lease_register_time: now.as_secs(),
+                            lease_expire_time: now.as_secs() + lease_time,
+                        };
+                        txn.put(
+                            META_CF_NAME.to_string(),
+                            META_LEASE_KEY.as_bytes().to_vec(),
+                            lease_info.encode_to_vec(),
+                        );
+                        // TODO: Retry put operation
+                        if let Err(e) = meta_store.txn(txn).await {
+                            tracing::error!("Unable to renew the leader lease. Error is {}", e);
+                        } else {
+                            tracing::info!("Current node is still leader");
+                        }
                         continue 'term;
                     }
 
@@ -354,7 +371,8 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         .unwrap_or_default();
 
                     if lease_info.is_empty() {
-                        // ETCD does not have leader lease. Run an election
+                        // ETCD does not have leader lease. Elect new leader
+                        tracing::info!("ETCD does not have leader lease. Elect new leader");
                         continue 'election;
                     }
 
@@ -367,6 +385,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                             .expect("Time went backwards")
                             .as_secs()
                     {
+                        tracing::warn!("Detected that leader is dead");
                         let mut txn = Transaction::default();
                         txn.delete(
                             META_CF_NAME.to_string(),
@@ -398,8 +417,8 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         }
                         continue 'election;
                     }
-
                     // lease exists and leader continues term
+                    tracing::info!("lease exists and leader continues term");
                 }
             }
         });
