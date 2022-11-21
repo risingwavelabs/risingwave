@@ -113,8 +113,8 @@ pub struct StateTable<S: StateStore> {
     /// last watermark that is used to construct delete ranges in `ingest`
     last_watermark: Option<ScalarImpl>,
 
-    /// number of commits since the last time we did state cleaning by watermark
-    num_commits_since_last_clean: usize,
+    /// number of commits with watermark since the last time we did state cleaning by watermark
+    num_wmked_commits_since_last_clean: usize,
 }
 
 // initialize
@@ -229,7 +229,7 @@ impl<S: StateStore> StateTable<S> {
             value_indices,
             epoch: None,
             last_watermark: None,
-            num_commits_since_last_clean: 0,
+            num_wmked_commits_since_last_clean: 0,
         }
     }
 
@@ -333,7 +333,7 @@ impl<S: StateStore> StateTable<S> {
             value_indices,
             epoch: None,
             last_watermark: None,
-            num_commits_since_last_clean: 0,
+            num_wmked_commits_since_last_clean: 0,
         }
     }
 
@@ -652,17 +652,8 @@ impl<S: StateStore> StateTable<S> {
     ) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.num_commits_since_last_clean += 1;
-        self.batch_write_rows(
-            mem_table,
-            new_epoch.prev,
-            if self.num_commits_since_last_clean >= STATE_CLEANING_PERIOD_EPOCH {
-                watermark
-            } else {
-                None
-            },
-        )
-        .await?;
+        self.batch_write_rows(mem_table, new_epoch.prev, watermark)
+            .await?;
         self.update_epoch(new_epoch);
         Ok(())
     }
@@ -690,8 +681,15 @@ impl<S: StateStore> StateTable<S> {
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
-        watermark: Option<&ScalarImpl>,
+        mut watermark: Option<&ScalarImpl>,
     ) -> StreamExecutorResult<()> {
+        if watermark.is_some() {
+            self.num_wmked_commits_since_last_clean += 1;
+
+            if self.num_wmked_commits_since_last_clean < STATE_CLEANING_PERIOD_EPOCH {
+                watermark = None;
+            }
+        }
         let mut write_batch = self.local_store.start_write_batch(WriteOptions {
             epoch,
             table_id: self.table_id(),
@@ -757,7 +755,7 @@ impl<S: StateStore> StateTable<S> {
         write_batch.ingest().await?;
         if let Some(watermark) = watermark {
             self.last_watermark = Some(watermark.clone());
-            self.num_commits_since_last_clean = 0;
+            self.num_wmked_commits_since_last_clean = 0;
         }
         Ok(())
     }
