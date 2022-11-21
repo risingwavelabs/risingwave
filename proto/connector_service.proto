@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package connector_service;
+
+import "data.proto";
+
+option java_package = "com.risingwave.proto";
+option java_outer_classname = "ConnectorServiceProto";
+
+
+message SinkConfig {
+  message TableSchema {
+    message Column {
+      string name = 1;
+      data.DataType.TypeName data_type = 2;
+    }
+    repeated Column columns = 1;
+    repeated uint32 pk_indices = 2;
+  }
+  string sink_type = 1;
+  map<string, string> properties = 2;
+  TableSchema table_schema = 3;
+}
+
+
+message SinkTask {
+  message StartSink {
+    SinkConfig sink_config = 1;
+  }
+
+  message WriteBatch {
+    message JsonPayload {
+      message RowOp {
+        data.Op op_type = 1;
+        string line = 2;
+      }
+      repeated RowOp rowOps = 1;
+    }
+
+    oneof payload{
+      JsonPayload json_payload = 1;
+    }
+
+    uint64 batch_id = 3;
+    uint64 epoch = 4;
+  }
+
+  message StartEpoch {
+    uint64 epoch = 1;
+  }
+
+  message SyncBatch {
+    uint64 epoch = 1;
+  }
+
+  oneof request {
+    StartSink start = 1;
+    StartEpoch startEpoch = 2;
+    WriteBatch write = 3;
+    SyncBatch sync = 4;
+  }
+}
+
+message SinkResponse {
+  message SyncResponse {
+    uint64 epoch = 1;
+  }
+
+  message StartEpochResponse {
+    uint64 epoch = 1;
+  }
+
+  message WriteResponse {
+    uint64 epoch = 1;
+    uint64 batch_id = 2;
+  }
+
+  message StartResponse { }
+
+  oneof response {
+    SyncResponse sync = 2;
+    StartEpochResponse startEpoch = 3;
+    WriteResponse write = 4;
+    StartResponse start = 5;
+  }
+}
+
+service ConnectorService {
+  rpc SinkStream(stream SinkTask) returns (stream SinkResponse);
+}

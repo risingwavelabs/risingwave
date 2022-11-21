@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_connector::sink::remote::RemoteSinkParams;
 
 use super::*;
 use crate::executor::SinkExecutor;
@@ -37,12 +38,17 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .map(|i| ColumnId::from(*i))
             .collect::<Vec<ColumnId>>();
 
+        let connector_params = params.env.connector_addr().map(|addr| RemoteSinkParams {
+            connector_addr: addr,
+        });
+
         Ok(Box::new(SinkExecutor::new(
             materialize_executor,
             store,
             stream.streaming_metrics.clone(),
             node.properties.clone(),
             params.executor_id,
+            connector_params,
         )))
     }
 }

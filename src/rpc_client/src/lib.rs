@@ -46,12 +46,14 @@ mod cdc_client;
 mod compute_client;
 mod hummock_meta_client;
 mod meta_client;
+// mod sink_client;
 mod stream_client;
 
 pub use cdc_client::CdcClient;
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use hummock_meta_client::HummockMetaClient;
 pub use meta_client::MetaClient;
+// pub use sink_client::{SinkClient, SinkClientPool, SinkClientPoolRef};
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
 #[async_trait]

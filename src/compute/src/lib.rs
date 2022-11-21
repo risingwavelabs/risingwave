@@ -87,7 +87,9 @@ pub struct ComputeNodeOpts {
 use std::future::Future;
 use std::pin::Pin;
 
-use risingwave_common::config::{BatchConfig, ServerConfig, StorageConfig, StreamingConfig};
+use risingwave_common::config::{
+    BatchConfig, ConnectorConfig, ServerConfig, StorageConfig, StreamingConfig,
+};
 
 use crate::server::compute_node_serve;
 
@@ -139,4 +141,8 @@ pub struct ComputeNodeConfig {
     // Below for Hummock.
     #[serde(default)]
     pub storage: StorageConfig,
+
+    // Below for connector
+    #[serde(default)]
+    pub connector: ConnectorConfig,
 }

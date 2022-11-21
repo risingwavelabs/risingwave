@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -77,6 +78,7 @@ pub async fn compute_node_serve(
     let storage_config = Arc::new(config.storage.clone());
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
+    let connector_config = Arc::new(config.connector.clone());
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let meta_client = MetaClient::register_new(
@@ -222,10 +224,15 @@ pub async fn compute_node_serve(
     );
 
     // Initialize the streaming environment.
+    let connector_addr = connector_config
+        .connector_addr
+        .clone()
+        .map(|addr| HostAddr::from_str(&addr).unwrap());
     let stream_env = StreamEnvironment::new(
         source_mgr,
         client_addr.clone(),
         opts.connector_source_endpoint,
+        connector_addr,
         stream_config,
         worker_id,
         state_store,

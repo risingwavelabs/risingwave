@@ -31,6 +31,9 @@ pub struct StreamEnvironment {
     /// Endpoint of the source connector node
     connector_source_endpoint: String,
 
+    /// Address of connector node (optional)
+    connector_addr: Option<HostAddr>,
+
     /// Reference to the source manager.
     source_manager: TableSourceManagerRef,
 
@@ -49,6 +52,7 @@ impl StreamEnvironment {
         source_manager: TableSourceManagerRef,
         server_addr: HostAddr,
         connector_source_endpoint: String,
+        connector_addr: Option<HostAddr>,
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
@@ -56,6 +60,7 @@ impl StreamEnvironment {
         StreamEnvironment {
             server_addr,
             connector_source_endpoint,
+            connector_addr,
             source_manager,
             config,
             worker_id,
@@ -70,6 +75,7 @@ impl StreamEnvironment {
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             connector_source_endpoint: "127.0.0.1:60061".parse().unwrap(),
+            connector_addr: None,
             source_manager: Arc::new(TableSourceManager::default()),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
@@ -105,5 +111,9 @@ impl StreamEnvironment {
 
     pub fn connector_source_endpoint(&self) -> String {
         self.connector_source_endpoint.clone()
+    }
+
+    pub fn connector_addr(&self) -> Option<HostAddr> {
+        self.connector_addr.clone()
     }
 }

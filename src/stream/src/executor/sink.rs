@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::default::Default;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -20,6 +19,7 @@ use std::time::Instant;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
+use risingwave_connector::sink::remote::RemoteSinkParams;
 use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
 use risingwave_storage::StateStore;
 
@@ -34,11 +34,19 @@ pub struct SinkExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
     properties: HashMap<String, String>,
     identity: String,
+    connector_params: Option<RemoteSinkParams>,
     pk_indices: PkIndices,
 }
 
-async fn build_sink(config: SinkConfig, schema: Schema) -> StreamExecutorResult<Box<SinkImpl>> {
-    Ok(Box::new(SinkImpl::new(config, schema).await?))
+async fn build_sink(
+    config: SinkConfig,
+    schema: Schema,
+    pk_indices: PkIndices,
+    connector_params: Option<RemoteSinkParams>,
+) -> StreamExecutorResult<Box<SinkImpl>> {
+    Ok(Box::new(
+        SinkImpl::new(config, schema, pk_indices, connector_params).await?,
+    ))
 }
 
 impl<S: StateStore> SinkExecutor<S> {
@@ -48,17 +56,20 @@ impl<S: StateStore> SinkExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         mut properties: HashMap<String, String>,
         executor_id: u64,
+        connector_params: Option<RemoteSinkParams>,
     ) -> Self {
         // This field can be used to distinguish a specific actor in parallelism to prevent
         // transaction execution errors
         properties.insert("identifier".to_string(), format!("sink-{:?}", executor_id));
+        let pk_indices = materialize_executor.pk_indices().to_vec();
         Self {
             input: materialize_executor,
             _store,
             metrics,
             properties,
             identity: format!("SinkExecutor_{:?}", executor_id),
-            pk_indices: Default::default(), // todo
+            pk_indices,
+            connector_params,
         }
     }
 
@@ -72,7 +83,13 @@ impl<S: StateStore> SinkExecutor<S> {
 
         let schema = self.schema().clone();
         let sink_config = SinkConfig::from_hashmap(self.properties.clone())?;
-        let mut sink = build_sink(sink_config.clone(), schema).await?;
+        let mut sink = build_sink(
+            sink_config.clone(),
+            schema,
+            self.pk_indices,
+            self.connector_params,
+        )
+        .await?;
 
         // prepare the external sink before writing if needed.
         if sink.needs_preparation() {
@@ -201,6 +218,7 @@ mod test {
             Arc::new(StreamingMetrics::unused()),
             properties,
             0,
+            None,
         );
 
         let mut executor = SinkExecutor::execute(Box::new(sink_executor));
