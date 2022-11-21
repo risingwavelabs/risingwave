@@ -268,7 +268,13 @@ mod tests {
             table_id: 12,
             ignore_range_tombstone: false,
         };
-
+        let iter_read_options = TraceReadOptions {
+            prefix_hint: None,
+            check_bloom_filter: true,
+            retention_seconds: Some(124),
+            table_id: 123,
+            ignore_range_tombstone: true,
+        };
         let op = Operation::Get {
             key: vec![123],
             epoch: 123,
@@ -334,7 +340,7 @@ mod tests {
         let op = Operation::Iter {
             key_range: (Bound::Unbounded, Bound::Unbounded),
             epoch: 45,
-            read_options: read_options.clone(),
+            read_options: iter_read_options,
         };
         let record = Record::new(StorageType::Local(0), 1, op);
         res_tx

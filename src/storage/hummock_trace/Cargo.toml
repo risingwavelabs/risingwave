@@ -12,9 +12,9 @@ either = "1"
 flume = "0.10.14"
 lazy_static = "1.4.0"
 parking_lot = "0.12"
+prost = "0.11"
 risingwave_common = { path = "../../common" }
 risingwave_pb = { path = "../../prost" }
-ron = "0.8"
 thiserror = "1.0"
 tokio = { version = "0.2", package = "madsim-tokio" }
 

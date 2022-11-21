@@ -14,7 +14,9 @@
 use std::ops::Bound;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use bincode::{BorrowDecode, Decode, Encode};
+use bincode::error::{DecodeError, EncodeError};
+use bincode::{Decode, Encode};
+use prost::Message;
 use risingwave_pb::meta::SubscribeResponse;
 
 use crate::StorageType;
@@ -111,15 +113,12 @@ pub enum Operation {
     /// (epoch, is_checkpoint)
     Seal(u64, bool),
 
-    /// Update local_version
-    UpdateVersion(u64),
-
-    /// The end of an operation
-    Finish,
-
     MetaMessage(Box<TraceSubResp>),
 
     Result(OperationResult),
+
+    /// The end of an operation
+    Finish,
 }
 
 impl Operation {
@@ -137,10 +136,10 @@ impl Operation {
             epoch,
             read_options: TraceReadOptions {
                 prefix_hint,
+                ignore_range_tombstone,
                 check_bloom_filter,
                 retention_seconds,
                 table_id,
-                ignore_range_tombstone,
             },
         }
     }
@@ -197,15 +196,16 @@ pub enum OperationResult {
 pub struct TraceSubResp(pub SubscribeResponse);
 
 impl Encode for TraceSubResp {
-    fn encode<E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), bincode::error::EncodeError> {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         // SubscribeResponse and its implementation of Serialize is generated
-        // by prost and pbjson for ProtoBuf mapping.
+        // by prost and pbjson for protobuf mapping.
         // Serialization methods like Bincode may not correctly serialize it.
-        let encoded = ron::to_string(&self.0).unwrap();
-        Encode::encode(&encoded, encoder)
+        // So we use prost::Message::encode
+        let mut buf = vec![];
+        self.0
+            .encode(&mut buf)
+            .map_err(|_| EncodeError::Other("failed to encode subscribeResponse"))?;
+        Encode::encode(&buf, encoder)
     }
 }
 
@@ -213,8 +213,10 @@ impl Decode for TraceSubResp {
     fn decode<D: bincode::de::Decoder>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
-        let s: String = Decode::decode(decoder)?;
-        let resp: SubscribeResponse = ron::from_str(&s).unwrap();
+        let buf: Vec<u8> = Decode::decode(decoder)?;
+        let resp = Message::decode(&buf[..]).map_err(|_| {
+            DecodeError::OtherString("failed to decode subscribeResponse".to_string())
+        })?;
         Ok(Self(resp))
     }
 }
@@ -223,8 +225,10 @@ impl<'de> bincode::BorrowDecode<'de> for TraceSubResp {
     fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
         decoder: &mut D,
     ) -> core::result::Result<Self, bincode::error::DecodeError> {
-        let s: String = BorrowDecode::borrow_decode(decoder)?;
-        let resp: SubscribeResponse = ron::from_str(&s).unwrap();
+        let buf: Vec<u8> = Decode::decode(decoder)?;
+        let resp = Message::decode(&buf[..]).map_err(|_| {
+            DecodeError::OtherString("failed to decode subscribeResponse".to_string())
+        })?;
         Ok(Self(resp))
     }
 }
@@ -253,7 +257,7 @@ mod tests {
 
     // test atomic id
     #[tokio::test(flavor = "multi_thread")]
-    async fn atomic_span_id() {
+    async fn test_atomic_span_id() {
         // reset record id to be 0
         let gen = Arc::new(RecordIdGenerator::new());
         let mut handles = Vec::new();
