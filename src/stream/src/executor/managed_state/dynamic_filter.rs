@@ -23,7 +23,7 @@ use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::{CompactedRow, Row, Row2};
-use risingwave_common::types::{ScalarImpl, VIRTUAL_NODE_SIZE};
+use risingwave_common::types::{ScalarImpl, VirtualNode, MAX_VIRTUAL_NODE, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::StateStore;
 
@@ -38,7 +38,7 @@ type ScalarRange = (Bound<ScalarImpl>, Bound<ScalarImpl>);
 /// Values not in range will have to be retrieved from storage.
 pub struct RangeCache<S: StateStore> {
     /// {vnode -> {memcomparable_pk -> row}}
-    cache: HashMap<u8, BTreeMap<Vec<u8>, CompactedRow>>,
+    cache: HashMap<VirtualNode, BTreeMap<Vec<u8>, CompactedRow>>,
     pub(crate) state_table: StateTable<S>,
     /// The current range stored in the cache.
     /// Any request for a set of values outside of this range will result in a scan
@@ -232,18 +232,18 @@ impl<S: StateStore> RangeCache<S> {
 }
 
 pub struct UnorderedRangeCacheIter<'a> {
-    cache: &'a HashMap<u8, BTreeMap<Vec<u8>, CompactedRow>>,
+    cache: &'a HashMap<VirtualNode, BTreeMap<Vec<u8>, CompactedRow>>,
     current_map: Option<&'a BTreeMap<Vec<u8>, CompactedRow>>,
     current_iter: Option<BTreeMapRange<'a, Vec<u8>, CompactedRow>>,
     vnodes: Arc<Bitmap>,
-    next_vnode: u8,
+    next_vnode: VirtualNode,
     completed: bool,
     range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 }
 
 impl<'a> UnorderedRangeCacheIter<'a> {
     fn new(
-        cache: &'a HashMap<u8, BTreeMap<Vec<u8>, CompactedRow>>,
+        cache: &'a HashMap<VirtualNode, BTreeMap<Vec<u8>, CompactedRow>>,
         range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         vnodes: Arc<Bitmap>,
     ) -> Self {
@@ -266,7 +266,7 @@ impl<'a> UnorderedRangeCacheIter<'a> {
                 self.current_map = Some(vnode_range);
                 self.current_iter = self.current_map.map(|m| m.range(self.range.clone()));
                 return;
-            } else if self.next_vnode == u8::MAX {
+            } else if self.next_vnode == MAX_VIRTUAL_NODE {
                 // The iterator cannot be refilled further.
                 self.completed = true;
                 return;
@@ -286,7 +286,7 @@ impl<'a> std::iter::Iterator for UnorderedRangeCacheIter<'a> {
         } else if let Some(iter) = &mut self.current_iter {
             let res = iter.next();
             if res.is_none() {
-                if self.next_vnode == u8::MAX {
+                if self.next_vnode == MAX_VIRTUAL_NODE {
                     // The iterator cannot be refilled further.
                     self.completed = true;
                     None
@@ -415,6 +415,8 @@ fn range_contains_lower_upper(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::VIRTUAL_NODE_COUNT;
+
     use super::*;
 
     #[test]
@@ -537,23 +539,31 @@ mod tests {
 
     #[test]
     fn test_dynamic_filter_range_cache_unordered_range_iter() {
-        let cache = (0..=u8::MAX)
+        let cache = (0..=MAX_VIRTUAL_NODE)
             .map(|x| {
                 (
                     x,
-                    vec![(vec![x], CompactedRow { row: vec![x] })]
-                        .into_iter()
-                        .collect::<BTreeMap<_, _>>(),
+                    vec![(
+                        x.to_be_bytes().to_vec(),
+                        CompactedRow {
+                            row: x.to_be_bytes().to_vec(),
+                        },
+                    )]
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>(),
                 )
             })
             .collect::<HashMap<_, _>>();
         let range = (Unbounded, Unbounded);
-        let vnodes = Arc::new(Bitmap::from_bytes(bytes::Bytes::from_static(
-            &[u8::MAX; 32],
-        ))); // set all the bits
+        let vnodes = Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).into(); // set all the bits
         let mut iter = UnorderedRangeCacheIter::new(&cache, range, vnodes);
-        for i in 0..=u8::MAX {
-            assert_eq!(Some(&CompactedRow { row: vec![i] }), iter.next());
+        for i in 0..=MAX_VIRTUAL_NODE {
+            assert_eq!(
+                Some(&CompactedRow {
+                    row: i.to_be_bytes().to_vec()
+                }),
+                iter.next()
+            );
         }
         assert!(iter.next().is_none());
     }

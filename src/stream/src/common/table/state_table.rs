@@ -833,11 +833,12 @@ impl<S: StateStore> StateTable<S> {
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
-        vnode: u8,
+        vnode: VirtualNode,
     ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
 
-        let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &[vnode]);
+        let memcomparable_range_with_vnode =
+            prefixed_range(memcomparable_range, &vnode.to_be_bytes());
 
         // TODO: provide a trace of useful params.
 
@@ -854,7 +855,7 @@ impl<S: StateStore> StateTable<S> {
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
-        vnode: u8,
+        vnode: VirtualNode,
     ) -> StreamExecutorResult<RowStream<'_, S>> {
         let (mem_table_iter, storage_iter_stream) =
             self.iter_with_pk_range_inner(pk_range, vnode).await?;
@@ -872,7 +873,7 @@ impl<S: StateStore> StateTable<S> {
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
-        vnode: u8,
+        vnode: VirtualNode,
     ) -> StreamExecutorResult<RowStreamWithPk<'_, S>> {
         let (mem_table_iter, storage_iter_stream) =
             self.iter_with_pk_range_inner(pk_range, vnode).await?;

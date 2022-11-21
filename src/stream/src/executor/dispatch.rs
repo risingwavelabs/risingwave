@@ -873,7 +873,6 @@ mod tests {
     use risingwave_common::catalog::Schema;
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::stream_plan::DispatcherType;
-    use static_assertions::const_assert_eq;
 
     use super::*;
     use crate::executor::exchange::output::Output;
@@ -915,7 +914,8 @@ mod tests {
 
     async fn test_hash_dispatcher_complex_inner() {
         // This test only works when VIRTUAL_NODE_COUNT is 256.
-        const_assert_eq!(VIRTUAL_NODE_COUNT, 256);
+        //
+        // static_assertions::const_assert_eq!(VIRTUAL_NODE_COUNT, 256);
 
         let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
