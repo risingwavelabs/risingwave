@@ -400,11 +400,17 @@ mod tests {
         tx.push_barrier(1, false);
         executor.next().await.unwrap().unwrap();
 
+        macro_rules! watermark {
+            ($scalar:expr) => {
+                Watermark::new(1, WATERMARK_TYPE.clone(), $scalar)
+            };
+        }
+
         // Init watermark
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            Watermark::new(1, WATERMARK_TYPE.clone(), WATERMARK_TYPE.min())
+            watermark!(WATERMARK_TYPE.min()),
         );
 
         // push the 1st chunk
@@ -422,13 +428,9 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            Watermark::new(
-                1,
-                WATERMARK_TYPE.clone(),
-                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                    NaiveDate::from_ymd(2022, 11, 7).and_hms(0, 0, 0)
-                ))
-            )
+            watermark!(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                NaiveDate::from_ymd(2022, 11, 7).and_hms(0, 0, 0)
+            )))
         );
 
         // push the 2nd barrier
@@ -449,13 +451,9 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            Watermark::new(
-                1,
-                WATERMARK_TYPE.clone(),
-                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                    NaiveDate::from_ymd(2022, 11, 9).and_hms(0, 0, 0)
-                ))
-            )
+            watermark!(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                NaiveDate::from_ymd(2022, 11, 9).and_hms(0, 0, 0)
+            )))
         );
 
         // push the 3nd barrier
@@ -477,13 +475,9 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            Watermark::new(
-                1,
-                WATERMARK_TYPE.clone(),
-                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                    NaiveDate::from_ymd(2022, 11, 9).and_hms(0, 0, 0)
-                ))
-            )
+            watermark!(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                NaiveDate::from_ymd(2022, 11, 9).and_hms(0, 0, 0)
+            )))
         );
 
         // push the 3rd chunk
@@ -500,13 +494,9 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            Watermark::new(
-                1,
-                WATERMARK_TYPE.clone(),
-                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                    NaiveDate::from_ymd(2022, 11, 13).and_hms(0, 0, 0)
-                ))
-            )
+            watermark!(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                NaiveDate::from_ymd(2022, 11, 13).and_hms(0, 0, 0)
+            )))
         );
     }
 }

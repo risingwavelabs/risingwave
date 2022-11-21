@@ -566,12 +566,12 @@ impl Watermark {
 
     pub fn from_protobuf(prost: &ProstWatermark) -> StreamExecutorResult<Self> {
         let data_type = DataType::from(prost.get_data_type()?);
-        // Should never receive a Null watermark value here
-        let datum = deserialize_datum(prost.get_val()?.get_body().as_slice(), &data_type)?.unwrap();
+        let val = deserialize_datum(prost.get_val()?.get_body().as_slice(), &data_type)?
+            .expect("watermark value cannot be null");
         Ok(Watermark {
             col_idx: prost.col_idx as _,
             data_type,
-            val: datum,
+            val,
         })
     }
 }

@@ -49,14 +49,19 @@ impl MessageSender {
     }
 
     #[allow(dead_code)]
-    pub fn push_int64_watermark(&mut self, col_idx: usize, val: i64) {
+    pub fn push_watermark(&mut self, col_idx: usize, data_type: DataType, val: ScalarImpl) {
         self.0
             .send(Message::Watermark(Watermark {
                 col_idx,
-                data_type: DataType::Int64,
-                val: ScalarImpl::Int64(val),
+                data_type,
+                val,
             }))
             .unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_int64_watermark(&mut self, col_idx: usize, val: i64) {
+        self.push_watermark(col_idx, DataType::Int64, ScalarImpl::Int64(val));
     }
 }
 
