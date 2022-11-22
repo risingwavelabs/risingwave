@@ -142,7 +142,7 @@ async fn run_election<S: MetaStore>(
     meta_store: &Arc<S>,
     addr: &String,
     lease_time: u64,
-) -> Option<(MetaLeaderInfo, MetaLeaseInfo)> {
+) -> Option<(MetaLeaderInfo, MetaLeaseInfo, bool)> {
     // below is old code
     // get old leader info and lease
     let (old_leader_info, old_leader_lease) = match get_infos(&meta_store).await {
@@ -199,6 +199,7 @@ async fn run_election<S: MetaStore>(
     tracing::info!("lease_info: {:?}", lease_info);
 
     if !old_leader_info.is_empty() {
+        tracing::info!("old_leader_info empty");
         // cluster has leader
         txn.check_equal(
             META_CF_NAME.to_string(),
@@ -211,6 +212,8 @@ async fn run_election<S: MetaStore>(
             leader_info.encode_to_vec(),
         );
     } else {
+        tracing::info!("old_leader_info full");
+
         // cluster has no leader
         if let Err(e) = meta_store
             .put_cf(
@@ -238,59 +241,66 @@ async fn run_election<S: MetaStore>(
         META_LEASE_KEY.as_bytes().to_vec(),
         lease_info.encode_to_vec(),
     );
+
     if let Err(e) = meta_store.txn(txn).await {
         tracing::warn!(
             "add leader info failed, MetaStoreError: {:?}, try again later",
             e
         );
+        // TODO: Do I have to return none here?
         return None;
     }
 
-    // below is my code
-
-    // define lease
-    //    let mut txn = Transaction::default();
-    // let now = since_epoch();
-    // let lease_info = MetaLeaseInfo {
-    // leader: Some(leader_info.clone()), // TODO: Get new leader_info
-    // lease_register_time: now.as_secs(),
-    // lease_expire_time: now.as_secs() + lease_time,
-    // };
-    // txn.check_equal(
-    // META_CF_NAME.to_string(),
-    // META_LEADER_KEY.as_bytes().to_vec(),
-    // leader_info.encode_to_vec(),
-    // );
-    // txn.put(
-    // META_CF_NAME.to_string(),
-    // META_LEASE_KEY.as_bytes().to_vec(),
-    // lease_info.encode_to_vec(),
-    // );
-
+    // TODO
+    // Taken from the election loop
+    // Do we need this?
+    let mut txn = Transaction::default();
+    let now = since_epoch();
+    let lease_info = MetaLeaseInfo {
+        leader: Some(leader_info.clone()),
+        lease_register_time: now.as_secs(),
+        lease_expire_time: now.as_secs() + lease_time,
+    };
+    txn.check_equal(
+        META_CF_NAME.to_string(),
+        META_LEADER_KEY.as_bytes().to_vec(),
+        leader_info.encode_to_vec(),
+    );
+    txn.put(
+        META_CF_NAME.to_string(),
+        META_LEASE_KEY.as_bytes().to_vec(),
+        lease_info.encode_to_vec(),
+    );
     // TODO: not sure if we need to do this
     // try to acquire lease
-    // if let Err(e) = meta_store.txn(txn).await {
-    // match e {
-    // MetaStoreError::TransactionAbort() => {
-    // tracing::error!("keep lease failed, another node has become new leader");
-    // }
-    // MetaStoreError::Internal(e) => {
-    // tracing::warn!(
-    // "keep lease failed, try again later, MetaStoreError: {:?}",
-    // e
-    // );
-    // TODO: DO I need this delay here?
-    // tokio::select! { _ = ticker.tick() => {}}
-    // return None;
-    // }
-    // MetaStoreError::ItemNotFound(e) => {
-    // tracing::warn!("keep lease failed, MetaStoreError: {:?}", e);
-    // }
-    // }
-    // } else {
-    // tracing::info!("Current node is leader");
-    // }
-    Some((leader_info, lease_info))
+    // TODO: Change log messages
+    let is_leader = match meta_store.txn(txn).await {
+        Err(e) => match e {
+            MetaStoreError::TransactionAbort() => {
+                tracing::error!("keep lease failed, another node has become new leader");
+                false
+            }
+            MetaStoreError::Internal(e) => {
+                tracing::warn!(
+                    "keep lease failed, try again later, MetaStoreError: {:?}",
+                    e
+                );
+                return None; // repeat the lection
+            }
+            MetaStoreError::ItemNotFound(e) => {
+                tracing::warn!("keep lease failed, MetaStoreError: {:?}", e);
+                false
+            }
+        },
+        Ok(_) => {
+            tracing::info!("Current node is leader");
+            true
+        }
+    };
+
+    // TODO: Compare the logs here with the logs from the main branch
+
+    Some((leader_info, lease_info, is_leader))
 }
 
 // getting leader_info and leader_lease or defaulting to none
@@ -345,10 +355,10 @@ pub async fn register_leader_for_meta<S: MetaStore>(
 
         // run the initial election
         let election_outcome = run_election(&meta_store, &addr_clone, lease_time).await;
-        let (leader, _) = match election_outcome {
+        let (leader, _, is_leader) = match election_outcome {
             Some(infos) => {
-                let (leader, lease) = infos;
-                (leader, lease)
+                let (leader, lease, is_leader) = infos;
+                (leader, lease, is_leader) // TODO: define election_result datatype
             }
             None => continue 'initial_election,
         };
@@ -376,14 +386,15 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 break 'election; // TODO: remove this line
                                  // TODO: error is in the election loop
 
-                let election_result = run_election(&meta_store, &addr_clone, lease_time).await;
-                let (leader_info, lease_info) = match election_result {
-                    None => continue 'election,
-                    Some(infos) => {
-                        let (leader, lease) = infos;
-                        (leader, lease)
-                    }
-                };
+                // TODO: how do we update the leader status? We cannot return is_leader here
+                let (leader_info, lease_info, is_leader) =
+                    match run_election(&meta_store, &addr_clone, lease_time).await {
+                        None => continue 'election,
+                        Some(infos) => {
+                            let (leader, lease, is_leader) = infos;
+                            (leader, lease, is_leader)
+                        }
+                    };
 
                 tracing::info!("Election done. Entering term");
 
@@ -486,8 +497,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 }
             }
         });
-        let node_is_leader = (&leader).node_address.eq(&addr);
-        return Ok((leader, handle, shutdown_tx, node_is_leader));
+        return Ok((leader, handle, shutdown_tx, is_leader));
     }
 }
 
