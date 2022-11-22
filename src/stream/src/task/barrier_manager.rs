@@ -152,11 +152,11 @@ impl LocalBarrierManager {
             match self.senders.get(&actor_id) {
                 Some(senders) => {
                     for sender in senders {
-                    if let Err(err) = sender.send(barrier.clone()) {
-                        // return err to trigger recovery.
-                        bail!("failed to send barrier to actor {}: {:?}", actor_id, err)
+                        if let Err(err) = sender.send(barrier.clone()) {
+                            // return err to trigger recovery.
+                            bail!("failed to send barrier to actor {}: {:?}", actor_id, err)
+                        }
                     }
-                }
                 }
                 None => {
                     bail!("sender for actor {} does not exist", actor_id)
