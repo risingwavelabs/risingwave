@@ -226,7 +226,7 @@ async fn run_election<S: MetaStore>(
             return None;
         }
         // Check if new leader was elected in the meantime
-        return match renew_lease(&leader_info, lease_time, &meta_store).await {
+        return match try_acquire_renew_lease(&leader_info, lease_time, &meta_store).await {
             Some(val) => {
                 if !val {
                     return None;
@@ -243,7 +243,7 @@ async fn run_election<S: MetaStore>(
 
     // follow-up election:
     // There has already been a leader before
-    let is_leader = match renew_lease(&leader_info, lease_time, meta_store).await {
+    let is_leader = match try_acquire_renew_lease(&leader_info, lease_time, meta_store).await {
         None => return None,
         Some(val) => val,
     };
@@ -259,7 +259,7 @@ async fn run_election<S: MetaStore>(
 // Returns true if node was leader and was able to renew/acquire the lease
 // Returns false if node was follower and thus could not renew/acquire lease
 // Returns None if operation has to be repeated
-async fn renew_lease<S: MetaStore>(
+async fn try_acquire_renew_lease<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
     lease_time_sec: u64,
     meta_store: &Arc<S>,
@@ -450,7 +450,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     tracing::info!("leader_info: {:?}", leader_info);
 
                     // renew the current lease if this is the leader
-                    if renew_lease(&leader_info, lease_time, &meta_store)
+                    if try_acquire_renew_lease(&leader_info, lease_time, &meta_store)
                         .await
                         .is_none()
                     {
