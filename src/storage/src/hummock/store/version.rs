@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::key::{
     bound_table_key_range, user_key, FullKey, TableKey, TableKeyRange, UserKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
-use risingwave_hummock_sdk::{can_concat, HummockEpoch};
+use risingwave_hummock_sdk::{can_concat, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 use sync_point::sync_point;
 
@@ -64,22 +64,23 @@ pub type CommittedVersion = PinnedVersion;
 /// - Uncommitted SST: data that has been uploaded to persistent storage but not committed to
 ///   hummock version.
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StagingSstableInfo {
     // newer data comes first
-    sstable_infos: Vec<SstableInfo>,
+    sstable_infos: Vec<LocalSstableInfo>,
     /// Epochs whose data are included in the Sstable. The newer epoch comes first.
     /// The field must not be empty.
     epochs: Vec<HummockEpoch>,
-    #[allow(dead_code)]
     imm_ids: Vec<ImmId>,
+    imm_size: usize,
 }
 
 impl StagingSstableInfo {
     pub fn new(
-        sstable_infos: Vec<SstableInfo>,
+        sstable_infos: Vec<LocalSstableInfo>,
         epochs: Vec<HummockEpoch>,
         imm_ids: Vec<ImmId>,
+        imm_size: usize,
     ) -> Self {
         // the epochs are sorted from higher epoch to lower epoch
         assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2.partial_cmp(epoch1)));
@@ -87,11 +88,24 @@ impl StagingSstableInfo {
             sstable_infos,
             epochs,
             imm_ids,
+            imm_size,
         }
     }
 
-    pub fn sstable_infos(&self) -> &Vec<SstableInfo> {
+    pub fn sstable_infos(&self) -> &Vec<LocalSstableInfo> {
         &self.sstable_infos
+    }
+
+    pub fn imm_size(&self) -> usize {
+        self.imm_size
+    }
+
+    pub fn epochs(&self) -> &Vec<HummockEpoch> {
+        &self.epochs
+    }
+
+    pub fn imm_ids(&self) -> &Vec<ImmId> {
+        &self.imm_ids
     }
 }
 
@@ -157,6 +171,7 @@ impl StagingVersion {
                 staging_sst
                     .sstable_infos
                     .iter()
+                    .map(|sstable| &sstable.sst_info)
                     .filter(move |sstable| filter_single_sst(sstable, table_id, table_key_range))
             });
         (overlapped_imms, overlapped_ssts)
