@@ -26,7 +26,7 @@ use super::generic::{
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
-    StreamLocalSimpleAgg, StreamProject, ToBatch, ToStream,
+    StreamLocalSimpleAgg, StreamProject, ToBatch, ToStream, NodeExplain, NodeExplainBuilder,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
@@ -719,7 +719,9 @@ impl LogicalAgg {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name)
+        let mut builder = NodeExplainBuilder::new(name.to_string());
+        self.core.explain(&mut builder);
+        builder.write_in_one_row(f)
     }
 }
 

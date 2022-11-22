@@ -467,16 +467,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {
         (self.agg_calls, self.group_key, self.input)
     }
+}
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        if !self.group_key.is_empty() {
-            builder.field("group_key", &self.group_key_display());
-        }
-        builder.field("aggs", &self.agg_calls_display());
-        builder.finish()
-    }
-
+impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
         self.agg_calls
             .iter()
@@ -484,7 +477,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 plan_agg_call,
                 input_schema: self.input.schema(),
             })
-            .collect_vec()
+            .collect()
     }
 
     fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
@@ -492,7 +485,16 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .iter()
             .copied()
             .map(|i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-            .collect_vec()
+            .collect()
+    }
+}
+
+impl<PlanRef: GenericPlanRef> NodeExplain for Agg<PlanRef> {
+    fn explain(&self, builder: &mut NodeExplainBuilder) {
+        if !self.group_key.is_empty() {
+            builder.debug_field("group_key", &self.group_key_display());
+        }
+        builder.debug_field("aggs", &self.agg_calls_display());
     }
 }
 
