@@ -19,7 +19,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use prost::Message;
 use rand::Rng;
-use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
@@ -170,7 +169,6 @@ async fn run_election<S: MetaStore>(
     let now = since_epoch();
     if !current_leader_lease.is_empty() {
         // TODO: why do we need this part?
-        tracing::info!("current_leader_lease is not empty");
         let lease_info = MetaLeaseInfo::decode(&mut current_leader_lease.as_slice()).unwrap();
 
         // Lease did not yet expire
@@ -256,6 +254,7 @@ async fn run_election<S: MetaStore>(
     })
 }
 
+// TODO: write docstring
 // Try to renew/acquire the lease of the current leader by lease_time
 // Returns true if node was leader and was able to renew/acquire the lease
 // Returns false if node was follower and thus could not renew/acquire lease
@@ -285,7 +284,8 @@ async fn try_acquire_renew_lease<S: MetaStore>(
     let is_leader = match meta_store.txn(txn).await {
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => {
-                tracing::error!("Renew/acquire lease: another node has become new leader");
+                // TODO: remove this
+                //   tracing::info!("Renew/acquire lease: another node has become new leader");
                 false
             }
             MetaStoreError::Internal(e) => {
@@ -303,18 +303,10 @@ async fn try_acquire_renew_lease<S: MetaStore>(
                 // TODO: Do we have to go to elections if we run into this one?
             }
         },
-        Ok(_) => {
-            tracing::info!("Current node is leader");
-            true
-        }
+        Ok(_) => true,
     };
     Some(is_leader)
 }
-
-// TODO: How to debug
-// query kv from etcd
-// add more logs
-// txn may be incorrect
 
 type MetaLeaderInfoVec = Vec<u8>;
 type MetaLeaseInfoVec = Vec<u8>;
@@ -443,8 +435,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         _ = ticker.tick() => {},
                     }
 
-                    tracing::info!("leader_info: {:?}", leader_info);
-
                     // renew the current lease if this is the leader
                     let attempt =
                         try_acquire_renew_lease(&leader_info, lease_time, &meta_store).await;
@@ -484,7 +474,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         continue 'election;
                     }
                     // lease exists and leader continues term
-                    tracing::info!("lease exists and leader continues term");
                 }
             }
         });
