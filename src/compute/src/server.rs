@@ -221,12 +221,15 @@ pub async fn compute_node_serve(
         client_pool,
     );
 
+    let connector_params = risingwave_connector::ConnectorParams {
+        connector_source_endpoint: opts.connector_source_endpoint,
+        connector_sink_endpoint: opts.connector_sink_endpoint,
+    };
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
         source_mgr,
         client_addr.clone(),
-        opts.connector_source_endpoint.clone(),
-        opts.connector_sink_endpoint.clone(),
+        connector_params,
         stream_config,
         worker_id,
         state_store,

@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_connector::ConnectorParams;
 use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
@@ -28,11 +29,8 @@ pub struct StreamEnvironment {
     /// Endpoint the stream manager listens on.
     server_addr: HostAddr,
 
-    /// Endpoint of the source connector node
-    connector_source_endpoint: String,
-
-    /// Address of connector node (optional)
-    connector_sink_endpoint: String,
+    /// Parameters used by connector nodes.
+    connector_params: ConnectorParams,
 
     /// Reference to the source manager.
     source_manager: TableSourceManagerRef,
@@ -51,16 +49,14 @@ impl StreamEnvironment {
     pub fn new(
         source_manager: TableSourceManagerRef,
         server_addr: HostAddr,
-        connector_source_endpoint: String,
-        connector_sink_endpoint: String,
+        connector_params: ConnectorParams,
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
     ) -> Self {
         StreamEnvironment {
             server_addr,
-            connector_source_endpoint,
-            connector_sink_endpoint,
+            connector_params,
             source_manager,
             config,
             worker_id,
@@ -74,8 +70,10 @@ impl StreamEnvironment {
         use risingwave_storage::monitor::StateStoreMetrics;
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
-            connector_source_endpoint: "127.0.0.1:60061".parse().unwrap(),
-            connector_sink_endpoint: "127.0.0.1:50051".parse().unwrap(),
+            connector_params: ConnectorParams::new(
+                Some("127.0.0.1:60061".parse().unwrap()),
+                Some("127.0.0.1:50051".parse().unwrap()),
+            ),
             source_manager: Arc::new(TableSourceManager::default()),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
@@ -109,11 +107,7 @@ impl StreamEnvironment {
         self.state_store.clone()
     }
 
-    pub fn connector_source_endpoint(&self) -> String {
-        self.connector_source_endpoint.clone()
-    }
-
-    pub fn connector_sink_endpoint(&self) -> String {
-        self.connector_sink_endpoint.clone()
+    pub fn connector_params(&self) -> ConnectorParams {
+        self.connector_params.clone()
     }
 }

@@ -31,7 +31,20 @@ mod macros;
 pub mod sink;
 pub mod source;
 
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
-    pub connector_addr: String,
+    pub connector_source_endpoint: Option<String>,
+    pub connector_sink_endpoint: Option<String>,
+}
+
+impl ConnectorParams {
+    pub fn new(
+        connector_source_endpoint: Option<String>,
+        connector_sink_endpoint: Option<String>,
+    ) -> Self {
+        Self {
+            connector_source_endpoint,
+            connector_sink_endpoint,
+        }
+    }
 }

@@ -118,15 +118,22 @@ impl RemoteSink {
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
     ) -> Result<Self> {
-        let channel = Endpoint::from_shared(format!("http://{}", connector_params.connector_addr))
-            .map_err(|e| SinkError::Remote(format!("failed to connect channel: {:?}", e)))?
-            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
-            .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .tcp_nodelay(true)
-            .connect_timeout(Duration::from_secs(5))
-            .connect()
-            .await
-            .map_err(|e| SinkError::Remote(format!("failed to connect channel: {:?}", e)))?; // create client and start sink
+        let channel = Endpoint::from_shared(format!(
+            "http://{}",
+            connector_params
+                .connector_sink_endpoint
+                .ok_or_else(|| SinkError::Remote(
+                    "connector sink endpoint not specified".parse().unwrap()
+                ))?
+        ))
+        .map_err(|e| SinkError::Remote(format!("failed to connect channel: {:?}", e)))?
+        .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+        .initial_stream_window_size(STREAM_WINDOW_SIZE)
+        .tcp_nodelay(true)
+        .connect_timeout(Duration::from_secs(5))
+        .connect()
+        .await
+        .map_err(|e| SinkError::Remote(format!("failed to connect channel: {:?}", e)))?; // create client and start sink
         let mut client = ConnectorServiceClient::new(channel);
 
         let (request_sender, request_receiver) = mpsc::unbounded_channel::<SinkTask>();
