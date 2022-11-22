@@ -24,6 +24,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
@@ -599,66 +600,54 @@ impl Dispatcher for HashDataDispatcher {
             let mut last_vnode_when_update_delete = None;
             let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
+            // TODO: refactor with `Vis`.
             let (ops, columns, visibility) = chunk.into_inner();
+
+            let mut build_op_vis = |vnode: VirtualNode, op: Op, visible: bool| {
+                // Build visibility map for every output chunk.
+                for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
+                    vis_map.append(
+                        visible && self.hash_mapping[vnode.to_index()] == output.actor_id(),
+                    );
+                }
+
+                if !visible {
+                    new_ops.push(op);
+                    return;
+                }
+
+                // The 'update' message, noted by an `UpdateDelete` and a successive `UpdateInsert`,
+                // need to be rewritten to common `Delete` and `Insert` if they were dispatched to
+                // different actors.
+                if op == Op::UpdateDelete {
+                    last_vnode_when_update_delete = Some(vnode);
+                } else if op == Op::UpdateInsert {
+                    if vnode != last_vnode_when_update_delete.unwrap() {
+                        new_ops.push(Op::Delete);
+                        new_ops.push(Op::Insert);
+                    } else {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::UpdateInsert);
+                    }
+                } else {
+                    new_ops.push(op);
+                }
+            };
 
             match visibility {
                 None => {
                     vnodes.iter().copied().zip_eq(ops).for_each(|(vnode, op)| {
-                        // get visibility map for every output chunk
-                        for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
-                            vis_map
-                                .append(self.hash_mapping[vnode.to_index()] == output.actor_id());
-                        }
-                        // The 'update' message, noted by an UpdateDelete and a successive
-                        // UpdateInsert, need to be rewritten to common
-                        // Delete and Insert if they were dispatched to
-                        // different actors.
-                        if op == Op::UpdateDelete {
-                            last_vnode_when_update_delete = Some(vnode);
-                        } else if op == Op::UpdateInsert {
-                            if vnode != last_vnode_when_update_delete.unwrap() {
-                                new_ops.push(Op::Delete);
-                                new_ops.push(Op::Insert);
-                            } else {
-                                new_ops.push(Op::UpdateDelete);
-                                new_ops.push(Op::UpdateInsert);
-                            }
-                        } else {
-                            new_ops.push(op);
-                        }
+                        build_op_vis(vnode, op, true);
                     });
                 }
                 Some(visibility) => {
                     vnodes
                         .iter()
                         .copied()
-                        .zip_eq(visibility.iter())
                         .zip_eq(ops)
-                        .for_each(|((vnode, visible), op)| {
-                            for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut())
-                            {
-                                vis_map.append(
-                                    visible
-                                        && self.hash_mapping[vnode.to_index()] == output.actor_id(),
-                                );
-                            }
-                            if !visible {
-                                new_ops.push(op);
-                                return;
-                            }
-                            if op == Op::UpdateDelete {
-                                last_vnode_when_update_delete = Some(vnode);
-                            } else if op == Op::UpdateInsert {
-                                if vnode != last_vnode_when_update_delete.unwrap() {
-                                    new_ops.push(Op::Delete);
-                                    new_ops.push(Op::Insert);
-                                } else {
-                                    new_ops.push(Op::UpdateDelete);
-                                    new_ops.push(Op::UpdateInsert);
-                                }
-                            } else {
-                                new_ops.push(op);
-                            }
+                        .zip_eq(visibility.iter())
+                        .for_each(|((vnode, op), visible)| {
+                            build_op_vis(vnode, op, visible);
                         });
                 }
             }
@@ -916,8 +905,7 @@ mod tests {
 
     async fn test_hash_dispatcher_complex_inner() {
         // This test only works when VirtualNode::COUNT is 256.
-        //
-        // static_assertions::const_assert_eq!(VirtualNode::COUNT, 256);
+        static_assertions::const_assert_eq!(VirtualNode::COUNT, 256);
 
         let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];

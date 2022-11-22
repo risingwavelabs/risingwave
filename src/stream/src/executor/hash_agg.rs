@@ -224,7 +224,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .map(|(key, hash_code)| {
                 (
                     key.clone(),
-                    hash_code,
+                    *hash_code,
                     key_to_vis_maps.remove(key).unwrap().into_iter().collect(),
                 )
             })

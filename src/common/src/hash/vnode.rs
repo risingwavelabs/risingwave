@@ -17,6 +17,7 @@ use parse_display::Display;
 use crate::hash::HashCode;
 
 /// Parallel unit is the minimal scheduling unit.
+// TODO: make it a newtype
 pub type ParallelUnitId = u32;
 pub type VnodeMapping = Vec<ParallelUnitId>;
 
