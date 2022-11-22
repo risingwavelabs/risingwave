@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::storage::{MetaStore, MetaStoreError, MetaStoreResult, DEFAULT_COLUMN_FAMILY};
+use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
 
 /// `NotificationVersion` records the last sent notification version, this will be stored
 /// persistently to meta store.
@@ -36,10 +36,7 @@ impl NotificationVersion {
         Self(version)
     }
 
-    pub async fn increase_version<S>(&mut self, store: &S) -> MetaStoreResult<()>
-    where
-        S: MetaStore,
-    {
+    pub async fn increase_version<S: MetaStore>(&mut self, store: &S) {
         let version = self.0 + 1;
         store
             .put_cf(
@@ -47,9 +44,9 @@ impl NotificationVersion {
                 NOTIFICATION_VERSION_KEY.to_vec(),
                 version.to_be_bytes().to_vec(),
             )
-            .await?;
+            .await
+            .unwrap();
         self.0 = version;
-        Ok(())
     }
 
     pub fn version(&self) -> u64 {

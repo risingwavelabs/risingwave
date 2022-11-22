@@ -30,6 +30,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::hash::VnodeMapping;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::select_all;
+use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::plan_node::NodeBody::{Delete, Insert, Update};
 use risingwave_pb::batch_plan::{
@@ -324,10 +325,22 @@ impl StageRunner {
                     task_id: i as u32,
                 };
                 let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
-                let plan_fragment = self.create_plan_fragment(i as u32, Some(vnode_ranges));
+                let plan_fragment = self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
                 futures.push(self.schedule_task(task_id, plan_fragment, Some(worker)));
             }
-        } else {
+        } else if let Some(source_info) = self.stage.source_info.as_ref() {
+            for (id, split) in source_info.split_info().iter().enumerate() {
+                let task_id = TaskIdProst {
+                    query_id: self.stage.query_id.id.clone(),
+                    stage_id: self.stage.id,
+                    task_id: id as u32,
+                };
+                let plan_fragment = self.create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
+                let worker = self.choose_worker(&plan_fragment, id as u32)?;
+                futures.push(self.schedule_task(task_id, plan_fragment, worker));
+            }
+        }
+        else {
             for id in 0..self.stage.parallelism {
                 let task_id = TaskIdProst {
                     query_id: self.stage.query_id.id.clone(),
@@ -768,13 +781,32 @@ impl StageRunner {
                 let NodeBody::RowSeqScan(mut scan_node) = node_body else {
                     unreachable!();
                 };
-                let partition = partition.expect("no partition info for seq scan");
+                let partition = partition
+                    .expect("no partition info for seq scan")
+                    .into_table()
+                    .expect("PartitionInfo should be TablePartitionInfo");
                 scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
                 scan_node.scan_ranges = partition.scan_ranges;
                 PlanNodeProst {
                     children: vec![],
                     identity,
                     node_body: Some(NodeBody::RowSeqScan(scan_node)),
+                }
+            }
+            PlanNodeType::BatchSource => {
+                let node_body = execution_plan_node.node.clone();
+                let NodeBody::Source(mut source_node) = node_body else {
+                    unreachable!();
+                };
+                let partition = partition
+                    .expect("no partition info for seq scan")
+                    .into_source()
+                    .expect("PartitionInfo should be SourcePartitionInfo");
+                source_node.split = partition.encode_to_bytes().into();
+                PlanNodeProst {
+                    children: vec![],
+                    identity,
+                    node_body: Some(NodeBody::Source(source_node)),
                 }
             }
             _ => {

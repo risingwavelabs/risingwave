@@ -99,7 +99,7 @@ pub async fn compactor_serve(
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
 
-    let observer_join_handle = observer_manager.start().await.unwrap();
+    let observer_join_handle = observer_manager.start().await;
     let output_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
     let memory_limiter = Arc::new(MemoryLimiter::new(output_limit_mb << 20));
     let input_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
