@@ -309,7 +309,7 @@ where
                 dependent_table
                     .fragments
                     .values_mut()
-                    .filter(|f| f.fragment_type() == FragmentType::Sink)
+                    .filter(|f| f.fragment_type() == FragmentType::Mview)
                     .flat_map(|f| &mut f.actors)
                     .for_each(|a| {
                         a.dispatcher.retain_mut(|d| {
@@ -825,7 +825,7 @@ where
         Ok(map
             .get(table_id)
             .context(format!("table_fragment not exist: id={}", table_id))?
-            .sink_actor_ids())
+            .mview_actor_ids())
     }
 
     // we will read three things at once, avoiding locking too much.
@@ -841,7 +841,7 @@ where
                 *table_id,
                 map.get(table_id)
                     .context(format!("table_fragment not exist: id={}", table_id))?
-                    .sink_actor_ids(),
+                    .mview_actor_ids(),
             );
         }
         Ok(info)
@@ -859,7 +859,7 @@ where
                 *table_id,
                 map.get(table_id)
                     .context(format!("table_fragment not exist: id={}", table_id))?
-                    .sink_vnode_bitmap_info(),
+                    .mview_vnode_bitmap_info(),
             );
         }
 
@@ -881,7 +881,7 @@ where
                 *table_id,
                 FragmentVNodeInfo {
                     actor_parallel_unit_maps: table_fragment.sink_actor_parallel_units(),
-                    vnode_mapping: table_fragment.sink_vnode_mapping(),
+                    vnode_mapping: table_fragment.mview_vnode_mapping(),
                 },
             );
         }
