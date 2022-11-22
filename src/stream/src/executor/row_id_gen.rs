@@ -14,6 +14,7 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
@@ -22,7 +23,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_source::row_id::RowIdGenerator;
 
-use super::{expect_first_barrier, BoxedExecutor, Executor, PkIndices};
+use super::{expect_first_barrier, BoxedExecutor, Executor, PkIndices, PkIndicesRef};
 use crate::executor::{Message, StreamExecutorError};
 
 /// [`RowIdGenExecutor`] generates row id for data, where the user has not specified a pk.
@@ -49,7 +50,9 @@ impl RowIdGenExecutor {
         row_id_index: usize,
         vnodes: Bitmap,
     ) -> Self {
-        let vnode = vnodes.next_set_bit(0).unwrap_or(0);
+        // TODO: We should generate row id for each vnode in the future instead of using the first
+        // vnode.
+        let vnode = vnodes.next_set_bit(0).unwrap();
         Self {
             upstream: Some(upstream),
             schema,
@@ -68,14 +71,11 @@ impl RowIdGenExecutor {
         let len = column.array_ref().len();
         let mut builder = I64ArrayBuilder::new(len);
 
-        for i in 0..len {
+        for (datum, op) in column.array_ref().iter().zip_eq(ops) {
             // Only refill row_id for insert operation.
-            if ops.get(i) == Some(&Op::Insert) {
-                builder.append(Some(self.row_id_generator.next().await));
-            } else {
-                builder.append(Some(
-                    i64::try_from(column.array_ref().datum_at(i).unwrap()).unwrap(),
-                ));
+            match op {
+                Op::Insert => builder.append(Some(self.row_id_generator.next().await)),
+                _ => builder.append(Some(i64::try_from(datum.unwrap()).unwrap())),
             }
         }
 
@@ -117,7 +117,7 @@ impl Executor for RowIdGenExecutor {
         &self.schema
     }
 
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.pk_indices
     }
 
