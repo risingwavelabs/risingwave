@@ -158,7 +158,8 @@ impl<S: StateStore> RangeCache<S> {
                 .ones()
                 .map(|vnode| {
                     self.cache
-                        .remove(&(vnode as VirtualNode))
+                        .get_mut(&(vnode as VirtualNode))
+                        .map(|map| std::mem::take(map))
                         .unwrap_or_default()
                 })
                 .collect_vec();
