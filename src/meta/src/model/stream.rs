@@ -412,7 +412,7 @@ impl TableFragments {
             .collect_vec()
     }
 
-    pub fn sink_actor_parallel_units(&self) -> BTreeMap<ActorId, ParallelUnit> {
+    pub fn mview_actor_parallel_units(&self) -> BTreeMap<ActorId, ParallelUnit> {
         let sink_actor_ids = self.mview_actor_ids();
         sink_actor_ids
             .iter()
