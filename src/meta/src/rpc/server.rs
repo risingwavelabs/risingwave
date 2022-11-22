@@ -202,22 +202,8 @@ async fn run_election<S: MetaStore>(
     };
     tracing::info!("lease_info: {:?}", lease_info);
 
-    // This should be part of the initial transaction only?
-    if !old_leader_info.is_empty() {
-        tracing::info!("We already have a leader");
-        // cluster has leader
-        txn.check_equal(
-            META_CF_NAME.to_string(),
-            META_LEADER_KEY.as_bytes().to_vec(),
-            old_leader_info,
-        );
-        txn.put(
-            // duplicate of below
-            META_CF_NAME.to_string(),
-            META_LEADER_KEY.as_bytes().to_vec(),
-            leader_info.encode_to_vec(),
-        );
-    } else {
+    // Initial leader election
+    if old_leader_info.is_empty() {
         tracing::info!("We have no leader");
 
         // cluster has no leader
@@ -250,11 +236,7 @@ async fn run_election<S: MetaStore>(
         );
 
         if let Err(e) = meta_store.txn(txn).await {
-            tracing::warn!(
-                "add leader info failed, MetaStoreError: {:?}, try again later",
-                e
-            );
-            // TODO: Do I have to return none here?
+            tracing::warn!("acquiring lease failed. Error: {:?}, will retry", e);
             return None;
         }
         return Some((leader_info, lease_info, true));
