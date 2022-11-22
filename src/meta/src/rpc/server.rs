@@ -138,6 +138,7 @@ fn since_epoch() -> Duration {
         .expect("Time went backwards")
 }
 
+// Sets a leader. Does not renew leaders term
 async fn run_election<S: MetaStore>(
     meta_store: &Arc<S>,
     addr: &String,
@@ -421,7 +422,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         _ = ticker.tick() => {},
                     }
 
-                    // maybe use etcd_client?
                     // renew the current lease
                     let now = since_epoch();
                     if addr_clone == lease_info.leader.as_ref().unwrap().node_address {
@@ -431,12 +431,16 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                             lease_register_time: now.as_secs(),
                             lease_expire_time: now.as_secs() + lease_time,
                         };
+                        txn.check_equal(
+                            META_CF_NAME.to_string(),
+                            META_LEADER_KEY.as_bytes().to_vec(),
+                            leader_info.encode_to_vec(),
+                        );
                         txn.put(
                             META_CF_NAME.to_string(),
-                            META_LEASE_KEY.as_bytes().to_vec(),
+                            META_LEADER_KEY.as_bytes().to_vec(),
                             lease_info.encode_to_vec(),
                         );
-                        // TODO: Retry put operation
                         if let Err(e) = meta_store.txn(txn).await {
                             tracing::error!("Unable to renew the leader lease. Error is {}", e);
                         } else {
@@ -445,58 +449,27 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         continue 'term;
                     }
 
-                    // TODO: How do we know we are talking to the correct ETCD node?
                     // get leader info
-                    let infos = get_infos(&meta_store).await;
-                    if infos.is_none() {
-                        continue 'election;
-                    }
-                    let (_, lease_info) = infos.unwrap();
+                    let (_, lease_info) = get_infos(&meta_store).await.unwrap_or_default();
                     if lease_info.is_empty() {
                         // ETCD does not have leader lease. Elect new leader
-                        tracing::info!("ETCD does not have leader lease. Elect new leader");
+                        tracing::info!("ETCD does not have leader lease. Running new election");
                         continue 'election;
                     }
 
                     // delete lease and run new election if lease is expired for some time
                     let some_time = lease_time / 2;
                     let lease_info = MetaLeaseInfo::decode(&mut lease_info.as_slice()).unwrap();
-                    if lease_info.get_lease_expire_time() + some_time
-                        < SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .expect("Time went backwards")
-                            .as_secs()
-                    {
+                    if lease_info.get_lease_expire_time() + some_time < since_epoch().as_secs() {
                         tracing::warn!("Detected that leader is dead");
                         let mut txn = Transaction::default();
                         txn.delete(
                             META_CF_NAME.to_string(),
                             META_LEADER_KEY.as_bytes().to_vec(),
                         );
-                        if let Err(e) = meta_store.txn(txn).await {
-                            match e {
-                                MetaStoreError::TransactionAbort() => {
-                                    tracing::info!(
-                                        // How can we make sure that we delete exactly that
-                                        // lease?
-                                        // Is randomizing the tick good enough?
-                                        "Deleting lease failed: New leader already elected"
-                                    );
-                                }
-                                MetaStoreError::Internal(e) => {
-                                    tracing::warn!(
-                                        "Deleting lease failed: MetaStoreError: {:?}",
-                                        e
-                                    );
-                                    continue 'term;
-                                }
-                                MetaStoreError::ItemNotFound(e) => {
-                                    tracing::warn!(
-                                        "Deleting lease failed: MetaStoreError: {:?}",
-                                        e
-                                    );
-                                }
-                            }
+                        match meta_store.txn(txn).await {
+                            Err(e) => tracing::error!("unable to delete lease. Error was {}", e),
+                            Ok(_) => tracing::info!("Deleted leader lease. Running new election"),
                         }
                         continue 'election;
                     }
