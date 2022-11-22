@@ -151,9 +151,18 @@ impl Drop for LocalInstanceGuard {
     fn drop(&mut self) {
         // If sending fails, it means that event_handler and event_channel have been destroyed, no
         // need to handle failure
-        let _ = self.event_sender.send(HummockEvent::DestroyReadVersion {
-            table_id: self.table_id,
-            instance_id: self.instance_id,
-        });
+        self.event_sender
+            .send(HummockEvent::DestroyReadVersion {
+                table_id: self.table_id,
+                instance_id: self.instance_id,
+            })
+            .unwrap_or_else(|err| {
+                tracing::error!(
+                    "LocalInstanceGuard table_id {:?} instance_id {} Drop SendError {:?}",
+                    self.table_id,
+                    self.instance_id,
+                    err
+                )
+            })
     }
 }

@@ -520,7 +520,7 @@ impl HummockEventHandler {
                                         table_id, instance_id
                                     )
                                 })
-                                .remove(&instance_id);
+                                .remove(&instance_id).unwrap_or_else(|| panic!("DestroyHummockInstance inexist instance table_id {} instance_id {}",  table_id, instance_id));
                         }
                     }
                 }
