@@ -69,12 +69,12 @@ pub struct HummockStorageCore {
 
 impl Drop for HummockStorageCore {
     fn drop(&mut self) {
-        self.event_sender
-            .send(HummockEvent::DestroyReadVersion {
-                table_id: self.table_id,
-                instance_id: self.id,
-            })
-            .unwrap();
+        // If sending fails, it means that event_handler and event_channel have been destroyed, no
+        // need to handle failure
+        let _ = self.event_sender.send(HummockEvent::DestroyReadVersion {
+            table_id: self.table_id,
+            instance_id: self.id,
+        });
     }
 }
 
