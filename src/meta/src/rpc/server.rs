@@ -143,6 +143,8 @@ async fn run_election<S: MetaStore>(
     addr: &String,
     lease_time: u64,
 ) -> Option<(MetaLeaderInfo, MetaLeaseInfo, bool)> {
+    tracing::info!("running an election...");
+
     // below is old code
     // get old leader info and lease
     let (old_leader_info, old_leader_lease) = match get_infos(&meta_store).await {
@@ -199,8 +201,9 @@ async fn run_election<S: MetaStore>(
     };
     tracing::info!("lease_info: {:?}", lease_info);
 
+    // This should be part of the initial transaction only?
     if !old_leader_info.is_empty() {
-        tracing::info!("old_leader_info empty");
+        tracing::info!("We already have a leader");
         // cluster has leader
         txn.check_equal(
             META_CF_NAME.to_string(),
@@ -214,7 +217,7 @@ async fn run_election<S: MetaStore>(
             leader_info.encode_to_vec(),
         );
     } else {
-        tracing::info!("old_leader_info full");
+        tracing::info!("We have no leader");
 
         // cluster has no leader
         if let Err(e) = meta_store
@@ -229,29 +232,31 @@ async fn run_election<S: MetaStore>(
                 "new cluster put leader info failed, MetaStoreError: {:?}",
                 e
             );
-            // continue; // TODO: Should I return none here?
             return None;
         }
+        // Why do we check equal here? We have no leader. Should just get lease
         txn.check_equal(
             META_CF_NAME.to_string(),
             META_LEADER_KEY.as_bytes().to_vec(),
             leader_info.encode_to_vec(),
         );
-    }
-    // duplicate of above
-    txn.put(
-        META_CF_NAME.to_string(),
-        META_LEADER_KEY.as_bytes().to_vec(),
-        lease_info.encode_to_vec(),
-    );
 
-    if let Err(e) = meta_store.txn(txn).await {
-        tracing::warn!(
-            "add leader info failed, MetaStoreError: {:?}, try again later",
-            e
+        // duplicate of above
+        txn.put(
+            META_CF_NAME.to_string(),
+            META_LEADER_KEY.as_bytes().to_vec(),
+            lease_info.encode_to_vec(),
         );
-        // TODO: Do I have to return none here?
-        return None;
+
+        if let Err(e) = meta_store.txn(txn).await {
+            tracing::warn!(
+                "add leader info failed, MetaStoreError: {:?}, try again later",
+                e
+            );
+            // TODO: Do I have to return none here?
+            return None;
+        }
+        return Some((leader_info, lease_info, true));
     }
 
     // TODO
@@ -380,9 +385,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         let handle = tokio::spawn(async move {
             // election
             'election: loop {
-                break 'election; // TODO: remove this line
-                                 // TODO: error is in the election loop
-
                 // also my code below
                 tokio::select! {
                     _ = &mut shutdown_rx => {
@@ -523,16 +525,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     .await?;
     let node_state = if node_is_leader { "leader" } else { "follower" };
     tracing::info!("This node currently is a {}", node_state);
-    // TODO How do I do this properly?
-    if !node_is_leader {
-        let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
-        let join_handle = tokio::spawn(async move {
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {}
-            }
-        });
 
-        return Ok((join_handle, shutdown_send));
+    if !node_is_leader {
+        // TODO: implement actual standby mode.
+        // follower is now pending forever
+        futures::future::pending::<()>().await;
     }
 
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
