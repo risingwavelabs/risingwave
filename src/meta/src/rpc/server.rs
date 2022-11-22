@@ -235,11 +235,13 @@ async fn run_election<S: MetaStore>(
             lease_info.encode_to_vec(),
         );
 
-        if let Err(e) = meta_store.txn(txn).await {
-            tracing::warn!("acquiring lease failed. Error: {:?}, will retry", e);
-            return None;
-        }
-        return Some((leader_info, lease_info, true));
+        return match meta_store.txn(txn).await {
+            Err(e) => {
+                tracing::warn!("acquiring lease failed. Error: {:?}, will retry", e);
+                None
+            }
+            Ok(_) => Some((leader_info, lease_info, true)),
+        };
     }
 
     // TODO
