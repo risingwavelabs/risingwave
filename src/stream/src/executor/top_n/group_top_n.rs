@@ -255,7 +255,7 @@ where
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.limit);
         let mut res_rows = Vec::with_capacity(self.limit);
-
+        let chunk = chunk.compact();
         let keys = K::build(&self.group_by, chunk.data_chunk())?;
 
         for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq(keys.iter()) {

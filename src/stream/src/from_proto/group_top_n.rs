@@ -142,21 +142,3 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
         &self.group_key_types
     }
 }
-
-// pub fn generate_executor_pk_indices_info(
-//     order_pairs: Vec<OrderPair>,
-//     schema: &Schema,
-//     group_by_len: usize,
-// ) -> &[DataType]{
-//     let mut internal_key_indices = vec![];
-//     for order_pair in order_pairs {
-//         internal_key_indices.push(order_pair.column_idx);
-//     }
-//     let internal_data_types: Vec<DataType> = internal_key_indices
-//         .iter()
-//         .map(|idx| schema.fields()[*idx].data_type())
-//         .collect();
-
-//     &internal_data_types[..group_by_len+1]
-
-// }
