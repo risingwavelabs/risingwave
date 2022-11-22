@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 
 use risingwave_pb::catalog::source::Info;
+use risingwave_pb::catalog::source_info::SourceInfo;
 use risingwave_pb::catalog::Source as ProstSource;
-use risingwave_pb::stream_plan::source_node::Info as StreamPlanInfo;
 
 use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, SourceId};
@@ -34,18 +34,18 @@ pub struct SourceCatalog {
     pub pk_col_ids: Vec<ColumnId>,
     pub append_only: bool,
     pub owner: u32,
-    pub info: StreamPlanInfo,
+    pub info: SourceInfo,
     pub row_id_index: Option<usize>,
     pub properties: HashMap<String, String>,
 }
 
 impl SourceCatalog {
     pub fn is_table(&self) -> bool {
-        matches!(self.info, StreamPlanInfo::TableSource(_))
+        matches!(self.info, SourceInfo::TableSource(_))
     }
 
     pub fn is_stream(&self) -> bool {
-        matches!(self.info, StreamPlanInfo::StreamSource(_))
+        matches!(self.info, SourceInfo::StreamSource(_))
     }
 }
 
@@ -62,10 +62,8 @@ impl From<&ProstSource> for SourceCatalog {
             .collect();
         let with_options = WithOptions::new(prost.properties.clone());
         let info = match &prost.info {
-            Some(Info::StreamSource(info_inner)) => {
-                StreamPlanInfo::StreamSource(info_inner.clone())
-            }
-            Some(Info::TableSource(info_inner)) => StreamPlanInfo::TableSource(info_inner.clone()),
+            Some(Info::StreamSource(info_inner)) => SourceInfo::StreamSource(info_inner.clone()),
+            Some(Info::TableSource(info_inner)) => SourceInfo::TableSource(info_inner.clone()),
             None => unreachable!(),
         };
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();

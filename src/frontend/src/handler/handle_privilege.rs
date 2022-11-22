@@ -143,7 +143,7 @@ pub async fn handle_grant_privilege(
         let user_reader = session.env().user_info_reader();
         let reader = user_reader.read_guard();
         for grantee in grantees {
-            if let Some(user) = reader.get_user_by_name(&grantee.value) {
+            if let Some(user) = reader.get_user_by_name(&grantee.real_value()) {
                 users.push(user.id);
             } else {
                 return Err(ErrorCode::BindError("Grantee does not exist".to_string()).into());
@@ -151,7 +151,7 @@ pub async fn handle_grant_privilege(
         }
         if let Some(granted_by) = &granted_by {
             // We remark that the user name is always case-sensitive.
-            if reader.get_user_by_name(&granted_by.value).is_none() {
+            if reader.get_user_by_name(&granted_by.real_value()).is_none() {
                 return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());
             }
         }
@@ -184,14 +184,14 @@ pub async fn handle_revoke_privilege(
         let user_reader = session.env().user_info_reader();
         let reader = user_reader.read_guard();
         for grantee in grantees {
-            if let Some(user) = reader.get_user_by_name(&grantee.value) {
+            if let Some(user) = reader.get_user_by_name(&grantee.real_value()) {
                 users.push(user.id);
             } else {
                 return Err(ErrorCode::BindError("Grantee does not exist".to_string()).into());
             }
         }
         if let Some(granted_by) = &granted_by {
-            if let Some(user) = reader.get_user_by_name(&granted_by.value) {
+            if let Some(user) = reader.get_user_by_name(&granted_by.real_value()) {
                 granted_by_id = Some(user.id);
             } else {
                 return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());
