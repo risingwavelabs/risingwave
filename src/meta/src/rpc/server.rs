@@ -226,27 +226,18 @@ async fn run_election<S: MetaStore>(
             return None;
         }
         // Check if new leader was elected in the meantime
-        txn.check_equal(
-            META_CF_NAME.to_string(),
-            META_LEADER_KEY.as_bytes().to_vec(),
-            leader_info.encode_to_vec(),
-        );
-        txn.put(
-            META_CF_NAME.to_string(),
-            META_LEASE_KEY.as_bytes().to_vec(),
-            lease_info.encode_to_vec(),
-        );
-
-        return match meta_store.txn(txn).await {
-            Err(e) => {
-                tracing::warn!("acquiring lease failed. Error: {:?}, will retry", e);
-                None
+        return match renew_lease(&leader_info, lease_time, &meta_store).await {
+            Some(val) => {
+                if !val {
+                    return None;
+                }
+                Some(ElectionResult {
+                    meta_leader_info: leader_info,
+                    meta_lease_info: lease_info,
+                    is_leader: true,
+                })
             }
-            Ok(_) => Some(ElectionResult {
-                meta_leader_info: leader_info,
-                meta_lease_info: lease_info,
-                is_leader: true,
-            }),
+            None => None,
         };
     }
 
@@ -264,9 +255,9 @@ async fn run_election<S: MetaStore>(
     })
 }
 
-// Try to renews the lease of the current leader by lease_time
-// Returns true if node was leader and was able to renew/create the lease
-// Returns false if node was follower and thus could not renew/create lease
+// Try to renew/acquire the lease of the current leader by lease_time
+// Returns true if node was leader and was able to renew/acquire the lease
+// Returns false if node was follower and thus could not renew/acquire lease
 // Returns None if operation has to be repeated
 async fn renew_lease<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
@@ -293,16 +284,16 @@ async fn renew_lease<S: MetaStore>(
     let is_leader = match meta_store.txn(txn).await {
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => {
-                tracing::error!("Renewing/Taking: another node has become new leader");
+                tracing::error!("Renew/acquire: another node has become new leader");
                 false
             }
             MetaStoreError::Internal(e) => {
-                tracing::warn!("Renewing/Taking: try again later, MetaStoreError: {:?}", e);
+                tracing::warn!("Renew/acquire: try again later, MetaStoreError: {:?}", e);
                 // operation has to be repeated
                 return None;
             }
             MetaStoreError::ItemNotFound(e) => {
-                tracing::warn!("Renewing/Taking: MetaStoreError: {:?}", e);
+                tracing::warn!("Renew/acquire: MetaStoreError: {:?}", e);
                 return None;
                 // false // TODO: Should we repeat here or should we assume that we are not leader?
                 // TODO: Do we have to go to elections if we run into this one?
@@ -385,8 +376,14 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         let election_outcome =
             run_election(&meta_store, &addr_clone, lease_time, init_lease_id).await;
         let (leader, is_leader) = match election_outcome {
-            Some(infos) => (infos.meta_leader_info, infos.is_leader),
-            None => continue 'initial_election,
+            Some(infos) => {
+                tracing::info!("initial election Succeeded");
+                (infos.meta_leader_info, infos.is_leader)
+            }
+            None => {
+                tracing::info!("initial election failed. Repeating election");
+                continue 'initial_election;
+            }
         };
         tracing::info!("current leader is {:?}", leader);
 
@@ -415,12 +412,18 @@ pub async fn register_leader_for_meta<S: MetaStore>(
 
                 let (leader_info, _, is_leader) =
                     match run_election(&meta_store, &addr_clone, lease_time, lease_id).await {
-                        None => continue 'election,
-                        Some(infos) => (
-                            infos.meta_leader_info,
-                            infos.meta_lease_info,
-                            infos.is_leader,
-                        ),
+                        None => {
+                            tracing::info!("Election failed. Repeating election");
+                            continue 'election;
+                        }
+                        Some(infos) => {
+                            tracing::info!("Election succeeded.");
+                            (
+                                infos.meta_leader_info,
+                                infos.meta_lease_info,
+                                infos.is_leader,
+                            )
+                        }
                     };
 
                 // signal to observers that this node currently is leader
