@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::hash::vnode::VirtualNode;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{CompactedRow, Row, Row2};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
@@ -416,7 +416,7 @@ fn range_contains_lower_upper(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::hash::vnode::VirtualNode;
+    use risingwave_common::hash::VirtualNode;
 
     use super::*;
 

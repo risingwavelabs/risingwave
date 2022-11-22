@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::hash::vnode::{ParallelUnitId, VirtualNode, VnodeMapping};
+use risingwave_common::hash::{ParallelUnitId, VirtualNode, VnodeMapping};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::stream_plan::ActorMapping;

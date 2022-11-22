@@ -19,7 +19,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::hash::vnode::VirtualNode;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;

@@ -27,7 +27,7 @@ use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::TaskId as TaskIdBatch;
 use risingwave_common::array::DataChunk;
-use risingwave_common::hash::vnode::VnodeMapping;
+use risingwave_common::hash::VnodeMapping;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;

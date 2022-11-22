@@ -18,9 +18,9 @@ use itertools::Itertools;
 use paste::paste;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
-use crate::hash::vnode::VirtualNode;
 
 use super::value_encoding::serialize_datum_to_bytes;
+use crate::hash::VirtualNode;
 use crate::row::{Row2, RowExt};
 use crate::types::{Datum, ScalarImpl};
 use crate::util::hash_util::Crc32FastBuilder;

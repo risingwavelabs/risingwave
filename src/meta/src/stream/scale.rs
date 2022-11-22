@@ -38,7 +38,7 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use uuid::Uuid;
-use risingwave_common::hash::vnode::{ParallelUnitId, VirtualNode};
+use risingwave_common::hash::{ParallelUnitId, VirtualNode};
 
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};

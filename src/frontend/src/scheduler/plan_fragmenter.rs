@@ -29,7 +29,7 @@ use risingwave_pb::plan_common::Field as FieldProst;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use uuid::Uuid;
-use risingwave_common::hash::vnode::{ParallelUnitId, VirtualNode, VnodeMapping};
+use risingwave_common::hash::{ParallelUnitId, VirtualNode, VnodeMapping};
 
 use crate::catalog::catalog_service::CatalogReader;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -720,7 +720,7 @@ fn derive_partitions(
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use risingwave_common::hash::vnode::ParallelUnitId;
+    use risingwave_common::hash::ParallelUnitId;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::common::ParallelUnit;
 

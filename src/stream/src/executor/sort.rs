@@ -21,7 +21,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::vnode::VirtualNode;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, Row};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;

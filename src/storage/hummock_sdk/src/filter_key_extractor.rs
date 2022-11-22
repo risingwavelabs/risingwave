@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::hash::vnode::VirtualNode;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
@@ -369,7 +369,7 @@ mod tests {
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
     use tokio::task;
-    use risingwave_common::hash::vnode::VirtualNode;
+    use risingwave_common::hash::VirtualNode;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
     use crate::filter_key_extractor::{

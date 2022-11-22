@@ -22,7 +22,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, Row2, RowExt};
-use risingwave_common::hash::vnode::VirtualNode;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 
 use crate::error::StorageResult;

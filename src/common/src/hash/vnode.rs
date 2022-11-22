@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use parse_display_derive::derive_display as Display;
+use parse_display::Display;
+
 use crate::hash::HashCode;
 
 /// Parallel unit is the minimal scheduling unit.

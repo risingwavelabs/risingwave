@@ -38,7 +38,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::StorageTableDesc;
 use uuid::Uuid;
-use risingwave_common::hash::vnode::{ParallelUnitId, VirtualNode, VnodeMapping};
+use risingwave_common::hash::{ParallelUnitId, VirtualNode, VnodeMapping};
 
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,

@@ -14,7 +14,7 @@
 
 use risingwave_common::error::Result;
 use risingwave_common::row::{Row, Row2};
-use risingwave_common::hash::vnode::VirtualNode;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::ordered::OrderedRowSerde;
 
 pub fn serialize_pk(pk: impl Row2, serializer: &OrderedRowSerde) -> Vec<u8> {

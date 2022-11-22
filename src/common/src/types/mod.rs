@@ -24,7 +24,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::error::BoxedError;
-use crate::hash::HashCode;
 
 mod native_type;
 mod ops;
@@ -65,10 +64,9 @@ use self::struct_type::StructType;
 use self::to_binary::ToBinary;
 use self::to_text::ToText;
 use crate::array::{
-    ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, read_interval_unit, StructRef,
+    read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
     StructValue,
 };
-
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;

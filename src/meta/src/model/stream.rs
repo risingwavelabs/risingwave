@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::vnode::ParallelUnitId;
+use risingwave_common::hash::ParallelUnitId;
 use risingwave_common::util::is_stream_source;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
