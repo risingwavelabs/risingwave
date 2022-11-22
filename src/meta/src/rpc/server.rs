@@ -300,9 +300,14 @@ async fn run_election<S: MetaStore>(
 // add more logs
 // txn may be incorrect
 
+type MetaLeaderInfoVec = Vec<u8>;
+type MetaLeaseInfoVec = Vec<u8>;
+
 // TODO: return MetaLeaderInfo and MetaLeaderLease types. Or return a infos type that contains both
 // of them getting leader_info and leader_lease or defaulting to none
-async fn get_infos<S: MetaStore>(meta_store: &Arc<S>) -> Option<(Vec<u8>, Vec<u8>)> {
+async fn get_infos<S: MetaStore>(
+    meta_store: &Arc<S>,
+) -> Option<(MetaLeaderInfoVec, MetaLeaseInfoVec)> {
     let current_leader_info = match meta_store
         .get_cf(META_CF_NAME, META_LEADER_KEY.as_bytes())
         .await
@@ -410,18 +415,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         }
                         _ = ticker.tick() => {},
                     }
-
-                    // get current leader info or continue term
-                    //    let leader_info = match get_infos(&meta_store).await {
-                    //        Some(val) => {
-                    //            let (leader, _) = val;
-                    //            MetaLeaderInfo::decode(&mut leader.as_slice()).unwrap()
-                    //        }
-                    //        None => {
-                    //            tracing::warn!("Unable to get infos");
-                    //            continue 'term;
-                    //        }
-                    //    };
 
                     // The leader info of this node
                     let this_node_leader_info = MetaLeaderInfo {
