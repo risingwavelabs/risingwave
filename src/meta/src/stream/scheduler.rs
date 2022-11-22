@@ -19,7 +19,7 @@ use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::types::VnodeMapping;
+use risingwave_common::hash::vnode::VnodeMapping;
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -268,7 +268,7 @@ mod test {
 
     use itertools::Itertools;
     use risingwave_common::buffer::Bitmap;
-    use risingwave_common::types::VirtualNode;
+    use risingwave_common::hash::vnode::VirtualNode;
     use risingwave_pb::catalog::Table;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;

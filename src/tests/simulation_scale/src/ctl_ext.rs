@@ -23,7 +23,7 @@ use itertools::Itertools;
 use madsim::rand::thread_rng;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::Rng;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::hash::vnode::ParallelUnitId;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment as ProstFragment;
 use risingwave_pb::meta::GetClusterInfoResponse;

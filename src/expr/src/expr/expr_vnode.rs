@@ -91,7 +91,7 @@ impl Expression for VnodeExpression {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
-    use risingwave_common::types::VirtualNode;
+    use risingwave_common::hash::vnode::VirtualNode;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;

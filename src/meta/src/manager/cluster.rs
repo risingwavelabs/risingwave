@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::hash::vnode::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::heartbeat_request;

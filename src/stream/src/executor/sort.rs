@@ -21,15 +21,16 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::hash::vnode::VirtualNode;
 use risingwave_common::row::{self, Row};
-use risingwave_common::types::{ScalarImpl, VirtualNode};
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, expect_first_barrier, Message,
     PkIndices, StreamExecutorResult, Watermark,
 };
 use crate::common::table::state_table::StateTable;

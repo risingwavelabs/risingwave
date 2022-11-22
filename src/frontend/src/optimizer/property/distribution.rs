@@ -50,7 +50,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::types::{ParallelUnitId, VnodeMapping};
+use risingwave_common::hash::vnode::{ParallelUnitId, VnodeMapping};
 use risingwave_pb::batch_plan::exchange_info::{
     ConsistentHashInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
 };

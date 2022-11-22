@@ -19,7 +19,7 @@ mod tests {
     use itertools::Itertools;
     use maplit::btreeset;
     use risingwave_common::buffer::Bitmap;
-    use risingwave_common::types::{ParallelUnitId, VirtualNode};
+    use risingwave_common::hash::vnode::{ParallelUnitId, VirtualNode};
     use risingwave_common::util::compress::decompress_data;
     use risingwave_pb::common::ParallelUnit;
     use risingwave_pb::stream_plan::{ActorMapping, StreamActor};

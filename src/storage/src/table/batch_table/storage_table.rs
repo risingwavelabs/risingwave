@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::row::{self, Row, Row2, RowDeserializer, RowExt};
-use risingwave_common::types::VirtualNode;
+use risingwave_common::hash::vnode::VirtualNode;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};

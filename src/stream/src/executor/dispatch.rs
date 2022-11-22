@@ -873,7 +873,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
-    use risingwave_common::types::VirtualNode;
+    use risingwave_common::hash::vnode::VirtualNode;
     use risingwave_pb::stream_plan::DispatcherType;
 
     use super::*;
