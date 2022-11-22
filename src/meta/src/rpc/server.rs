@@ -404,32 +404,38 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         _ = ticker.tick() => {},
                     }
 
-                    // renew the current lease
+                    // renew the current lease if this is the leader
                     let now = since_epoch();
-                    if addr_clone == lease_info.leader.as_ref().unwrap().node_address {
-                        let mut txn = Transaction::default();
-                        let lease_info = MetaLeaseInfo {
-                            leader: Some(leader_info.clone()),
-                            lease_register_time: now.as_secs(),
-                            lease_expire_time: now.as_secs() + lease_time,
-                        };
-                        txn.check_equal(
-                            META_CF_NAME.to_string(),
-                            META_LEADER_KEY.as_bytes().to_vec(),
-                            leader_info.encode_to_vec(),
-                        );
-                        txn.put(
-                            META_CF_NAME.to_string(),
-                            META_LEADER_KEY.as_bytes().to_vec(),
-                            lease_info.encode_to_vec(),
-                        );
-                        match meta_store.txn(txn).await {
-                            Err(e) => {
-                                tracing::error!("Unable to renew the leader lease. Error is {}", e)
+                    let mut txn = Transaction::default();
+                    let lease_info = MetaLeaseInfo {
+                        leader: Some(leader_info.clone()),
+                        lease_register_time: now.as_secs(),
+                        lease_expire_time: now.as_secs() + lease_time,
+                    };
+                    txn.check_equal(
+                        META_CF_NAME.to_string(),
+                        META_LEADER_KEY.as_bytes().to_vec(),
+                        leader_info.encode_to_vec(),
+                    );
+                    txn.put(
+                        META_CF_NAME.to_string(),
+                        META_LEASE_KEY.as_bytes().to_vec(),
+                        lease_info.encode_to_vec(),
+                    );
+                    match meta_store.txn(txn).await {
+                        Err(e) => match e {
+                            MetaStoreError::TransactionAbort() => {
+                                tracing::info!("Cannot update lease if not leader")
+                                // TODO: Remove this log development only
                             }
-                            Ok(_) => tracing::info!("Current node is still leader"),
+                            _ => {
+                                tracing::warn!("Unable to update lease. Error {}", e)
+                            }
+                        },
+                        Ok(_) => {
+                            tracing::info!("Current node is still leader");
+                            continue 'term;
                         }
-                        continue 'term;
                     }
 
                     // get leader info
@@ -451,7 +457,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                             META_LEADER_KEY.as_bytes().to_vec(),
                         );
                         match meta_store.txn(txn).await {
-                            Err(e) => tracing::error!("unable to delete lease. Error was {}", e),
+                            Err(e) => tracing::warn!("Unable to update lease. Error {}", e),
                             Ok(_) => tracing::info!("Deleted leader lease. Running new election"),
                         }
                         continue 'election;
