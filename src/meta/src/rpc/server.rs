@@ -162,6 +162,7 @@ async fn run_election<S: MetaStore>(
         // Lease did not yet expire
         if lease_info.lease_expire_time > now.as_secs()
             && lease_info.leader.as_ref().unwrap().node_address != *addr
+        // TODO: They are all the nodes
         {
             let err_info = format!(
                 "the lease {:?} does not expire, now time: {}",
@@ -207,6 +208,7 @@ async fn run_election<S: MetaStore>(
             old_leader_info,
         );
         txn.put(
+            // duplicate of below
             META_CF_NAME.to_string(),
             META_LEADER_KEY.as_bytes().to_vec(),
             leader_info.encode_to_vec(),
@@ -236,9 +238,10 @@ async fn run_election<S: MetaStore>(
             leader_info.encode_to_vec(),
         );
     }
+    // duplicate of above
     txn.put(
         META_CF_NAME.to_string(),
-        META_LEASE_KEY.as_bytes().to_vec(),
+        META_LEADER_KEY.as_bytes().to_vec(),
         lease_info.encode_to_vec(),
     );
 
@@ -266,6 +269,9 @@ async fn run_election<S: MetaStore>(
         META_LEADER_KEY.as_bytes().to_vec(),
         leader_info.encode_to_vec(),
     );
+    // query kv from etcd
+    // add more logs
+    // txn may be incorrect
     txn.put(
         META_CF_NAME.to_string(),
         META_LEASE_KEY.as_bytes().to_vec(),
@@ -278,6 +284,7 @@ async fn run_election<S: MetaStore>(
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => {
                 tracing::error!("keep lease failed, another node has become new leader");
+                // Main: Sleep forever aka follower node
                 false
             }
             MetaStoreError::Internal(e) => {
