@@ -201,11 +201,11 @@ fn build_fragment(
     // Update current fragment based on the node we're visiting.
     match stream_node.get_node_body()? {
         NodeBody::Source(_) => {
-            current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
         }
 
         NodeBody::Materialize(_) => {
-            current_fragment.fragment_type_mask |= FragmentTypeFlag::Mview as u32
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Mview as u32;
         }
 
         NodeBody::Sink(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32,
@@ -222,6 +222,8 @@ fn build_fragment(
             current_fragment.upstream_table_ids.push(node.table_id);
             current_fragment.is_singleton = node.is_singleton;
         }
+
+        NodeBody::Now(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32,
 
         _ => {}
     };
