@@ -173,8 +173,9 @@ async fn run_election<S: MetaStore>(
 
         // Lease did not yet expire
         if lease_info.lease_expire_time > now.as_secs()
-            && lease_info.leader.as_ref().unwrap().node_address != *addr
-        // TODO: all nodes have the same addr. This line is useless. Will this be different in prod?
+        //   && lease_info.leader.as_ref().unwrap().node_address != *addr
+        // TODO: all nodes have the same addr. Above line is useless.
+        // Will this be different in prod?
         {
             tracing::error!(
                 "We already have a leader with a lease that is valid for {} more sec",
@@ -185,7 +186,7 @@ async fn run_election<S: MetaStore>(
                     .unwrap(),
                 meta_lease_info: MetaLeaseInfo::decode(&mut current_leader_lease.as_slice())
                     .unwrap(),
-                is_leader: false,
+                is_leader: lease_id == lease_info.leader.unwrap().lease_id,
             });
         }
     }
