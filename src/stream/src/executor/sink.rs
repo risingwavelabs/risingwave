@@ -19,8 +19,8 @@ use std::time::Instant;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_connector::sink::remote::RemoteSinkParams;
 use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
+use risingwave_connector::ConnectorParams;
 use risingwave_storage::StateStore;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
@@ -34,7 +34,7 @@ pub struct SinkExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
     properties: HashMap<String, String>,
     identity: String,
-    connector_params: Option<RemoteSinkParams>,
+    connector_params: ConnectorParams,
     pk_indices: PkIndices,
 }
 
@@ -42,7 +42,7 @@ async fn build_sink(
     config: SinkConfig,
     schema: Schema,
     pk_indices: PkIndices,
-    connector_params: Option<RemoteSinkParams>,
+    connector_params: ConnectorParams,
 ) -> StreamExecutorResult<Box<SinkImpl>> {
     Ok(Box::new(
         SinkImpl::new(config, schema, pk_indices, connector_params).await?,
@@ -56,7 +56,7 @@ impl<S: StateStore> SinkExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         mut properties: HashMap<String, String>,
         executor_id: u64,
-        connector_params: Option<RemoteSinkParams>,
+        connector_params: ConnectorParams,
     ) -> Self {
         // This field can be used to distinguish a specific actor in parallelism to prevent
         // transaction execution errors
@@ -218,7 +218,7 @@ mod test {
             Arc::new(StreamingMetrics::unused()),
             properties,
             0,
-            None,
+            Default::default(),
         );
 
         let mut executor = SinkExecutor::execute(Box::new(sink_executor));

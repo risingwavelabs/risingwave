@@ -34,7 +34,8 @@ use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 pub use crate::sink::mysql::{MySqlConfig, MySqlSink, MYSQL_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
-use crate::sink::remote::{RemoteConfig, RemoteSink, RemoteSinkParams};
+use crate::sink::remote::{RemoteConfig, RemoteSink};
+use crate::ConnectorParams;
 
 #[async_trait]
 pub trait Sink {
@@ -111,7 +112,7 @@ impl SinkImpl {
         cfg: SinkConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
-        sink_params: Option<RemoteSinkParams>,
+        connector_params: ConnectorParams,
     ) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Mysql(cfg) => SinkImpl::MySql(Box::new(MySqlSink::new(cfg, schema).await?)),
@@ -119,15 +120,7 @@ impl SinkImpl {
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg, schema).await?)),
             SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(Box::new(
-                RemoteSink::new(
-                    cfg,
-                    schema,
-                    pk_indices,
-                    sink_params.ok_or_else(|| {
-                        SinkError::Config("remote sink requires sink_params".to_string())
-                    })?,
-                )
-                .await?,
+                RemoteSink::new(cfg, schema, pk_indices, connector_params).await?,
             )),
         })
     }

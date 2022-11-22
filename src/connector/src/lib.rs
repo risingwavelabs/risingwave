@@ -24,10 +24,14 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(let_chains)]
-#![feature(fn_traits)]
 
 pub mod aws_utils;
 pub mod error;
 mod macros;
 pub mod sink;
 pub mod source;
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct ConnectorParams {
+    pub connector_addr: String,
+}
