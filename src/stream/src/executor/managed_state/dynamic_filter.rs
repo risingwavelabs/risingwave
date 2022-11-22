@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use futures::{pin_mut, stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{AllVirtualNodeIter, VirtualNode};
 use risingwave_common::row::{CompactedRow, Row, Row2};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
@@ -264,7 +264,7 @@ pub struct UnorderedRangeCacheIter<'a> {
     current_map: Option<&'a BTreeMap<Vec<u8>, CompactedRow>>,
     current_iter: Option<BTreeMapRange<'a, Vec<u8>, CompactedRow>>,
     vnodes: Arc<Bitmap>,
-    next_vnode: VirtualNode,
+    vnode_iter: AllVirtualNodeIter,
     completed: bool,
     range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 }
@@ -279,7 +279,7 @@ impl<'a> UnorderedRangeCacheIter<'a> {
             cache,
             current_map: None,
             current_iter: None,
-            next_vnode: VirtualNode::ZERO,
+            vnode_iter: VirtualNode::all(),
             vnodes,
             range,
             completed: false,
@@ -289,19 +289,14 @@ impl<'a> UnorderedRangeCacheIter<'a> {
     }
 
     fn refill_iterator(&mut self) {
-        loop {
-            if self.vnodes.is_set(self.next_vnode.to_index()) && let Some(vnode_range) = self.cache.get(&self.next_vnode) {
+        while let Some(vnode) = self.vnode_iter.next() {
+            if self.vnodes.is_set(vnode.to_index()) && let Some(vnode_range) = self.cache.get(&vnode) {
                 self.current_map = Some(vnode_range);
                 self.current_iter = self.current_map.map(|m| m.range(self.range.clone()));
                 return;
-            } else if self.next_vnode == VirtualNode::MAX {
-                // The iterator cannot be refilled further.
-                self.completed = true;
-                return;
-            } else {
-                self.next_vnode = self.next_vnode.next();
             }
         }
+        self.completed = true;
     }
 }
 
@@ -312,20 +307,11 @@ impl<'a> std::iter::Iterator for UnorderedRangeCacheIter<'a> {
         if self.completed {
             None
         } else if let Some(iter) = &mut self.current_iter {
-            let res = iter.next();
-            if res.is_none() {
-                if self.next_vnode == VirtualNode::MAX {
-                    // The iterator cannot be refilled further.
-                    self.completed = true;
-                    None
-                } else {
-                    // Try to refill the iterator.
-                    self.next_vnode = self.next_vnode.next();
-                    self.refill_iterator();
-                    self.next()
-                }
+            if let Some(r) = iter.next() {
+                Some(r.1)
             } else {
-                res.map(|r| r.1)
+                self.refill_iterator();
+                self.next()
             }
         } else {
             panic!("Not completed but no iterator");
