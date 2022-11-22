@@ -1,8 +1,10 @@
 /* eslint-disable */
+import { SourceInfo } from "./catalog";
 import { Buffer, HostAddress, WorkerNode } from "./common";
 import { IntervalUnit } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem, TableFunction } from "./expr";
 import {
+  ColumnCatalog,
   ColumnDesc,
   ColumnOrder,
   Field,
@@ -64,11 +66,17 @@ export interface ScanRange_Bound {
   inclusive: boolean;
 }
 
-export interface SourceScanNode {
-  tableId: number;
-  /** timestamp_ms is used for offset synchronization of high level consumer groups, this field will be deprecated if a more elegant approach is available in the future */
-  timestampMs: number;
-  columnIds: number[];
+export interface SourceNode {
+  sourceId: number;
+  columns: ColumnCatalog[];
+  properties: { [key: string]: string };
+  split: Uint8Array;
+  info: SourceInfo | undefined;
+}
+
+export interface SourceNode_PropertiesEntry {
+  key: string;
+  value: string;
 }
 
 export interface ProjectNode {
@@ -298,7 +306,8 @@ export interface PlanNode {
     | { $case: "projectSet"; projectSet: ProjectSetNode }
     | { $case: "union"; union: UnionNode }
     | { $case: "groupTopN"; groupTopN: GroupTopNNode }
-    | { $case: "distributedLookupJoin"; distributedLookupJoin: DistributedLookupJoinNode };
+    | { $case: "distributedLookupJoin"; distributedLookupJoin: DistributedLookupJoinNode }
+    | { $case: "source"; source: SourceNode };
   identity: string;
 }
 
@@ -537,36 +546,87 @@ export const ScanRange_Bound = {
   },
 };
 
-function createBaseSourceScanNode(): SourceScanNode {
-  return { tableId: 0, timestampMs: 0, columnIds: [] };
+function createBaseSourceNode(): SourceNode {
+  return { sourceId: 0, columns: [], properties: {}, split: new Uint8Array(), info: undefined };
 }
 
-export const SourceScanNode = {
-  fromJSON(object: any): SourceScanNode {
+export const SourceNode = {
+  fromJSON(object: any): SourceNode {
     return {
-      tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
-      timestampMs: isSet(object.timestampMs) ? Number(object.timestampMs) : 0,
-      columnIds: Array.isArray(object?.columnIds) ? object.columnIds.map((e: any) => Number(e)) : [],
+      sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0,
+      columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
+      properties: isObject(object.properties)
+        ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+          acc[key] = String(value);
+          return acc;
+        }, {})
+        : {},
+      split: isSet(object.split) ? bytesFromBase64(object.split) : new Uint8Array(),
+      info: isSet(object.info) ? SourceInfo.fromJSON(object.info) : undefined,
     };
   },
 
-  toJSON(message: SourceScanNode): unknown {
+  toJSON(message: SourceNode): unknown {
     const obj: any = {};
-    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
-    message.timestampMs !== undefined && (obj.timestampMs = Math.round(message.timestampMs));
-    if (message.columnIds) {
-      obj.columnIds = message.columnIds.map((e) => Math.round(e));
+    message.sourceId !== undefined && (obj.sourceId = Math.round(message.sourceId));
+    if (message.columns) {
+      obj.columns = message.columns.map((e) => e ? ColumnCatalog.toJSON(e) : undefined);
     } else {
-      obj.columnIds = [];
+      obj.columns = [];
     }
+    obj.properties = {};
+    if (message.properties) {
+      Object.entries(message.properties).forEach(([k, v]) => {
+        obj.properties[k] = v;
+      });
+    }
+    message.split !== undefined &&
+      (obj.split = base64FromBytes(message.split !== undefined ? message.split : new Uint8Array()));
+    message.info !== undefined && (obj.info = message.info ? SourceInfo.toJSON(message.info) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<SourceScanNode>, I>>(object: I): SourceScanNode {
-    const message = createBaseSourceScanNode();
-    message.tableId = object.tableId ?? 0;
-    message.timestampMs = object.timestampMs ?? 0;
-    message.columnIds = object.columnIds?.map((e) => e) || [];
+  fromPartial<I extends Exact<DeepPartial<SourceNode>, I>>(object: I): SourceNode {
+    const message = createBaseSourceNode();
+    message.sourceId = object.sourceId ?? 0;
+    message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
+    message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[key] = String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    message.split = object.split ?? new Uint8Array();
+    message.info = (object.info !== undefined && object.info !== null)
+      ? SourceInfo.fromPartial(object.info)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseSourceNode_PropertiesEntry(): SourceNode_PropertiesEntry {
+  return { key: "", value: "" };
+}
+
+export const SourceNode_PropertiesEntry = {
+  fromJSON(object: any): SourceNode_PropertiesEntry {
+    return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
+  },
+
+  toJSON(message: SourceNode_PropertiesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = message.key);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SourceNode_PropertiesEntry>, I>>(object: I): SourceNode_PropertiesEntry {
+    const message = createBaseSourceNode_PropertiesEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
     return message;
   },
 };
@@ -1767,6 +1827,8 @@ export const PlanNode = {
           $case: "distributedLookupJoin",
           distributedLookupJoin: DistributedLookupJoinNode.fromJSON(object.distributedLookupJoin),
         }
+        : isSet(object.source)
+        ? { $case: "source", source: SourceNode.fromJSON(object.source) }
         : undefined,
       identity: isSet(object.identity) ? String(object.identity) : "",
     };
@@ -1839,6 +1901,8 @@ export const PlanNode = {
       (obj.distributedLookupJoin = message.nodeBody?.distributedLookupJoin
         ? DistributedLookupJoinNode.toJSON(message.nodeBody?.distributedLookupJoin)
         : undefined);
+    message.nodeBody?.$case === "source" &&
+      (obj.source = message.nodeBody?.source ? SourceNode.toJSON(message.nodeBody?.source) : undefined);
     message.identity !== undefined && (obj.identity = message.identity);
     return obj;
   },
@@ -2022,6 +2086,11 @@ export const PlanNode = {
         $case: "distributedLookupJoin",
         distributedLookupJoin: DistributedLookupJoinNode.fromPartial(object.nodeBody.distributedLookupJoin),
       };
+    }
+    if (
+      object.nodeBody?.$case === "source" && object.nodeBody?.source !== undefined && object.nodeBody?.source !== null
+    ) {
+      message.nodeBody = { $case: "source", source: SourceNode.fromPartial(object.nodeBody.source) };
     }
     message.identity = object.identity ?? "";
     return message;
@@ -2279,6 +2348,10 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
+
+function isObject(value: any): boolean {
+  return typeof value === "object" && value !== null;
+}
 
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;
