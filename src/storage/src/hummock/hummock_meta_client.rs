@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
@@ -96,10 +97,17 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
+    async fn report_compaction_task(
+        &self,
+        compact_task: CompactTask,
+        table_stats_change: TableStatsMap,
+    ) -> Result<()> {
         self.stats.report_compaction_task_counts.inc();
         let timer = self.stats.report_compaction_task_latency.start_timer();
-        let res = self.meta_client.report_compaction_task(compact_task).await;
+        let res = self
+            .meta_client
+            .report_compaction_task(compact_task, table_stats_change)
+            .await;
         timer.observe_duration();
         res
     }
