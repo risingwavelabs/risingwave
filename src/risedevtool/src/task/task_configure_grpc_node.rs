@@ -42,8 +42,8 @@ impl Task for ConfigureGrpcNodeTask {
             );
             ctx.wait_tcp_user(&address)?;
         } else {
-            ctx.pb.set_message("waiting for online...");
-            ctx.wait_tcp(&address)?;
+            ctx.pb.set_message("NOT waiting for online...");
+            // ctx.wait_tcp(&address)?;
         }
 
         ctx.complete_spin();
