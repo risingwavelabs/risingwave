@@ -63,11 +63,3 @@ buildkite-agent artifact upload risedev-dev-"$profile"
 buildkite-agent artifact upload risingwave_regress_test-"$profile"
 buildkite-agent artifact upload ./sqlsmith-"$profile"
 buildkite-agent artifact upload ./compaction-test-"$profile"
-
-echo "--- Build Java connector node"
-git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
-cd risingwave-connector-node
-mvn package -Dmaven.test.skip=true
-echo "--- Upload Java artifacts"
-cp service/target/service-*.jar ./connector-service.jar
-buildkite-agent artifact upload ./connector-service.jar

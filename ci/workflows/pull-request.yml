@@ -96,7 +96,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
+    timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "end-to-end test (parallel)"
@@ -129,7 +129,9 @@ steps:
 
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
-    depends_on: "build"
+    depends_on:
+      - "build"
+      - "build-other"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
@@ -142,9 +144,7 @@ steps:
 
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"
-    depends_on:
-      - "build"
-      - "build-other"
+    depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
