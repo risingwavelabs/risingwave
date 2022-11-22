@@ -52,6 +52,30 @@ impl<'a, S: StateStoreWrite> WriteBatch<'a, S> {
         }
     }
 
+    /// Puts a value.
+    pub fn put(&mut self, key: impl AsRef<[u8]>, value: StorageValue) {
+        self.do_push(key.as_ref(), value);
+    }
+
+    /// Deletes a value.
+    pub fn delete(&mut self, key: impl AsRef<[u8]>) {
+        self.do_push(key.as_ref(), StorageValue::new_delete());
+    }
+
+    /// Delete all keys starting with `prefix`.
+    pub fn delete_prefix(&mut self, prefix: impl AsRef<[u8]>) {
+        let start_key = Bytes::from(prefix.as_ref().to_owned());
+        let end_key = Bytes::from(next_key(&start_key));
+        self.delete_ranges.push((start_key, end_key));
+    }
+
+    /// Delete all keys in this range.
+    pub fn delete_range(&mut self, start: impl AsRef<[u8]>, end: impl AsRef<[u8]>) {
+        let start_key = Bytes::from(start.as_ref().to_owned());
+        let end_key = Bytes::from(end.as_ref().to_owned());
+        self.delete_ranges.push((start_key, end_key));
+    }
+
     /// Reserves capacity for at least `additional` more key-value pairs to be inserted in the
     /// batch.
     pub fn reserve(&mut self, additional: usize) {
@@ -94,86 +118,35 @@ impl<'a, S: StateStoreWrite> WriteBatch<'a, S> {
         Ok(())
     }
 
-    /// Creates a [`KeySpaceWriteBatch`] with the given `prefix`, which automatically prepends the
-    /// prefix when writing.
-    pub fn prefixify(self) -> KeySpaceWriteBatch<'a, S> {
-        KeySpaceWriteBatch { global: self }
-    }
-}
-
-/// [`KeySpaceWriteBatch`] attaches a [`Keyspace`] to a mutable reference of global [`WriteBatch`],
-/// which automatically prepends the keyspace prefix when writing.
-pub struct KeySpaceWriteBatch<'a, S: StateStoreWrite> {
-    global: WriteBatch<'a, S>,
-}
-
-impl<'a, S: StateStoreWrite> KeySpaceWriteBatch<'a, S> {
     /// Pushes `key` and `value` into the `WriteBatch`.
-    /// If `key` is valid, it will be prefixed with `keyspace` key.
-    /// Otherwise, only `keyspace` key is pushed.
     fn do_push(&mut self, key: &[u8], value: StorageValue) {
         let key = Bytes::from(key.to_vec());
-        self.global.batch.push((key, value));
-    }
-
-    /// Puts a value, with the key prepended by the prefix of `keyspace`, like `[prefix | given
-    /// key]`.
-    pub fn put(&mut self, key: impl AsRef<[u8]>, value: StorageValue) {
-        self.do_push(key.as_ref(), value);
-    }
-
-    /// Delete all keys with the key prepended by the prefix of `keyspace`, like `[prefix | given
-    /// key]`.
-    pub fn delete_prefix(&mut self, prefix: impl AsRef<[u8]>) {
-        let start_key = Bytes::from(prefix.as_ref().to_owned());
-        let end_key = Bytes::from(next_key(&start_key));
-        self.global.delete_ranges.push((start_key, end_key));
-    }
-
-    /// Delete all keys in this range prepended by the prefix of `keyspace` which is [prefix|start,
-    /// prefix|end).
-    pub fn delete_range(&mut self, start: impl AsRef<[u8]>, end: impl AsRef<[u8]>) {
-        let start_key = Bytes::from(start.as_ref().to_owned());
-        let end_key = Bytes::from(end.as_ref().to_owned());
-        self.global.delete_ranges.push((start_key, end_key));
-    }
-
-    /// Deletes a value, with the key prepended by the prefix of `keyspace`, like `[prefix | given
-    /// key]`.
-    pub fn delete(&mut self, key: impl AsRef<[u8]>) {
-        self.do_push(key.as_ref(), StorageValue::new_delete());
-    }
-
-    pub async fn ingest(self) -> StorageResult<()> {
-        self.global.ingest().await
+        self.batch.push((key, value));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use risingwave_common::catalog::TableId;
 
     use crate::memory::MemoryStateStore;
     use crate::storage_value::StorageValue;
-    use crate::store::WriteOptions;
-    use crate::Keyspace;
+    use crate::store::{StateStoreWrite, WriteOptions};
 
     #[tokio::test]
     async fn test_invalid_write_batch() {
         let state_store = MemoryStateStore::new();
-        let key_space = Keyspace::table_root(state_store, TableId::from(0x118));
-
-        let mut key_space_batch = key_space.start_write_batch(WriteOptions {
+        let mut batch = state_store.start_write_batch(WriteOptions {
             epoch: 1,
             table_id: Default::default(),
         });
-        key_space_batch.put(Bytes::from("aa"), StorageValue::new_put("444"));
-        key_space_batch.put(Bytes::from("cc"), StorageValue::new_put("444"));
-        key_space_batch.put(Bytes::from("bb"), StorageValue::new_put("444"));
-        key_space_batch.delete(Bytes::from("aa"));
 
-        key_space_batch
+        batch.put(Bytes::from("aa"), StorageValue::new_put("444"));
+        batch.put(Bytes::from("cc"), StorageValue::new_put("444"));
+        batch.put(Bytes::from("bb"), StorageValue::new_put("444"));
+        batch.delete(Bytes::from("aa"));
+
+        batch
             .ingest()
             .await
             .expect_err("Should panic here because of duplicate key.");

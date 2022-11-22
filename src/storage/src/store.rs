@@ -42,12 +42,27 @@ pub trait StateStoreIterExt: StateStoreIter {
         + Send
         + 'a;
 
+    fn map<B, F>(self, f: F) -> StateStoreMapIter<Self, F>
+    where
+        Self: Sized,
+        B: Send,
+        F: FnMut(Self::Item) -> B;
+
     fn collect(&mut self, limit: Option<usize>) -> Self::CollectFuture<'_>;
 }
 
 impl<I: StateStoreIter> StateStoreIterExt for I {
     type CollectFuture<'a> =
         impl Future<Output = StorageResult<Vec<<Self as StateStoreIter>::Item>>> + Send + 'a;
+
+    fn map<B, F>(self, f: F) -> StateStoreMapIter<Self, F>
+    where
+        Self: Sized,
+        B: Send,
+        F: FnMut(Self::Item) -> B,
+    {
+        StateStoreMapIter { iter: self, f }
+    }
 
     fn collect(&mut self, limit: Option<usize>) -> Self::CollectFuture<'_> {
         async move {
@@ -62,6 +77,26 @@ impl<I: StateStoreIter> StateStoreIterExt for I {
 
             Ok(kvs)
         }
+    }
+}
+
+pub struct StateStoreMapIter<I, F> {
+    iter: I,
+    f: F,
+}
+
+impl<B, I, F> StateStoreIter for StateStoreMapIter<I, F>
+where
+    B: Send,
+    I: StateStoreIter,
+    F: FnMut(I::Item) -> B + StaticSendSync,
+{
+    type Item = B;
+
+    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move { Ok(self.iter.next().await?.map(&mut self.f)) }
     }
 }
 

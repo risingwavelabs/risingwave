@@ -19,14 +19,16 @@ use std::{cmp, ops};
 
 use itertools::Itertools;
 
+use super::Row2;
 use crate::array::RowRef;
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::HashCode;
-use crate::types::{hash_datum, DataType, Datum};
+use crate::types::{hash_datum, to_datum_ref, DataType, Datum, DatumRef};
 use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
+/// TODO(row trait): rename to `OwnedRow`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Row(pub Vec<Datum>);
 
@@ -71,6 +73,7 @@ impl Row {
         Self(values)
     }
 
+    /// TODO(row trait): use `row::empty` instead.
     pub fn empty<'a>() -> &'a Self {
         static EMPTY_ROW: Row = Row(Vec::new());
         &EMPTY_ROW
@@ -103,6 +106,8 @@ impl Row {
     /// [`crate::util::ordered::OrderedRow`]
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
+    ///
+    /// TODO(row trait): use `Row::value_serialize` instead.
     pub fn serialize(&self, value_indices: &Option<Vec<usize>>) -> Vec<u8> {
         let mut result = vec![];
         // value_indices is None means serializing each `Datum` in sequence, otherwise only
@@ -135,23 +140,30 @@ impl Row {
     }
 
     /// Return number of cells in the row.
+    ///
+    /// TODO(row trait): use `Row::len` instead.
     pub fn size(&self) -> usize {
         self.0.len()
     }
 
+    /// TODO(row trait): use `Row::chain` with `row::once` instead.
     pub fn push(&mut self, value: Datum) {
         self.0.push(value);
     }
 
+    /// TODO(row trait): use `Row::iter` instead.
     pub fn values(&self) -> impl Iterator<Item = &Datum> {
         self.0.iter()
     }
 
+    /// TODO(row trait): use `Row::chain` instead.
     pub fn concat(&self, values: impl IntoIterator<Item = Datum>) -> Row {
         Row::new(self.values().cloned().chain(values).collect())
     }
 
     /// Hash row data all in one
+    ///
+    /// TODO(row trait): use `Row::hash` instead.
     pub fn hash_row<H>(&self, hash_builder: &H) -> HashCode
     where
         H: BuildHasher,
@@ -164,6 +176,8 @@ impl Row {
     }
 
     /// Compute hash value of a row on corresponding indices.
+    ///
+    /// TODO(row trait): use `Row::project` then `Row::hash` instead.
     pub fn hash_by_indices<H>(&self, hash_indices: &[usize], hash_builder: &H) -> HashCode
     where
         H: BuildHasher,
@@ -178,11 +192,15 @@ impl Row {
     /// Get an owned `Row` by the given `indices` from current row.
     ///
     /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
+    ///
+    /// TODO(row trait): use `Row::project` instead.
     pub fn by_indices(&self, indices: &[usize]) -> Row {
         Row(indices.iter().map(|&idx| self.0[idx].clone()).collect_vec())
     }
 
     /// Get a reference to the datums in the row by the given `indices`.
+    ///
+    /// TODO(row trait): use `Row::project` instead.
     pub fn datums_by_indices<'a>(&'a self, indices: &'a [usize]) -> impl Iterator<Item = &Datum> {
         indices.iter().map(|&idx| &self.0[idx])
     }
@@ -192,6 +210,42 @@ impl EstimateSize for Row {
     fn estimated_heap_size(&self) -> usize {
         // FIXME(bugen): this is not accurate now as the heap size of some `Scalar` is not counted.
         self.0.capacity() * std::mem::size_of::<Datum>()
+    }
+}
+
+impl Row2 for Row {
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    where
+        Self: 'a;
+
+    #[inline]
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        to_datum_ref(&self[index])
+    }
+
+    #[inline]
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        to_datum_ref(self.0.get_unchecked(index))
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[inline]
+    fn iter(&self) -> Self::Iter<'_> {
+        Iterator::map(self.0.iter(), to_datum_ref)
+    }
+
+    #[inline]
+    fn to_owned_row(&self) -> Row {
+        self.clone()
+    }
+
+    #[inline]
+    fn into_owned_row(self) -> Row {
+        self
     }
 }
 

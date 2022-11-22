@@ -29,10 +29,10 @@ use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::table::streaming_table::mem_table::RowOp;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
@@ -210,7 +210,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
                         let _ = self.state_table.update_vnode_bitmap(vnode_bitmap);
                     }
-
+                    self.materialize_cache.evict();
                     Message::Barrier(b)
                 }
             }
@@ -500,6 +500,10 @@ impl MaterializeCache {
 
     pub fn put(&mut self, key: Vec<u8>, value: Option<CompactedRow>) {
         self.data.push(key, value);
+    }
+
+    fn evict(&mut self) {
+        self.data.evict()
     }
 }
 #[cfg(test)]

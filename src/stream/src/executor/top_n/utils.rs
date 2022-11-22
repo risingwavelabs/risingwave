@@ -58,6 +58,7 @@ pub trait TopNExecutorBase: Send + 'static {
         unreachable!()
     }
 
+    fn evict(&mut self) {}
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 }
 
@@ -120,7 +121,7 @@ where
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
-
+                    self.inner.evict();
                     yield Message::Barrier(barrier)
                 }
             };

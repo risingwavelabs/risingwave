@@ -1111,3 +1111,15 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         self.o2i_col_mapping().inverse()
     }
 }
+
+/// `Union` returns the union of the rows of its inputs.
+/// If `all` is false, it needs to eliminate duplicates.
+#[derive(Debug, Clone)]
+pub struct Union<PlanRef> {
+    pub all: bool,
+    pub inputs: Vec<PlanRef>,
+    /// It is used by streaming processing. We need to use `source_col` to identify the record came
+    /// from which source input.
+    /// We add it as a logical property, because we need to derive the logical pk based on it.
+    pub source_col: Option<usize>,
+}

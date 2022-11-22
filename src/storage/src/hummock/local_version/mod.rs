@@ -22,7 +22,6 @@ use crate::hummock::shared_buffer::{OrderSortedUncommittedData, SharedBuffer};
 pub mod local_version_impl;
 pub mod local_version_manager;
 pub mod pinned_version;
-pub mod upload_handle_manager;
 
 #[derive(Clone)]
 pub struct LocalVersion {

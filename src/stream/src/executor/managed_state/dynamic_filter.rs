@@ -22,14 +22,12 @@ use anyhow::anyhow;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::row::{CompactedRow, Row};
+use risingwave_common::row::{CompactedRow, Row, Row2};
 use risingwave_common::types::{ScalarImpl, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_storage::table::streaming_table::state_table::{
-    prefix_range_to_memcomparable, StateTable,
-};
 use risingwave_storage::StateStore;
 
+use crate::common::table::state_table::{prefix_range_to_memcomparable, StateTable};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
@@ -102,6 +100,14 @@ impl<S: StateStore> RangeCache<S> {
         Ok(())
     }
 
+    fn to_row_bound(bound: Bound<ScalarImpl>) -> Bound<Row> {
+        match bound {
+            Unbounded => Unbounded,
+            Included(s) => Included(Row::new(vec![Some(s)])),
+            Excluded(s) => Excluded(Row::new(vec![Some(s)])),
+        }
+    }
+
     /// Return an iterator over sets of rows that satisfy the given range. Evicts entries if
     /// exceeding capacity based on whether the latest RHS value is the lower or upper bound of
     /// the range.
@@ -139,43 +145,21 @@ impl<S: StateStore> RangeCache<S> {
             vec![range.clone()]
         };
 
-        let to_row_bound = |bound: Bound<ScalarImpl>| -> Bound<Row> {
-            match bound {
-                Unbounded => Unbounded,
-                Included(s) => Included(Row::new(vec![Some(s)])),
-                Excluded(s) => Excluded(Row::new(vec![Some(s)])),
-            }
-        };
+        let missing_ranges = missing_ranges.iter().map(|(r0, r1)| {
+            (
+                Self::to_row_bound(r0.clone()),
+                Self::to_row_bound(r1.clone()),
+            )
+        });
 
-        let missing_ranges = missing_ranges
-            .iter()
-            .map(|(r0, r1)| (to_row_bound(r0.clone()), to_row_bound(r1.clone())));
-
+        let own_vnodes = self.vnodes.ones().collect_vec();
         for pk_range in missing_ranges {
-            for (vnode, b) in self.vnodes.iter().enumerate() {
-                if b {
-                    let vnode = vnode.try_into().unwrap();
-                    // TODO: do this concurrently over each vnode.
-                    let row_stream = self
-                        .state_table
-                        .iter_key_and_val_with_pk_range(&pk_range, vnode)
-                        .await?;
-                    pin_mut!(row_stream);
-
-                    let map = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
-                    while let Some(res) = row_stream.next().await {
-                        let (key_bytes, row) = res?;
-
-                        map.insert(
-                            key_bytes[VIRTUAL_NODE_SIZE..].to_vec(),
-                            (row.as_ref()).into(),
-                        );
-                    }
-                }
+            for vnode in &own_vnodes {
+                self.add_vnode_range(*vnode, &pk_range).await?;
             }
         }
 
-        let range = (to_row_bound(range.0), to_row_bound(range.1));
+        let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
         let memcomparable_range =
             prefix_range_to_memcomparable(self.state_table.pk_serde(), &range);
         Ok(UnorderedRangeCacheIter::new(
@@ -185,9 +169,38 @@ impl<S: StateStore> RangeCache<S> {
         ))
     }
 
+    async fn add_vnode_range(
+        &mut self,
+        vnode: usize,
+        pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
+    ) -> StreamExecutorResult<()> {
+        let vnode = vnode.try_into().unwrap();
+        // TODO: do this concurrently over each vnode.
+        let row_stream = self
+            .state_table
+            .iter_key_and_val_with_pk_range(pk_range, vnode)
+            .await?;
+        pin_mut!(row_stream);
+
+        let map = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
+        while let Some(res) = row_stream.next().await {
+            let (key_bytes, row) = res?;
+
+            map.insert(
+                key_bytes[VIRTUAL_NODE_SIZE..].to_vec(),
+                (row.as_ref()).into(),
+            );
+        }
+
+        Ok(())
+    }
+
     /// Updates the vnodes for `RangeCache`, purging the rows of the vnodes that are no longer
     /// owned.
-    pub fn update_vnodes(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+    pub async fn update_vnodes(
+        &mut self,
+        new_vnodes: Arc<Bitmap>,
+    ) -> StreamExecutorResult<Arc<Bitmap>> {
         let old_vnodes = self.state_table.update_vnode_bitmap(new_vnodes.clone());
         for (vnode, (old, new)) in old_vnodes.iter().zip_eq(new_vnodes.iter()).enumerate() {
             if old && !new {
@@ -195,8 +208,19 @@ impl<S: StateStore> RangeCache<S> {
                 self.cache.remove(&vnode);
             }
         }
+        if let Some(ref self_range) = self.range {
+            let current_range = (
+                Self::to_row_bound(self_range.0.clone()),
+                Self::to_row_bound(self_range.1.clone()),
+            );
+            for (vnode, (old, new)) in old_vnodes.iter().zip_eq(new_vnodes.iter()).enumerate() {
+                if new && !old {
+                    self.add_vnode_range(vnode, &current_range).await?;
+                }
+            }
+        }
         self.vnodes = new_vnodes;
-        old_vnodes
+        Ok(old_vnodes)
     }
 
     /// Flush writes to the `StateTable` from the in-memory buffer.

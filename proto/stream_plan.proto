@@ -95,16 +95,19 @@ message Barrier {
 }
 
 message Watermark {
-  // the watermark column's index in the stream's schema
+  // The watermark column's index in the stream's schema.
   uint32 col_idx = 1;
-  // the watermark value, there will be no record having a greater value in the watermark column
-  data.Datum val = 2;
+  // The watermark type, used for deserialization of the watermark value.
+  data.DataType data_type = 2;
+  // The watermark value, there will be no record having a greater value in the watermark column.
+  data.Datum val = 3;
 }
 
 message StreamMessage {
   oneof stream_message {
     data.StreamChunk stream_chunk = 1;
     Barrier barrier = 2;
+    Watermark watermark = 3;
   }
 }
 
@@ -300,6 +303,18 @@ message ExchangeNode {
   DispatchStrategy strategy = 1;
 }
 
+enum ChainType {
+  CHAIN_UNSPECIFIED = 0;
+
+  // CHAIN is corresponding to the chain executor.
+  CHAIN = 1;
+
+  // REARRANGE is corresponding to the rearranged chain executor.
+  REARRANGE = 2;
+
+  // BACKFILL is corresponding to the backfill executor.
+  BACKFILL = 3;
+}
 // ChainNode is used for mv on mv.
 // ChainNode is like a "UNION" on mv snapshot and streaming. So it takes two inputs with fixed order:
 //   1. MergeNode (as a placeholder) for streaming read.
@@ -313,14 +328,17 @@ message ChainNode {
   // Generally, the barrier needs to be rearranged during the MV creation process, so that data can
   // be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
   // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
-  // This option is used to disable barrier rearrangement.
-  bool disable_rearrange = 4;
+  // ChainType is used to decide which implementation for the ChainNode.
+  ChainType chain_type = 4;
   // Whether to place this chain on the same worker node as upstream actors.
   bool same_worker_node = 5;
   // Whether the upstream materialize is and this chain should be a singleton.
   // FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
   // fragment in the downstream mview. Remove this when we refactor the fragmenter.
   bool is_singleton = 6;
+
+  // The upstream materialized view info used by backfill.
+  plan_common.StorageTableDesc table_desc = 7;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.

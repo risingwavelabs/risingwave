@@ -352,14 +352,6 @@ impl PredicatePushdown for LogicalTopN {
 
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> Result<PlanRef> {
-        if self.with_ties() {
-            return Err(ErrorCode::NotImplemented(
-                "TopN with ties in batch mode".to_string(),
-                5302.into(),
-            )
-            .into());
-        }
-
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         if self.group_key().is_empty() {

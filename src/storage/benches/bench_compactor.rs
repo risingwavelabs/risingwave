@@ -178,6 +178,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         cache_policy: CachePolicy::Disable,
         gc_delete_keys: false,
         watermark: 0,
+        stats_target_table_ids: None,
     };
     Compactor::compact_and_build_sst(
         &mut builder,

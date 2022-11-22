@@ -25,6 +25,7 @@ use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use crate::array::ArrayResult;
+use crate::types::Decimal::Normalized;
 
 #[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
@@ -57,6 +58,11 @@ impl Decimal {
         let mut buf = [0u8; 16];
         input.read_exact(&mut buf)?;
         Ok(Self::unordered_deserialize(buf))
+    }
+
+    pub fn from_scientific(value: &str) -> Option<Self> {
+        let decimal = RustDecimal::from_scientific(value).ok()?;
+        Some(Normalized(decimal))
     }
 }
 
