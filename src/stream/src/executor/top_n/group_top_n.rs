@@ -22,7 +22,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
@@ -257,29 +256,26 @@ where
         let mut res_ops = Vec::with_capacity(self.limit);
         let mut res_rows = Vec::with_capacity(self.limit);
 
-        let hash_codes = chunk
-            .data_chunk()
-            .get_hash_values(&self.group_by, Crc32FastBuilder);
-        let keys = K::build_from_hash_code(&self.group_by, chunk.data_chunk(), hash_codes.clone());
-        for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq(keys) {
+        let keys = K::build(&self.group_by, chunk.data_chunk())?;
+
+        for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq(keys.iter()) {
             // The pk without group by
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices[self.group_by.len()..]);
             let cache_key =
                 serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
 
             let group_key = row_ref.row_by_indices(&self.group_by);
-            let pk_prefix = group_key.clone();
 
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
-            if !self.caches.contains(&group_cache_key) {
+            if !self.caches.contains(group_cache_key) {
                 let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
                 self.managed_state
-                    .init_topn_cache(Some(&pk_prefix), &mut topn_cache, self.order_by_len)
+                    .init_topn_cache(Some(&group_key), &mut topn_cache, self.order_by_len)
                     .await?;
                 self.caches.insert(group_cache_key.clone(), topn_cache);
             }
-            let cache = self.caches.get_mut(&group_cache_key).unwrap();
+            let cache = self.caches.get_mut(group_cache_key).unwrap();
 
             // apply the chunk to state table
             match op {
@@ -292,7 +288,7 @@ where
                     self.managed_state.delete(row_ref.clone());
                     cache
                         .delete(
-                            Some(&pk_prefix),
+                            Some(&group_key),
                             &mut self.managed_state,
                             cache_key,
                             row_ref,

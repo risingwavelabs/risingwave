@@ -46,10 +46,8 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
         let order_pairs = table.get_pk().iter().map(OrderPair::from_prost).collect();
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let group_key_types = group_by
-            .iter()
-            .map(|idx| input.schema().fields[*idx].data_type())
-            .collect_vec();
+        let group_key_types = input.schema().data_types()[..group_by.len()].to_vec();
+
         if node.with_ties {
             let args = GroupTopNExecutorDispatcherArgs {
                 input,
