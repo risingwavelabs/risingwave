@@ -227,11 +227,9 @@ async fn run_election<S: MetaStore>(
             META_LEADER_KEY.as_bytes().to_vec(),
             leader_info.encode_to_vec(),
         );
-
-        // duplicate of above
         txn.put(
             META_CF_NAME.to_string(),
-            META_LEADER_KEY.as_bytes().to_vec(),
+            META_LEASE_KEY.as_bytes().to_vec(),
             lease_info.encode_to_vec(),
         );
 
