@@ -14,6 +14,7 @@
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
+use futures::stream::select_all;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -25,7 +26,6 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_hummock_sdk::HummockReadEpoch;

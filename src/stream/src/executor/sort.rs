@@ -24,7 +24,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, Row};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::select_all;
+use futures::stream::select_all;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;

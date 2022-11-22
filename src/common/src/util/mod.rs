@@ -32,13 +32,10 @@ pub mod sort_util;
 #[macro_use]
 pub mod match_util;
 pub mod epoch;
-mod future_utils;
 pub mod scan_range;
 pub mod schema_check;
 pub mod value_encoding;
 pub mod worker_util;
-
-pub use future_utils::select_all;
 
 pub fn downcast_ref<S, T>(source: &S) -> Result<&T>
 where
