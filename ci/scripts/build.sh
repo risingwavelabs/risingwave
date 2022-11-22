@@ -42,8 +42,12 @@ cargo build \
     -p risingwave_compaction_test \
     --features "static-link static-log-level" --profile "$profile"
 
-echo "--- Compress RisingWave debug info"
+echo "--- Compress debug info for artifacts"
 objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave
+objcopy --compress-debug-sections=zlib-gnu target/"$target"/sqlsmith
+objcopy --compress-debug-sections=zlib-gnu target/"$target"/compaction-test
+objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave_regress_test
+objcopy --compress-debug-sections=zlib-gnu target/"$target"/risedev-dev
 
 echo "--- Show link info"
 ldd target/"$target"/risingwave
