@@ -272,18 +272,15 @@ async fn run_election<S: MetaStore>(
     let is_leader = match meta_store.txn(txn).await {
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => {
-                tracing::error!("Trying to become leader: another node has become new leader");
+                tracing::error!("Renewing lease: another node has become new leader");
                 false
             }
             MetaStoreError::Internal(e) => {
-                tracing::warn!(
-                    "Trying to become leader: try again later, MetaStoreError: {:?}",
-                    e
-                );
+                tracing::warn!("Renewing lease: try again later, MetaStoreError: {:?}", e);
                 return None; // repeat the election
             }
             MetaStoreError::ItemNotFound(e) => {
-                tracing::warn!("Trying to become leader: MetaStoreError: {:?}", e);
+                tracing::warn!("Renewing lease: MetaStoreError: {:?}", e);
                 false
             }
         },
@@ -293,11 +290,68 @@ async fn run_election<S: MetaStore>(
         }
     };
 
+    let is_leader = match renew_lease(&leader_info, lease_time, meta_store).await {
+        None => return None,
+        Some(val) => val,
+    };
+
     Some(ElectionResult {
         metaLeaderInfo: leader_info,
         metaLeaseInfo: lease_info,
         isLeader: is_leader,
     })
+}
+
+// Try to renews the lease of the current leader by lease_time
+// Returns true if node was leader and was able to renew/create the lease
+// Returns false if node was follower and thus could not renew/create lease
+// Returns None if operation has to be repeated
+async fn renew_lease<S: MetaStore>(
+    leader_info: &MetaLeaderInfo,
+    lease_time_sec: u64,
+    meta_store: &Arc<S>,
+) -> Option<bool> {
+    let now = since_epoch();
+    let mut txn = Transaction::default();
+    let lease_info = MetaLeaseInfo {
+        leader: Some(leader_info.clone()),
+        lease_register_time: now.as_secs(),
+        lease_expire_time: now.as_secs() + lease_time_sec,
+    };
+    txn.check_equal(
+        META_CF_NAME.to_string(),
+        META_LEADER_KEY.as_bytes().to_vec(),
+        leader_info.encode_to_vec(),
+    );
+    txn.put(
+        META_CF_NAME.to_string(),
+        META_LEASE_KEY.as_bytes().to_vec(),
+        lease_info.encode_to_vec(),
+    );
+    let is_leader = match meta_store.txn(txn).await {
+        Err(e) => match e {
+            MetaStoreError::TransactionAbort() => {
+                tracing::error!("Renewing/Taking: another node has become new leader");
+                false
+            }
+            MetaStoreError::Internal(e) => {
+                tracing::warn!("Renewing/Taking: try again later, MetaStoreError: {:?}", e);
+                // operation has to be repeated
+                return None;
+            }
+            MetaStoreError::ItemNotFound(e) => {
+                tracing::warn!("Renewing/Taking: MetaStoreError: {:?}", e);
+                return None;
+                // false // TODO: Should we repeat here or should we assume that we are not leader?
+                // TODO: Do we have to go to elections if we run into this one?
+            }
+        },
+        Ok(_) => {
+            tracing::info!("Current node is leader");
+            true
+        }
+    };
+    Some(is_leader)
 }
 
 // TODO: How to debug
@@ -361,6 +415,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     'initial_election: loop {
         ticker.tick().await;
 
+        // every lease gets a random ID to differentiate between leases/leaders
         let mut initial_election = true;
         let init_lease_id = gen_rand_lease_id();
 
@@ -426,41 +481,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     tracing::info!("leader_info: {:?}", leader_info);
 
                     // renew the current lease if this is the leader
-                    let now = since_epoch();
-                    let mut txn = Transaction::default();
-                    let lease_info = MetaLeaseInfo {
-                        leader: Some(this_node_leader_info.clone()),
-                        lease_register_time: now.as_secs(),
-                        lease_expire_time: now.as_secs() + lease_time,
-                    };
-                    txn.check_equal(
-                        META_CF_NAME.to_string(),
-                        META_LEADER_KEY.as_bytes().to_vec(),
-                        this_node_leader_info.encode_to_vec(),
-                    );
-                    txn.put(
-                        META_CF_NAME.to_string(),
-                        META_LEASE_KEY.as_bytes().to_vec(),
-                        lease_info.encode_to_vec(),
-                    );
-                    match meta_store.txn(txn).await {
-                        Err(e) => match e {
-                            MetaStoreError::TransactionAbort() => {
-                                tracing::info!("Cannot update lease if not leader")
-                                // TODO: Remove this log development only
-                            }
-                            _ => {
-                                tracing::warn!("Unable to update lease. Error {}", e);
-                                continue 'term;
-                            }
-                        },
-                        Ok(_) => {
-                            tracing::info!(
-                                "Current node is still leader until {}",
-                                now.as_secs() + lease_time
-                            );
-                            continue 'term;
-                        }
+                    if renew_lease(&leader_info, lease_time, &meta_store)
+                        .await
+                        .is_none()
+                    {
+                        continue 'term;
                     }
 
                     // get leader info
