@@ -481,7 +481,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 plan_agg_call,
                 input_schema: self.input.schema(),
             })
-            .collect_vec()
+            .collect()
     }
 
     fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
@@ -489,7 +489,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .iter()
             .copied()
             .map(|i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-            .collect_vec()
+            .collect()
     }
 }
 
