@@ -353,7 +353,7 @@ macro_rules! for_all_cast_variants {
             { varchar, time, str_to_time },
             { varchar, interval, str_parse },
             { varchar, timestamp, str_to_timestamp },
-            { varchar, timestampz, str_to_timestampz },
+            { varchar, timestamptz, str_to_timestampz },
             { varchar, int16, str_parse },
             { varchar, int32, str_parse },
             { varchar, int64, str_parse },
@@ -374,7 +374,7 @@ macro_rules! for_all_cast_variants {
             { interval, varchar, general_to_text },
             { date, varchar, general_to_text },
             { timestamp, varchar, general_to_text },
-            { timestampz, varchar, |x| Ok(timestampz_to_utc_string(x)) },
+            { timestamptz, varchar, |x| Ok(timestampz_to_utc_string(x)) },
             { list, varchar, |x| general_to_text(x) },
 
             { boolean, int32, general_cast },

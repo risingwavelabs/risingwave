@@ -36,7 +36,7 @@ pub mod round;
 pub mod rtrim;
 pub mod split_part;
 pub mod substr;
-pub mod timestampz;
+pub mod timestamptz;
 pub mod to_char;
 pub mod translate;
 pub mod trim;
