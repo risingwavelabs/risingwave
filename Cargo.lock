@@ -5017,6 +5017,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "spin 0.9.4",
+ "static_assertions",
  "strum",
  "strum_macros",
  "sysinfo",
