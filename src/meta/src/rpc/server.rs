@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use prost::Message;
+use rand::Rng;
 use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -142,13 +143,14 @@ fn since_epoch() -> Duration {
 async fn run_election<S: MetaStore>(
     meta_store: &Arc<S>,
     addr: &String,
-    lease_time: u64,
+    lease_time: u64, // in sec
+    lease_id: u64,   // random id identifying the leader via the lease
 ) -> Option<(MetaLeaderInfo, MetaLeaseInfo, bool)> {
     tracing::info!("running an election...");
 
     // below is old code
     // get old leader info and lease
-    let (old_leader_info, old_leader_lease) = match get_infos(&meta_store).await {
+    let (current_leader_info, current_leader_lease) = match get_infos(&meta_store).await {
         None => return None,
         Some(infos) => {
             let (leader, lease) = infos;
@@ -157,10 +159,10 @@ async fn run_election<S: MetaStore>(
     };
 
     let now = since_epoch();
-    if !old_leader_lease.is_empty() {
+    if !current_leader_lease.is_empty() {
         // TODO: why do we need this part?
         tracing::info!("old_leader_lease is not empty");
-        let lease_info = MetaLeaseInfo::decode(&mut old_leader_lease.as_slice()).unwrap();
+        let lease_info = MetaLeaseInfo::decode(&mut current_leader_lease.as_slice()).unwrap();
 
         // Lease did not yet expire
         if lease_info.lease_expire_time > now.as_secs()
@@ -174,18 +176,19 @@ async fn run_election<S: MetaStore>(
             );
             tracing::error!("{}", err_info);
             return None;
-            // bail!(err_info);
+            // TODO
+            // Currently this repeats the election, but this should go into the term
         }
     }
 
     // TODO: are we sure we want to update like this? We could miss a lease update?
     // Why not a random number?
-    let lease_id = if !old_leader_info.is_empty() {
-        let leader_info = MetaLeaderInfo::decode(&mut old_leader_info.as_slice()).unwrap();
-        leader_info.lease_id + 1
-    } else {
-        0
-    };
+    //  let lease_id = if !old_leader_info.is_empty() {
+    //      let leader_info = MetaLeaderInfo::decode(&mut old_leader_info.as_slice()).unwrap();
+    //      leader_info.lease_id + 1
+    //  } else {
+    //      0
+    //  };
     tracing::info!("lease_id: {}", lease_id);
 
     let mut txn = Transaction::default();
@@ -203,7 +206,7 @@ async fn run_election<S: MetaStore>(
     tracing::info!("lease_info: {:?}", lease_info);
 
     // Initial leader election
-    if old_leader_info.is_empty() {
+    if current_leader_info.is_empty() {
         tracing::info!("We have no leader");
 
         // cluster has no leader
@@ -244,7 +247,6 @@ async fn run_election<S: MetaStore>(
 
     // follow-up election:
     // There has already been a leader before
-
     let mut txn = Transaction::default();
     let now = since_epoch();
     let lease_info = MetaLeaseInfo {
@@ -269,18 +271,18 @@ async fn run_election<S: MetaStore>(
     let is_leader = match meta_store.txn(txn).await {
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => {
-                tracing::error!("keep lease failed, another node has become new leader");
+                tracing::error!("Trying to become leader: another node has become new leader");
                 false
             }
             MetaStoreError::Internal(e) => {
                 tracing::warn!(
-                    "keep lease failed, try again later, MetaStoreError: {:?}",
+                    "Trying to become leader: try again later, MetaStoreError: {:?}",
                     e
                 );
                 return None; // repeat the election
             }
             MetaStoreError::ItemNotFound(e) => {
-                tracing::warn!("keep lease failed, MetaStoreError: {:?}", e);
+                tracing::warn!("Trying to become leader: MetaStoreError: {:?}", e);
                 false
             }
         },
@@ -298,9 +300,10 @@ async fn run_election<S: MetaStore>(
 // add more logs
 // txn may be incorrect
 
-// getting leader_info and leader_lease or defaulting to none
+// TODO: return MetaLeaderInfo and MetaLeaderLease types. Or return a infos type that contains both
+// of them getting leader_info and leader_lease or defaulting to none
 async fn get_infos<S: MetaStore>(meta_store: &Arc<S>) -> Option<(Vec<u8>, Vec<u8>)> {
-    let old_leader_info = match meta_store
+    let current_leader_info = match meta_store
         .get_cf(META_CF_NAME, META_LEADER_KEY.as_bytes())
         .await
     {
@@ -312,9 +315,9 @@ async fn get_infos<S: MetaStore>(meta_store: &Arc<S>) -> Option<(Vec<u8>, Vec<u8
     };
     tracing::info!(
         "Old_leader_info: {:?}",
-        String::from_utf8_lossy(&old_leader_info)
+        String::from_utf8_lossy(&current_leader_info)
     );
-    let old_leader_lease = match meta_store
+    let current_leader_lease = match meta_store
         .get_cf(META_CF_NAME, META_LEASE_KEY.as_bytes())
         .await
     {
@@ -324,9 +327,13 @@ async fn get_infos<S: MetaStore>(meta_store: &Arc<S>) -> Option<(Vec<u8>, Vec<u8
     };
     tracing::info!(
         "old_leader_lease: {:?}",
-        String::from_utf8_lossy(&old_leader_lease)
+        String::from_utf8_lossy(&current_leader_lease)
     );
-    Some((old_leader_info, old_leader_lease))
+    Some((current_leader_info, current_leader_lease))
+}
+
+fn gen_rand_lease_id() -> u64 {
+    rand::thread_rng().gen_range(0..std::u64::MAX)
 }
 
 // TODO: write docstring
@@ -352,8 +359,12 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         // TODO: maybe also shut down?
         ticker.tick().await;
 
+        let mut initial_election = true;
+        let init_lease_id = gen_rand_lease_id();
+
         // run the initial election
-        let election_outcome = run_election(&meta_store, &addr_clone, lease_time).await;
+        let election_outcome =
+            run_election(&meta_store, &addr_clone, lease_time, init_lease_id).await;
         let (leader, _, is_leader) = match election_outcome {
             Some(infos) => {
                 let (leader, lease, is_leader) = infos;
@@ -377,9 +388,17 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     _ = ticker.tick() => {},
                 }
 
+                // lease id of this node
+                let lease_id = if initial_election {
+                    initial_election = false;
+                    init_lease_id
+                } else {
+                    gen_rand_lease_id()
+                };
+
                 // TODO: how do we update the leader status? We cannot return is_leader here
                 let (leader_info, lease_info, is_leader) =
-                    match run_election(&meta_store, &addr_clone, lease_time).await {
+                    match run_election(&meta_store, &addr_clone, lease_time, lease_id).await {
                         None => continue 'election,
                         Some(infos) => {
                             let (leader, lease, is_leader) = infos;
@@ -388,10 +407,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     };
 
                 tracing::info!("Election done. Entering term");
-
-                // TODO: remove log line
-                // TODO: where is the error? Has to be in election loop
-                // Try to isolate the error
 
                 // election done. Enter current term in loop below
                 'term: loop {
@@ -404,24 +419,45 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         _ = ticker.tick() => {},
                     }
 
+                    // get current leader info or continue term
+                    //    let leader_info = match get_infos(&meta_store).await {
+                    //        Some(val) => {
+                    //            let (leader, _) = val;
+                    //            MetaLeaderInfo::decode(&mut leader.as_slice()).unwrap()
+                    //        }
+                    //        None => {
+                    //            tracing::warn!("Unable to get infos");
+                    //            continue 'term;
+                    //        }
+                    //    };
+
+                    // The leader info of this node
+                    let this_node_leader_info = MetaLeaderInfo {
+                        lease_id,
+                        node_address: addr.to_string(),
+                    };
+                    tracing::info!("leader_info: {:?}", leader_info);
+
                     // renew the current lease if this is the leader
                     let now = since_epoch();
                     let mut txn = Transaction::default();
                     let lease_info = MetaLeaseInfo {
-                        leader: Some(leader_info.clone()),
+                        leader: Some(this_node_leader_info.clone()),
                         lease_register_time: now.as_secs(),
                         lease_expire_time: now.as_secs() + lease_time,
                     };
                     txn.check_equal(
                         META_CF_NAME.to_string(),
                         META_LEADER_KEY.as_bytes().to_vec(),
-                        leader_info.encode_to_vec(),
+                        this_node_leader_info.encode_to_vec(),
                     );
                     txn.put(
                         META_CF_NAME.to_string(),
                         META_LEASE_KEY.as_bytes().to_vec(),
                         lease_info.encode_to_vec(),
                     );
+                    // TODO: will always succeed, because we are just comparing against the latest
+                    // leader_info Need to compare against my leader info
                     match meta_store.txn(txn).await {
                         Err(e) => match e {
                             MetaStoreError::TransactionAbort() => {
@@ -429,11 +465,15 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                                 // TODO: Remove this log development only
                             }
                             _ => {
-                                tracing::warn!("Unable to update lease. Error {}", e)
+                                tracing::warn!("Unable to update lease. Error {}", e);
+                                continue 'term;
                             }
                         },
                         Ok(_) => {
-                            tracing::info!("Current node is still leader");
+                            tracing::info!(
+                                "Current node is still leader until {}",
+                                now.as_secs() + lease_time
+                            );
                             continue 'term;
                         }
                     }
