@@ -148,11 +148,12 @@ struct ElectionResult {
 }
 
 // Sets a leader. Does not renew leaders term
-async fn run_election<S: MetaStore>(
+// lease_id: random id identifying the leader via the lease.
+async fn run_for_election<S: MetaStore>(
     meta_store: &Arc<S>,
     addr: &String,
-    lease_time: u64, // in sec
-    lease_id: u64,   // random id identifying the leader via the lease
+    lease_time: u64,    // in sec
+    next_lease_id: u64, //  Will be the new id, if this node gets elected
 ) -> Option<ElectionResult> {
     tracing::info!("running an election...");
 
@@ -173,7 +174,7 @@ async fn run_election<S: MetaStore>(
 
         // Lease did not yet expire
         if lease_info.lease_expire_time > now.as_secs()
-            && lease_info.leader.as_ref().unwrap().node_address != *addr
+        //    && lease_info.leader.as_ref().unwrap().node_address != *addr
         // TODO: all nodes have the same addr. Above line is useless.
         // Will this be different in prod?
         {
@@ -181,20 +182,22 @@ async fn run_election<S: MetaStore>(
                 "We already have a leader with a lease that is valid for {} more sec",
                 lease_info.lease_expire_time - now.as_secs(),
             );
-            return Some(ElectionResult {
-                meta_leader_info: MetaLeaderInfo::decode(&mut current_leader_info.as_slice())
-                    .unwrap(),
-                meta_lease_info: MetaLeaseInfo::decode(&mut current_leader_lease.as_slice())
-                    .unwrap(),
-                is_leader: lease_id == lease_info.leader.unwrap().lease_id,
-            });
+            return None;
+            // we do not know who is th leader. Repeat election
+            //   return Some(ElectionResult {
+            //       meta_leader_info: MetaLeaderInfo::decode(&mut current_leader_info.as_slice())
+            //           .unwrap(),
+            //       meta_lease_info: MetaLeaseInfo::decode(&mut current_leader_lease.as_slice())
+            //           .unwrap(),
+            //       is_leader: next_lease_id == lease_info.leader.unwrap().lease_id,
+            //   });
         }
     }
 
-    tracing::info!("lease_id: {}", lease_id);
+    tracing::info!("lease_id: {}", next_lease_id);
 
     let leader_info = MetaLeaderInfo {
-        lease_id,
+        lease_id: next_lease_id,
         node_address: addr.to_string(),
     };
     tracing::info!("leader_info: {:?}", leader_info);
@@ -371,7 +374,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
 
         // run the initial election
         let election_outcome =
-            run_election(&meta_store, &addr_clone, lease_time, init_lease_id).await;
+            run_for_election(&meta_store, &addr_clone, lease_time, init_lease_id).await;
         let (leader, is_leader) = match election_outcome {
             Some(infos) => {
                 tracing::info!("initial election Succeeded");
@@ -407,7 +410,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 };
 
                 let (leader_info, _, is_leader) =
-                    match run_election(&meta_store, &addr_clone, lease_time, lease_id).await {
+                    match run_for_election(&meta_store, &addr_clone, lease_time, lease_id).await {
                         None => {
                             tracing::info!("Election failed. Repeating election");
                             continue 'election;
