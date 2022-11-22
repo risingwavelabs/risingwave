@@ -176,23 +176,24 @@ async fn run_election<S: MetaStore>(
         // Lease did not yet expire
         if lease_info.lease_expire_time > now.as_secs()
             && lease_info.leader.as_ref().unwrap().node_address != *addr
-        // TODO: They are all the nodes
+        // TODO: all nodes have the same addr. This line is useless. Will this be different in prod?
         {
-            let err_info = format!(
-                "the lease {:?} does not expire, now time: {}",
-                lease_info,
-                now.as_secs(),
+            tracing::error!(
+                "We already have a leader with a lease that is valid for {} more sec",
+                lease_info.lease_expire_time - now.as_secs(),
             );
-            tracing::error!("{}", err_info);
-            return None;
-            // TODO
-            // Currently this repeats the election, but this should go into the term
+            return Some(ElectionResult {
+                meta_leader_info: MetaLeaderInfo::decode(&mut current_leader_info.as_slice())
+                    .unwrap(),
+                meta_lease_info: MetaLeaseInfo::decode(&mut current_leader_lease.as_slice())
+                    .unwrap(),
+                is_leader: false,
+            });
         }
     }
 
     tracing::info!("lease_id: {}", lease_id);
 
-    let mut txn = Transaction::default();
     let leader_info = MetaLeaderInfo {
         lease_id,
         node_address: addr.to_string(),
@@ -284,16 +285,19 @@ async fn try_acquire_renew_lease<S: MetaStore>(
     let is_leader = match meta_store.txn(txn).await {
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => {
-                tracing::error!("Renew/acquire: another node has become new leader");
+                tracing::error!("Renew/acquire lease: another node has become new leader");
                 false
             }
             MetaStoreError::Internal(e) => {
-                tracing::warn!("Renew/acquire: try again later, MetaStoreError: {:?}", e);
+                tracing::warn!(
+                    "Renew/acquire lease: try again later, MetaStoreError: {:?}",
+                    e
+                );
                 // operation has to be repeated
                 return None;
             }
             MetaStoreError::ItemNotFound(e) => {
-                tracing::warn!("Renew/acquire: MetaStoreError: {:?}", e);
+                tracing::warn!("Renew/acquire lease: MetaStoreError: {:?}", e);
                 return None;
                 // false // TODO: Should we repeat here or should we assume that we are not leader?
                 // TODO: Do we have to go to elections if we run into this one?
@@ -387,13 +391,12 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         };
         tracing::info!("current leader is {:?}", leader);
 
-        // define all follow up elections and terms
+        // define all follow up elections and terms in handle
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let (leader_tx, leader_rx) = tokio::sync::watch::channel(is_leader);
         let handle = tokio::spawn(async move {
             // election
             'election: loop {
-                // also my code below
                 tokio::select! {
                     _ = &mut shutdown_rx => {
                         tracing::info!("Register leader info is stopped");
@@ -426,10 +429,8 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         }
                     };
 
-                // signal to observers that this node currently is leader
+                // signal to observers if this node currently is leader
                 leader_tx.send(is_leader).unwrap();
-
-                tracing::info!("Election done. Entering term");
 
                 // election done. Enter current term in loop below
                 'term: loop {
@@ -442,20 +443,20 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         _ = ticker.tick() => {},
                     }
 
-                    // The leader info of this node
-                    let this_node_leader_info = MetaLeaderInfo {
-                        lease_id,
-                        node_address: addr.to_string(),
-                    };
                     tracing::info!("leader_info: {:?}", leader_info);
 
                     // renew the current lease if this is the leader
-                    if try_acquire_renew_lease(&leader_info, lease_time, &meta_store)
-                        .await
-                        .is_none()
-                    {
+                    let attempt =
+                        try_acquire_renew_lease(&leader_info, lease_time, &meta_store).await;
+                    if attempt.is_none() {
+                        // something went wrong
+                        continue 'election;
+                    }
+                    if attempt.unwrap() {
+                        // node is leader and lease was renewed
                         continue 'term;
                     }
+                    // node is follower
 
                     // get leader info
                     let (_, lease_info) = get_infos(&meta_store).await.unwrap_or_default();
@@ -469,7 +470,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     let some_time = lease_time / 2;
                     let lease_info = MetaLeaseInfo::decode(&mut lease_info.as_slice()).unwrap();
                     if lease_info.get_lease_expire_time() + some_time < since_epoch().as_secs() {
-                        tracing::warn!("Detected that leader is dead");
+                        tracing::warn!("Detected that leader is down");
                         let mut txn = Transaction::default();
                         txn.delete(
                             META_CF_NAME.to_string(),
@@ -478,7 +479,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
                         match meta_store.txn(txn).await {
                             Err(e) => tracing::warn!("Unable to update lease. Error {}", e),
-                            Ok(_) => tracing::info!("Deleted leader lease"),
+                            Ok(_) => tracing::info!("Deleted leader and lease"),
                         }
                         continue 'election;
                     }
