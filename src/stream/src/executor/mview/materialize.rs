@@ -210,7 +210,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
                         let _ = self.state_table.update_vnode_bitmap(vnode_bitmap);
                     }
-
+                    self.materialize_cache.evict();
                     Message::Barrier(b)
                 }
             }
@@ -500,6 +500,10 @@ impl MaterializeCache {
 
     pub fn put(&mut self, key: Vec<u8>, value: Option<CompactedRow>) {
         self.data.push(key, value);
+    }
+
+    fn evict(&mut self) {
+        self.data.evict()
     }
 }
 #[cfg(test)]
