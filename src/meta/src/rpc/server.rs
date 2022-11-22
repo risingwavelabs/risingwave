@@ -161,7 +161,7 @@ async fn run_election<S: MetaStore>(
     let now = since_epoch();
     if !current_leader_lease.is_empty() {
         // TODO: why do we need this part?
-        tracing::info!("old_leader_lease is not empty");
+        tracing::info!("current_leader_lease is not empty");
         let lease_info = MetaLeaseInfo::decode(&mut current_leader_lease.as_slice()).unwrap();
 
         // Lease did not yet expire
@@ -313,10 +313,6 @@ async fn get_infos<S: MetaStore>(meta_store: &Arc<S>) -> Option<(Vec<u8>, Vec<u8
             return None;
         }
     };
-    tracing::info!(
-        "Old_leader_info: {:?}",
-        String::from_utf8_lossy(&current_leader_info)
-    );
     let current_leader_lease = match meta_store
         .get_cf(META_CF_NAME, META_LEASE_KEY.as_bytes())
         .await
@@ -325,10 +321,6 @@ async fn get_infos<S: MetaStore>(meta_store: &Arc<S>) -> Option<(Vec<u8>, Vec<u8
         Ok(v) => v,
         _ => return None,
     };
-    tracing::info!(
-        "old_leader_lease: {:?}",
-        String::from_utf8_lossy(&current_leader_lease)
-    );
     Some((current_leader_info, current_leader_lease))
 }
 
@@ -496,9 +488,10 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                             META_CF_NAME.to_string(),
                             META_LEADER_KEY.as_bytes().to_vec(),
                         );
+                        txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
                         match meta_store.txn(txn).await {
                             Err(e) => tracing::warn!("Unable to update lease. Error {}", e),
-                            Ok(_) => tracing::info!("Deleted leader lease. Running new election"),
+                            Ok(_) => tracing::info!("Deleted leader lease"),
                         }
                         continue 'election;
                     }
