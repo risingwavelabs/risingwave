@@ -16,14 +16,12 @@ use std::{fmt, iter};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
 use super::generic::{
-    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggCallDisplay,
-    PlanAggOrderByField,
+    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
 };
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
