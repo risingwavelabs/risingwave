@@ -25,7 +25,7 @@ impl DataType {
             DataType::Int64
             | DataType::Float64
             | DataType::Timestamp
-            | DataType::Timestampz
+            | DataType::Timestamptz
             | DataType::Time => 8,
             DataType::Decimal
             | DataType::Varchar
@@ -54,7 +54,7 @@ impl DataType {
             1043 => Ok(DataType::Varchar),
             1083 => Ok(DataType::Time),
             1114 => Ok(DataType::Timestamp),
-            1184 => Ok(DataType::Timestampz),
+            1184 => Ok(DataType::Timestamptz),
             1186 => Ok(DataType::Interval),
             1000 => Ok(DataType::List {
                 datatype: Box::new(DataType::Boolean),
@@ -90,7 +90,7 @@ impl DataType {
                 datatype: Box::new(DataType::Timestamp),
             }),
             1185 => Ok(DataType::List {
-                datatype: Box::new(DataType::Timestampz),
+                datatype: Box::new(DataType::Timestamptz),
             }),
             1187 => Ok(DataType::List {
                 datatype: Box::new(DataType::Interval),
@@ -112,7 +112,7 @@ impl DataType {
             DataType::Varchar => 1043,
             DataType::Time => 1083,
             DataType::Timestamp => 1114,
-            DataType::Timestampz => 1184,
+            DataType::Timestamptz => 1184,
             DataType::Interval => 1186,
             // NOTE: Sturct type don't have oid in postgres, here we use varchar oid so that struct
             // will be considered as a varchar.
@@ -129,7 +129,7 @@ impl DataType {
                 DataType::Varchar => 1015,
                 DataType::Time => 1183,
                 DataType::Timestamp => 1115,
-                DataType::Timestampz => 1185,
+                DataType::Timestamptz => 1185,
                 DataType::Interval => 1187,
                 DataType::Struct(_) => 1015,
                 DataType::List { .. } => unreachable!("Never reach here!"),

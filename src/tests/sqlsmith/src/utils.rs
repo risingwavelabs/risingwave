@@ -102,7 +102,7 @@ pub fn data_type_name_to_ast_data_type(type_name: DataTypeName) -> Option<DataTy
         DataTypeName::Varchar => Some(DataType::Varchar),
         DataTypeName::Date => Some(DataType::Date),
         DataTypeName::Timestamp => Some(DataType::Timestamp(false)),
-        DataTypeName::Timestampz => Some(DataType::Timestamp(true)),
+        DataTypeName::Timestamptz => Some(DataType::Timestamp(true)),
         DataTypeName::Time => Some(DataType::Time(false)),
         DataTypeName::Interval => Some(DataType::Interval),
         DataTypeName::Struct | DataTypeName::List => None,

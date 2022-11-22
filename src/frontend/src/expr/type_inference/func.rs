@@ -383,7 +383,7 @@ fn is_preferred(t: DataTypeName) -> bool {
     use DataTypeName as T;
     matches!(
         t,
-        T::Float64 | T::Boolean | T::Varchar | T::Timestampz | T::Interval
+        T::Float64 | T::Boolean | T::Varchar | T::Timestamptz | T::Interval
     )
 }
 
@@ -682,7 +682,7 @@ fn build_type_derive_map() -> FuncSigMap {
         T::Varchar,
         T::Date,
         T::Timestamp,
-        T::Timestampz,
+        T::Timestamptz,
         T::Time,
         T::Interval,
     ];
@@ -722,7 +722,7 @@ fn build_type_derive_map() -> FuncSigMap {
     ];
     build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct]);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Date, T::Timestamp, T::Timestampz]);
+    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Date, T::Timestamp, T::Timestamptz]);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
     for e in cmp_exprs {
         for t in [T::Boolean, T::Varchar] {
@@ -781,7 +781,7 @@ fn build_type_derive_map() -> FuncSigMap {
     for (base, delta) in [
         (T::Date, T::Int32),
         (T::Timestamp, T::Interval),
-        (T::Timestampz, T::Interval),
+        (T::Timestamptz, T::Interval),
         (T::Time, T::Interval),
     ] {
         build_commutative_funcs(&mut map, E::Add, base, delta, base);
@@ -802,7 +802,7 @@ fn build_type_derive_map() -> FuncSigMap {
         map.insert(E::Divide, vec![T::Interval, t], T::Interval);
     }
 
-    for t in [T::Timestampz, T::Timestamp, T::Time, T::Date] {
+    for t in [T::Timestamptz, T::Timestamp, T::Time, T::Date] {
         map.insert(E::Extract, vec![T::Varchar, t], T::Decimal);
     }
     for t in [T::Timestamp, T::Date] {
@@ -810,17 +810,17 @@ fn build_type_derive_map() -> FuncSigMap {
     }
     map.insert(
         E::TumbleStart,
-        vec![T::Timestampz, T::Interval],
-        T::Timestampz,
+        vec![T::Timestamptz, T::Interval],
+        T::Timestamptz,
     );
-    map.insert(E::ToTimestamp, vec![T::Float64], T::Timestampz);
-    map.insert(E::AtTimeZone, vec![T::Timestamp, T::Varchar], T::Timestampz);
-    map.insert(E::AtTimeZone, vec![T::Timestampz, T::Varchar], T::Timestamp);
+    map.insert(E::ToTimestamp, vec![T::Float64], T::Timestamptz);
+    map.insert(E::AtTimeZone, vec![T::Timestamp, T::Varchar], T::Timestamptz);
+    map.insert(E::AtTimeZone, vec![T::Timestamptz, T::Varchar], T::Timestamp);
     map.insert(E::DateTrunc, vec![T::Varchar, T::Timestamp], T::Timestamp);
     map.insert(
         E::DateTrunc,
-        vec![T::Varchar, T::Timestampz, T::Varchar],
-        T::Timestampz,
+        vec![T::Varchar, T::Timestamptz, T::Varchar],
+        T::Timestamptz,
     );
     map.insert(E::DateTrunc, vec![T::Varchar, T::Interval], T::Interval);
 
@@ -1087,15 +1087,15 @@ mod tests {
             (
                 "`top_matches` ranks by exact count then preferred count",
                 vec![
-                    vec![T::Float64, T::Float64, T::Float64, T::Timestampz], // 0 exact 3 preferred
+                    vec![T::Float64, T::Float64, T::Float64, T::Timestamptz], // 0 exact 3 preferred
                     vec![T::Float64, T::Int32, T::Float32, T::Timestamp],    // 1 exact 1 preferred
-                    vec![T::Float32, T::Float32, T::Int32, T::Timestampz],   // 1 exact 0 preferred
-                    vec![T::Int32, T::Float64, T::Float32, T::Timestampz],   // 1 exact 1 preferred
-                    vec![T::Int32, T::Int16, T::Int32, T::Timestampz], // 2 exact 1 non-castable
+                    vec![T::Float32, T::Float32, T::Int32, T::Timestamptz],   // 1 exact 0 preferred
+                    vec![T::Int32, T::Float64, T::Float32, T::Timestamptz],   // 1 exact 1 preferred
+                    vec![T::Int32, T::Int16, T::Int32, T::Timestamptz], // 2 exact 1 non-castable
                     vec![T::Int32, T::Float64, T::Float32, T::Date],   // 1 exact 1 preferred
                 ],
                 &[Some(T::Int32), Some(T::Int32), Some(T::Int32), None] as &[_],
-                Ok(&[T::Int32, T::Float64, T::Float32, T::Timestampz] as &[_]),
+                Ok(&[T::Int32, T::Float64, T::Float32, T::Timestamptz] as &[_]),
             ),
             (
                 "Rule 4e fails and Rule 4f unique.",

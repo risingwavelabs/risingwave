@@ -174,7 +174,7 @@ fn cannal_do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl>
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
         DataType::Time => str_to_date(ensure_str!(v, "time"))?.into(),
         DataType::Timestamp => str_to_timestamp(ensure_str!(v, "string"))?.into(),
-        DataType::Timestampz => str_to_timestampz(ensure_str!(v, "string"))?.into(),
+        DataType::Timestamptz => str_to_timestampz(ensure_str!(v, "string"))?.into(),
         _ => {
             return Err(RwError::from(InternalError(format!(
                 "cannal data source not support type {}",

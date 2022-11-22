@@ -62,7 +62,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 data_type: DataType::Time(false),
                 value: self.gen_temporal_scalar(typ),
             },
-            T::Timestamp | T::Timestampz => Expr::TypedString {
+            T::Timestamp | T::Timestamptz => Expr::TypedString {
                 data_type: DataType::Timestamp(false),
                 value: self.gen_temporal_scalar(typ),
             },
@@ -122,7 +122,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(*secs));
         match typ {
             T::Date => tm.format("%F").to_string(),
-            T::Timestamp | T::Timestampz => tm.format("%Y-%m-%d %H:%M:%S").to_string(),
+            T::Timestamp | T::Timestamptz => tm.format("%Y-%m-%d %H:%M:%S").to_string(),
             T::Time => tm.format("%T").to_string(),
             T::Interval => secs.to_string(),
             _ => unreachable!(),

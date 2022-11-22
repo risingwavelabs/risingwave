@@ -87,12 +87,12 @@ fn pg_value_format(data_type: &DataType, d: ScalarRefImpl<'_>, format: bool) -> 
     // format == true means BINARY format
     if !format {
         match (data_type, d) {
-            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => timestampz_to_utc_string(us).into(),
+            (DataType::Timestamptz, ScalarRefImpl::Int64(us)) => timestampz_to_utc_string(us).into(),
             _ => d.text_format().into(),
         }
     } else {
         match (data_type, d) {
-            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => timestampz_to_utc_binary(us),
+            (DataType::Timestamptz, ScalarRefImpl::Int64(us)) => timestampz_to_utc_binary(us),
             _ => d.binary_format(),
         }
     }

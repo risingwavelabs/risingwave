@@ -81,7 +81,7 @@ impl Binder {
 
         let time_col = if let Some(time_col_arg) = args.next()
           && let Some(ExprImpl::InputRef(time_col)) = self.bind_function_arg(time_col_arg)?.into_iter().next()
-          && matches!(time_col.data_type, DataType::Timestampz | DataType::Timestamp | DataType::Date)
+          && matches!(time_col.data_type, DataType::Timestamptz | DataType::Timestamp | DataType::Date)
         {
             time_col
         } else {

@@ -242,7 +242,7 @@ fn build_array_access_expr(
         DataType::Varchar => array_access_expression!(Utf8Array),
         DataType::Time => array_access_expression!(NaiveTimeArray),
         DataType::Timestamp => array_access_expression!(NaiveDateTimeArray),
-        DataType::Timestampz => array_access_expression!(PrimitiveArray::<i64>),
+        DataType::Timestamptz => array_access_expression!(PrimitiveArray::<i64>),
         DataType::Interval => array_access_expression!(IntervalArray),
         DataType::Struct { .. } => array_access_expression!(StructArray),
         DataType::List { .. } => array_access_expression!(ListArray),

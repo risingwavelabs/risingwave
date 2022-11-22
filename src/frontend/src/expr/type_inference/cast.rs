@@ -199,7 +199,7 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
             T::Float64,
         ],
     );
-    insert_cast_seq(&mut m, &[T::Date, T::Timestamp, T::Timestampz]);
+    insert_cast_seq(&mut m, &[T::Date, T::Timestamp, T::Timestamptz]);
     insert_cast_seq(&mut m, &[T::Time, T::Interval]);
 
     // Casting to and from string type.
@@ -213,7 +213,7 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
         T::Float64,
         T::Date,
         T::Timestamp,
-        T::Timestampz,
+        T::Timestamptz,
         T::Time,
         T::Interval,
     ] {
@@ -223,7 +223,7 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
 
     // Misc casts allowed by PG that are neither in implicit cast sequences nor from/to string.
     m.insert((T::Timestamp, T::Time), CastContext::Assign);
-    m.insert((T::Timestampz, T::Time), CastContext::Assign);
+    m.insert((T::Timestamptz, T::Time), CastContext::Assign);
     m.insert((T::Boolean, T::Int32), CastContext::Explicit);
     m.insert((T::Int32, T::Boolean), CastContext::Explicit);
     m
@@ -291,7 +291,7 @@ mod tests {
             T::Varchar,
             T::Date,
             T::Timestamp,
-            T::Timestampz,
+            T::Timestamptz,
             T::Time,
             T::Interval,
         ];
