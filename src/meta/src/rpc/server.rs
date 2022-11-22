@@ -139,13 +139,21 @@ fn since_epoch() -> Duration {
         .expect("Time went backwards")
 }
 
+struct ElectionResult {
+    pub metaLeaderInfo: MetaLeaderInfo,
+    pub metaLeaseInfo: MetaLeaseInfo,
+
+    // True if current node is leader
+    pub isLeader: bool,
+}
+
 // Sets a leader. Does not renew leaders term
 async fn run_election<S: MetaStore>(
     meta_store: &Arc<S>,
     addr: &String,
     lease_time: u64, // in sec
     lease_id: u64,   // random id identifying the leader via the lease
-) -> Option<(MetaLeaderInfo, MetaLeaseInfo, bool)> {
+) -> Option<ElectionResult> {
     tracing::info!("running an election...");
 
     // below is old code
@@ -233,7 +241,11 @@ async fn run_election<S: MetaStore>(
                 tracing::warn!("acquiring lease failed. Error: {:?}, will retry", e);
                 None
             }
-            Ok(_) => Some((leader_info, lease_info, true)),
+            Ok(_) => Some(ElectionResult {
+                metaLeaderInfo: leader_info,
+                metaLeaseInfo: lease_info,
+                isLeader: true,
+            }),
         };
     }
 
@@ -280,7 +292,11 @@ async fn run_election<S: MetaStore>(
         }
     };
 
-    Some((leader_info, lease_info, is_leader))
+    Some(ElectionResult {
+        metaLeaderInfo: leader_info,
+        metaLeaseInfo: lease_info,
+        isLeader: is_leader,
+    })
 }
 
 // TODO: How to debug
@@ -350,11 +366,8 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         // run the initial election
         let election_outcome =
             run_election(&meta_store, &addr_clone, lease_time, init_lease_id).await;
-        let (leader, _, is_leader) = match election_outcome {
-            Some(infos) => {
-                let (leader, lease, is_leader) = infos;
-                (leader, lease, is_leader) // TODO: define election_result datatype
-            }
+        let (leader, is_leader) = match election_outcome {
+            Some(infos) => (infos.metaLeaderInfo, infos.isLeader),
             None => continue 'initial_election,
         };
         tracing::info!("current leader is {:?}", leader);
@@ -385,10 +398,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 let (leader_info, lease_info, is_leader) =
                     match run_election(&meta_store, &addr_clone, lease_time, lease_id).await {
                         None => continue 'election,
-                        Some(infos) => {
-                            let (leader, lease, is_leader) = infos;
-                            (leader, lease, is_leader)
-                        }
+                        Some(infos) => (infos.metaLeaderInfo, infos.metaLeaseInfo, infos.isLeader),
                     };
 
                 tracing::info!("Election done. Entering term");
