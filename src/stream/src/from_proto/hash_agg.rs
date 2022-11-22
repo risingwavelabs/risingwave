@@ -35,7 +35,6 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     storages: Vec<AggStateStorage<S>>,
     result_table: StateTable<S>,
     group_key_indices: Vec<usize>,
-    group_key_invert_idx: Vec<Option<usize>>,
     group_key_types: Vec<DataType>,
     pk_indices: PkIndices,
     group_by_cache_size: usize,
@@ -59,7 +58,6 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
             self.pk_indices,
             self.executor_id,
             self.group_key_indices,
-            self.group_key_invert_idx,
             self.group_by_cache_size,
             self.extreme_cache_size,
             self.lru_manager,
@@ -92,10 +90,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let mut group_key_invert_idx = vec![None; input.info().schema.len()];
-        for (group_key_seq, group_key_idx) in group_key_indices.iter().enumerate() {
-            group_key_invert_idx[*group_key_idx] = Some(group_key_seq);
-        }
         let group_key_types = group_key_indices
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
@@ -127,7 +121,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             storages,
             result_table,
             group_key_indices,
-            group_key_invert_idx,
             group_key_types,
             pk_indices: params.pk_indices,
             group_by_cache_size: stream.config.developer.unsafe_stream_hash_agg_cache_size,

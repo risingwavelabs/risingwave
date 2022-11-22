@@ -156,7 +156,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         pk_indices: PkIndices,
         executor_id: u64,
         group_key_indices: Vec<usize>,
-        group_key_invert_idx: Vec<Option<usize>>,
         group_by_cache_size: usize,
         extreme_cache_size: usize,
         lru_manager: Option<LruManagerRef>,
@@ -165,6 +164,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     ) -> StreamResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
+
+        let mut group_key_invert_idx = vec![None; input.info().schema.len()];
+        for (group_key_seq, group_key_idx) in group_key_indices.iter().enumerate() {
+            group_key_invert_idx[*group_key_idx] = Some(group_key_seq);
+        }
 
         Ok(Self {
             input,
@@ -650,7 +654,6 @@ mod tests {
             pk_indices,
             executor_id,
             group_key_indices,
-            group_key_invert_idx,
             group_by_cache_size,
             extreme_cache_size,
             None,
