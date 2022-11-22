@@ -36,7 +36,7 @@ use risingwave_storage::hummock::store::version::{
     read_filter_for_batch, read_filter_for_local, HummockVersionReader,
 };
 use risingwave_storage::hummock::test_utils::default_config_for_test;
-use risingwave_storage::hummock::{SstableIdManager, SstableStore};
+use risingwave_storage::hummock::{MemoryLimiter, SstableIdManager, SstableStore};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
@@ -71,7 +71,6 @@ pub async fn prepare_hummock_event_handler(
         Arc::new(StateStoreMetrics::unused()),
         sstable_id_manager,
         Arc::new(FilterKeyExtractorManager::default()),
-        Arc::new(risingwave_tracing::RwTracingService::new()),
     ));
 
     let hummock_event_handler =
@@ -109,22 +108,28 @@ async fn sync_epoch(event_tx: &UnboundedSender<HummockEvent>, epoch: HummockEpoc
 
 async fn get_local_hummock_storage(
     table_id: TableId,
-    instance_id: u64,
     event_tx: UnboundedSender<HummockEvent>,
     hummock_version_reader: HummockVersionReader,
 ) -> LocalHummockStorage {
     let (tx, rx) = tokio::sync::oneshot::channel();
     event_tx
-        .send(HummockEvent::RegisterHummockInstance {
+        .send(HummockEvent::RegisterReadVersion {
             table_id,
-            instance_id,
-            event_tx_for_instance: event_tx.clone(),
-            hummock_version_reader,
-            sync_result_sender: tx,
+            new_read_version_sender: tx,
         })
         .unwrap();
 
-    rx.await.unwrap()
+    let (basic_read_version, instance_id) = rx.await.unwrap();
+    LocalHummockStorage::new(
+        table_id,
+        instance_id,
+        basic_read_version,
+        hummock_version_reader,
+        event_tx.clone(),
+        MemoryLimiter::unlimit(),
+        #[cfg(not(madsim))]
+        Arc::new(risingwave_tracing::RwTracingService::new()),
+    )
 }
 
 #[tokio::test]
@@ -159,13 +164,9 @@ async fn test_storage_basic() {
     let hummock_version_reader =
         HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
 
-    let hummock_storage = get_local_hummock_storage(
-        Default::default(),
-        1,
-        event_tx.clone(),
-        hummock_version_reader,
-    )
-    .await;
+    let hummock_storage =
+        get_local_hummock_storage(Default::default(), event_tx.clone(), hummock_version_reader)
+            .await;
 
     // First batch inserts the anchor and others.
     let mut batch1 = vec![
@@ -525,13 +526,9 @@ async fn test_state_store_sync() {
     let hummock_version_reader =
         HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
 
-    let hummock_storage = get_local_hummock_storage(
-        Default::default(),
-        1,
-        event_tx.clone(),
-        hummock_version_reader,
-    )
-    .await;
+    let hummock_storage =
+        get_local_hummock_storage(Default::default(), event_tx.clone(), hummock_version_reader)
+            .await;
 
     let read_version = hummock_storage.read_version();
 
@@ -785,13 +782,9 @@ async fn test_delete_get() {
     let hummock_version_reader =
         HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
 
-    let hummock_storage = get_local_hummock_storage(
-        Default::default(),
-        1,
-        event_tx.clone(),
-        hummock_version_reader,
-    )
-    .await;
+    let hummock_storage =
+        get_local_hummock_storage(Default::default(), event_tx.clone(), hummock_version_reader)
+            .await;
 
     let initial_epoch = hummock_storage
         .read_version()
@@ -889,13 +882,9 @@ async fn test_multiple_epoch_sync() {
     let hummock_version_reader =
         HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
 
-    let hummock_storage = get_local_hummock_storage(
-        Default::default(),
-        1,
-        event_tx.clone(),
-        hummock_version_reader,
-    )
-    .await;
+    let hummock_storage =
+        get_local_hummock_storage(Default::default(), event_tx.clone(), hummock_version_reader)
+            .await;
 
     let initial_epoch = hummock_storage
         .read_version()
@@ -1061,13 +1050,9 @@ async fn test_iter_with_min_epoch() {
     let hummock_version_reader =
         HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
 
-    let hummock_storage = get_local_hummock_storage(
-        Default::default(),
-        1,
-        event_tx.clone(),
-        hummock_version_reader,
-    )
-    .await;
+    let hummock_storage =
+        get_local_hummock_storage(Default::default(), event_tx.clone(), hummock_version_reader)
+            .await;
 
     let epoch1 = (31 * 1000) << 16;
 
@@ -1297,7 +1282,6 @@ async fn test_hummock_version_reader() {
 
     let hummock_storage = get_local_hummock_storage(
         Default::default(),
-        1,
         event_tx.clone(),
         hummock_version_reader.clone(),
     )

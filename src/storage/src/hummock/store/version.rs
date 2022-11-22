@@ -212,23 +212,21 @@ impl HummockReadVersion {
                 StagingData::ImmMem(imm) => self.staging.imm.push_front(imm),
                 StagingData::Sst(staging_sst) => {
                     let staging_imm_ids_from_sst: HashSet<u64> =
-                        staging_sst.imm_ids.iter().cloned().sorted().collect();
-                    let staging_imm_ids_from_imms: HashSet<u64> = self
-                        .staging
-                        .imm
-                        .iter()
-                        .map(|imm| imm.batch_id())
-                        .sorted()
-                        .collect();
+                        staging_sst.imm_ids.iter().cloned().collect();
+                    let staging_imm_ids_from_imms: HashSet<u64> =
+                        self.staging.imm.iter().map(|imm| imm.batch_id()).collect();
                     let intersection =
                         staging_imm_ids_from_imms.intersection(&staging_imm_ids_from_sst);
 
-                    if intersection.count() > 0 {
-                        let imm_id_set: HashSet<ImmId> =
-                            HashSet::from_iter(staging_sst.imm_ids.iter().cloned());
-                        self.staging
-                            .imm
-                            .retain(|imm| !imm_id_set.contains(&imm.batch_id()));
+                    // check intersection order of staging_imm
+                    let staging_imm_ids_from_sst_vec =
+                        intersection.collect_vec().into_iter().sorted();
+                    if staging_imm_ids_from_sst_vec.len() > 0 {
+                        for clear_imm_id in staging_imm_ids_from_sst_vec {
+                            let item = self.staging.imm.back().unwrap();
+                            assert_eq!(*clear_imm_id, item.batch_id());
+                            self.staging.imm.pop_back();
+                        }
 
                         self.staging.sst.push_front(staging_sst);
                     }

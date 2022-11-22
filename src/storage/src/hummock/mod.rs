@@ -132,11 +132,10 @@ pub struct HummockStorage {
 
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
-    // TODO: serving batch_query with read_version_mapping
-    #[allow(dead_code)]
     read_version_mapping: Arc<ReadVersionMappingType>,
 
-    instance_id_generator: Arc<AtomicU64>,
+    #[cfg(not(madsim))]
+    pub tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
 impl HummockStorage {
@@ -189,8 +188,6 @@ impl HummockStorage {
             stats.clone(),
             sstable_id_manager.clone(),
             filter_key_extractor_manager.clone(),
-            #[cfg(not(madsim))]
-            tracing,
         ));
 
         let hummock_event_handler =
@@ -208,7 +205,8 @@ impl HummockStorage {
                 shutdown_sender: event_tx,
             }),
             read_version_mapping: hummock_event_handler.read_version_mapping(),
-            instance_id_generator: Arc::new(AtomicU64::new(0)),
+            #[cfg(not(madsim))]
+            tracing,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -218,21 +216,25 @@ impl HummockStorage {
 
     // TODO: make it self function and remove hummock_event_sender parameter
     async fn new_local_inner(&self, table_id: TableId) -> LocalHummockStorage {
-        use std::sync::atomic::Ordering;
-        let instance_id = self.instance_id_generator.fetch_add(1, Ordering::SeqCst);
-
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.hummock_event_sender
-            .send(HummockEvent::RegisterHummockInstance {
+            .send(HummockEvent::RegisterReadVersion {
                 table_id,
-                instance_id,
-                event_tx_for_instance: self.hummock_event_sender.clone(),
-                hummock_version_reader: self.hummock_version_reader.clone(),
-                sync_result_sender: tx,
+                new_read_version_sender: tx,
             })
             .unwrap();
 
-        rx.await.unwrap()
+        let (basic_read_version, instance_id) = rx.await.unwrap();
+        LocalHummockStorage::new(
+            table_id,
+            instance_id,
+            basic_read_version,
+            self.hummock_version_reader.clone(),
+            self.hummock_event_sender.clone(),
+            self.buffer_tracker.get_memory_limiter().clone(),
+            #[cfg(not(madsim))]
+            self.tracing.clone(),
+        )
     }
 
     pub fn sstable_store(&self) -> SstableStoreRef {
@@ -525,8 +527,6 @@ impl HummockStorageV1 {
             stats.clone(),
             sstable_id_manager.clone(),
             filter_key_extractor_manager.clone(),
-            #[cfg(not(madsim))]
-            tracing.clone(),
         ));
 
         let buffer_tracker = BufferTracker::from_storage_config(&options);

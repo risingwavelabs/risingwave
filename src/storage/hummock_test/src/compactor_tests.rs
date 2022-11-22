@@ -47,6 +47,7 @@ pub(crate) mod tests {
         CompactionExecutor, Compactor, CompactorContext, Context,
     };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
+    use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
         CompactorSstableStore, HummockStorage as GlobalHummockStorage, MemoryLimiter,
         SstableIdManager,
@@ -163,9 +164,23 @@ pub(crate) mod tests {
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
+        get_compactor_context_with_filter_key_extractor_manager_impl(
+            storage.options().clone(),
+            storage.sstable_store(),
+            hummock_meta_client,
+            filter_key_extractor_manager,
+        )
+    }
+
+    fn get_compactor_context_with_filter_key_extractor_manager_impl(
+        options: Arc<StorageConfig>,
+        sstable_store: SstableStoreRef,
+        hummock_meta_client: &Arc<dyn HummockMetaClient>,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+    ) -> CompactorContext {
         let context = Arc::new(Context {
-            options: storage.options().clone(),
-            sstable_store: storage.sstable_store(),
+            options: options.clone(),
+            sstable_store,
             hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
@@ -174,10 +189,9 @@ pub(crate) mod tests {
             filter_key_extractor_manager,
             sstable_id_manager: Arc::new(SstableIdManager::new(
                 hummock_meta_client.clone(),
-                storage.options().sstable_id_remote_fetch_number,
+                options.sstable_id_remote_fetch_number,
             )),
             task_progress_manager: Default::default(),
-            tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
         });
         CompactorContext::new(
             context.clone(),
@@ -205,13 +219,13 @@ pub(crate) mod tests {
         let table_id = get_table_id(&key);
         assert_eq!(table_id, 1);
 
-        let storage_1 = get_hummock_storage(
+        let storage = get_hummock_storage(
             hummock_meta_client.clone(),
             get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
             TableId::from(table_id),
         )
         .await;
-        let compact_ctx_1 = get_compactor_context(&storage_1, &hummock_meta_client);
+        let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         hummock_manager_ref
             .register_table_ids(&mut [(
@@ -223,7 +237,7 @@ pub(crate) mod tests {
             .unwrap();
 
         prepare_test_put_data(
-            &storage_1,
+            &storage,
             &hummock_meta_client,
             &key,
             1 << 10,
@@ -269,7 +283,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        Compactor::compact(Arc::new(compact_ctx_1), compact_task.clone(), rx).await;
+        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
@@ -285,8 +299,8 @@ pub(crate) mod tests {
             .first()
             .unwrap()
             .clone();
-        storage_1.wait_version(version).await;
-        let table = storage_1
+        storage.wait_version(version).await;
+        let table = storage
             .sstable_store()
             .sstable(&output_table, &mut StoreLocalStatistic::default())
             .await
@@ -295,7 +309,7 @@ pub(crate) mod tests {
         // we have removed these 31 keys before watermark 32.
         assert_eq!(table.value().meta.key_count, 97);
 
-        let get_val = storage_1
+        let get_val = storage
             .get(
                 &key,
                 (32 * 1000) << 16,
@@ -313,7 +327,7 @@ pub(crate) mod tests {
             .to_vec();
 
         assert_eq!(get_val, val);
-        let ret = storage_1
+        let ret = storage
             .get(
                 &key,
                 (31 * 1000) << 16,
@@ -626,6 +640,7 @@ pub(crate) mod tests {
         )
         .await;
 
+        // register the local_storage to global_storage
         let storage_1 =
             HummockV2MixedStateStore::new(global_storage.clone(), TableId::from(1)).await;
 
@@ -647,8 +662,9 @@ pub(crate) mod tests {
             )),
         );
 
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
-            &storage_1,
+        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager_impl(
+            global_storage.options().clone(),
+            global_storage.sstable_store(),
             &hummock_meta_client,
             filter_key_extractor_manager.clone(),
         );
@@ -767,7 +783,7 @@ pub(crate) mod tests {
         global_storage.wait_version(version).await;
 
         // 7. scan kv to check key table_id
-        let scan_result = storage_2
+        let scan_result = global_storage
             .scan(
                 (Bound::Unbounded, Bound::Unbounded),
                 epoch,

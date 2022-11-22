@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::pin_version_response;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::store::memtable::ImmutableMemtable;
@@ -27,8 +30,7 @@ pub mod uploader;
 
 pub use hummock_event_handler::HummockEventHandler;
 
-use super::store::version::HummockVersionReader;
-use crate::hummock::store::state_store::LocalHummockStorage;
+use super::store::version::HummockReadVersion;
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {
@@ -67,15 +69,13 @@ pub enum HummockEvent {
     /// Flush all previous event. When all previous events has been consumed, the event handler
     /// will notify
     FlushEvent(oneshot::Sender<()>),
-    RegisterHummockInstance {
+
+    RegisterReadVersion {
         table_id: TableId,
-        instance_id: u64,
-        hummock_version_reader: HummockVersionReader,
-        event_tx_for_instance: mpsc::UnboundedSender<HummockEvent>,
-        sync_result_sender: oneshot::Sender<LocalHummockStorage>,
+        new_read_version_sender: oneshot::Sender<(Arc<RwLock<HummockReadVersion>>, u64)>,
     },
 
-    DestroyHummockInstance {
+    DestroyReadVersion {
         table_id: TableId,
         instance_id: u64,
     },
@@ -108,21 +108,16 @@ impl HummockEvent {
                 "SealEpoch epoch {:?} is_checkpoint {:?}",
                 epoch, is_checkpoint
             ),
-            HummockEvent::RegisterHummockInstance {
+            HummockEvent::RegisterReadVersion {
                 table_id,
-                instance_id,
-                event_tx_for_instance: _,
-                hummock_version_reader: _,
-                sync_result_sender: _,
-            } => format!(
-                "RegisterHummockInstance table_id {:?} instance_id {:?}",
-                table_id, instance_id
-            ),
-            HummockEvent::DestroyHummockInstance {
+                new_read_version_sender: _,
+            } => format!("RegisterReadVersion table_id {:?}", table_id,),
+
+            HummockEvent::DestroyReadVersion {
                 table_id,
                 instance_id,
             } => format!(
-                "DestroyHummockInstance table_id {:?} instance_id {:?}",
+                "DestroyReadVersion table_id {:?} instance_id {:?}",
                 table_id, instance_id
             ),
 

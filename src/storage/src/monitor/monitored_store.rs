@@ -26,7 +26,7 @@ use tracing::error;
 use super::StateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockStorage, HummockStorageV1, SstableIdManagerRef};
+use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
@@ -227,16 +227,6 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
 }
 
 impl MonitoredStateStore<HummockStorage> {
-    pub fn sstable_store(&self) -> SstableStoreRef {
-        self.inner.sstable_store()
-    }
-
-    pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
-        self.inner.sstable_id_manager().clone()
-    }
-}
-
-impl MonitoredStateStore<HummockStorageV1> {
     pub fn sstable_store(&self) -> SstableStoreRef {
         self.inner.sstable_store()
     }
