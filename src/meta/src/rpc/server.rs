@@ -348,6 +348,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     );
     let addr_clone = addr.clone();
 
+    // TODO: Only use one ticker
     let mut tick_interval = tokio::time::interval(Duration::from_secs(lease_time / 2));
     'initial_election: loop {
         // TODO: maybe also shut down?
