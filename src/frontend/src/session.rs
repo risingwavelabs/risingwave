@@ -40,6 +40,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
@@ -57,6 +58,7 @@ use crate::expr::CorrelatedId;
 use crate::handler::handle;
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
+use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
 use crate::observer::FrontendObserverNode;
@@ -70,6 +72,7 @@ use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterIm
 use crate::user::UserId;
 use crate::utils::WithOptions;
 use crate::{FrontendConfig, FrontendOpts, PgResponseStream, TableCatalog};
+
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
@@ -332,7 +335,7 @@ impl FrontendEnv {
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
                 .await;
-        let observer_join_handle = observer_manager.start().await?;
+        let observer_join_handle = observer_manager.start().await;
 
         meta_client.activate(&frontend_address).await?;
 
@@ -347,6 +350,20 @@ impl FrontendEnv {
         if opts.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
+
+        let health_srv = HealthServiceImpl::new();
+        let host = opts.health_check_listener_addr.clone();
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(HealthServer::new(health_srv))
+                .serve(host.parse().unwrap())
+                .await
+                .unwrap();
+        });
+        tracing::info!(
+            "Health Check RPC Listener is set up on {}",
+            opts.health_check_listener_addr.clone()
+        );
 
         Ok((
             Self {
@@ -825,7 +842,7 @@ impl Session<PgResponseStream> for SessionImpl {
                 }
             },
             Statement::ShowVariable { variable } => {
-                let name = &variable[0].value.to_lowercase();
+                let name = &variable[0].real_value().to_lowercase();
                 if name.eq_ignore_ascii_case("ALL") {
                     vec![
                         PgFieldDescriptor::new(

@@ -29,6 +29,7 @@ mod project;
 mod project_set;
 mod row_seq_scan;
 mod sort_agg;
+mod source;
 mod sys_row_seq_scan;
 mod table_function;
 pub mod test_utils;
@@ -63,6 +64,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
+pub use source::*;
 pub use table_function::*;
 pub use top_n::TopNExecutor;
 pub use trace::*;
@@ -208,6 +210,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::DistributedLookupJoin => DistributedLookupJoinExecutorBuilder,
             NodeBody::ProjectSet => ProjectSetExecutor,
             NodeBody::Union => UnionExecutor,
+            NodeBody::Source => SourceExecutor,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();

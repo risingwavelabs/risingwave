@@ -27,7 +27,9 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, State};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{
+    Dispatcher, DispatcherType, FragmentType, StreamActor, StreamNode,
+};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
@@ -91,7 +93,7 @@ pub struct FragmentVNodeInfo {
 
 #[derive(Default)]
 pub struct BuildGraphInfo {
-    pub table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
+    pub table_mview_actor_ids: HashMap<TableId, Vec<ActorId>>,
 }
 
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
@@ -307,7 +309,7 @@ where
                 dependent_table
                     .fragments
                     .values_mut()
-                    .filter(|f| f.fragment_type() == FragmentType::Sink)
+                    .filter(|f| f.fragment_type() == FragmentType::Mview)
                     .flat_map(|f| &mut f.actors)
                     .for_each(|a| {
                         a.dispatcher.retain_mut(|d| {
@@ -639,6 +641,7 @@ where
 
                 let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
 
+                // First step, update self fragment
                 // Add actors to this fragment: set the state to `Running`.
                 for actor_id in &added_actors {
                     table_fragment
@@ -701,10 +704,13 @@ where
                     }
                 }
 
+                // Second step, update upstream fragments
                 // Update the dispatcher of the upstream fragments.
                 for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
-                    // TODO: here we assume the upstream fragment is in the same streaming job
-                    // as this fragment.
+                    // here we assume the upstream fragment is in the same streaming job as this
+                    // fragment. Cross-table references only occur in the case
+                    // of Chain fragment, and the scale of Chain fragment does not introduce updates
+                    // to the upstream Fragment (because of NoShuffle)
                     let upstream_fragment = table_fragment
                         .fragments
                         .get_mut(&upstream_fragment_id)
@@ -717,7 +723,10 @@ where
 
                         for dispatcher in &mut upstream_actor.dispatcher {
                             if dispatcher.dispatcher_id == dispatcher_id {
-                                dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
+                                if let DispatcherType::Hash = dispatcher.r#type() {
+                                    dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
+                                }
+
                                 update_actors(
                                     dispatcher.downstream_actor_id.as_mut(),
                                     &removed_actor_ids,
@@ -811,12 +820,12 @@ where
             .collect::<MetaResult<Vec<_>>>()
     }
 
-    pub async fn get_table_sink_actor_ids(&self, table_id: &TableId) -> MetaResult<Vec<ActorId>> {
+    pub async fn get_table_mview_actor_ids(&self, table_id: &TableId) -> MetaResult<Vec<ActorId>> {
         let map = &self.core.read().await.table_fragments;
         Ok(map
             .get(table_id)
             .context(format!("table_fragment not exist: id={}", table_id))?
-            .sink_actor_ids())
+            .mview_actor_ids())
     }
 
     // we will read three things at once, avoiding locking too much.
@@ -828,17 +837,17 @@ where
         let mut info: BuildGraphInfo = Default::default();
 
         for table_id in table_ids {
-            info.table_sink_actor_ids.insert(
+            info.table_mview_actor_ids.insert(
                 *table_id,
                 map.get(table_id)
                     .context(format!("table_fragment not exist: id={}", table_id))?
-                    .sink_actor_ids(),
+                    .mview_actor_ids(),
             );
         }
         Ok(info)
     }
 
-    pub async fn get_sink_vnode_bitmap_info(
+    pub async fn get_mview_vnode_bitmap_info(
         &self,
         table_ids: &HashSet<TableId>,
     ) -> MetaResult<HashMap<TableId, Vec<(ActorId, Option<Buffer>)>>> {
@@ -850,14 +859,14 @@ where
                 *table_id,
                 map.get(table_id)
                     .context(format!("table_fragment not exist: id={}", table_id))?
-                    .sink_vnode_bitmap_info(),
+                    .mview_vnode_bitmap_info(),
             );
         }
 
         Ok(info)
     }
 
-    pub async fn get_sink_fragment_vnode_info(
+    pub async fn get_mview_fragment_vnode_info(
         &self,
         table_ids: &HashSet<TableId>,
     ) -> MetaResult<HashMap<TableId, FragmentVNodeInfo>> {
@@ -871,8 +880,8 @@ where
             info.insert(
                 *table_id,
                 FragmentVNodeInfo {
-                    actor_parallel_unit_maps: table_fragment.sink_actor_parallel_units(),
-                    vnode_mapping: table_fragment.sink_vnode_mapping(),
+                    actor_parallel_unit_maps: table_fragment.mview_actor_parallel_units(),
+                    vnode_mapping: table_fragment.mview_vnode_mapping(),
                 },
             );
         }
