@@ -16,11 +16,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
-use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -257,12 +257,11 @@ where
         let mut res_ops = Vec::with_capacity(self.limit);
         let mut res_rows = Vec::with_capacity(self.limit);
 
-        println!("这里");
         let hash_codes = chunk
             .data_chunk()
             .get_hash_values(&self.group_by, Crc32FastBuilder);
         let keys = K::build_from_hash_code(&self.group_by, chunk.data_chunk(), hash_codes.clone());
-        for ((op, row_ref), group_cache_key) in chunk.rows().zip(keys) {
+        for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq(keys) {
             // The pk without group by
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices[self.group_by.len()..]);
             let cache_key =
