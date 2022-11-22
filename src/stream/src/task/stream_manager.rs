@@ -221,9 +221,10 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    /// Clear all collect rx in barrier manager.
-    pub fn clear_all_collect_rx(&self) {
+    /// Clear all senders and collect rx in barrier manager.
+    pub fn clear_all_senders_and_collect_rx(&self) {
         let mut barrier_manager = self.context.lock_barrier_manager();
+        barrier_manager.clear_senders();
         barrier_manager.clear_collect_rx();
     }
 
@@ -306,7 +307,7 @@ impl LocalStreamManager {
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
-        self.clear_all_collect_rx();
+        self.clear_all_senders_and_collect_rx();
         self.core.lock().await.drop_all_actors();
 
         Ok(())

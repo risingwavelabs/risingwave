@@ -190,6 +190,11 @@ impl LocalBarrierManager {
             })
     }
 
+    // remove all senders
+    pub fn clear_senders(&mut self) {
+        self.senders.clear();
+    }
+
     /// remove all collect rx
     pub fn clear_collect_rx(&mut self) {
         self.collect_complete_receiver.clear();
