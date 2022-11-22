@@ -85,46 +85,52 @@ pub struct VirtualNode(VirtualNodeInner);
 
 impl From<HashCode> for VirtualNode {
     fn from(hash_code: HashCode) -> Self {
-        VirtualNode((hash_code.0 % VIRTUAL_NODE_COUNT as u64) as _)
+        VirtualNode((hash_code.0 % Self::COUNT as u64) as _)
     }
 }
 
 impl VirtualNode {
-    pub const ZERO: VirtualNode = VirtualNode(0);
+    pub const BITS: usize = 11;
+    pub const COUNT: usize = 1 << Self::BITS;
+    pub const SIZE: usize = std::mem::size_of::<Self>();
+}
 
-    pub fn from_index(index: usize) -> Self {
+impl VirtualNode {
+    pub const MAX: VirtualNode = VirtualNode::from_index(Self::COUNT - 1);
+    pub const ZERO: VirtualNode = VirtualNode::from_index(0);
+
+    pub const fn from_index(index: usize) -> Self {
         VirtualNode(index as _)
     }
 
-    pub fn to_index(self) -> usize {
+    pub const fn to_index(self) -> usize {
         self.0 as _
     }
 
-    pub fn from_scalar(scalar: i16) -> Self {
+    pub const fn from_scalar(scalar: i16) -> Self {
         VirtualNode(scalar as _)
     }
 
-    pub fn to_scalar(self) -> i16 {
+    pub const fn to_scalar(self) -> i16 {
         self.0 as _
     }
 
-    pub fn to_be_bytes(self) -> [u8; 2] {
-        self.0.to_be_bytes()
-    }
-
-    pub fn from_be_bytes(bytes: [u8; 2]) -> Self {
+    pub const fn from_be_bytes(bytes: [u8; Self::SIZE]) -> Self {
         Self(VirtualNodeInner::from_be_bytes(bytes))
     }
 
-    pub fn next(self) -> Self {
+    pub const fn to_be_bytes(self) -> [u8; Self::SIZE] {
+        self.0.to_be_bytes()
+    }
+
+    pub const fn next(self) -> Self {
         Self(self.0 + 1)
     }
-}
 
-pub const VIRTUAL_NODE_SIZE: usize = std::mem::size_of::<VirtualNode>();
-pub const VNODE_BITS: usize = 11;
-pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
-pub const MAX_VIRTUAL_NODE: VirtualNode = VirtualNode((VIRTUAL_NODE_COUNT - 1) as _);
+    pub fn all() -> impl Iterator<Item = Self> {
+        (0..Self::COUNT).map(Self::from_index)
+    }
+}
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;

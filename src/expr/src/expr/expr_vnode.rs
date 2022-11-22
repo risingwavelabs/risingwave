@@ -91,7 +91,7 @@ impl Expression for VnodeExpression {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
-    use risingwave_common::types::VIRTUAL_NODE_COUNT;
+    use risingwave_common::types::VirtualNode;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;
@@ -134,7 +134,7 @@ mod tests {
         actual.iter().for_each(|vnode| {
             let vnode = vnode.unwrap().into_int16();
             assert!(vnode >= 0);
-            assert!((vnode as usize) < VIRTUAL_NODE_COUNT);
+            assert!((vnode as usize) < VirtualNode::COUNT);
         });
     }
 
@@ -160,7 +160,7 @@ mod tests {
             let actual = vnode_expr.eval_row(&row).unwrap();
             let vnode = actual.unwrap().into_int16();
             assert!(vnode >= 0);
-            assert!((vnode as usize) < VIRTUAL_NODE_COUNT);
+            assert!((vnode as usize) < VirtualNode::COUNT);
         }
     }
 }

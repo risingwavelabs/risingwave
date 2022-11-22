@@ -873,7 +873,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
-    use risingwave_common::types::VIRTUAL_NODE_COUNT;
+    use risingwave_common::types::VirtualNode;
     use risingwave_pb::stream_plan::DispatcherType;
 
     use super::*;
@@ -915,9 +915,9 @@ mod tests {
     }
 
     async fn test_hash_dispatcher_complex_inner() {
-        // This test only works when VIRTUAL_NODE_COUNT is 256.
+        // This test only works when VirtualNode::COUNT is 256.
         //
-        // static_assertions::const_assert_eq!(VIRTUAL_NODE_COUNT, 256);
+        // static_assertions::const_assert_eq!(VirtualNode::COUNT, 256);
 
         let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
@@ -932,9 +932,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VIRTUAL_NODE_COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VIRTUAL_NODE_COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
         let mut hash_dispatcher =
             HashDataDispatcher::new(outputs, key_indices.to_vec(), hash_mapping, 0);
 
@@ -1169,9 +1169,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VIRTUAL_NODE_COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VIRTUAL_NODE_COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
         let mut hash_dispatcher =
             HashDataDispatcher::new(outputs, key_indices.to_vec(), hash_mapping.clone(), 0);
 
@@ -1200,7 +1200,7 @@ mod tests {
                 hasher.update(&bytes);
             }
             let output_idx =
-                hash_mapping[hasher.finish() as usize % VIRTUAL_NODE_COUNT] as usize - 1;
+                hash_mapping[hasher.finish() as usize % VirtualNode::COUNT] as usize - 1;
             for (builder, val) in builders.iter_mut().zip_eq(one_row.iter()) {
                 builder.append(Some(*val));
             }

@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
-use risingwave_common::types::{ParallelUnitId, VnodeMapping, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{ParallelUnitId, VirtualNode, VnodeMapping};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
@@ -455,7 +455,7 @@ impl BatchPlanFragmenter {
                                 .take(1)
                                 .update(|(_, info)| {
                                     info.vnode_bitmap =
-                                        Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).to_protobuf();
+                                        Bitmap::all_high_bits(VirtualNode::COUNT).to_protobuf();
                                 })
                                 .collect();
                         }

@@ -23,7 +23,7 @@ use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{ParallelUnitId, VirtualNode};
 use risingwave_common::util::prost::is_stream_source;
 use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -137,7 +137,7 @@ pub(crate) fn rebalance_actor_vnode(
         builder: BitmapBuilder,
     }
 
-    let (expected, mut remain) = VIRTUAL_NODE_COUNT.div_rem(&target_actor_count);
+    let (expected, mut remain) = VirtualNode::COUNT.div_rem(&target_actor_count);
 
     tracing::debug!(
         "expected {}, remain {}, prev actors {}, target actors {}",
@@ -171,7 +171,7 @@ pub(crate) fn rebalance_actor_vnode(
         builder
     };
 
-    let (prev_expected, _) = VIRTUAL_NODE_COUNT.div_rem(&actors.len());
+    let (prev_expected, _) = VirtualNode::COUNT.div_rem(&actors.len());
 
     let prev_remain = removed
         .iter()
@@ -204,7 +204,7 @@ pub(crate) fn rebalance_actor_vnode(
         .map(|actor_id| Balance {
             actor_id: *actor_id,
             balance: -(expected as i32),
-            builder: BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT),
+            builder: BitmapBuilder::zeroed(VirtualNode::COUNT),
         })
         .collect_vec();
 
@@ -267,7 +267,7 @@ pub(crate) fn rebalance_actor_vnode(
         let n = min(abs(src.balance), abs(dst.balance));
 
         let mut moved = 0;
-        for idx in (0..VIRTUAL_NODE_COUNT).rev() {
+        for idx in (0..VirtualNode::COUNT).rev() {
             if moved >= n {
                 break;
             }
@@ -966,7 +966,7 @@ where
                         None
                     } else if parallel_unit_to_actor_after_reschedule.len() == 1 {
                         Some(ActorMapping {
-                            original_indices: vec![VIRTUAL_NODE_COUNT as u64 - 1],
+                            original_indices: vec![VirtualNode::COUNT as u64 - 1],
                             data: vec![
                                 *parallel_unit_to_actor_after_reschedule
                                     .first_key_value()

@@ -23,7 +23,7 @@ use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::{CompactedRow, Row, Row2};
-use risingwave_common::types::{ScalarImpl, VirtualNode, MAX_VIRTUAL_NODE, VIRTUAL_NODE_SIZE};
+use risingwave_common::types::{ScalarImpl, VirtualNode};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::StateStore;
 
@@ -187,7 +187,7 @@ impl<S: StateStore> RangeCache<S> {
             let (key_bytes, row) = res?;
 
             map.insert(
-                key_bytes[VIRTUAL_NODE_SIZE..].to_vec(),
+                key_bytes[VirtualNode::SIZE..].to_vec(),
                 (row.as_ref()).into(),
             );
         }
@@ -266,7 +266,7 @@ impl<'a> UnorderedRangeCacheIter<'a> {
                 self.current_map = Some(vnode_range);
                 self.current_iter = self.current_map.map(|m| m.range(self.range.clone()));
                 return;
-            } else if self.next_vnode == MAX_VIRTUAL_NODE {
+            } else if self.next_vnode == VirtualNode::MAX {
                 // The iterator cannot be refilled further.
                 self.completed = true;
                 return;
@@ -286,7 +286,7 @@ impl<'a> std::iter::Iterator for UnorderedRangeCacheIter<'a> {
         } else if let Some(iter) = &mut self.current_iter {
             let res = iter.next();
             if res.is_none() {
-                if self.next_vnode == MAX_VIRTUAL_NODE {
+                if self.next_vnode == VirtualNode::MAX {
                     // The iterator cannot be refilled further.
                     self.completed = true;
                     None
@@ -415,7 +415,7 @@ fn range_contains_lower_upper(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::VIRTUAL_NODE_COUNT;
+    use risingwave_common::types::VirtualNode;
 
     use super::*;
 
@@ -537,34 +537,34 @@ mod tests {
         );
     }
 
-    // #[test]
-    // fn test_dynamic_filter_range_cache_unordered_range_iter() {
-    //     let cache = (0..=MAX_VIRTUAL_NODE)
-    //         .map(|x| {
-    //             (
-    //                 x,
-    //                 vec![(
-    //                     x.to_be_bytes().to_vec(),
-    //                     CompactedRow {
-    //                         row: x.to_be_bytes().to_vec(),
-    //                     },
-    //                 )]
-    //                 .into_iter()
-    //                 .collect::<BTreeMap<_, _>>(),
-    //             )
-    //         })
-    //         .collect::<HashMap<_, _>>();
-    //     let range = (Unbounded, Unbounded);
-    //     let vnodes = Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).into(); // set all the bits
-    //     let mut iter = UnorderedRangeCacheIter::new(&cache, range, vnodes);
-    //     for i in 0..=MAX_VIRTUAL_NODE {
-    //         assert_eq!(
-    //             Some(&CompactedRow {
-    //                 row: i.to_be_bytes().to_vec()
-    //             }),
-    //             iter.next()
-    //         );
-    //     }
-    //     assert!(iter.next().is_none());
-    // }
+    #[test]
+    fn test_dynamic_filter_range_cache_unordered_range_iter() {
+        let cache = VirtualNode::all()
+            .map(|x| {
+                (
+                    x,
+                    vec![(
+                        x.to_be_bytes().to_vec(),
+                        CompactedRow {
+                            row: x.to_be_bytes().to_vec(),
+                        },
+                    )]
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let range = (Unbounded, Unbounded);
+        let vnodes = Bitmap::all_high_bits(VirtualNode::COUNT).into(); // set all the bits
+        let mut iter = UnorderedRangeCacheIter::new(&cache, range, vnodes);
+        for i in VirtualNode::all() {
+            assert_eq!(
+                Some(&CompactedRow {
+                    row: i.to_be_bytes().to_vec()
+                }),
+                iter.next()
+            );
+        }
+        assert!(iter.next().is_none());
+    }
 }

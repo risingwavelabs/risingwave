@@ -22,7 +22,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, Row2, RowExt};
-use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::VirtualNode;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 
 use crate::error::StorageResult;
@@ -44,7 +44,7 @@ impl Distribution {
     pub fn fallback() -> Self {
         /// A bitmap that only the default vnode is set.
         static FALLBACK_VNODES: LazyLock<Arc<Bitmap>> = LazyLock::new(|| {
-            let mut vnodes = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
+            let mut vnodes = BitmapBuilder::zeroed(VirtualNode::COUNT);
             vnodes.set(DEFAULT_VNODE.to_index(), true);
             vnodes.finish().into()
         });
@@ -58,7 +58,7 @@ impl Distribution {
     pub fn all_vnodes(dist_key_indices: Vec<usize>) -> Self {
         /// A bitmap that all vnodes are set.
         static ALL_VNODES: LazyLock<Arc<Bitmap>> =
-            LazyLock::new(|| Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).into());
+            LazyLock::new(|| Bitmap::all_high_bits(VirtualNode::COUNT).into());
         Self {
             dist_key_indices,
             vnodes: ALL_VNODES.clone(),
