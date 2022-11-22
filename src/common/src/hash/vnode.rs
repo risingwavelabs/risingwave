@@ -32,8 +32,9 @@ static_assertions::const_assert!(VirtualNodeInner::BITS >= VirtualNode::BITS as 
 
 impl From<HashCode> for VirtualNode {
     fn from(hash_code: HashCode) -> Self {
-        // Take the most significant bits of the hash code.
-        let inner = (hash_code.0 >> (u64::BITS - VirtualNode::BITS as u32)) as VirtualNodeInner;
+        // Take the least significant bits of the hash code.
+        // TODO: should we use the most significant bits?
+        let inner = (hash_code.0 % Self::COUNT as u64) as VirtualNodeInner;
         VirtualNode(inner)
     }
 }
