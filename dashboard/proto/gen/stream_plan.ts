@@ -133,59 +133,6 @@ export function dispatcherTypeToJSON(object: DispatcherType): string {
   }
 }
 
-export const FragmentType = {
-  FRAGMENT_UNSPECIFIED: "FRAGMENT_UNSPECIFIED",
-  OTHERS: "OTHERS",
-  SOURCE: "SOURCE",
-  MVIEW: "MVIEW",
-  SINK: "SINK",
-  UNRECOGNIZED: "UNRECOGNIZED",
-} as const;
-
-export type FragmentType = typeof FragmentType[keyof typeof FragmentType];
-
-export function fragmentTypeFromJSON(object: any): FragmentType {
-  switch (object) {
-    case 0:
-    case "FRAGMENT_UNSPECIFIED":
-      return FragmentType.FRAGMENT_UNSPECIFIED;
-    case 1:
-    case "OTHERS":
-      return FragmentType.OTHERS;
-    case 2:
-    case "SOURCE":
-      return FragmentType.SOURCE;
-    case 3:
-    case "MVIEW":
-      return FragmentType.MVIEW;
-    case 4:
-    case "SINK":
-      return FragmentType.SINK;
-    case -1:
-    case "UNRECOGNIZED":
-    default:
-      return FragmentType.UNRECOGNIZED;
-  }
-}
-
-export function fragmentTypeToJSON(object: FragmentType): string {
-  switch (object) {
-    case FragmentType.FRAGMENT_UNSPECIFIED:
-      return "FRAGMENT_UNSPECIFIED";
-    case FragmentType.OTHERS:
-      return "OTHERS";
-    case FragmentType.SOURCE:
-      return "SOURCE";
-    case FragmentType.MVIEW:
-      return "MVIEW";
-    case FragmentType.SINK:
-      return "SINK";
-    case FragmentType.UNRECOGNIZED:
-    default:
-      return "UNRECOGNIZED";
-  }
-}
-
 export interface AddMutation {
   /** New dispatchers for each actor. */
   actorDispatchers: { [key: number]: AddMutation_Dispatchers };
@@ -810,7 +757,7 @@ export interface StreamFragmentGraph_StreamFragment {
   fragmentId: number;
   /** root stream node in this fragment. */
   node: StreamNode | undefined;
-  fragmentType: FragmentType;
+  fragmentTypeMask: number;
   /** mark whether this fragment should only have one actor. */
   isSingleton: boolean;
   /** Number of table ids (stateful states) for this fragment. */
@@ -3635,7 +3582,7 @@ function createBaseStreamFragmentGraph_StreamFragment(): StreamFragmentGraph_Str
   return {
     fragmentId: 0,
     node: undefined,
-    fragmentType: FragmentType.FRAGMENT_UNSPECIFIED,
+    fragmentTypeMask: 0,
     isSingleton: false,
     tableIdsCnt: 0,
     upstreamTableIds: [],
@@ -3647,9 +3594,7 @@ export const StreamFragmentGraph_StreamFragment = {
     return {
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
       node: isSet(object.node) ? StreamNode.fromJSON(object.node) : undefined,
-      fragmentType: isSet(object.fragmentType)
-        ? fragmentTypeFromJSON(object.fragmentType)
-        : FragmentType.FRAGMENT_UNSPECIFIED,
+      fragmentTypeMask: isSet(object.fragmentTypeMask) ? Number(object.fragmentTypeMask) : 0,
       isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
       upstreamTableIds: Array.isArray(object?.upstreamTableIds)
@@ -3662,7 +3607,7 @@ export const StreamFragmentGraph_StreamFragment = {
     const obj: any = {};
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
     message.node !== undefined && (obj.node = message.node ? StreamNode.toJSON(message.node) : undefined);
-    message.fragmentType !== undefined && (obj.fragmentType = fragmentTypeToJSON(message.fragmentType));
+    message.fragmentTypeMask !== undefined && (obj.fragmentTypeMask = Math.round(message.fragmentTypeMask));
     message.isSingleton !== undefined && (obj.isSingleton = message.isSingleton);
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
     if (message.upstreamTableIds) {
@@ -3681,7 +3626,7 @@ export const StreamFragmentGraph_StreamFragment = {
     message.node = (object.node !== undefined && object.node !== null)
       ? StreamNode.fromPartial(object.node)
       : undefined;
-    message.fragmentType = object.fragmentType ?? FragmentType.FRAGMENT_UNSPECIFIED;
+    message.fragmentTypeMask = object.fragmentTypeMask ?? 0;
     message.isSingleton = object.isSingleton ?? false;
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
     message.upstreamTableIds = object.upstreamTableIds?.map((e) => e) || [];

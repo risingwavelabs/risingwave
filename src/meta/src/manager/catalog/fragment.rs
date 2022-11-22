@@ -28,7 +28,7 @@ use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, State};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, FragmentType, StreamActor, StreamNode,
+    Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
 
@@ -309,7 +309,7 @@ where
                 dependent_table
                     .fragments
                     .values_mut()
-                    .filter(|f| f.fragment_type() == FragmentType::Mview)
+                    .filter(|f| (f.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0)
                     .flat_map(|f| &mut f.actors)
                     .for_each(|a| {
                         a.dispatcher.retain_mut(|d| {
