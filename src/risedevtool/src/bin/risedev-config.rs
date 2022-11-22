@@ -155,7 +155,7 @@ Required if you want to tracing operations from hummock
 Path of log file
 HM_TRACE_PATH=\".trace/hummock.ht\"
 Runtime tracing flag
-USE_HM_TRACE = true
+USE_HM_TRACE=true
                 "
             }
         }

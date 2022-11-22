@@ -34,9 +34,13 @@ use serde::{Deserialize, Serialize};
 struct Args {
     #[arg(short, long)]
     path: String,
+
     // path to config file
     #[arg(short, long, default_value = "src/config/risingwave.toml")]
     config: String,
+
+    #[arg(short, long)]
+    object_storage: String,
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -65,7 +69,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn Replaya
     let state_store_stats = Arc::new(StateStoreMetrics::unused());
     let object_store_stats = Arc::new(ObjectStoreMetrics::unused());
     let object_store =
-        parse_remote_object_store(&config.local_object_store, object_store_stats, false).await;
+        parse_remote_object_store(&args.object_storage, object_store_stats, false).await;
 
     let sstable_store = {
         let tiered_cache = TieredCache::none();
