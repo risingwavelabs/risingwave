@@ -48,41 +48,22 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let group_key_types = input.schema().data_types()[..group_by.len()].to_vec();
 
-        if node.with_ties {
-            let args = GroupTopNExecutorDispatcherArgs {
-                input,
-                ctx: params.actor_context,
-                order_pairs,
-                offset_and_limit: (node.offset as usize, node.limit as usize),
-                order_by_len: node.order_by_len as usize,
-                pk_indices: params.pk_indices,
-                executor_id: params.executor_id,
-                group_by,
-                state_table,
-                lru_manager: stream.context.lru_manager.clone(),
-                cache_size: 1 << 16,
-                with_ties: true,
-                group_key_types,
-            };
-            args.dispatch()
-        } else {
-            let args = GroupTopNExecutorDispatcherArgs {
-                input,
-                ctx: params.actor_context,
-                order_pairs,
-                offset_and_limit: (node.offset as usize, node.limit as usize),
-                order_by_len: node.order_by_len as usize,
-                pk_indices: params.pk_indices,
-                executor_id: params.executor_id,
-                group_by,
-                state_table,
-                lru_manager: stream.context.lru_manager.clone(),
-                cache_size: 1 << 16,
-                with_ties: false,
-                group_key_types,
-            };
-            args.dispatch()
-        }
+        let args = GroupTopNExecutorDispatcherArgs {
+            input,
+            ctx: params.actor_context,
+            order_pairs,
+            offset_and_limit: (node.offset as usize, node.limit as usize),
+            order_by_len: node.order_by_len as usize,
+            pk_indices: params.pk_indices,
+            executor_id: params.executor_id,
+            group_by,
+            state_table,
+            lru_manager: stream.context.lru_manager.clone(),
+            cache_size: 1 << 16,
+            with_ties: node.with_ties,
+            group_key_types,
+        };
+        args.dispatch()
     }
 }
 
