@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
+use risingwave_common::hash::{ParallelUnitId, VirtualNode, VnodeMapping};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
@@ -29,7 +30,6 @@ use risingwave_pb::plan_common::Field as FieldProst;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use uuid::Uuid;
-use risingwave_common::hash::{ParallelUnitId, VirtualNode, VnodeMapping};
 
 use crate::catalog::catalog_service::CatalogReader;
 use crate::optimizer::plan_node::generic::GenericPlanRef;

@@ -19,14 +19,16 @@ use itertools::Itertools;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, Result};
-use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::hash::{
+    HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode, VnodeMapping,
+};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_expr::expr::expr_unary::new_unary_expr;
-use risingwave_expr::expr::{BoxedExpression, build_from_prost, LiteralExpression};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression, LiteralExpression};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -38,7 +40,6 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::StorageTableDesc;
 use uuid::Uuid;
-use risingwave_common::hash::{ParallelUnitId, VirtualNode, VnodeMapping};
 
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,

@@ -56,12 +56,12 @@ impl From<u64> for HashCode {
 }
 
 impl HashCode {
-    pub fn hash_code(&self) -> u64 {
+    pub fn hash_code(self) -> u64 {
         self.0
     }
 
-    pub fn to_vnode(&self) -> VirtualNode {
-        VirtualNode::from(*self)
+    pub fn to_vnode(self) -> VirtualNode {
+        VirtualNode::from(self)
     }
 }
 

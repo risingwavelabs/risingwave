@@ -30,7 +30,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, expect_first_barrier, Message,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
     PkIndices, StreamExecutorResult, Watermark,
 };
 use crate::common::table::state_table::StateTable;

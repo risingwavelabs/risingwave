@@ -361,15 +361,15 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::Row;
-    use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::types::DataType;
+    use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
     use tokio::task;
-    use risingwave_common::hash::VirtualNode;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
     use crate::filter_key_extractor::{

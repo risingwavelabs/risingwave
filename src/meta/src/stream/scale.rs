@@ -23,8 +23,9 @@ use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::hash::{ParallelUnitId, VirtualNode};
 use risingwave_common::util::prost::is_stream_source;
-use risingwave_pb::common::{ActorInfo, ParallelUnit, worker_node, WorkerNode, WorkerType};
+use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
@@ -38,7 +39,6 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use uuid::Uuid;
-use risingwave_common::hash::{ParallelUnitId, VirtualNode};
 
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
