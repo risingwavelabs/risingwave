@@ -124,10 +124,7 @@ message SourceNode {
   repeated plan_common.ColumnCatalog columns = 4;
   repeated int32 pk_column_ids = 5;
   map<string, string> properties = 6;
-  oneof info {
-    catalog.StreamSourceInfo stream_source = 7;
-    catalog.TableSourceInfo table_source = 8;
-  }
+  catalog.SourceInfo info = 7;
 }
 
 message SinkNode {
