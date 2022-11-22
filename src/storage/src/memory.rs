@@ -86,6 +86,7 @@ impl RangeKv for BTreeMapRangeKv {
 
 pub mod sled {
     use std::fs::create_dir_all;
+    use std::ops::RangeBounds;
 
     use bytes::Bytes;
     use risingwave_hummock_sdk::key::FullKey;
@@ -124,18 +125,26 @@ pub mod sled {
             limit: Option<usize>,
         ) -> StorageResult<Vec<(FullKey<Vec<u8>>, Option<Bytes>)>> {
             let (left, right) = range;
-            let left = left.map(|key| key.to_ref().encode_reverse_epoch());
-            let right = right.map(|key| key.to_ref().encode_reverse_epoch());
+            let full_key_ref_bound = (
+                left.as_ref().map(FullKey::to_ref),
+                right.as_ref().map(FullKey::to_ref),
+            );
+            let left_encoded = left.as_ref().map(|key| key.to_ref().encode_reverse_epoch());
+            let right_encoded = right
+                .as_ref()
+                .map(|key| key.to_ref().encode_reverse_epoch());
             let limit = limit.unwrap_or(usize::MAX);
             let mut ret = vec![];
-            for result in self.inner.range((left, right)).take(limit) {
+            for result in self.inner.range((left_encoded, right_encoded)).take(limit) {
                 let (key, value) = result?;
                 let full_key = FullKey::decode_reverse_epoch(key.as_ref()).to_vec();
-                assert!(!value.is_empty());
+                if !full_key_ref_bound.contains(&full_key.to_ref()) {
+                    continue;
+                }
                 let value = match value.as_ref() {
                     [EMPTY] => None,
                     [NON_EMPTY, rest @ ..] => Some(Bytes::from(Vec::from(rest))),
-                    _ => unreachable!(),
+                    _ => unreachable!("malformed value: {:?}", value),
                 };
                 ret.push((full_key, value))
             }
@@ -183,6 +192,89 @@ pub mod sled {
             RangeKvStateStore {
                 inner: SledRangeKv::new_temp(),
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use std::ops::{Bound, RangeBounds};
+
+        use bytes::Bytes;
+        use risingwave_common::catalog::TableId;
+        use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+
+        use crate::memory::sled::SledRangeKv;
+        use crate::memory::RangeKv;
+
+        #[test]
+        fn test_filter_variable_key_length_false_positive() {
+            let table_id = TableId { table_id: 233 };
+            let epoch = u64::MAX - u64::from_be_bytes([1, 2, 3, 4, 5, 6, 7, 8]);
+            let excluded_short_table_key = [0, 1, 0, 0];
+            let included_long_table_key = [0, 1, 0, 0, 1, 2];
+            let left_table_key = [0, 1, 0, 0, 1];
+            let right_table_key = [0, 1, 1, 1];
+
+            let to_full_key = |table_key: &[u8]| FullKey {
+                user_key: UserKey {
+                    table_id,
+                    table_key: TableKey(Bytes::from(table_key.to_vec())),
+                },
+                epoch,
+            };
+
+            let left_full_key = to_full_key(&left_table_key[..]);
+            let right_full_key = to_full_key(&right_table_key[..]);
+            let included_long_full_key = to_full_key(&included_long_table_key[..]);
+            let excluded_short_full_key = to_full_key(&excluded_short_table_key[..]);
+
+            assert!((
+                Bound::Included(left_full_key.to_ref()),
+                Bound::Included(right_full_key.to_ref())
+            )
+                .contains(&included_long_full_key.to_ref()));
+            assert!(!(
+                Bound::Included(left_full_key.to_ref()),
+                Bound::Included(right_full_key.to_ref())
+            )
+                .contains(&excluded_short_full_key.to_ref()));
+
+            let left_encoded = left_full_key.encode_reverse_epoch();
+            let right_encoded = right_full_key.encode_reverse_epoch();
+
+            assert!((
+                Bound::Included(left_encoded.clone()),
+                Bound::Included(right_encoded.clone())
+            )
+                .contains(&included_long_full_key.encode_reverse_epoch().clone()));
+            assert!((
+                Bound::Included(left_encoded.clone()),
+                Bound::Included(right_encoded.clone())
+            )
+                .contains(&excluded_short_full_key.encode_reverse_epoch().clone()));
+
+            let sled_range_kv = SledRangeKv::new_temp();
+            sled_range_kv
+                .ingest_batch(
+                    vec![
+                        (included_long_full_key.clone(), None),
+                        (excluded_short_full_key.clone(), None),
+                    ]
+                    .into_iter(),
+                )
+                .unwrap();
+            let kvs = sled_range_kv
+                .range(
+                    (
+                        Bound::Included(left_full_key),
+                        Bound::Included(right_full_key),
+                    ),
+                    None,
+                )
+                .unwrap();
+            assert_eq!(1, kvs.len());
+            assert_eq!(included_long_full_key.to_ref(), kvs[0].0.to_ref());
+            assert!(kvs[0].1.is_none());
         }
     }
 }
