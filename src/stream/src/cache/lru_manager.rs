@@ -128,6 +128,7 @@ impl LruManager {
             //     last_step
             //   - or else we set the step to last_step * 2
 
+            let last_step = step;
             step = if cur_total_bytes_used < mem_threshold_graceful {
                 // Do not evict if the memory usage is lower than `mem_threshold_graceful`
                 0
@@ -138,7 +139,7 @@ impl LruManager {
                 } else {
                     step + 1
                 }
-            } else if last_total_bytes_used > cur_total_bytes_used {
+            } else if last_total_bytes_used < cur_total_bytes_used {
                 // Aggressively evict
                 if step == 0 {
                     2
@@ -150,7 +151,17 @@ impl LruManager {
             };
 
             last_total_bytes_used = cur_total_bytes_used;
-            watermark_time_ms += self.barrier_interval_ms as u64 * step;
+
+            // if watermark_time_ms + self.barrier_interval_ms as u64 * step > now, we do not
+            // increase the step, and set the epoch to now time epoch.
+            let physical_now = Epoch::physical_now();
+            if self.barrier_interval_ms as u64 > (physical_now - watermark_time_ms) / step
+            {
+                step = last_step;
+                watermark_time_ms = physical_now;
+            } else {
+                watermark_time_ms += self.barrier_interval_ms as u64 * step;
+            }
 
             self.set_watermark_time_ms(watermark_time_ms);
         }
