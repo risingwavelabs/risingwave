@@ -88,10 +88,13 @@ fn read_naive_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveTimeWrapper> 
 }
 
 fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTimeWrapper> {
-    match cursor.read_i64::<BigEndian>() {
-        Ok(t) => NaiveDateTimeWrapper::from_protobuf(t),
-        Err(e) => bail!("Failed to read i64 from NaiveDateTime buffer: {}", e),
-    }
+    let secs = cursor
+        .read_i64::<BigEndian>()
+        .map_err(|e| anyhow!("Failed to read i64 from NaiveDateTime buffer: {}", e))?;
+    let nsecs = cursor
+        .read_u32::<BigEndian>()
+        .map_err(|e| anyhow!("Failed to read u32 from NaiveDateTime buffer: {}", e))?;
+    NaiveDateTimeWrapper::from_protobuf(secs, nsecs)
 }
 
 pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUnit> {

@@ -151,7 +151,7 @@ fn parse_naive_time(s: &str) -> Result<NaiveTime> {
 #[inline(always)]
 pub fn str_to_timestampz(elem: &str) -> Result<i64> {
     elem.parse::<DateTime<Utc>>()
-        .map(|ret| ret.timestamp_nanos() / 1000)
+        .map(|ret| ret.timestamp_micros())
         .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ))
 }
 
@@ -183,7 +183,9 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
 pub fn timestampz_to_utc_string(elem: i64) -> String {
     // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
     // from session. See #3552.
-    let instant = Utc.timestamp_nanos(elem * 1000);
+    let secs = elem / 1_000_000;
+    let nsecs = (elem % 1_000_000) * 1000;
+    let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     // PostgreSQL uses a space rather than `T` to separate the date and time.
     // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-OUTPUT
     instant.format("%Y-%m-%d %H:%M:%S%.f%:z").to_string()
@@ -192,7 +194,9 @@ pub fn timestampz_to_utc_string(elem: i64) -> String {
 pub fn timestampz_to_utc_binary(elem: i64) -> Bytes {
     // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
     // from session. See #3552.
-    let instant = Utc.timestamp_nanos(elem * 1000);
+    let secs = elem / 1_000_000;
+    let nsecs = (elem % 1_000_000) * 1000;
+    let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     let mut out = BytesMut::new();
     // postgres_types::Type::ANY is only used as a placeholder.
     instant
