@@ -155,8 +155,7 @@ impl LruManager {
             // if watermark_time_ms + self.barrier_interval_ms as u64 * step > now, we do not
             // increase the step, and set the epoch to now time epoch.
             let physical_now = Epoch::physical_now();
-            if self.barrier_interval_ms as u64 > (physical_now - watermark_time_ms) / step
-            {
+            if self.barrier_interval_ms as u64 > (physical_now - watermark_time_ms) / step {
                 step = last_step;
                 watermark_time_ms = physical_now;
             } else {
