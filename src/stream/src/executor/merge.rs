@@ -18,6 +18,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use anyhow::anyhow;
+use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
@@ -235,35 +236,110 @@ struct BufferedWatermarks {
 }
 
 pub struct SelectReceivers {
-    blocks: Vec<BoxedInput>,
-    upstreams: Vec<BoxedInput>,
     barrier: Option<Barrier>,
-    last_base: usize,
+
+    blocked_upstreams: Vec<BoxedInput>,
+    select_futures: FuturesUnordered<StreamFuture<BoxedInput>>,
+
     actor_id: u32,
     /// watermark column index -> `BufferedWatermarks`
     buffered_watermarks: BTreeMap<usize, BufferedWatermarks>,
+}
+
+impl Stream for SelectReceivers {
+    type Item = std::result::Result<Message, StreamExecutorError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.select_futures.is_terminated() {
+            return Poll::Ready(None);
+        }
+
+        loop {
+            match futures::ready!(self.select_futures.poll_next_unpin(cx)) {
+                Some((Some(Err(e)), _)) => {
+                    return Poll::Ready(Some(Err(e)));
+                }
+                Some((Some(Ok(message)), remaining)) => {
+                    let actor_id = remaining.actor_id();
+                    match message {
+                        Message::Chunk(chunk) => {
+                            self.select_futures.push(remaining.into_future());
+                            return Poll::Ready(Some(Ok(Message::Chunk(chunk))));
+                        }
+                        Message::Watermark(watermark) => {
+                            self.select_futures.push(remaining.into_future());
+                            if let Some(watermark) = self.handle_watermark(actor_id, watermark) {
+                                return Poll::Ready(Some(Ok(Message::Watermark(watermark))));
+                            }
+                        }
+                        Message::Barrier(barrier) => {
+                            self.blocked_upstreams.push(remaining);
+                            if let Some(current_barrier) = self.barrier.as_ref() {
+                                if current_barrier.epoch != barrier.epoch {
+                                    return Poll::Ready(Some(Err(
+                                        StreamExecutorError::align_barrier(
+                                            current_barrier.clone(),
+                                            barrier,
+                                        ),
+                                    )));
+                                }
+                            } else {
+                                self.barrier = Some(barrier);
+                            }
+                        }
+                    }
+                }
+                Some((None, _)) => return Poll::Ready(None),
+                None => break,
+            }
+        }
+
+        assert!(self.select_futures.is_terminated());
+        let barrier = self.barrier.take().unwrap();
+
+        // If this barrier asks the actor to stop, we do not reset the upstreams so that the
+        // next call would return `Poll::Ready(None)` due to `is_terminated`.
+        if !barrier.is_stop_or_update_drop_actor(self.actor_id) {
+            let upstreams = std::mem::take(&mut self.blocked_upstreams);
+            self.extend(upstreams);
+            assert!(!self.select_futures.is_terminated());
+        }
+        Poll::Ready(Some(Ok(Message::Barrier(barrier))))
+    }
 }
 
 impl SelectReceivers {
     fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
         assert!(!upstreams.is_empty());
 
-        Self {
-            blocks: Vec::with_capacity(upstreams.len()),
-            upstreams,
-            last_base: 0,
+        let mut this = Self {
+            blocked_upstreams: Vec::with_capacity(upstreams.len()),
+            select_futures: Default::default(),
             actor_id,
             barrier: None,
-            buffered_watermarks: BTreeMap::default(),
-        }
+            buffered_watermarks: Default::default(),
+        };
+        this.extend(upstreams);
+        this
+    }
+
+    fn extend(&mut self, upstreams: impl IntoIterator<Item = BoxedInput>) {
+        assert!(self.blocked_upstreams.is_empty() && self.barrier.is_none());
+
+        self.select_futures
+            .extend(upstreams.into_iter().map(|s| s.into_future()));
+    }
+
+    fn len(&self) -> usize {
+        self.blocked_upstreams.len() + self.select_futures.len()
     }
 
     fn check_heap(&mut self, col_idx: usize) -> Option<Watermark> {
+        let len = self.len();
         let mut watermark_to_transfer = None;
         let col_data = self.buffered_watermarks.get_mut(&col_idx).unwrap();
         while !col_data.first_buffered_watermarks.is_empty()
-            && (col_data.first_buffered_watermarks.len()
-                == self.upstreams.len() + self.blocks.len()
+            && (col_data.first_buffered_watermarks.len() == len
                 || watermark_to_transfer.as_ref().map_or(false, |watermark| {
                     watermark == &col_data.first_buffered_watermarks.peek().unwrap().0 .0
                 }))
@@ -287,11 +363,12 @@ impl SelectReceivers {
 
     fn handle_watermark(&mut self, actor_id: ActorId, watermark: Watermark) -> Option<Watermark> {
         let col_idx = watermark.col_idx;
+        let len = self.len();
         let watermarks =
             self.buffered_watermarks
                 .entry(col_idx)
                 .or_insert_with(|| BufferedWatermarks {
-                    first_buffered_watermarks: BinaryHeap::with_capacity(self.upstreams.len()),
+                    first_buffered_watermarks: BinaryHeap::with_capacity(len),
                     other_buffered_watermarks: BTreeMap::default(),
                 });
         let staged = watermarks
@@ -312,20 +389,23 @@ impl SelectReceivers {
 
     /// Consume `other` and add its upstreams to `self`.
     fn add_upstreams_from(&mut self, other: Self) {
-        assert!(self.blocks.is_empty() && self.barrier.is_none());
-        assert!(other.blocks.is_empty() && other.barrier.is_none());
+        assert!(self.blocked_upstreams.is_empty() && self.barrier.is_none());
+        assert!(other.blocked_upstreams.is_empty() && other.barrier.is_none());
         assert_eq!(self.actor_id, other.actor_id);
 
-        self.upstreams.extend(other.upstreams);
-        self.last_base = 0;
+        self.select_futures.extend(other.select_futures);
     }
 
     /// Remove upstreams from `self` in `upstream_actor_ids`.
     fn remove_upstreams(&mut self, upstream_actor_ids: &HashSet<ActorId>) {
-        assert!(self.blocks.is_empty() && self.barrier.is_none());
+        assert!(self.blocked_upstreams.is_empty() && self.barrier.is_none());
 
-        self.upstreams
-            .retain(|u| !upstream_actor_ids.contains(&u.actor_id()));
+        let new_upstreams = std::mem::take(&mut self.select_futures)
+            .into_iter()
+            .map(|s| s.into_inner().unwrap())
+            .filter(|u| !upstream_actor_ids.contains(&u.actor_id()));
+        self.extend(new_upstreams);
+
         for BufferedWatermarks {
             first_buffered_watermarks,
             other_buffered_watermarks,
@@ -334,72 +414,6 @@ impl SelectReceivers {
             first_buffered_watermarks
                 .retain(|Reverse((_, actor_id))| !upstream_actor_ids.contains(actor_id));
             other_buffered_watermarks.retain(|actor_id, _| !upstream_actor_ids.contains(actor_id));
-        }
-        self.last_base = 0;
-    }
-}
-
-impl Stream for SelectReceivers {
-    type Item = std::result::Result<Message, StreamExecutorError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut poll_count = 0;
-        while poll_count < self.upstreams.len() {
-            let idx = (poll_count + self.last_base) % self.upstreams.len();
-            let upstream = &mut self.upstreams[idx];
-            let actor_id = upstream.actor_id();
-            match upstream.poll_next_unpin(cx) {
-                Poll::Pending => {
-                    poll_count += 1;
-                    continue;
-                }
-                Poll::Ready(item) => match item {
-                    None => return Poll::Ready(None),
-                    Some(Err(e)) => return Poll::Ready(Some(Err(e))),
-                    Some(Ok(Message::Barrier(barrier))) => {
-                        let rc = self.upstreams.swap_remove(idx);
-                        self.blocks.push(rc);
-                        if let Some(current_barrier) = self.barrier.as_ref() {
-                            if current_barrier.epoch != barrier.epoch {
-                                return Poll::Ready(Some(Err(StreamExecutorError::align_barrier(
-                                    current_barrier.clone(),
-                                    barrier,
-                                ))));
-                            }
-                        } else {
-                            self.barrier = Some(barrier);
-                        }
-                        poll_count = 0;
-                    }
-                    Some(Ok(Message::Chunk(chunk))) => {
-                        let message = Message::Chunk(chunk);
-                        self.last_base = (idx + 1) % self.upstreams.len();
-                        return Poll::Ready(Some(Ok(message)));
-                    }
-                    Some(Ok(Message::Watermark(watermark))) => {
-                        if let Some(watermark) = self.handle_watermark(actor_id, watermark) {
-                            self.last_base = idx;
-                            return Poll::Ready(Some(Ok(Message::Watermark(watermark))));
-                        }
-                        continue;
-                    }
-                },
-            }
-        }
-        if self.upstreams.is_empty() {
-            if let Some(barrier) = self.barrier.take() {
-                // If this barrier acquire the executor stop, we do not reset the upstreams
-                // so that the next call would return `Poll::Ready(None)`.
-                if !barrier.is_stop_or_update_drop_actor(self.actor_id) {
-                    self.upstreams = std::mem::take(&mut self.blocks);
-                }
-                let message = Message::Barrier(barrier);
-                Poll::Ready(Some(Ok(message)))
-            } else {
-                Poll::Ready(None)
-            }
-        } else {
-            Poll::Pending
         }
     }
 }
