@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
-use risingwave_pb::stream_plan::ChainType;
+use risingwave_pb::stream_plan::{ChainNode, ChainType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 
@@ -26,13 +26,14 @@ pub struct ChainExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for ChainExecutorBuilder {
+    type Node = ChainNode;
+
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         state_store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Chain)?;
         let [mview, snapshot]: [_; 2] = params.input.try_into().unwrap();
 
         let upstream_indices: Vec<usize> = node

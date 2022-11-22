@@ -23,6 +23,7 @@ use async_stack_trace::{StackTraceManager, StackTraceReport, TraceConfig};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -104,6 +105,9 @@ pub struct ExecutorParams {
     /// Information of the operator from plan node.
     pub op_info: String,
 
+    /// The output schema of the executor.
+    pub schema: Schema,
+
     /// The input executor.
     pub input: Vec<BoxedExecutor>,
 
@@ -127,6 +131,7 @@ impl Debug for ExecutorParams {
             .field("executor_id", &self.executor_id)
             .field("operator_id", &self.operator_id)
             .field("op_info", &self.op_info)
+            .field("schema", &self.schema)
             .field("input", &self.input.len())
             .field("actor_id", &self.actor_context.id)
             .finish_non_exhaustive()
@@ -512,6 +517,7 @@ impl LocalStreamManagerCore {
         // same.
         let executor_id = unique_executor_id(actor_context.id, node.operator_id);
         let operator_id = unique_operator_id(fragment_id, node.operator_id);
+        let schema = node.fields.iter().map(Field::from).collect();
 
         // Build the executor with params.
         let executor_params = ExecutorParams {
@@ -520,6 +526,7 @@ impl LocalStreamManagerCore {
             executor_id,
             operator_id,
             op_info,
+            schema,
             input,
             fragment_id,
             executor_stats: self.streaming_metrics.clone(),
