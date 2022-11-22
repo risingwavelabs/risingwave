@@ -36,39 +36,7 @@ use serde_json::Value;
 ))]
 use simd_json::{value::StaticNode, BorrowedValue, ValueAccess};
 
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-macro_rules! ensure_float {
-    ($v:ident, $t:ty) => {
-        $v.as_f64()
-            .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t), ", but found {}"), $v))?
-    };
-}
-
-macro_rules! simd_json_ensure_float {
-    ($v:ident, $t:ty) => {
-        $v.cast_f64()
-            .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t), ", but found {}"), $v))?
-    };
-}
-
-macro_rules! ensure_int {
-    ($v:ident, $t:ty) => {
-        $v.as_i64()
-            .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t), ", but found {}"), $v))?
-    };
-}
-
-macro_rules! ensure_str {
-    ($v:ident, $t:literal) => {
-        $v.as_str()
-            .ok_or_else(|| anyhow!(concat!("expect ", $t, ", but found {}"), $v))?
-    };
-}
+use crate::{ensure_int, ensure_str};
 
 #[cfg(not(any(
     target_feature = "sse4.2",
@@ -77,6 +45,7 @@ macro_rules! ensure_str {
     target_feature = "simd128"
 )))]
 fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
+    use crate::ensure_float;
     let v = match dtype {
         DataType::Boolean => v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into(),
         DataType::Int16 => ScalarImpl::Int16(
@@ -101,12 +70,12 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
         DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
         DataType::Timestamp => match v {
             Value::String(s) => str_to_timestamp(s)?.into(),
-            Value::Number(n) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
+            Value::Number(_n) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
             _ => anyhow::bail!("expect timestamp, but found {v}"),
         },
         DataType::Timestampz => match v {
             Value::String(s) => str_to_timestampz(s)?.into(),
-            Value::Number(n) => i64_to_timestampz(ensure_int!(v, i64))?.into(),
+            Value::Number(_n) => i64_to_timestampz(ensure_int!(v, i64))?.into(),
             _ => anyhow::bail!("expect timestampz, but found {v}"),
         },
         DataType::Struct(struct_type_info) => {
@@ -163,6 +132,8 @@ pub(crate) fn json_parse_value(dtype: &DataType, value: Option<&Value>) -> Resul
     target_feature = "simd128"
 ))]
 fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<ScalarImpl> {
+    use crate::simd_json_ensure_float;
+
     let v = match dtype {
         DataType::Boolean => v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into(),
         DataType::Int16 => ScalarImpl::Int16(

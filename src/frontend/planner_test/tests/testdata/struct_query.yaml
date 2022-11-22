@@ -249,8 +249,7 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select (v1).v2 from t;
-  binder_error: 'Bind error: column notation .v2 applied to type bigint, which is
-    not a composite type'
+  binder_error: 'Bind error: column notation .v2 applied to type bigint, which is not a composite type'
 - sql: |
     create materialized view t as select * from s;
     select (country + country) from t;
@@ -276,8 +275,7 @@
 - sql: |
     create materialized view t as select * from s;
     select avg(country) from t;
-  binder_error: 'Invalid input syntax: Invalid aggregation: avg(struct<address varchar,zipcode
-    varchar>)'
+  binder_error: 'Invalid input syntax: Invalid aggregation: avg(struct<address varchar,zipcode varchar>)'
   create_source:
     row_format: protobuf
     name: s
@@ -392,5 +390,4 @@
 - sql: |
     CREATE TABLE a (c STRUCT<i STRUCT<a INTEGER>, j INTEGER>);
     INSERT INTO a VALUES (1);
-  binder_error: 'Bind error: cannot cast type "integer" to "struct<i struct<a integer>,j
-    integer>" in Assign context'
+  binder_error: 'Bind error: cannot cast type "integer" to "struct<i struct<a integer>,j integer>" in Assign context'

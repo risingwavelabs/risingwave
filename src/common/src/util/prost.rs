@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::stream_plan::source_node::Info as SourceInfo;
+use risingwave_pb::catalog::source_info::SourceInfo;
+use risingwave_pb::catalog::SourceInfo as StructSourceInfo;
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_pb::{batch_plan, data};
 
@@ -34,5 +35,10 @@ impl TypeUrl for data::Column {
 
 #[inline(always)]
 pub fn is_stream_source(source_node: &SourceNode) -> bool {
-    matches!(source_node.info.as_ref(), Some(SourceInfo::StreamSource(_)))
+    matches!(
+        source_node.info.as_ref(),
+        Some(StructSourceInfo {
+            source_info: Some(SourceInfo::StreamSource(_))
+        })
+    )
 }

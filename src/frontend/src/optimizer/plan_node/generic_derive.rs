@@ -385,3 +385,29 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
         self.input.ctx()
     }
 }
+
+impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
+    fn schema(&self) -> Schema {
+        self.inputs[0].schema().clone()
+    }
+
+    fn logical_pk(&self) -> Option<Vec<usize>> {
+        // Union all its inputs pks + source_col if exists
+        let mut pk_indices = vec![];
+        for input in &self.inputs {
+            for pk in input.logical_pk() {
+                if !pk_indices.contains(pk) {
+                    pk_indices.push(*pk);
+                }
+            }
+        }
+        if let Some(source_col) = self.source_col {
+            pk_indices.push(source_col)
+        }
+        Some(pk_indices)
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.inputs[0].ctx()
+    }
+}

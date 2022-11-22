@@ -16,12 +16,13 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub use avro_parser::*;
+pub use avro::*;
+pub use canal::*;
 pub use debezium::*;
 use futures::Future;
 use itertools::Itertools;
 pub use json_parser::*;
-pub use pb_parser::*;
+pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
@@ -30,14 +31,17 @@ use risingwave_common::types::Datum;
 use crate::parser::maxwell::MaxwellParser;
 use crate::{SourceColumnDesc, SourceFormat};
 
-mod avro_parser;
+mod avro;
+mod canal;
 mod common;
 mod debezium;
 mod json_parser;
+mod macros;
 mod maxwell;
-mod pb_parser;
+mod protobuf;
 mod schema_registry;
 mod util;
+
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
@@ -283,6 +287,7 @@ pub enum SourceParserImpl {
     DebeziumJson(DebeziumJsonParser),
     Avro(AvroParser),
     Maxwell(MaxwellParser),
+    CanalJson(CanalJsonParser),
 }
 
 impl SourceParserImpl {
@@ -297,6 +302,7 @@ impl SourceParserImpl {
             Self::DebeziumJson(parser) => parser.parse(payload, writer).await,
             Self::Avro(avro_parser) => avro_parser.parse(payload, writer).await,
             Self::Maxwell(maxwell_parser) => maxwell_parser.parse(payload, writer).await,
+            Self::CanalJson(parser) => parser.parse(payload, writer).await,
         }
     }
 
@@ -325,6 +331,7 @@ impl SourceParserImpl {
                 AvroParser::new(schema_location, use_schema_registry, properties.clone()).await?,
             ),
             SourceFormat::Maxwell => SourceParserImpl::Maxwell(MaxwellParser),
+            SourceFormat::CanalJson => SourceParserImpl::CanalJson(CanalJsonParser),
             _ => {
                 return Err(RwError::from(ProtocolError(
                     "format not support".to_string(),

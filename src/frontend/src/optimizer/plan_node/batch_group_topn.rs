@@ -83,6 +83,7 @@ impl ToBatchProst for BatchGroupTopN {
             offset: self.logical.offset(),
             column_orders,
             group_key: self.group_key().iter().map(|c| *c as u32).collect(),
+            with_ties: self.logical.with_ties(),
         })
     }
 }

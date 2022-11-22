@@ -466,6 +466,7 @@ mod tests {
                     } else {
                         tx.send(Message::Watermark(Watermark {
                             col_idx: (epoch as usize / 20 + tx_id) % CHANNEL_NUMBER,
+                            data_type: DataType::Int64,
                             val: ScalarImpl::Int64(epoch as i64),
                         }))
                         .await

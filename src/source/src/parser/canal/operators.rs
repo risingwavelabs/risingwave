@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub(crate) mod display_stats;
-pub(crate) mod latency_stat;
-mod my_stats;
-pub(crate) mod workload;
+pub const CANAL_UPDATE_EVENT: &str = "UPDATE";
+pub const CANAL_INSERT_EVENT: &str = "INSERT";
+pub const CANAL_DELETE_EVENT: &str = "DELETE";
