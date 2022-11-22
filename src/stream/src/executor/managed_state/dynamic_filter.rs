@@ -153,14 +153,24 @@ impl<S: StateStore> RangeCache<S> {
         });
 
         for pk_range in missing_ranges {
+            let init_maps = self
+                .vnodes
+                .ones()
+                .map(|vnode| {
+                    self.cache
+                        .remove(&(vnode as VirtualNode))
+                        .unwrap_or_default()
+                })
+                .collect_vec();
             let futures = self
                 .vnodes
                 .ones()
-                .map(|vnode| self.fetch_vnode_range(vnode, &pk_range));
+                .zip_eq(init_maps.into_iter())
+                .map(|(vnode, init_map)| self.fetch_vnode_range(vnode, &pk_range, init_map));
             let results: Vec<_> = stream::iter(futures).buffer_unordered(10).collect().await;
             for result in results {
-                let (vnode, mut map) = result?;
-                self.cache.entry(vnode).or_default().append(&mut map);
+                let (vnode, map) = result?;
+                self.cache.insert(vnode, map);
             }
         }
 
@@ -178,6 +188,7 @@ impl<S: StateStore> RangeCache<S> {
         &self,
         vnode: usize,
         pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
+        initial_map: BTreeMap<Vec<u8>, CompactedRow>,
     ) -> StreamExecutorResult<(VirtualNode, BTreeMap<Vec<u8>, CompactedRow>)> {
         let vnode = vnode.try_into().unwrap();
         let row_stream = self
@@ -186,7 +197,7 @@ impl<S: StateStore> RangeCache<S> {
             .await?;
         pin_mut!(row_stream);
 
-        let mut map = BTreeMap::new();
+        let mut map = initial_map;
         // row stream output is sorted by its pk, aka left key (and then original pk)
         while let Some(res) = row_stream.next().await {
             let (key_bytes, row) = res?;
@@ -222,7 +233,7 @@ impl<S: StateStore> RangeCache<S> {
 
             let futures = newly_owned_vnodes
                 .ones()
-                .map(|vnode| self.fetch_vnode_range(vnode, &current_range));
+                .map(|vnode| self.fetch_vnode_range(vnode, &current_range, BTreeMap::new()));
             let results: Vec<_> = stream::iter(futures).buffer_unordered(10).collect().await;
             for result in results {
                 let (vnode, map) = result?;
