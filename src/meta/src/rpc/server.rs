@@ -221,7 +221,7 @@ async fn run_election<S: MetaStore>(
             );
             return None;
         }
-        // Why do we check equal here? We have no leader. Should just get lease
+        // Check if new leader was elected in the meantime
         txn.check_equal(
             META_CF_NAME.to_string(),
             META_LEADER_KEY.as_bytes().to_vec(),
@@ -244,9 +244,9 @@ async fn run_election<S: MetaStore>(
         };
     }
 
-    // TODO
-    // Taken from the election loop
-    // Do we need this?
+    // follow-up election:
+    // There has already been a leader before
+
     let mut txn = Transaction::default();
     let now = since_epoch();
     let lease_info = MetaLeaseInfo {
@@ -259,12 +259,10 @@ async fn run_election<S: MetaStore>(
         META_LEADER_KEY.as_bytes().to_vec(),
         leader_info.encode_to_vec(),
     );
-    // query kv from etcd
-    // add more logs
-    // txn may be incorrect
     txn.put(
         META_CF_NAME.to_string(),
-        META_LEASE_KEY.as_bytes().to_vec(),
+        META_LEASE_KEY.as_bytes().to_vec(), // TODO: Leader or lease key?
+        // What do we need META_LEASE_KEY for?
         lease_info.encode_to_vec(),
     );
     // TODO: not sure if we need to do this
@@ -274,7 +272,6 @@ async fn run_election<S: MetaStore>(
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => {
                 tracing::error!("keep lease failed, another node has become new leader");
-                // Main: Sleep forever aka follower node
                 false
             }
             MetaStoreError::Internal(e) => {
@@ -282,7 +279,7 @@ async fn run_election<S: MetaStore>(
                     "keep lease failed, try again later, MetaStoreError: {:?}",
                     e
                 );
-                return None; // repeat the lection
+                return None; // repeat the election
             }
             MetaStoreError::ItemNotFound(e) => {
                 tracing::warn!("keep lease failed, MetaStoreError: {:?}", e);
@@ -295,10 +292,13 @@ async fn run_election<S: MetaStore>(
         }
     };
 
-    // TODO: Compare the logs here with the logs from the main branch
-
     Some((leader_info, lease_info, is_leader))
 }
+
+// TODO: How to debug
+// query kv from etcd
+// add more logs
+// txn may be incorrect
 
 // getting leader_info and leader_lease or defaulting to none
 async fn get_infos<S: MetaStore>(meta_store: &Arc<S>) -> Option<(Vec<u8>, Vec<u8>)> {
