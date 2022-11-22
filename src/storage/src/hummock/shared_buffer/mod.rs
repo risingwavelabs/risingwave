@@ -576,7 +576,7 @@ mod tests {
         let sst1 = gen_dummy_sst_info(1, vec![batch1, batch2], TableId::default(), 1);
         shared_buffer.borrow_mut().succeed_upload_task(
             order_index1,
-            vec![LocalSstableInfo::new(
+            vec![LocalSstableInfo::with_compaction_group(
                 StaticCompactionGroupId::StateDefault.into(),
                 sst1,
             )],

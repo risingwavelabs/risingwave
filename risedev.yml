@@ -413,12 +413,15 @@ risedev:
     - use: frontend
       port: 4565
       exporter-port: 2222
+      health-check-port: 6786
     - use: frontend
       port: 4566
       exporter-port: 2223
+      health-check-port: 6787
     - use: frontend
       port: 4567
       exporter-port: 2224
+      health-check-port: 6788
     - use: compactor
 
   ci-3cn-3fe-in-memory:
@@ -441,12 +444,15 @@ risedev:
     - use: frontend
       port: 4565
       exporter-port: 2222
+      health-check-port: 6786
     - use: frontend
       port: 4566
       exporter-port: 2223
+      health-check-port: 6787
     - use: frontend
       port: 4567
       exporter-port: 2224
+      health-check-port: 6788
 
   ci-kafka:
     - use: minio
@@ -578,7 +584,7 @@ template:
     enable-tiered-cache: false
 
     # RPC endpoint for source connector node
-    connector-source-endpoint: "127.0.0.1:61261"
+    connector-source-endpoint: "127.0.0.1:60061"
 
     # Minio instances used by this compute node
     provide-minio: "minio*"
@@ -709,6 +715,9 @@ template:
 
     # Prometheus exporter listen port
     exporter-port: 2222
+
+    # Health check listen port
+    health-check-port: 6786
 
     # Id of this instance
     id: frontend-${port}

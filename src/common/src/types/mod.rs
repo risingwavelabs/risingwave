@@ -547,6 +547,8 @@ pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
 /// Convert a [`Datum`] to a [`DatumRef`].
+// TODO: use `ToDatumRef::to_datum_ref` instead.
+#[inline(always)]
 pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
     datum.as_ref().map(|d| d.as_scalar_ref_impl())
 }
@@ -631,8 +633,32 @@ pub trait ToOwnedDatum {
 }
 
 impl ToOwnedDatum for DatumRef<'_> {
+    #[inline(always)]
     fn to_owned_datum(self) -> Datum {
         self.map(ScalarRefImpl::into_scalar_impl)
+    }
+}
+
+pub trait ToDatumRef: PartialEq + Eq + std::fmt::Debug {
+    fn to_datum_ref(&self) -> DatumRef<'_>;
+}
+
+impl ToDatumRef for Datum {
+    #[inline(always)]
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        to_datum_ref(self)
+    }
+}
+impl ToDatumRef for &Datum {
+    #[inline(always)]
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        to_datum_ref(self)
+    }
+}
+impl ToDatumRef for DatumRef<'_> {
+    #[inline(always)]
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        *self
     }
 }
 
