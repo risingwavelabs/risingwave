@@ -441,10 +441,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                             META_LEADER_KEY.as_bytes().to_vec(),
                             lease_info.encode_to_vec(),
                         );
-                        if let Err(e) = meta_store.txn(txn).await {
-                            tracing::error!("Unable to renew the leader lease. Error is {}", e);
-                        } else {
-                            tracing::info!("Current node is still leader");
+                        match meta_store.txn(txn).await {
+                            Err(e) => {
+                                tracing::error!("Unable to renew the leader lease. Error is {}", e)
+                            }
+                            Ok(_) => tracing::info!("Current node is still leader"),
                         }
                         continue 'term;
                     }
