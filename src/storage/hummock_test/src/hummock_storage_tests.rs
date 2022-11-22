@@ -73,8 +73,12 @@ pub async fn prepare_hummock_event_handler(
         Arc::new(FilterKeyExtractorManager::default()),
     ));
 
-    let hummock_event_handler =
-        HummockEventHandler::new(event_rx, pinned_version, compactor_context);
+    let hummock_event_handler = HummockEventHandler::new(
+        event_tx.clone(),
+        event_rx,
+        pinned_version,
+        compactor_context,
+    );
 
     (hummock_event_handler, event_tx)
 }
@@ -119,10 +123,9 @@ async fn get_local_hummock_storage(
         })
         .unwrap();
 
-    let (basic_read_version, instance_id) = rx.await.unwrap();
+    let (basic_read_version, instance_guard) = rx.await.unwrap();
     LocalHummockStorage::new(
-        table_id,
-        instance_id,
+        instance_guard,
         basic_read_version,
         hummock_version_reader,
         event_tx.clone(),

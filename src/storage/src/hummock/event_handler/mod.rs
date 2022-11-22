@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::pin_version_response;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::store::memtable::ImmutableMemtable;
@@ -72,12 +73,13 @@ pub enum HummockEvent {
 
     RegisterReadVersion {
         table_id: TableId,
-        new_read_version_sender: oneshot::Sender<(Arc<RwLock<HummockReadVersion>>, u64)>,
+        new_read_version_sender:
+            oneshot::Sender<(Arc<RwLock<HummockReadVersion>>, LocalInstanceGuard)>,
     },
 
     DestroyReadVersion {
         table_id: TableId,
-        instance_id: u64,
+        instance_id: LocalInstanceId,
     },
 }
 
@@ -132,5 +134,26 @@ impl std::fmt::Debug for HummockEvent {
         f.debug_struct("HummockEvent")
             .field("debug_string", &self.to_debug_string())
             .finish()
+    }
+}
+
+pub type LocalInstanceId = u64;
+pub type ReadVersionMappingType =
+    RwLock<HashMap<TableId, HashMap<LocalInstanceId, Arc<RwLock<HummockReadVersion>>>>>;
+
+pub struct LocalInstanceGuard {
+    pub table_id: TableId,
+    pub instance_id: LocalInstanceId,
+    event_sender: mpsc::UnboundedSender<HummockEvent>,
+}
+
+impl Drop for LocalInstanceGuard {
+    fn drop(&mut self) {
+        // If sending fails, it means that event_handler and event_channel have been destroyed, no
+        // need to handle failure
+        let _ = self.event_sender.send(HummockEvent::DestroyReadVersion {
+            table_id: self.table_id,
+            instance_id: self.instance_id,
+        });
     }
 }

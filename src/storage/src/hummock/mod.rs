@@ -79,12 +79,13 @@ use risingwave_hummock_sdk::filter_key_extractor::{
 pub use validator::*;
 use value::*;
 
+use self::event_handler::ReadVersionMappingType;
 use self::iterator::{BackwardUserIterator, HummockIterator, UserIterator};
 pub use self::sstable_store::*;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::compactor::Context;
-use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, ReadVersionMappingType};
+use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::iterator::{
     Backward, BackwardUserIteratorType, DirectedUserIteratorBuilder, DirectionEnum, Forward,
@@ -190,8 +191,12 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
         ));
 
-        let hummock_event_handler =
-            HummockEventHandler::new(event_rx, pinned_version, compactor_context.clone());
+        let hummock_event_handler = HummockEventHandler::new(
+            event_tx.clone(),
+            event_rx,
+            pinned_version,
+            compactor_context.clone(),
+        );
 
         let instance = Self {
             context: compactor_context,
@@ -224,10 +229,9 @@ impl HummockStorage {
             })
             .unwrap();
 
-        let (basic_read_version, instance_id) = rx.await.unwrap();
+        let (basic_read_version, instance_guard) = rx.await.unwrap();
         LocalHummockStorage::new(
-            table_id,
-            instance_id,
+            instance_guard,
             basic_read_version,
             self.hummock_version_reader.clone(),
             self.hummock_event_sender.clone(),

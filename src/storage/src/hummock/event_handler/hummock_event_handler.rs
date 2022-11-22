@@ -21,7 +21,6 @@ use arc_swap::ArcSwap;
 use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
-use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
@@ -30,6 +29,7 @@ use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
+use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::hummock::compactor::{compact, Context};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::uploader::{
@@ -92,11 +92,8 @@ impl BufferTracker {
     }
 }
 
-type InstanceId = u64;
-pub type ReadVersionMappingType =
-    RwLock<HashMap<TableId, HashMap<InstanceId, Arc<RwLock<HummockReadVersion>>>>>;
-
 pub struct HummockEventHandler {
+    hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
     hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
     pending_sync_requests: BTreeMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
     read_version_mapping: Arc<ReadVersionMappingType>,
@@ -108,7 +105,7 @@ pub struct HummockEventHandler {
 
     uploader: HummockUploader,
 
-    instance_id_generator: Arc<AtomicU64>,
+    instance_id_generator: LocalInstanceId,
 
     sstable_id_manager: SstableIdManagerRef,
 }
@@ -140,6 +137,7 @@ async fn flush_imms(
 
 impl HummockEventHandler {
     pub fn new(
+        hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
         compactor_context: Arc<Context>,
@@ -161,6 +159,7 @@ impl HummockEventHandler {
         );
 
         Self {
+            hummock_event_tx,
             hummock_event_rx,
             pending_sync_requests: Default::default(),
             version_update_notifier_tx,
@@ -169,7 +168,7 @@ impl HummockEventHandler {
             write_conflict_detector,
             read_version_mapping,
             uploader,
-            instance_id_generator: Arc::new(AtomicU64::new(0)),
+            instance_id_generator: 0,
             sstable_id_manager,
         }
     }
@@ -428,95 +427,110 @@ impl HummockEventHandler {
                         self.handle_data_spilled(staging_sstable_info);
                     }
                 },
-                Either::Right(event) => match event {
-                    HummockEvent::BufferMayFlush => {
-                        self.uploader.try_flush();
-                    }
-                    HummockEvent::AwaitSyncEpoch {
-                        new_sync_epoch,
-                        sync_result_sender,
-                    } => {
-                        self.handle_await_sync_epoch(new_sync_epoch, sync_result_sender);
-                    }
-                    HummockEvent::Clear(notifier) => {
-                        self.handle_clear(notifier);
-                    }
-                    HummockEvent::Shutdown => {
-                        info!("buffer tracker shutdown");
-                        break;
-                    }
-
-                    HummockEvent::VersionUpdate(version_payload) => {
-                        self.handle_version_update(version_payload);
-                    }
-
-                    HummockEvent::ImmToUploader(imm) => {
-                        self.uploader.add_imm(imm);
-                    }
-
-                    HummockEvent::SealEpoch {
-                        epoch,
-                        is_checkpoint,
-                    } => {
-                        self.uploader.seal_epoch(epoch);
-                        if is_checkpoint {
-                            self.uploader.start_sync_epoch(epoch);
+                Either::Right(event) => {
+                    match event {
+                        HummockEvent::BufferMayFlush => {
+                            self.uploader.try_flush();
                         }
-                        self.seal_epoch.store(epoch, Ordering::SeqCst);
-                    }
-                    #[cfg(any(test, feature = "test"))]
-                    HummockEvent::FlushEvent(sender) => {
-                        let _ = sender.send(()).inspect_err(|e| {
-                            error!("unable to send flush result: {:?}", e);
-                        });
-                    }
-
-                    HummockEvent::RegisterReadVersion {
-                        table_id,
-                        new_read_version_sender,
-                    } => {
-                        let pinned_version = self.pinned_version.load();
-                        let basic_read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-                            (**pinned_version).clone(),
-                        )));
-
-                        let instance_id = self.instance_id_generator.fetch_add(1, Ordering::SeqCst);
-
-                        {
-                            let mut read_version_mapping_guard = self.read_version_mapping.write();
-
-                            read_version_mapping_guard
-                                .entry(table_id)
-                                .or_default()
-                                .insert(instance_id, basic_read_version.clone());
+                        HummockEvent::AwaitSyncEpoch {
+                            new_sync_epoch,
+                            sync_result_sender,
+                        } => {
+                            self.handle_await_sync_epoch(new_sync_epoch, sync_result_sender);
+                        }
+                        HummockEvent::Clear(notifier) => {
+                            self.handle_clear(notifier);
+                        }
+                        HummockEvent::Shutdown => {
+                            info!("buffer tracker shutdown");
+                            break;
                         }
 
-                        match new_read_version_sender.send((basic_read_version, instance_id)) {
-                            Ok(_) => {}
-                            Err(_) => {
-                                panic!("RegisterReadVersion send fail")
+                        HummockEvent::VersionUpdate(version_payload) => {
+                            self.handle_version_update(version_payload);
+                        }
+
+                        HummockEvent::ImmToUploader(imm) => {
+                            self.uploader.add_imm(imm);
+                        }
+
+                        HummockEvent::SealEpoch {
+                            epoch,
+                            is_checkpoint,
+                        } => {
+                            self.uploader.seal_epoch(epoch);
+                            if is_checkpoint {
+                                self.uploader.start_sync_epoch(epoch);
+                            }
+                            self.seal_epoch.store(epoch, Ordering::SeqCst);
+                        }
+                        #[cfg(any(test, feature = "test"))]
+                        HummockEvent::FlushEvent(sender) => {
+                            let _ = sender.send(()).inspect_err(|e| {
+                                error!("unable to send flush result: {:?}", e);
+                            });
+                        }
+
+                        HummockEvent::RegisterReadVersion {
+                            table_id,
+                            new_read_version_sender,
+                        } => {
+                            let pinned_version = self.pinned_version.load();
+                            let basic_read_version = Arc::new(RwLock::new(
+                                HummockReadVersion::new((**pinned_version).clone()),
+                            ));
+
+                            let instance_id = self.generate_instance_id();
+
+                            {
+                                let mut read_version_mapping_guard =
+                                    self.read_version_mapping.write();
+
+                                read_version_mapping_guard
+                                    .entry(table_id)
+                                    .or_default()
+                                    .insert(instance_id, basic_read_version.clone());
+                            }
+
+                            match new_read_version_sender.send((
+                                basic_read_version,
+                                LocalInstanceGuard {
+                                    table_id,
+                                    instance_id,
+                                    event_sender: self.hummock_event_tx.clone(),
+                                },
+                            )) {
+                                Ok(_) => {}
+                                Err(_) => {
+                                    panic!("RegisterReadVersion send fail table_id {:?} instance_is {:?}", table_id, instance_id)
+                                }
                             }
                         }
-                    }
 
-                    HummockEvent::DestroyReadVersion {
-                        table_id,
-                        instance_id,
-                    } => {
-                        let mut read_version_mapping_guard = self.read_version_mapping.write();
-                        read_version_mapping_guard
-                            .get_mut(&table_id)
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "DestroyHummockInstance table_id {} instance_id {} fail",
-                                    table_id, instance_id
-                                )
-                            })
-                            .remove(&instance_id);
+                        HummockEvent::DestroyReadVersion {
+                            table_id,
+                            instance_id,
+                        } => {
+                            let mut read_version_mapping_guard = self.read_version_mapping.write();
+                            read_version_mapping_guard
+                                .get_mut(&table_id)
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "DestroyHummockInstance table_id {} instance_id {} fail",
+                                        table_id, instance_id
+                                    )
+                                })
+                                .remove(&instance_id);
+                        }
                     }
-                },
+                }
             };
         }
+    }
+
+    fn generate_instance_id(&mut self) -> LocalInstanceId {
+        self.instance_id_generator += 1;
+        self.instance_id_generator
     }
 }
 

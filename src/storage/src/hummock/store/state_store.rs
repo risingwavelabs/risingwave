@@ -26,7 +26,7 @@ use tokio::sync::mpsc;
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
-use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
 use crate::hummock::iterator::{
     ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
     UnorderedMergeIteratorInner, UserIterator,
@@ -34,8 +34,6 @@ use crate::hummock::iterator::{
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
-#[cfg(any(test, feature = "test"))]
-use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -52,9 +50,7 @@ use crate::{
 pub struct HummockStorageCore {
     /// Mutable memtable.
     // memtable: Memtable,
-    table_id: TableId,
-
-    id: u64,
+    instance_guard: LocalInstanceGuard,
 
     /// Read handle.
     read_version: Arc<RwLock<HummockReadVersion>>,
@@ -65,17 +61,6 @@ pub struct HummockStorageCore {
     memory_limiter: Arc<MemoryLimiter>,
 
     hummock_version_reader: HummockVersionReader,
-}
-
-impl Drop for HummockStorageCore {
-    fn drop(&mut self) {
-        // If sending fails, it means that event_handler and event_channel have been destroyed, no
-        // need to handle failure
-        let _ = self.event_sender.send(HummockEvent::DestroyReadVersion {
-            table_id: self.table_id,
-            instance_id: self.id,
-        });
-    }
 }
 
 pub struct LocalHummockStorage {
@@ -99,16 +84,14 @@ impl Clone for LocalHummockStorage {
 
 impl HummockStorageCore {
     pub fn new(
-        table_id: TableId,
-        id: u64,
+        instance_guard: LocalInstanceGuard,
         read_version: Arc<RwLock<HummockReadVersion>>,
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
     ) -> Self {
         Self {
-            table_id,
-            id,
+            instance_guard,
             read_version,
             event_sender,
             memory_limiter,
@@ -236,29 +219,8 @@ impl StateStoreWrite for LocalHummockStorage {
 impl LocalStateStore for LocalHummockStorage {}
 
 impl LocalHummockStorage {
-    #[cfg(any(test, feature = "test"))]
-    pub fn for_test(
-        table_id: TableId,
-        id: u64,
-        sstable_store: SstableStoreRef,
-        read_version: Arc<RwLock<HummockReadVersion>>,
-        event_sender: mpsc::UnboundedSender<HummockEvent>,
-    ) -> Self {
-        Self::new(
-            table_id,
-            id,
-            read_version,
-            HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused())),
-            event_sender,
-            MemoryLimiter::unlimit(),
-            #[cfg(not(madsim))]
-            Arc::new(risingwave_tracing::RwTracingService::new()),
-        )
-    }
-
     pub fn new(
-        table_id: TableId,
-        id: u64,
+        instance_guard: LocalInstanceGuard,
         read_version: Arc<RwLock<HummockReadVersion>>,
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
@@ -266,8 +228,7 @@ impl LocalHummockStorage {
         #[cfg(not(madsim))] tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> Self {
         let storage_core = HummockStorageCore::new(
-            table_id,
-            id,
+            instance_guard,
             read_version,
             hummock_version_reader,
             event_sender,
@@ -291,11 +252,11 @@ impl LocalHummockStorage {
     }
 
     pub fn table_id(&self) -> TableId {
-        self.core.table_id
+        self.core.instance_guard.table_id
     }
 
-    pub fn id(&self) -> u64 {
-        self.core.id
+    pub fn instance_id(&self) -> u64 {
+        self.core.instance_guard.instance_id
     }
 }
 
