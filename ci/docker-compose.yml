@@ -55,7 +55,7 @@ services:
       timeout: 10s
       retries: 5
 
-  e2e-test-env:
+  source-test-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221122
     depends_on:
       - mysql
