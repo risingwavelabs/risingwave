@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::error::BoxedError;
+use crate::hash::HashCode;
 
 mod native_type;
 mod ops;
@@ -74,11 +75,56 @@ pub type VnodeMapping = Vec<ParallelUnitId>;
 
 /// `VirtualNode` (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
 /// consistent hashing.
-pub type VirtualNode = u16;
+// pub type VirtualNode = u16;
+
+type VirtualNodeInner = u16;
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Display)]
+pub struct VirtualNode(VirtualNodeInner);
+
+impl From<HashCode> for VirtualNode {
+    fn from(hash_code: HashCode) -> Self {
+        VirtualNode((hash_code.0 % VIRTUAL_NODE_COUNT as u64) as _)
+    }
+}
+
+impl VirtualNode {
+    pub const ZERO: VirtualNode = VirtualNode(0);
+
+    pub fn from_index(index: usize) -> Self {
+        VirtualNode(index as _)
+    }
+
+    pub fn to_index(self) -> usize {
+        self.0 as _
+    }
+
+    pub fn from_scalar(scalar: i16) -> Self {
+        VirtualNode(scalar as _)
+    }
+
+    pub fn to_scalar(self) -> i16 {
+        self.0 as _
+    }
+
+    pub fn to_be_bytes(self) -> [u8; 2] {
+        self.0.to_be_bytes()
+    }
+
+    pub fn from_be_bytes(bytes: [u8; 2]) -> Self {
+        Self(VirtualNodeInner::from_be_bytes(bytes))
+    }
+
+    pub fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+}
+
 pub const VIRTUAL_NODE_SIZE: usize = std::mem::size_of::<VirtualNode>();
 pub const VNODE_BITS: usize = 11;
 pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
-pub const MAX_VIRTUAL_NODE: VirtualNode = (VIRTUAL_NODE_COUNT - 1) as VirtualNode;
+pub const MAX_VIRTUAL_NODE: VirtualNode = VirtualNode((VIRTUAL_NODE_COUNT - 1) as _);
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;

@@ -596,26 +596,27 @@ impl Dispatcher for HashDataDispatcher {
             let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
                 .take(num_outputs)
                 .collect_vec();
-            let mut last_vnode_when_update_delete = 0;
+            let mut last_vnode_when_update_delete = None;
             let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
             let (ops, columns, visibility) = chunk.into_inner();
 
             match visibility {
                 None => {
-                    vnodes.iter().zip_eq(ops).for_each(|(vnode, op)| {
+                    vnodes.iter().copied().zip_eq(ops).for_each(|(vnode, op)| {
                         // get visibility map for every output chunk
                         for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
-                            vis_map.append(self.hash_mapping[*vnode as usize] == output.actor_id());
+                            vis_map
+                                .append(self.hash_mapping[vnode.to_index()] == output.actor_id());
                         }
                         // The 'update' message, noted by an UpdateDelete and a successive
                         // UpdateInsert, need to be rewritten to common
                         // Delete and Insert if they were dispatched to
                         // different actors.
                         if op == Op::UpdateDelete {
-                            last_vnode_when_update_delete = *vnode;
+                            last_vnode_when_update_delete = Some(vnode);
                         } else if op == Op::UpdateInsert {
-                            if *vnode != last_vnode_when_update_delete {
+                            if vnode != last_vnode_when_update_delete.unwrap() {
                                 new_ops.push(Op::Delete);
                                 new_ops.push(Op::Insert);
                             } else {
@@ -630,6 +631,7 @@ impl Dispatcher for HashDataDispatcher {
                 Some(visibility) => {
                     vnodes
                         .iter()
+                        .copied()
                         .zip_eq(visibility.iter())
                         .zip_eq(ops)
                         .for_each(|((vnode, visible), op)| {
@@ -637,7 +639,7 @@ impl Dispatcher for HashDataDispatcher {
                             {
                                 vis_map.append(
                                     visible
-                                        && self.hash_mapping[*vnode as usize] == output.actor_id(),
+                                        && self.hash_mapping[vnode.to_index()] == output.actor_id(),
                                 );
                             }
                             if !visible {
@@ -645,9 +647,9 @@ impl Dispatcher for HashDataDispatcher {
                                 return;
                             }
                             if op == Op::UpdateDelete {
-                                last_vnode_when_update_delete = *vnode;
+                                last_vnode_when_update_delete = Some(vnode);
                             } else if op == Op::UpdateInsert {
-                                if *vnode != last_vnode_when_update_delete {
+                                if vnode != last_vnode_when_update_delete.unwrap() {
                                     new_ops.push(Op::Delete);
                                     new_ops.push(Op::Insert);
                                 } else {

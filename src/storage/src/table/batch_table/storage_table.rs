@@ -313,7 +313,7 @@ impl<S: StateStore> StorageTable<S> {
                 .iter()
                 .enumerate()
                 .filter(|&(_, set)| set)
-                .map(|(i, _)| i as VirtualNode),
+                .map(|(i, _)| VirtualNode::from_index(i)),
         };
 
         // For each vnode, construct an iterator.

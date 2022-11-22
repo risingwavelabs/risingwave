@@ -692,11 +692,11 @@ fn derive_partitions(
             }
             // scan a single partition
             Some(vnode) => {
-                let parallel_unit_id = vnode_mapping[vnode as usize];
+                let parallel_unit_id = vnode_mapping[vnode.to_index()];
                 let (bitmap, scan_ranges) = partitions
                     .entry(parallel_unit_id)
                     .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
-                bitmap.set(vnode as usize, true);
+                bitmap.set(vnode.to_index(), true);
                 scan_ranges.push(scan_range.to_protobuf());
             }
         }

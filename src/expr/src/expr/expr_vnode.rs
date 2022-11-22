@@ -72,7 +72,7 @@ impl Expression for VnodeExpression {
         let mut builder = I16ArrayBuilder::new(input.capacity());
         hash_values
             .into_iter()
-            .for_each(|h| builder.append(Some(h.to_vnode() as i16)));
+            .for_each(|h| builder.append(Some(h.to_vnode().to_scalar())));
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
@@ -80,7 +80,10 @@ impl Expression for VnodeExpression {
         let dist_key_row = input.by_indices(&self.dist_key_indices);
         // FIXME: currently the implementation of the hash function in Row::hash_row differs from
         // Array::hash_at, so their result might be different. #3457
-        let vnode = dist_key_row.hash_row(&Crc32FastBuilder {}).to_vnode() as i16;
+        let vnode = dist_key_row
+            .hash_row(&Crc32FastBuilder {})
+            .to_vnode()
+            .to_scalar();
         Ok(Some(vnode.into()))
     }
 }

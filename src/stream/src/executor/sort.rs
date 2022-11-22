@@ -22,7 +22,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, Row};
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{ScalarImpl, VirtualNode};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
@@ -261,7 +261,7 @@ impl<S: StateStore> SortExecutor<S> {
                 Bitmap::bit_saturate_subtract(prev_vnode_bitmap, curr_vnode_bitmap);
             self.buffer.retain(|(_, pk), _| {
                 let vnode = self.state_table.compute_vnode(pk);
-                !no_longer_owned_vnodes.is_set(vnode as _)
+                !no_longer_owned_vnodes.is_set(vnode.to_index())
             });
         }
 
@@ -285,7 +285,7 @@ impl<S: StateStore> SortExecutor<S> {
                         Bound::<row::Empty>::Unbounded,
                         Bound::<row::Empty>::Unbounded,
                     ),
-                    owned_vnode as _,
+                    VirtualNode::from_index(owned_vnode),
                 )
                 .await?;
             let value_iter = Box::pin(value_iter);

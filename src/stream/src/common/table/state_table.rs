@@ -366,7 +366,7 @@ impl<S: StateStore> StateTable<S> {
         let prefix_len = pk_prefix.len();
         if let Some(vnode_col_idx_in_pk) = self.vnode_col_idx_in_pk {
             let vnode = pk_prefix.datum_at(vnode_col_idx_in_pk).unwrap();
-            vnode.into_int16() as _
+            VirtualNode::from_scalar(vnode.into_int16())
         } else {
             // For streaming, the given prefix must be enough to calculate the vnode
             assert!(self.dist_key_in_pk_indices.iter().all(|&d| d < prefix_len));

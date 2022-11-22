@@ -102,7 +102,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
 
         list.iter().for_each(|(scan_range, vnode)| {
             scan_ranges.push(scan_range.to_protobuf());
-            vnode_bitmap.set(*vnode as usize, true);
+            vnode_bitmap.set(vnode.to_index(), true);
         });
 
         let row_seq_scan_node = NodeBody::RowSeqScan(RowSeqScanNode {
@@ -188,7 +188,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
         }
 
         let vnode = self.get_virtual_node(&scan_range)?;
-        let parallel_unit_id = self.vnode_mapping[vnode as usize];
+        let parallel_unit_id = self.vnode_mapping[vnode.to_index()];
 
         let list = self
             .pu_to_scan_range_mapping
