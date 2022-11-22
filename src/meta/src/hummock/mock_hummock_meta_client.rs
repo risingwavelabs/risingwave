@@ -36,6 +36,7 @@ use crate::storage::MemStore;
 pub struct MockHummockMetaClient {
     hummock_manager: Arc<HummockManager<MemStore>>,
     context_id: HummockContextId,
+    sst_offset: u64,
 }
 
 impl MockHummockMetaClient {
@@ -46,6 +47,19 @@ impl MockHummockMetaClient {
         MockHummockMetaClient {
             hummock_manager,
             context_id,
+            sst_offset: 0,
+        }
+    }
+
+    pub fn with_sst_offset(
+        hummock_manager: Arc<HummockManager<MemStore>>,
+        context_id: HummockContextId,
+        sst_offset: u64,
+    ) -> Self {
+        MockHummockMetaClient {
+            hummock_manager,
+            context_id,
+            sst_offset,
         }
     }
 
@@ -114,6 +128,10 @@ impl HummockMetaClient for MockHummockMetaClient {
             .get_new_sst_ids(number)
             .await
             .map_err(mock_err)
+            .map(|r| SstIdRange {
+                start_id: r.start_id + self.sst_offset,
+                end_id: r.end_id + self.sst_offset,
+            })
     }
 
     async fn report_compaction_task(&self, mut compact_task: CompactTask) -> Result<()> {

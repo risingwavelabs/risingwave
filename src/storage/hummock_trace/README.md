@@ -55,15 +55,6 @@ data_directory = "hummock_001"
 local_object_store = "minio://hummockadmin:hummockadmin@host/hummock001"
 ```
 
-### Sstable Offset hacking
-
-In `src/storage/hummock/compactor/mod.rs` function `open_builder`, set
-```rust
-let table_id = self.sstable_id_manager.get_new_sst_id().await? + 2147483647; // add a large enough offset
-```
-
-Otherwise, replaying will leave object storage dirty and make version updates fail.
-
 ### Run Replay
 
 Default storage config file, it uses `src/config/risingwave.toml`

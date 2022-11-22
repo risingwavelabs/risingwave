@@ -91,9 +91,10 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn Replaya
         };
 
         (
-            Arc::new(MockHummockMetaClient::new(
+            Arc::new(MockHummockMetaClient::with_sst_offset(
                 hummock_manager_ref,
                 worker_node.id,
+                2147483647,
             )),
             notification_client,
             notifier,
