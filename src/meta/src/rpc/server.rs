@@ -181,14 +181,6 @@ async fn run_election<S: MetaStore>(
         }
     }
 
-    // TODO: are we sure we want to update like this? We could miss a lease update?
-    // Why not a random number?
-    //  let lease_id = if !old_leader_info.is_empty() {
-    //      let leader_info = MetaLeaderInfo::decode(&mut old_leader_info.as_slice()).unwrap();
-    //      leader_info.lease_id + 1
-    //  } else {
-    //      0
-    //  };
     tracing::info!("lease_id: {}", lease_id);
 
     let mut txn = Transaction::default();
@@ -261,13 +253,9 @@ async fn run_election<S: MetaStore>(
     );
     txn.put(
         META_CF_NAME.to_string(),
-        META_LEASE_KEY.as_bytes().to_vec(), // TODO: Leader or lease key?
-        // What do we need META_LEASE_KEY for?
+        META_LEASE_KEY.as_bytes().to_vec(),
         lease_info.encode_to_vec(),
     );
-    // TODO: not sure if we need to do this
-    // try to acquire lease
-    // TODO: Change log messages
     let is_leader = match meta_store.txn(txn).await {
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => {
@@ -303,6 +291,7 @@ async fn run_election<S: MetaStore>(
 type MetaLeaderInfoVec = Vec<u8>;
 type MetaLeaseInfoVec = Vec<u8>;
 
+// TODO: Write docstring
 // TODO: return MetaLeaderInfo and MetaLeaderLease types. Or return a infos type that contains both
 // of them getting leader_info and leader_lease or defaulting to none
 async fn get_infos<S: MetaStore>(
@@ -353,7 +342,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     let mut ticker = tokio::time::interval(Duration::from_millis(rand_delay / 2 + rand_delay));
 
     'initial_election: loop {
-        // TODO: maybe also shut down?
         ticker.tick().await;
 
         let mut initial_election = true;
