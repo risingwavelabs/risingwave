@@ -159,7 +159,7 @@ impl<S: StateStore> RangeCache<S> {
                 .map(|vnode| {
                     self.cache
                         .get_mut(&(vnode as VirtualNode))
-                        .map(|map| std::mem::take(map))
+                        .map(std::mem::take)
                         .unwrap_or_default()
                 })
                 .collect_vec();
