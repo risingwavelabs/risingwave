@@ -131,7 +131,7 @@ impl ObserverState for FrontendObserverNode {
         let snapshot_version = snapshot.version.unwrap();
         catalog_guard.set_version(snapshot_version.catalog_version);
         self.catalog_updated_tx.send(resp.version).unwrap();
-        user_guard.set_version(snapshot_version.worker_node_version);
+        user_guard.set_version(snapshot_version.catalog_version);
         self.user_info_updated_tx.send(resp.version).unwrap();
     }
 }
