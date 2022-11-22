@@ -43,6 +43,10 @@ impl LruManager {
     const EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
 
     pub fn new(total_memory_available_bytes: usize, barrier_interval_ms: u32) -> Arc<Self> {
+        // Arbitrarily set a minimal barrier interval in case it is too small,
+        // especially when it's 0.
+        let barrier_interval_ms = std::cmp::max(barrier_interval_ms, 10);
+
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
             total_memory_available_bytes,
@@ -155,7 +159,7 @@ impl LruManager {
             // if watermark_time_ms + self.barrier_interval_ms as u64 * step > now, we do not
             // increase the step, and set the epoch to now time epoch.
             let physical_now = Epoch::physical_now();
-            if self.barrier_interval_ms as u64 > (physical_now - watermark_time_ms) / step {
+            if (physical_now - watermark_time_ms) / (self.barrier_interval_ms as u64) < step {
                 step = last_step;
                 watermark_time_ms = physical_now;
             } else {
