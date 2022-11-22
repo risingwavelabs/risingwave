@@ -476,11 +476,11 @@ where
             streaming_job_name: stream_job.name(),
             streaming_definition: stream_job.mview_definition(),
             table_properties: stream_job.properties(),
-            table_sink_map: self
+            table_mview_map: self
                 .fragment_manager
                 .get_build_graph_info(&dependent_table_ids)
                 .await?
-                .table_sink_actor_ids,
+                .table_mview_actor_ids,
             dependent_table_ids,
             ..Default::default()
         };
