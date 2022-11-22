@@ -28,6 +28,7 @@ use risingwave_pb::catalog::source_info::SourceInfo as ProstSourceInfo;
 use risingwave_pb::catalog::ColumnIndex as ProstColumnIndex;
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 
+use crate::connector_source::DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE;
 use crate::monitor::SourceMetrics;
 use crate::table::TableSource;
 use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
@@ -179,7 +180,7 @@ impl Default for TableSourceManager {
         TableSourceManager {
             sources: Default::default(),
             metrics: Default::default(),
-            connector_message_buffer_size: 16,
+            connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
         }
     }
 }

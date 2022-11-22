@@ -149,13 +149,16 @@ impl LocalBarrierManager {
         };
 
         for actor_id in to_send {
-            let sender = self
-                .senders
-                .get(&actor_id)
-                .unwrap_or_else(|| panic!("sender for actor {} does not exist", actor_id));
-            if let Err(err) = sender.send(barrier.clone()) {
-                // return err to trigger recovery.
-                bail!("failed to send barrier to actor {}: {:?}", actor_id, err)
+            match self.senders.get(&actor_id) {
+                Some(sender) => {
+                    if let Err(err) = sender.send(barrier.clone()) {
+                        // return err to trigger recovery.
+                        bail!("failed to send barrier to actor {}: {:?}", actor_id, err)
+                    }
+                }
+                None => {
+                    bail!("sender for actor {} does not exist", actor_id)
+                }
             }
         }
 
@@ -188,6 +191,11 @@ impl LocalBarrierManager {
                     prev_epoch
                 )
             })
+    }
+
+    // remove all senders
+    pub fn clear_senders(&mut self) {
+        self.senders.clear();
     }
 
     /// remove all collect rx

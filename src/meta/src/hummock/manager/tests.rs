@@ -21,6 +21,7 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
 // use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
@@ -29,7 +30,7 @@ use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange, SstableInfo,
 };
 
 use crate::hummock::compaction::ManualCompactionOption;
@@ -187,12 +188,12 @@ async fn test_hummock_compaction_task() {
     compact_task.set_task_status(TaskStatus::Success);
 
     assert!(hummock_manager
-        .report_compact_task(compactor.context_id(), &mut compact_task)
+        .report_compact_task(compactor.context_id(), &mut compact_task, None)
         .await
         .unwrap());
     // Finish the task and told the task is not found, which may have been processed previously.
     assert!(!hummock_manager
-        .report_compact_task(compactor.context_id(), &mut compact_task)
+        .report_compact_task(compactor.context_id(), &mut compact_task, None)
         .await
         .unwrap());
 }
@@ -1024,7 +1025,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     compact_task.set_task_status(TaskStatus::ExecuteFailed);
 
     assert!(hummock_manager
-        .report_compact_task(context_id, &mut compact_task)
+        .report_compact_task(context_id, &mut compact_task, None)
         .await
         .unwrap());
 
@@ -1052,7 +1053,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     // Cancel the task after heartbeat has triggered and fail.
     compact_task.set_task_status(TaskStatus::ExecuteFailed);
     assert!(!hummock_manager
-        .report_compact_task(context_id, &mut compact_task)
+        .report_compact_task(context_id, &mut compact_task, None)
         .await
         .unwrap());
     shutdown_tx.send(()).unwrap();
@@ -1196,4 +1197,134 @@ async fn test_extend_ssts_to_delete() {
         hummock_manager.get_ssts_to_delete().await.len(),
         orphan_sst_num as usize + 3
     );
+}
+
+#[tokio::test]
+async fn test_version_stats() {
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let init_stats = hummock_manager.get_version_stats().await;
+    assert!(init_stats.table_stats.is_empty());
+
+    // Commit epoch
+    let epoch = 1;
+    register_table_ids_to_compaction_group(
+        &hummock_manager,
+        &[1, 2, 3],
+        StaticCompactionGroupId::StateDefault as _,
+    )
+    .await;
+    let table_stats_change = TableStats {
+        total_key_size: 1000,
+        total_value_size: 100,
+        total_key_count: 10,
+        stale_key_count: 1,
+    };
+    let ssts_with_table_ids = vec![vec![1, 2], vec![2, 3]];
+    let sst_ids = get_sst_ids(&hummock_manager, ssts_with_table_ids.len() as _).await;
+    let ssts = ssts_with_table_ids
+        .into_iter()
+        .enumerate()
+        .map(|(idx, table_ids)| LocalSstableInfo {
+            compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+            sst_info: SstableInfo {
+                id: sst_ids[idx],
+                key_range: Some(KeyRange {
+                    left: iterator_test_key_of_epoch(1, 1, 1),
+                    right: iterator_test_key_of_epoch(1, 1, 1),
+                    right_exclusive: false,
+                }),
+                file_size: 1024 * 1024 * 1024,
+                table_ids: table_ids.clone(),
+                ..Default::default()
+            },
+            table_stats: table_ids
+                .iter()
+                .map(|table_id| (*table_id, table_stats_change.clone()))
+                .into_iter()
+                .collect(),
+        })
+        .collect_vec();
+    let sst_to_worker = ssts
+        .iter()
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, worker_node.id))
+        .collect();
+    hummock_manager
+        .commit_epoch(epoch, ssts, sst_to_worker)
+        .await
+        .unwrap();
+
+    let stats_after_commit = hummock_manager.get_version_stats().await;
+    assert_eq!(stats_after_commit.table_stats.len(), 3);
+    let table1_stats = stats_after_commit.table_stats.get(&1).unwrap();
+    let table2_stats = stats_after_commit.table_stats.get(&2).unwrap();
+    let table3_stats = stats_after_commit.table_stats.get(&3).unwrap();
+    assert_eq!(table1_stats.stale_key_count, 1);
+    assert_eq!(table1_stats.total_key_count, 10);
+    assert_eq!(table1_stats.total_value_size, 100);
+    assert_eq!(table1_stats.total_key_size, 1000);
+    assert_eq!(table2_stats.stale_key_count, 2);
+    assert_eq!(table2_stats.total_key_count, 20);
+    assert_eq!(table2_stats.total_value_size, 200);
+    assert_eq!(table2_stats.total_key_size, 2000);
+    assert_eq!(table3_stats.stale_key_count, 1);
+    assert_eq!(table3_stats.total_key_count, 10);
+    assert_eq!(table3_stats.total_value_size, 100);
+    assert_eq!(table3_stats.total_key_size, 1000);
+
+    // Report compaction
+    hummock_manager
+        .compactor_manager_ref_for_test()
+        .add_compactor(worker_node.id, u64::MAX);
+    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+    let mut compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap()
+        .unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, compactor.context_id())
+        .await
+        .unwrap();
+    compact_task.task_status = TaskStatus::Success as _;
+    let compact_table_stats_change = TableStatsMap::from([
+        (
+            2,
+            TableStats {
+                total_key_size: -1000,
+                total_value_size: -100,
+                total_key_count: -10,
+                stale_key_count: -1,
+            },
+        ),
+        (
+            3,
+            TableStats {
+                total_key_size: -1000,
+                total_value_size: -100,
+                total_key_count: -10,
+                stale_key_count: -1,
+            },
+        ),
+    ]);
+    hummock_manager
+        .report_compact_task(
+            worker_node.id,
+            &mut compact_task,
+            Some(to_prost_table_stats_map(compact_table_stats_change)),
+        )
+        .await
+        .unwrap();
+    let stats_after_compact = hummock_manager.get_version_stats().await;
+    let compact_table1_stats = stats_after_compact.table_stats.get(&1).unwrap();
+    let compact_table2_stats = stats_after_compact.table_stats.get(&2).unwrap();
+    let compact_table3_stats = stats_after_compact.table_stats.get(&3).unwrap();
+    assert_eq!(compact_table1_stats, table1_stats);
+    assert_eq!(compact_table2_stats.stale_key_count, 1);
+    assert_eq!(compact_table2_stats.total_key_count, 10);
+    assert_eq!(compact_table2_stats.total_value_size, 100);
+    assert_eq!(compact_table2_stats.total_key_size, 1000);
+    assert_eq!(compact_table3_stats.stale_key_count, 0);
+    assert_eq!(compact_table3_stats.total_key_count, 0);
+    assert_eq!(compact_table3_stats.total_value_size, 0);
+    assert_eq!(compact_table3_stats.total_key_size, 0);
 }

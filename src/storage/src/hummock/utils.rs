@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::fmt::{Debug, Formatter};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::atomic::AtomicU64;
@@ -213,6 +214,12 @@ pub struct MemoryLimiter {
 pub struct MemoryTracker {
     limiter: Arc<MemoryLimiterInner>,
     quota: u64,
+}
+
+impl Debug for MemoryTracker {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("quota").field("quota", &self.quota).finish()
+    }
 }
 
 use std::sync::atomic::Ordering as AtomicOrdering;

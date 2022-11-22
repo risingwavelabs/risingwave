@@ -14,6 +14,7 @@
 
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
+use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::SourceDescBuilder;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -25,13 +26,14 @@ pub struct SourceExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for SourceExecutorBuilder {
+    type Node = SourceNode;
+
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Source)?;
         let (sender, barrier_receiver) = unbounded_channel();
         stream
             .context
