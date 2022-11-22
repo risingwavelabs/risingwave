@@ -44,6 +44,23 @@ steps:
     timeout_in_minutes: 20
     retry: *auto-retry
 
+  - label: "build other components"
+    command: "ci/scripts/build-other.sh -t ci-dev -p ci-dev"
+    key: "build-other"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - GITHUB_TOKEN
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
@@ -157,11 +174,13 @@ steps:
 
   - label: "end-to-end source test (release mode)"
     command: "ci/scripts/e2e-source-test.sh -p ci-release"
-    depends_on: "build-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
-          run: rw-build-env
+          run: source-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
