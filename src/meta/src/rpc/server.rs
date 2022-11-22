@@ -355,11 +355,14 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     );
     let addr_clone = addr.clone();
 
-    // TODO: Only use one ticker
-    let mut tick_interval = tokio::time::interval(Duration::from_secs(lease_time / 2));
+    // Randomize interval to reduce mitigate likelihood of simultaneous requests
+    let rand_delay = (since_epoch().as_micros() % 100) as u64;
+    tracing::info!("Pseudo random delay is {}ms", rand_delay);
+    let mut ticker = tokio::time::interval(Duration::from_millis(rand_delay / 2 + rand_delay));
+
     'initial_election: loop {
         // TODO: maybe also shut down?
-        tick_interval.tick().await;
+        ticker.tick().await;
 
         // run the initial election
         let election_outcome = run_election(&meta_store, &addr_clone, lease_time).await;
@@ -375,14 +378,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         // define all follow up elections and terms
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let handle = tokio::spawn(async move {
-            // How can I properly do random things within this thread?
-            let rand_delay = (since_epoch().as_micros() % 100) as u64;
-            tracing::info!("Pseudo random delay is {}ms", rand_delay);
-            let mut ticker =
-                tokio::time::interval(Duration::from_millis(rand_delay / 2 + rand_delay)); // + random to reduce load
-
             // election
             'election: loop {
+                break 'election; // TODO: remove this line
+                                 // TODO: error is in the election loop
+
                 // also my code below
                 tokio::select! {
                     _ = &mut shutdown_rx => {
@@ -391,8 +391,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     }
                     _ = ticker.tick() => {},
                 }
-                break 'election; // TODO: remove this line
-                                 // TODO: error is in the election loop
 
                 // TODO: how do we update the leader status? We cannot return is_leader here
                 let (leader_info, lease_info, is_leader) =
