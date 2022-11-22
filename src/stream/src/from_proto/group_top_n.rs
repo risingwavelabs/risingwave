@@ -88,7 +88,7 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         match self.with_ties {
-            true => Ok(GroupTopNExecutor::<K, S, true>::new_with_ties(
+            true => Ok(GroupTopNExecutor::<K, S, true>::new(
                 self.input,
                 self.ctx,
                 self.order_pairs,
@@ -102,7 +102,7 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                 self.cache_size,
             )?
             .boxed()),
-            false => Ok(GroupTopNExecutor::<K, S, false>::new_without_ties(
+            false => Ok(GroupTopNExecutor::<K, S, false>::new(
                 self.input,
                 self.ctx,
                 self.order_pairs,

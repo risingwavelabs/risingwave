@@ -39,9 +39,9 @@ use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndi
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerGroupTopNExecutorNew<K, S, WITH_TIES>>;
 
-impl<K: HashKey, S: StateStore> GroupTopNExecutor<K, S, false> {
+impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new_without_ties(
+    pub fn new(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
         order_pairs: Vec<OrderPair>,
@@ -56,44 +56,6 @@ impl<K: HashKey, S: StateStore> GroupTopNExecutor<K, S, false> {
     ) -> StreamResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
-        Ok(TopNExecutorWrapper {
-            input,
-            ctx,
-            inner: InnerGroupTopNExecutorNew::new(
-                info,
-                schema,
-                order_pairs,
-                offset_and_limit,
-                order_by_len,
-                pk_indices,
-                executor_id,
-                group_by,
-                state_table,
-                lru_manager,
-                cache_size,
-            )?,
-        })
-    }
-}
-
-impl<K: HashKey, S: StateStore> GroupTopNExecutor<K, S, true> {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_with_ties(
-        input: Box<dyn Executor>,
-        ctx: ActorContextRef,
-        order_pairs: Vec<OrderPair>,
-        offset_and_limit: (usize, usize),
-        order_by_len: usize,
-        pk_indices: PkIndices,
-        executor_id: u64,
-        group_by: Vec<usize>,
-        state_table: StateTable<S>,
-        lru_manager: Option<LruManagerRef>,
-        cache_size: usize,
-    ) -> StreamResult<Self> {
-        let info = input.info();
-        let schema = input.schema().clone();
-
         Ok(TopNExecutorWrapper {
             input,
             ctx,
@@ -441,7 +403,7 @@ mod tests {
         )
         .await;
         let top_n_executor = Box::new(
-            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new_without_ties(
+            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
                 order_types,
@@ -541,7 +503,7 @@ mod tests {
         )
         .await;
         let top_n_executor = Box::new(
-            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new_without_ties(
+            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
                 order_types,
@@ -633,7 +595,7 @@ mod tests {
         )
         .await;
         let top_n_executor = Box::new(
-            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new_without_ties(
+            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
                 order_types,
