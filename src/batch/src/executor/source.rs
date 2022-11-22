@@ -12,23 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::stream_plan::LookupUnionNode;
+use risingwave_common::error::Result;
 
-use super::*;
-use crate::executor::LookupUnionExecutor;
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
+use crate::task::BatchTaskContext;
 
-pub struct LookupUnionExecutorBuilder;
+pub struct SourceExecutor {}
 
 #[async_trait::async_trait]
-impl ExecutorBuilder for LookupUnionExecutorBuilder {
-    type Node = LookupUnionNode;
-
-    async fn new_boxed_executor(
-        params: ExecutorParams,
-        node: &Self::Node,
-        _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
-        Ok(LookupUnionExecutor::new(params.pk_indices, params.input, node.order.clone()).boxed())
+impl BoxedExecutorBuilder for SourceExecutor {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        _source: &ExecutorBuilder<'_, C>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        todo!("Can't support SourceExecutor now!")
     }
 }

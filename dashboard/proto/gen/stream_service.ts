@@ -1,6 +1,6 @@
 /* eslint-disable */
 import { ActorInfo, Status } from "./common";
-import { SstableInfo } from "./hummock";
+import { SstableInfo, TableStats } from "./hummock";
 import { Barrier, StreamActor } from "./stream_plan";
 
 export const protobufPackage = "stream_service";
@@ -89,6 +89,12 @@ export interface BarrierCompleteResponse_CreateMviewProgress {
 export interface BarrierCompleteResponse_GroupedSstableInfo {
   compactionGroupId: number;
   sst: SstableInfo | undefined;
+  tableStatsMap: { [key: number]: TableStats };
+}
+
+export interface BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry {
+  key: number;
+  value: TableStats | undefined;
 }
 
 /** Before starting streaming, the leader node broadcast the actor-host table to needed workers. */
@@ -590,7 +596,7 @@ export const BarrierCompleteResponse_CreateMviewProgress = {
 };
 
 function createBaseBarrierCompleteResponse_GroupedSstableInfo(): BarrierCompleteResponse_GroupedSstableInfo {
-  return { compactionGroupId: 0, sst: undefined };
+  return { compactionGroupId: 0, sst: undefined, tableStatsMap: {} };
 }
 
 export const BarrierCompleteResponse_GroupedSstableInfo = {
@@ -598,6 +604,12 @@ export const BarrierCompleteResponse_GroupedSstableInfo = {
     return {
       compactionGroupId: isSet(object.compactionGroupId) ? Number(object.compactionGroupId) : 0,
       sst: isSet(object.sst) ? SstableInfo.fromJSON(object.sst) : undefined,
+      tableStatsMap: isObject(object.tableStatsMap)
+        ? Object.entries(object.tableStatsMap).reduce<{ [key: number]: TableStats }>((acc, [key, value]) => {
+          acc[Number(key)] = TableStats.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
@@ -605,6 +617,12 @@ export const BarrierCompleteResponse_GroupedSstableInfo = {
     const obj: any = {};
     message.compactionGroupId !== undefined && (obj.compactionGroupId = Math.round(message.compactionGroupId));
     message.sst !== undefined && (obj.sst = message.sst ? SstableInfo.toJSON(message.sst) : undefined);
+    obj.tableStatsMap = {};
+    if (message.tableStatsMap) {
+      Object.entries(message.tableStatsMap).forEach(([k, v]) => {
+        obj.tableStatsMap[k] = TableStats.toJSON(v);
+      });
+    }
     return obj;
   },
 
@@ -614,6 +632,46 @@ export const BarrierCompleteResponse_GroupedSstableInfo = {
     const message = createBaseBarrierCompleteResponse_GroupedSstableInfo();
     message.compactionGroupId = object.compactionGroupId ?? 0;
     message.sst = (object.sst !== undefined && object.sst !== null) ? SstableInfo.fromPartial(object.sst) : undefined;
+    message.tableStatsMap = Object.entries(object.tableStatsMap ?? {}).reduce<{ [key: number]: TableStats }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = TableStats.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseBarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry(): BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry {
+  return { key: 0, value: undefined };
+}
+
+export const BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry = {
+  fromJSON(object: any): BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? TableStats.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? TableStats.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry>, I>>(
+    object: I,
+  ): BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry {
+    const message = createBaseBarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? TableStats.fromPartial(object.value)
+      : undefined;
     return message;
   },
 };
@@ -701,6 +759,10 @@ export type DeepPartial<T> = T extends Builtin ? T
 type KeysOfUnion<T> = T extends T ? keyof T : never;
 export type Exact<P, I extends P> = P extends Builtin ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
+
+function isObject(value: any): boolean {
+  return typeof value === "object" && value !== null;
+}
 
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;

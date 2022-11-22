@@ -1,7 +1,7 @@
 /* eslint-disable */
-import { ColumnIndex, StreamSourceInfo, Table, TableSourceInfo } from "./catalog";
+import { ColumnIndex, SourceInfo, Table } from "./catalog";
 import { Buffer } from "./common";
-import { Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
+import { DataType, Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem } from "./expr";
 import {
   ColumnCatalog,
@@ -292,14 +292,21 @@ export interface Barrier {
 }
 
 export interface Watermark {
-  /** the watermark column's index in the stream's schema */
+  /** The watermark column's index in the stream's schema. */
   colIdx: number;
-  /** the watermark value, there will be no record having a greater value in the watermark column */
+  /** The watermark type, used for deserialization of the watermark value. */
+  dataType:
+    | DataType
+    | undefined;
+  /** The watermark value, there will be no record having a greater value in the watermark column. */
   val: Datum | undefined;
 }
 
 export interface StreamMessage {
-  streamMessage?: { $case: "streamChunk"; streamChunk: StreamChunk } | { $case: "barrier"; barrier: Barrier };
+  streamMessage?: { $case: "streamChunk"; streamChunk: StreamChunk } | { $case: "barrier"; barrier: Barrier } | {
+    $case: "watermark";
+    watermark: Watermark;
+  };
 }
 
 /** Hash mapping for compute node. Stores mapping from virtual node to actor id. */
@@ -316,10 +323,7 @@ export interface SourceNode {
   columns: ColumnCatalog[];
   pkColumnIds: number[];
   properties: { [key: string]: string };
-  info?: { $case: "streamSource"; streamSource: StreamSourceInfo } | {
-    $case: "tableSource";
-    tableSource: TableSourceInfo;
-  };
+  info: SourceInfo | undefined;
 }
 
 export interface SourceNode_PropertiesEntry {
@@ -1468,13 +1472,14 @@ export const Barrier = {
 };
 
 function createBaseWatermark(): Watermark {
-  return { colIdx: 0, val: undefined };
+  return { colIdx: 0, dataType: undefined, val: undefined };
 }
 
 export const Watermark = {
   fromJSON(object: any): Watermark {
     return {
       colIdx: isSet(object.colIdx) ? Number(object.colIdx) : 0,
+      dataType: isSet(object.dataType) ? DataType.fromJSON(object.dataType) : undefined,
       val: isSet(object.val) ? Datum.fromJSON(object.val) : undefined,
     };
   },
@@ -1482,6 +1487,7 @@ export const Watermark = {
   toJSON(message: Watermark): unknown {
     const obj: any = {};
     message.colIdx !== undefined && (obj.colIdx = Math.round(message.colIdx));
+    message.dataType !== undefined && (obj.dataType = message.dataType ? DataType.toJSON(message.dataType) : undefined);
     message.val !== undefined && (obj.val = message.val ? Datum.toJSON(message.val) : undefined);
     return obj;
   },
@@ -1489,6 +1495,9 @@ export const Watermark = {
   fromPartial<I extends Exact<DeepPartial<Watermark>, I>>(object: I): Watermark {
     const message = createBaseWatermark();
     message.colIdx = object.colIdx ?? 0;
+    message.dataType = (object.dataType !== undefined && object.dataType !== null)
+      ? DataType.fromPartial(object.dataType)
+      : undefined;
     message.val = (object.val !== undefined && object.val !== null) ? Datum.fromPartial(object.val) : undefined;
     return message;
   },
@@ -1505,6 +1514,8 @@ export const StreamMessage = {
         ? { $case: "streamChunk", streamChunk: StreamChunk.fromJSON(object.streamChunk) }
         : isSet(object.barrier)
         ? { $case: "barrier", barrier: Barrier.fromJSON(object.barrier) }
+        : isSet(object.watermark)
+        ? { $case: "watermark", watermark: Watermark.fromJSON(object.watermark) }
         : undefined,
     };
   },
@@ -1516,6 +1527,10 @@ export const StreamMessage = {
       : undefined);
     message.streamMessage?.$case === "barrier" &&
       (obj.barrier = message.streamMessage?.barrier ? Barrier.toJSON(message.streamMessage?.barrier) : undefined);
+    message.streamMessage?.$case === "watermark" &&
+      (obj.watermark = message.streamMessage?.watermark
+        ? Watermark.toJSON(message.streamMessage?.watermark)
+        : undefined);
     return obj;
   },
 
@@ -1537,6 +1552,13 @@ export const StreamMessage = {
       object.streamMessage?.barrier !== null
     ) {
       message.streamMessage = { $case: "barrier", barrier: Barrier.fromPartial(object.streamMessage.barrier) };
+    }
+    if (
+      object.streamMessage?.$case === "watermark" &&
+      object.streamMessage?.watermark !== undefined &&
+      object.streamMessage?.watermark !== null
+    ) {
+      message.streamMessage = { $case: "watermark", watermark: Watermark.fromPartial(object.streamMessage.watermark) };
     }
     return message;
   },
@@ -1603,11 +1625,7 @@ export const SourceNode = {
           return acc;
         }, {})
         : {},
-      info: isSet(object.streamSource)
-        ? { $case: "streamSource", streamSource: StreamSourceInfo.fromJSON(object.streamSource) }
-        : isSet(object.tableSource)
-        ? { $case: "tableSource", tableSource: TableSourceInfo.fromJSON(object.tableSource) }
-        : undefined,
+      info: isSet(object.info) ? SourceInfo.fromJSON(object.info) : undefined,
     };
   },
 
@@ -1634,10 +1652,7 @@ export const SourceNode = {
         obj.properties[k] = v;
       });
     }
-    message.info?.$case === "streamSource" &&
-      (obj.streamSource = message.info?.streamSource ? StreamSourceInfo.toJSON(message.info?.streamSource) : undefined);
-    message.info?.$case === "tableSource" &&
-      (obj.tableSource = message.info?.tableSource ? TableSourceInfo.toJSON(message.info?.tableSource) : undefined);
+    message.info !== undefined && (obj.info = message.info ? SourceInfo.toJSON(message.info) : undefined);
     return obj;
   },
 
@@ -1661,20 +1676,9 @@ export const SourceNode = {
       },
       {},
     );
-    if (
-      object.info?.$case === "streamSource" &&
-      object.info?.streamSource !== undefined &&
-      object.info?.streamSource !== null
-    ) {
-      message.info = { $case: "streamSource", streamSource: StreamSourceInfo.fromPartial(object.info.streamSource) };
-    }
-    if (
-      object.info?.$case === "tableSource" &&
-      object.info?.tableSource !== undefined &&
-      object.info?.tableSource !== null
-    ) {
-      message.info = { $case: "tableSource", tableSource: TableSourceInfo.fromPartial(object.info.tableSource) };
-    }
+    message.info = (object.info !== undefined && object.info !== null)
+      ? SourceInfo.fromPartial(object.info)
+      : undefined;
     return message;
   },
 };
