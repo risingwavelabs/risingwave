@@ -141,11 +141,11 @@ fn since_epoch() -> Duration {
 }
 
 struct ElectionResult {
-    pub metaLeaderInfo: MetaLeaderInfo,
-    pub metaLeaseInfo: MetaLeaseInfo,
+    pub meta_leader_info: MetaLeaderInfo,
+    pub meta_lease_info: MetaLeaseInfo,
 
     // True if current node is leader
-    pub isLeader: bool,
+    pub is_leader: bool,
 }
 
 // Sets a leader. Does not renew leaders term
@@ -243,9 +243,9 @@ async fn run_election<S: MetaStore>(
                 None
             }
             Ok(_) => Some(ElectionResult {
-                metaLeaderInfo: leader_info,
-                metaLeaseInfo: lease_info,
-                isLeader: true,
+                meta_leader_info: leader_info,
+                meta_lease_info: lease_info,
+                is_leader: true,
             }),
         };
     }
@@ -296,9 +296,9 @@ async fn run_election<S: MetaStore>(
     };
 
     Some(ElectionResult {
-        metaLeaderInfo: leader_info,
-        metaLeaseInfo: lease_info,
-        isLeader: is_leader,
+        meta_leader_info: leader_info,
+        meta_lease_info: lease_info,
+        is_leader,
     })
 }
 
@@ -423,7 +423,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         let election_outcome =
             run_election(&meta_store, &addr_clone, lease_time, init_lease_id).await;
         let (leader, is_leader) = match election_outcome {
-            Some(infos) => (infos.metaLeaderInfo, infos.isLeader),
+            Some(infos) => (infos.meta_leader_info, infos.is_leader),
             None => continue 'initial_election,
         };
         tracing::info!("current leader is {:?}", leader);
@@ -454,7 +454,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 let (leader_info, _, is_leader) =
                     match run_election(&meta_store, &addr_clone, lease_time, lease_id).await {
                         None => continue 'election,
-                        Some(infos) => (infos.metaLeaderInfo, infos.metaLeaseInfo, infos.isLeader),
+                        Some(infos) => (
+                            infos.meta_leader_info,
+                            infos.meta_lease_info,
+                            infos.is_leader,
+                        ),
                     };
 
                 // signal to observers that this node currently is leader
