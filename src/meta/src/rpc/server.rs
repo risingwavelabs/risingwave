@@ -396,8 +396,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     gen_rand_lease_id()
                 };
 
-                // TODO: how do we update the leader status? We cannot return is_leader here
-                let (leader_info, lease_info, is_leader) =
+                let (leader_info, _, is_leader) =
                     match run_election(&meta_store, &addr_clone, lease_time, lease_id).await {
                         None => continue 'election,
                         Some(infos) => (infos.metaLeaderInfo, infos.metaLeaseInfo, infos.isLeader),
@@ -444,8 +443,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         META_LEASE_KEY.as_bytes().to_vec(),
                         lease_info.encode_to_vec(),
                     );
-                    // TODO: will always succeed, because we are just comparing against the latest
-                    // leader_info Need to compare against my leader info
                     match meta_store.txn(txn).await {
                         Err(e) => match e {
                             MetaStoreError::TransactionAbort() => {
