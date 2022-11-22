@@ -246,19 +246,19 @@ pub mod sled {
                 Bound::Included(left_encoded.clone()),
                 Bound::Included(right_encoded.clone())
             )
-                .contains(&included_long_full_key.encode_reverse_epoch().clone()));
+                .contains(&included_long_full_key.encode_reverse_epoch()));
             assert!((
-                Bound::Included(left_encoded.clone()),
-                Bound::Included(right_encoded.clone())
+                Bound::Included(left_encoded),
+                Bound::Included(right_encoded)
             )
-                .contains(&excluded_short_full_key.encode_reverse_epoch().clone()));
+                .contains(&excluded_short_full_key.encode_reverse_epoch()));
 
             let sled_range_kv = SledRangeKv::new_temp();
             sled_range_kv
                 .ingest_batch(
                     vec![
                         (included_long_full_key.clone(), None),
-                        (excluded_short_full_key.clone(), None),
+                        (excluded_short_full_key, None),
                     ]
                     .into_iter(),
                 )
@@ -374,7 +374,7 @@ mod batched_iter {
 
         fn test_iter_chaos_inner(map: impl RangeKv, count: usize) {
             let key_range = 1..=10000;
-            let num_to_bytes = |k: i32| Bytes::from(k.to_string().as_bytes().to_vec());
+            let num_to_bytes = |k: i32| Bytes::from(format!("{:06}", k).as_bytes().to_vec());
             let num_to_full_key =
                 |k: i32| FullKey::new(TableId::default(), TableKey(num_to_bytes(k)), 0);
             #[allow(clippy::mutable_key_type)]
