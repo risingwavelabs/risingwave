@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
+use futures::stream::select_all;
 use futures::{stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
@@ -29,7 +30,6 @@ use risingwave_batch::task::TaskId as TaskIdBatch;
 use risingwave_common::array::DataChunk;
 use risingwave_common::types::VnodeMapping;
 use risingwave_common::util::addr::HostAddr;
-use futures::stream::select_all;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::plan_node::NodeBody::{Delete, Insert, Update};
