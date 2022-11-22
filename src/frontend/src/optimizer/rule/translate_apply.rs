@@ -68,8 +68,8 @@ impl Rule for TranslateApplyRule {
                 LogicalAgg::new(vec![], (0..project.schema().len()).collect_vec(), project);
             distinct.into()
         } else {
-            // The left side of the apply is not SPJ. We need to use the general way to calculate the domain.
-            // Distinct + Project + The Left of Apply
+            // The left side of the apply is not SPJ. We need to use the general way to calculate
+            // the domain. Distinct + Project + The Left of Apply
             let exprs = correlated_indices
                 .clone()
                 .into_iter()
