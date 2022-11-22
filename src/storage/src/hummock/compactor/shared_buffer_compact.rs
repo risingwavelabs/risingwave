@@ -242,8 +242,8 @@ async fn compact_shared_buffer(
     let mut err = None;
     while let Some(future_result) = buffered.next().await {
         match future_result {
-            Ok(Ok((split_index, ssts))) => {
-                output_ssts.push((split_index, ssts));
+            Ok(Ok((split_index, ssts, table_stats_map))) => {
+                output_ssts.push((split_index, ssts, table_stats_map));
             }
             Ok(Err(e)) => {
                 compact_success = false;
@@ -264,12 +264,12 @@ async fn compact_shared_buffer(
     }
 
     // Sort by split/key range index.
-    output_ssts.sort_by_key(|(split_index, _)| *split_index);
+    output_ssts.sort_by_key(|(split_index, ..)| *split_index);
 
     if compact_success {
         let mut level0 = Vec::with_capacity(parallelism);
 
-        for (_, ssts) in output_ssts {
+        for (_, ssts, _) in output_ssts {
             for sst_info in &ssts {
                 context
                     .stats
@@ -306,6 +306,7 @@ impl SharedBufferCompactRunner {
             CachePolicy::Fill,
             GC_DELETE_KEYS_FOR_FLUSH,
             GC_WATERMARK_FOR_FLUSH,
+            None,
         );
         Self {
             compactor,
@@ -314,13 +315,13 @@ impl SharedBufferCompactRunner {
     }
 
     pub async fn run(
-        &self,
+        self,
         iter: impl HummockIterator<Direction = Forward>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         del_agg: Arc<RangeTombstonesCollector>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
-        let ssts = self
+        let (ssts, table_stats_map) = self
             .compactor
             .compact_key_range(
                 iter,
@@ -330,6 +331,6 @@ impl SharedBufferCompactRunner {
                 None,
             )
             .await?;
-        Ok((self.split_index, ssts))
+        Ok((self.split_index, ssts, table_stats_map))
     }
 }

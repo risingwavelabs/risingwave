@@ -18,7 +18,9 @@ use std::ops::DerefMut;
 use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
-use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableId,
+};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{HummockVersion, ValidationTask};
 
@@ -127,7 +129,7 @@ where
     pub(crate) async fn commit_epoch_sanity_check(
         &self,
         epoch: HummockEpoch,
-        sstables: &Vec<LocalSstableInfo>,
+        sstables: &Vec<ExtendedSstableInfo>,
         sst_to_context: &HashMap<HummockSstableId, HummockContextId>,
         current_version: &HummockVersion,
     ) -> Result<()> {
@@ -168,7 +170,7 @@ where
             };
             let sst_infos = sstables
                 .iter()
-                .map(|LocalSstableInfo { sst_info, .. }| sst_info.clone())
+                .map(|ExtendedSstableInfo { sst_info, .. }| sst_info.clone())
                 .collect_vec();
             if compactor
                 .send_task(Task::ValidationTask(ValidationTask {
