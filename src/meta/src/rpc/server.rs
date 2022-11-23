@@ -411,15 +411,20 @@ async fn run_elections<S: MetaStore>(
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let (leader_tx, leader_rx) = tokio::sync::watch::channel(is_leader);
         let handle = tokio::spawn(async move {
+            let mut wait = true;
+
             // runs all follow-up elections
             'election: loop {
-                tokio::select! {
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("Register leader info is stopped");
-                        return;
+                if !wait {
+                    tokio::select! {
+                        _ = &mut shutdown_rx => {
+                            tracing::info!("Register leader info is stopped");
+                            return;
+                        }
+                        _ = ticker.tick() => {},
                     }
-                    _ = ticker.tick() => {},
                 }
+                wait = true;
 
                 // lease id of this node
                 let lease_id = if initial_election {
@@ -465,6 +470,7 @@ async fn run_elections<S: MetaStore>(
                         Some(leader_alive) => {
                             if !leader_alive {
                                 // leader failed, we need to elect a new leader
+                                wait = false;
                                 continue 'election;
                             }
                             // leader is fine, await the next heartbeat
@@ -493,6 +499,7 @@ async fn manage_term<S: MetaStore>(
     // renew the current lease if this is the leader
     let attempt = renew_lease(&leader_info, lease_time_sec, &meta_store).await;
     if attempt.is_none() {
+        // TODO: Do this a bit more rust idiomatic
         // something went wrong
         return Some(false);
     }
@@ -506,9 +513,6 @@ async fn manage_term<S: MetaStore>(
     let (_, lease_info) = get_infos(&meta_store).await.unwrap_or_default();
     if lease_info.is_empty() {
         // ETCD does not have leader lease. Elect new leader
-        // TODO: we currently wait for lease_timeout before doing going for the next
-        // election should go to the next election
-        // immediately
         tracing::info!("ETCD does not have leader lease. Running new election");
         return Some(false);
     }
