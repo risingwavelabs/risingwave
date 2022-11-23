@@ -19,5 +19,6 @@ pub fn select_all<S: Stream + Unpin>(
     streams: impl IntoIterator<Item = S>,
 ) -> futures::stream::SelectAll<S> {
     // We simply forward the implementation to `futures` as it performs good enough.
+    #[expect(clippy::disallowed_methods)]
     futures::stream::select_all(streams)
 }
