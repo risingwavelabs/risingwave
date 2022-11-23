@@ -364,7 +364,7 @@ fn gen_rand_lease_id() -> u64 {
 /// Runs an election every lease_time_sec to determine a leader
 /// A leaders term will last until the leader goes down/misses to renew the lease
 ///
-/// ## Address
+/// ## Arguments
 /// addr: Address of the current leader, e.g. "127.0.0.1"
 /// meta_store: Store that will hold information about the leader
 /// lease_time_sec: Time that a lease will be valid for.
@@ -460,52 +460,78 @@ async fn run_elections<S: MetaStore>(
                         _ = ticker.tick() => {},
                     }
 
-                    // renew the current lease if this is the leader
-                    let attempt = renew_lease(&leader_info, lease_time_sec, &meta_store).await;
-                    if attempt.is_none() {
-                        // something went wrong
-                        continue 'election;
-                    }
-                    if attempt.unwrap() {
-                        // node is leader and lease was renewed
-                        continue 'term;
-                    }
-                    // node is follower
-
-                    // get leader info
-                    let (_, lease_info) = get_infos(&meta_store).await.unwrap_or_default();
-                    if lease_info.is_empty() {
-                        // ETCD does not have leader lease. Elect new leader
-                        // TODO: we currently wait for lease_timeout before doing going for the next
-                        // election should go to the next election
-                        // immediately
-                        tracing::info!("ETCD does not have leader lease. Running new election");
-                        continue 'election;
-                    }
-
-                    // delete lease and run new election if lease is expired for some time
-                    let some_time = lease_time_sec / 2;
-                    let lease_info = MetaLeaseInfo::decode(&mut lease_info.as_slice()).unwrap();
-                    if lease_info.get_lease_expire_time() + some_time < since_epoch().as_secs() {
-                        tracing::warn!("Detected that leader is down");
-                        let mut txn = Transaction::default();
-                        txn.delete(
-                            META_CF_NAME.to_string(),
-                            META_LEADER_KEY.as_bytes().to_vec(),
-                        );
-                        txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
-                        match meta_store.txn(txn).await {
-                            Err(e) => tracing::warn!("Unable to update lease. Error {}", e),
-                            Ok(_) => tracing::info!("Deleted leader and lease"),
+                    match manage_term(&leader_info, lease_time_sec, &meta_store).await {
+                        None => continue 'term, // error. Try again
+                        Some(leader_alive) => {
+                            if !leader_alive {
+                                // leader failed, we need to elect a new leader
+                                continue 'election;
+                            }
+                            // leader is fine, await the next heartbeat
                         }
-                        continue 'election;
                     }
-                    // lease exists and leader continues term
                 }
             }
         });
         return Ok((leader, handle, shutdown_tx, leader_rx));
     }
+}
+
+/// Acts on the current leaders term
+/// Leaders will try to extend the term
+/// Followers will check if the leader is still alive
+///
+/// ## Returns
+/// True if the leader is still in power
+/// False if the leader failed
+/// None if there was an error
+async fn manage_term<S: MetaStore>(
+    leader_info: &MetaLeaderInfo,
+    lease_time_sec: u64,
+    meta_store: &Arc<S>,
+) -> Option<bool> {
+    // renew the current lease if this is the leader
+    let attempt = renew_lease(&leader_info, lease_time_sec, &meta_store).await;
+    if attempt.is_none() {
+        // something went wrong
+        return Some(false);
+    }
+    if attempt.unwrap() {
+        // node is leader and lease was renewed
+        return None;
+    }
+    // node is follower
+
+    // get leader info
+    let (_, lease_info) = get_infos(&meta_store).await.unwrap_or_default();
+    if lease_info.is_empty() {
+        // ETCD does not have leader lease. Elect new leader
+        // TODO: we currently wait for lease_timeout before doing going for the next
+        // election should go to the next election
+        // immediately
+        tracing::info!("ETCD does not have leader lease. Running new election");
+        return Some(false);
+    }
+
+    // delete lease and run new election if lease is expired for some time
+    let some_time = lease_time_sec / 2;
+    let lease_info = MetaLeaseInfo::decode(&mut lease_info.as_slice()).unwrap();
+    if lease_info.get_lease_expire_time() + some_time < since_epoch().as_secs() {
+        tracing::warn!("Detected that leader is down");
+        let mut txn = Transaction::default();
+        txn.delete(
+            META_CF_NAME.to_string(),
+            META_LEADER_KEY.as_bytes().to_vec(),
+        );
+        txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
+        match meta_store.txn(txn).await {
+            Err(e) => tracing::warn!("Unable to update lease. Error {}", e),
+            Ok(_) => tracing::info!("Deleted leader and lease"),
+        }
+        return Some(false);
+    }
+    // lease exists and leader continues term
+    Some(true)
 }
 
 /// ## Returns
