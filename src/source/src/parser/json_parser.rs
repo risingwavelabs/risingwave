@@ -86,7 +86,7 @@ impl JsonParser {
     fn parse_inner(
         &self,
         payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         use simd_json::{BorrowedValue, ValueAccess};
 

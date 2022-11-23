@@ -179,7 +179,7 @@ impl AvroParser {
     async fn parse_inner(
         &self,
         payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
