@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::types::{ParallelUnitId, VnodeMapping, VIRTUAL_NODE_COUNT};
+use risingwave_common::hash::{ParallelUnitId, VirtualNode, VnodeMapping};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::stream_plan::ActorMapping;
@@ -27,10 +27,10 @@ use crate::model::{ActorId, FragmentId};
 /// For example, if `parallel_units` is `[0, 1, 2]`, and the total vnode count is 10, we'll
 /// generate mapping like `[0, 0, 0, 0, 1, 1, 1, 2, 2, 2]`.
 pub(crate) fn build_vnode_mapping(parallel_units: &[ParallelUnit]) -> VnodeMapping {
-    let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
+    let mut vnode_mapping = Vec::with_capacity(VirtualNode::COUNT);
 
-    let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();
-    let mut one_more_count = VIRTUAL_NODE_COUNT % parallel_units.len();
+    let hash_shard_size = VirtualNode::COUNT / parallel_units.len();
+    let mut one_more_count = VirtualNode::COUNT % parallel_units.len();
     let mut init_bound = 0;
 
     parallel_units.iter().for_each(|parallel_unit| {
@@ -58,7 +58,7 @@ pub(crate) fn vnode_mapping_to_bitmaps(
         .for_each(|(vnode, parallel_unit)| {
             vnode_bitmaps
                 .entry(*parallel_unit)
-                .or_insert_with(|| BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT))
+                .or_insert_with(|| BitmapBuilder::zeroed(VirtualNode::COUNT))
                 .set(vnode, true);
         });
     vnode_bitmaps
@@ -68,7 +68,7 @@ pub(crate) fn vnode_mapping_to_bitmaps(
 }
 
 pub(crate) fn actor_mapping_from_bitmaps(bitmaps: &HashMap<ActorId, Bitmap>) -> ActorMapping {
-    let mut raw = vec![0 as ActorId; VIRTUAL_NODE_COUNT];
+    let mut raw = vec![0 as ActorId; VirtualNode::COUNT];
 
     for (actor_id, bitmap) in bitmaps {
         for (idx, pos) in raw.iter_mut().enumerate() {

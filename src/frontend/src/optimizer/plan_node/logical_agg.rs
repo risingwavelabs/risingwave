@@ -16,14 +16,12 @@ use std::{fmt, iter};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
 use super::generic::{
-    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggCallDisplay,
-    PlanAggOrderByField,
+    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
 };
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
@@ -680,14 +678,6 @@ impl LogicalAgg {
         &self.core.agg_calls
     }
 
-    pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
-        self.core.agg_calls_display()
-    }
-
-    pub fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
-        self.core.group_key_display()
-    }
-
     /// Get a reference to the logical agg's group key.
     pub fn group_key(&self) -> &Vec<usize> {
         &self.core.group_key
@@ -729,12 +719,7 @@ impl LogicalAgg {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        if !self.group_key().is_empty() {
-            builder.field("group_key", &self.group_key_display());
-        }
-        builder.field("aggs", &self.agg_calls_display());
-        builder.finish()
+        self.core.fmt_with_name(f, name)
     }
 }
 
