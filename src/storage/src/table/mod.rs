@@ -21,13 +21,13 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{Row, Row2, RowExt};
-use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 
 use crate::error::StorageResult;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
-pub const DEFAULT_VNODE: VirtualNode = 0;
+pub const DEFAULT_VNODE: VirtualNode = VirtualNode::ZERO;
 
 /// Represents the distribution for a specific table instance.
 #[derive(Debug)]
@@ -44,8 +44,8 @@ impl Distribution {
     pub fn fallback() -> Self {
         /// A bitmap that only the default vnode is set.
         static FALLBACK_VNODES: LazyLock<Arc<Bitmap>> = LazyLock::new(|| {
-            let mut vnodes = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
-            vnodes.set(DEFAULT_VNODE as _, true);
+            let mut vnodes = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            vnodes.set(DEFAULT_VNODE.to_index(), true);
             vnodes.finish().into()
         });
         Self {
@@ -58,7 +58,7 @@ impl Distribution {
     pub fn all_vnodes(dist_key_indices: Vec<usize>) -> Self {
         /// A bitmap that all vnodes are set.
         static ALL_VNODES: LazyLock<Arc<Bitmap>> =
-            LazyLock::new(|| Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).into());
+            LazyLock::new(|| Bitmap::all_high_bits(VirtualNode::COUNT).into());
         Self {
             dist_key_indices,
             vnodes: ALL_VNODES.clone(),
@@ -149,7 +149,7 @@ pub fn compute_chunk_vnode(
 
 /// Check whether the given `vnode` is set in the `vnodes` of this table.
 fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
-    let is_set = vnodes.is_set(vnode as usize);
+    let is_set = vnodes.is_set(vnode.to_index());
     assert!(
         is_set,
         "vnode {} should not be accessed by this table",
