@@ -866,4 +866,29 @@ mod tests {
             ])
         );
     }
+
+    #[test]
+    fn test_str_to_timestamp() {
+        let str1 = "0001-11-15 07:35:40.999999";
+        let timestamp1 = str_to_timestamp(str1).unwrap();
+        assert_eq!(timestamp1.0.timestamp_micros(), -62108094259000001);
+
+        let str2 = "1969-12-31 23:59:59.999999";
+        let timestamp2 = str_to_timestamp(str2).unwrap();
+        assert_eq!(timestamp2.0.timestamp_micros(), -1);
+    }
+
+    #[test]
+    fn test_timestampz() {
+        let str1 = "0001-11-15 15:35:40.999999+08:00";
+        let str1_utc0 = "0001-11-15 07:35:40.999999+00:00";
+        let timestampz1 = str_to_timestampz(str1).unwrap();
+        assert_eq!(timestampz1, -62108094259000001);
+        assert_eq!(timestampz_to_utc_string(timestampz1), str1_utc0);
+
+        let str2 = "1969-12-31 23:59:59.999999+00:00";
+        let timestampz2 = str_to_timestampz(str2).unwrap();
+        assert_eq!(timestampz2, -1);
+        assert_eq!(timestampz_to_utc_string(timestampz2), str2);
+    }
 }
