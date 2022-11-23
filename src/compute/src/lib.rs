@@ -32,8 +32,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, ArgEnum)]
 pub enum AsyncStackTraceOption {
     Off,
-    On,      // default
-    Verbose, // `debug_assertions` off only
+    On, // default
+    Verbose,
 }
 
 /// Command-line arguments for compute-node.
