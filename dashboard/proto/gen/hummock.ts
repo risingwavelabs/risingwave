@@ -757,7 +757,6 @@ export interface TableStats {
   totalKeySize: number;
   totalValueSize: number;
   totalKeyCount: number;
-  staleKeyCount: number;
 }
 
 export interface HummockVersionStats {
@@ -4282,7 +4281,7 @@ export const CompactionConfig = {
 };
 
 function createBaseTableStats(): TableStats {
-  return { totalKeySize: 0, totalValueSize: 0, totalKeyCount: 0, staleKeyCount: 0 };
+  return { totalKeySize: 0, totalValueSize: 0, totalKeyCount: 0 };
 }
 
 export const TableStats = {
@@ -4291,7 +4290,6 @@ export const TableStats = {
       totalKeySize: isSet(object.totalKeySize) ? Number(object.totalKeySize) : 0,
       totalValueSize: isSet(object.totalValueSize) ? Number(object.totalValueSize) : 0,
       totalKeyCount: isSet(object.totalKeyCount) ? Number(object.totalKeyCount) : 0,
-      staleKeyCount: isSet(object.staleKeyCount) ? Number(object.staleKeyCount) : 0,
     };
   },
 
@@ -4300,7 +4298,6 @@ export const TableStats = {
     message.totalKeySize !== undefined && (obj.totalKeySize = Math.round(message.totalKeySize));
     message.totalValueSize !== undefined && (obj.totalValueSize = Math.round(message.totalValueSize));
     message.totalKeyCount !== undefined && (obj.totalKeyCount = Math.round(message.totalKeyCount));
-    message.staleKeyCount !== undefined && (obj.staleKeyCount = Math.round(message.staleKeyCount));
     return obj;
   },
 
@@ -4309,7 +4306,6 @@ export const TableStats = {
     message.totalKeySize = object.totalKeySize ?? 0;
     message.totalValueSize = object.totalValueSize ?? 0;
     message.totalKeyCount = object.totalKeyCount ?? 0;
-    message.staleKeyCount = object.staleKeyCount ?? 0;
     return message;
   },
 };

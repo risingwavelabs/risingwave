@@ -569,7 +569,7 @@ impl Compactor {
         // Keep table stats changes due to dropping KV.
         let mut table_stats_drop = TableStatsMap::default();
         let mut last_table_stats = TableStats::default();
-
+        let mut last_table_id = None;
         while iter.is_valid() {
             let iter_key = iter.key();
 
@@ -583,12 +583,6 @@ impl Compactor {
                 if !max_key.is_empty() && iter_key >= max_key {
                     break;
                 }
-                if !last_key.is_empty() {
-                    table_stats_drop.insert(
-                        last_key.user_key.table_id.table_id,
-                        std::mem::take(&mut last_table_stats),
-                    );
-                }
                 last_key.set(iter_key);
                 watermark_can_see_last_key = false;
                 if value.is_delete() {
@@ -597,6 +591,16 @@ impl Compactor {
             } else {
                 local_stats.skip_multi_version_key_count += 1;
             }
+
+            if last_table_id.is_none()
+                || *last_table_id.as_ref().unwrap() != last_key.user_key.table_id.table_id
+            {
+                if let Some(last_table_id) = last_table_id.take() {
+                    table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
+                }
+                last_table_id = Some(last_key.user_key.table_id.table_id);
+            }
+
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
             // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
             // key which satisfies `epoch` < `watermark`
@@ -618,7 +622,6 @@ impl Compactor {
             if epoch <= task_config.watermark {
                 watermark_can_see_last_key = true;
             }
-
             if drop {
                 let should_count = match task_config.stats_target_table_ids.as_ref() {
                     Some(target_table_ids) => {
@@ -628,9 +631,6 @@ impl Compactor {
                 };
                 if should_count {
                     last_table_stats.total_key_count -= 1;
-                    if !is_new_user_key {
-                        last_table_stats.stale_key_count -= 1;
-                    }
                     last_table_stats.total_key_size -= last_key.encoded_len() as i64;
                     last_table_stats.total_value_size -= iter.value().encoded_len() as i64;
                 }
@@ -645,11 +645,8 @@ impl Compactor {
 
             iter.next().await?;
         }
-        if !last_key.is_empty() {
-            table_stats_drop.insert(
-                last_key.user_key.table_id.table_id,
-                std::mem::take(&mut last_table_stats),
-            );
+        if let Some(last_table_id) = last_table_id.take() {
+            table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
         }
         iter.collect_local_statistic(&mut local_stats);
         local_stats.report(stats.as_ref());
