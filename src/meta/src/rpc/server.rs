@@ -496,17 +496,15 @@ async fn manage_term<S: MetaStore>(
     lease_time_sec: u64,
     meta_store: &Arc<S>,
 ) -> Option<bool> {
-    // renew the current lease if this is the leader
-    let attempt = renew_lease(&leader_info, lease_time_sec, &meta_store).await;
-    if attempt.is_none() {
-        // TODO: Do this a bit more rust idiomatic
-        // something went wrong
-        return Some(false);
-    }
-    if attempt.unwrap() {
-        // node is leader and lease was renewed
-        return None;
-    }
+    // try to renew/acquire the lease
+    match renew_lease(&leader_info, lease_time_sec, &meta_store).await {
+        None => return Some(false),
+        Some(val) => {
+            if val {
+                return None; // node is leader and lease was renewed
+            }
+        }
+    };
     // node is follower
 
     // get leader info
