@@ -187,7 +187,7 @@ impl MergeExecutor {
                             for col_idx in col_idxes {
                                 // Call `check_heap` in case the only upstream(s) that does not have
                                 // watermark in heap is removed
-                                if let Some(watermark) = select_all.check_heap(col_idx) {
+                                if let Some(watermark) = select_all.check_watermark_heap(col_idx) {
                                     yield Message::Watermark(watermark);
                                 }
                             }
@@ -236,11 +236,14 @@ struct BufferedWatermarks {
 }
 
 pub struct SelectReceivers {
+    /// The barrier we're aligning to. If this is `None`, then `blocked_upstreams` is empty.
     barrier: Option<Barrier>,
+    /// The upstreams that're blocked by the `barrier`.
+    blocked: Vec<BoxedInput>,
+    /// The upstreams that're not blocked and can be polled.
+    active: FuturesUnordered<StreamFuture<BoxedInput>>,
 
-    blocked_upstreams: Vec<BoxedInput>,
-    select_futures: FuturesUnordered<StreamFuture<BoxedInput>>,
-
+    /// The actor id of this fragment.
     actor_id: u32,
     /// watermark column index -> `BufferedWatermarks`
     buffered_watermarks: BTreeMap<usize, BufferedWatermarks>,
@@ -250,30 +253,36 @@ impl Stream for SelectReceivers {
     type Item = std::result::Result<Message, StreamExecutorError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.select_futures.is_terminated() {
+        if self.active.is_terminated() {
+            // This only happens
             return Poll::Ready(None);
         }
 
         loop {
-            match futures::ready!(self.select_futures.poll_next_unpin(cx)) {
+            match futures::ready!(self.active.poll_next_unpin(cx)) {
+                // Directly forward the error.
                 Some((Some(Err(e)), _)) => {
                     return Poll::Ready(Some(Err(e)));
                 }
+                // Handle the message from some upstream.
                 Some((Some(Ok(message)), remaining)) => {
                     let actor_id = remaining.actor_id();
                     match message {
                         Message::Chunk(chunk) => {
-                            self.select_futures.push(remaining.into_future());
+                            // Continue polling this upstream by pushing it back to `active`.
+                            self.active.push(remaining.into_future());
                             return Poll::Ready(Some(Ok(Message::Chunk(chunk))));
                         }
                         Message::Watermark(watermark) => {
-                            self.select_futures.push(remaining.into_future());
+                            // Continue polling this upstream by pushing it back to `active`.
+                            self.active.push(remaining.into_future());
                             if let Some(watermark) = self.handle_watermark(actor_id, watermark) {
                                 return Poll::Ready(Some(Ok(Message::Watermark(watermark))));
                             }
                         }
                         Message::Barrier(barrier) => {
-                            self.blocked_upstreams.push(remaining);
+                            // Block this upstream by pushing it to `blocked`.
+                            self.blocked.push(remaining);
                             if let Some(current_barrier) = self.barrier.as_ref() {
                                 if current_barrier.epoch != barrier.epoch {
                                     return Poll::Ready(Some(Err(
@@ -289,20 +298,23 @@ impl Stream for SelectReceivers {
                         }
                     }
                 }
+                // If one upstream is finished, we finish the whole stream. This should not happen
+                // normally as we use the barrier as the control message.
                 Some((None, _)) => return Poll::Ready(None),
+                // There's no active upstreams. Process the barrier and resume the blocked ones.
                 None => break,
             }
         }
 
-        assert!(self.select_futures.is_terminated());
+        assert!(self.active.is_terminated());
         let barrier = self.barrier.take().unwrap();
 
         // If this barrier asks the actor to stop, we do not reset the upstreams so that the
         // next call would return `Poll::Ready(None)` due to `is_terminated`.
         if !barrier.is_stop_or_update_drop_actor(self.actor_id) {
-            let upstreams = std::mem::take(&mut self.blocked_upstreams);
-            self.extend(upstreams);
-            assert!(!self.select_futures.is_terminated());
+            let upstreams = std::mem::take(&mut self.blocked);
+            self.extend_active(upstreams);
+            assert!(!self.active.is_terminated());
         }
         Poll::Ready(Some(Ok(Message::Barrier(barrier))))
     }
@@ -313,28 +325,32 @@ impl SelectReceivers {
         assert!(!upstreams.is_empty());
 
         let mut this = Self {
-            blocked_upstreams: Vec::with_capacity(upstreams.len()),
-            select_futures: Default::default(),
+            blocked: Vec::with_capacity(upstreams.len()),
+            active: Default::default(),
             actor_id,
             barrier: None,
             buffered_watermarks: Default::default(),
         };
-        this.extend(upstreams);
+        this.extend_active(upstreams);
         this
     }
 
-    fn extend(&mut self, upstreams: impl IntoIterator<Item = BoxedInput>) {
-        assert!(self.blocked_upstreams.is_empty() && self.barrier.is_none());
+    /// Extend the active upstreams with the given upstreams. The current stream must be at the
+    /// clean state right after a barrier.
+    fn extend_active(&mut self, upstreams: impl IntoIterator<Item = BoxedInput>) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
 
-        self.select_futures
+        self.active
             .extend(upstreams.into_iter().map(|s| s.into_future()));
     }
 
+    /// The number of upstreams.
     fn len(&self) -> usize {
-        self.blocked_upstreams.len() + self.select_futures.len()
+        self.blocked.len() + self.active.len()
     }
 
-    fn check_heap(&mut self, col_idx: usize) -> Option<Watermark> {
+    /// Check the watermark heap and decide whether to emit a watermark message.
+    fn check_watermark_heap(&mut self, col_idx: usize) -> Option<Watermark> {
         let len = self.len();
         let mut watermark_to_transfer = None;
         let col_data = self.buffered_watermarks.get_mut(&col_idx).unwrap();
@@ -361,6 +377,7 @@ impl SelectReceivers {
         watermark_to_transfer
     }
 
+    /// Handle a new watermark message. Optionally returns the watermark message to emit.
     fn handle_watermark(&mut self, actor_id: ActorId, watermark: Watermark) -> Option<Watermark> {
         let col_idx = watermark.col_idx;
         let len = self.len();
@@ -383,28 +400,30 @@ impl SelectReceivers {
             watermarks
                 .first_buffered_watermarks
                 .push(Reverse((watermark, actor_id)));
-            self.check_heap(col_idx)
+            self.check_watermark_heap(col_idx)
         }
     }
 
-    /// Consume `other` and add its upstreams to `self`.
+    /// Consume `other` and add its upstreams to `self`. The two streams must be at the clean state
+    /// right after a barrier.
     fn add_upstreams_from(&mut self, other: Self) {
-        assert!(self.blocked_upstreams.is_empty() && self.barrier.is_none());
-        assert!(other.blocked_upstreams.is_empty() && other.barrier.is_none());
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+        assert!(other.blocked.is_empty() && other.barrier.is_none());
         assert_eq!(self.actor_id, other.actor_id);
 
-        self.select_futures.extend(other.select_futures);
+        self.active.extend(other.active);
     }
 
-    /// Remove upstreams from `self` in `upstream_actor_ids`.
+    /// Remove upstreams from `self` in `upstream_actor_ids`. The current stream must be at the
+    /// clean state right after a barrier.
     fn remove_upstreams(&mut self, upstream_actor_ids: &HashSet<ActorId>) {
-        assert!(self.blocked_upstreams.is_empty() && self.barrier.is_none());
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
 
-        let new_upstreams = std::mem::take(&mut self.select_futures)
+        let new_upstreams = std::mem::take(&mut self.active)
             .into_iter()
             .map(|s| s.into_inner().unwrap())
             .filter(|u| !upstream_actor_ids.contains(&u.actor_id()));
-        self.extend(new_upstreams);
+        self.extend_active(new_upstreams);
 
         for BufferedWatermarks {
             first_buffered_watermarks,
