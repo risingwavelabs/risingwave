@@ -15,7 +15,7 @@
 use std::hash::Hash;
 use std::io::Write;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
 use postgres_types::{ToSql, Type};
 
@@ -134,20 +134,8 @@ impl NaiveDateWrapper {
             .map_err(Into::into)
     }
 
-    pub fn to_protobuf_owned(self) -> Vec<u8> {
-        self.0.num_days_from_ce().to_be_bytes().to_vec()
-    }
-
     pub fn from_protobuf(days: i32) -> ArrayResult<Self> {
         Self::with_days(days).map_err(Into::into)
-    }
-
-    pub fn from_protobuf_bytes(b: &[u8]) -> ArrayResult<Self> {
-        let days = i32::from_be_bytes(
-            b.try_into()
-                .map_err(|e| anyhow::anyhow!("Failed to deserialize date, reason: {:?}", e))?,
-        );
-        Self::from_protobuf(days)
     }
 }
 
@@ -167,13 +155,6 @@ impl NaiveTimeWrapper {
         ))
     }
 
-    pub fn to_protobuf_owned(self) -> Vec<u8> {
-        let buf = BytesMut::with_capacity(8);
-        let mut writer = buf.writer();
-        self.to_protobuf(&mut writer).unwrap();
-        writer.into_inner().to_vec()
-    }
-
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
             .write(
@@ -188,14 +169,6 @@ impl NaiveTimeWrapper {
         let secs = (nano / 1_000_000_000) as u32;
         let nano = (nano % 1_000_000_000) as u32;
         Self::with_secs_nano(secs, nano).map_err(Into::into)
-    }
-
-    pub fn from_protobuf_bytes(b: &[u8]) -> ArrayResult<Self> {
-        let nanos = u64::from_be_bytes(
-            b.try_into()
-                .map_err(|e| anyhow::anyhow!("Failed to deserialize time, reason: {:?}", e))?,
-        );
-        Self::from_protobuf(nanos)
     }
 }
 
@@ -218,29 +191,20 @@ impl NaiveDateTimeWrapper {
     }
 
     /// Although `NaiveDateTime` takes 12 bytes, we drop 4 bytes in protobuf encoding.
-    /// TODO: Consider another way to save. Nanosecond timestamp can only represent about 584 years.
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
-            .write(&(self.0.timestamp_nanos()).to_be_bytes())
+            .write(&(self.0.timestamp_micros()).to_be_bytes())
             .map_err(Into::into)
     }
 
-    pub fn to_protobuf_owned(self) -> Vec<u8> {
-        self.0.timestamp_nanos().to_be_bytes().to_vec()
-    }
-
-    pub fn from_protobuf(timestamp_nanos: i64) -> ArrayResult<Self> {
-        let secs = timestamp_nanos / 1_000_000_000;
-        let nsecs = (timestamp_nanos % 1_000_000_000) as u32;
-        Self::with_secs_nsecs(secs, nsecs).map_err(Into::into)
-    }
-
-    pub fn from_protobuf_bytes(b: &[u8]) -> ArrayResult<Self> {
-        let nanos =
-            i64::from_be_bytes(b.try_into().map_err(|e| {
-                anyhow::anyhow!("Failed to deserialize date time, reason: {:?}", e)
-            })?);
-        Self::from_protobuf(nanos)
+    pub fn from_protobuf(timestamp_micros: i64) -> ArrayResult<Self> {
+        let mut secs = timestamp_micros / 1_000_000;
+        let mut nsecs = (timestamp_micros % 1_000_000) * 1000;
+        if nsecs < 0 {
+            secs -= 1;
+            nsecs += 1_000_000_000;
+        }
+        Self::with_secs_nsecs(secs, nsecs as u32).map_err(Into::into)
     }
 
     /// Truncate the timestamp to the precision of microseconds.
