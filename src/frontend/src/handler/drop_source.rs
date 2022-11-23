@@ -21,6 +21,7 @@ use super::privilege::check_super_user;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::source_catalog::SourceKind;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_source(
@@ -64,10 +65,13 @@ pub async fn handle_drop_source(
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
 
-        if source.is_table() {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP TABLE` to drop a table.".to_owned(),
-            )));
+        match source.kind() {
+            SourceKind::Table => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP TABLE` to drop a table.".to_owned(),
+                )))
+            }
+            SourceKind::Stream => {}
         }
 
         let table_id = catalog_reader
