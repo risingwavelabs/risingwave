@@ -41,6 +41,7 @@ impl Rule for TranslateApplyRule {
         let mut index = 0;
 
         // First try to rewrite the left side of the apply if it is SPJ.
+        // TODO: remove the rewrite and always use the general way to calculate the domain.
         let domain: PlanRef = if let Some(rewritten_left) = Self::rewrite(
             &left,
             correlated_indices.clone(),
@@ -70,18 +71,11 @@ impl Rule for TranslateApplyRule {
         } else {
             // The left side of the apply is not SPJ. We need to use the general way to calculate
             // the domain. Distinct + Project + The Left of Apply
-            let exprs = correlated_indices
-                .clone()
-                .into_iter()
-                .map(|correlated_index| {
-                    let data_type = left.schema().fields()[correlated_index].data_type.clone();
-                    InputRef::new(correlated_index, data_type).into()
-                })
-                .collect();
-
-            let project = LogicalProject::create(left, exprs);
-            let distinct =
-                LogicalAgg::new(vec![], (0..project.schema().len()).collect_vec(), project);
+            let distinct = LogicalAgg::new(
+                vec![],
+                correlated_indices.clone().into_iter().collect_vec(),
+                left,
+            );
             distinct.into()
         };
 
