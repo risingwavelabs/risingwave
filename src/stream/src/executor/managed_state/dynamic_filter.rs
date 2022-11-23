@@ -22,8 +22,9 @@ use anyhow::anyhow;
 use futures::{pin_mut, stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::hash::{AllVirtualNodeIter, VirtualNode};
 use risingwave_common::row::{CompactedRow, Row, Row2};
-use risingwave_common::types::{ScalarImpl, VirtualNode, VIRTUAL_NODE_SIZE};
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::StateStore;
 
@@ -38,7 +39,7 @@ type ScalarRange = (Bound<ScalarImpl>, Bound<ScalarImpl>);
 /// Values not in range will have to be retrieved from storage.
 pub struct RangeCache<S: StateStore> {
     /// {vnode -> {memcomparable_pk -> row}}
-    cache: HashMap<u8, BTreeMap<Vec<u8>, CompactedRow>>,
+    cache: HashMap<VirtualNode, BTreeMap<Vec<u8>, CompactedRow>>,
     pub(crate) state_table: StateTable<S>,
     /// The current range stored in the cache.
     /// Any request for a set of values outside of this range will result in a scan
@@ -158,16 +159,18 @@ impl<S: StateStore> RangeCache<S> {
                 .ones()
                 .map(|vnode| {
                     self.cache
-                        .get_mut(&(vnode as VirtualNode))
+                        .get_mut(&VirtualNode::from_index(vnode))
                         .map(std::mem::take)
                         .unwrap_or_default()
                 })
                 .collect_vec();
-            let futures = self
-                .vnodes
-                .ones()
-                .zip_eq(init_maps.into_iter())
-                .map(|(vnode, init_map)| self.fetch_vnode_range(vnode, &pk_range, init_map));
+            let futures =
+                self.vnodes
+                    .ones()
+                    .zip_eq(init_maps.into_iter())
+                    .map(|(vnode, init_map)| {
+                        self.fetch_vnode_range(VirtualNode::from_index(vnode), &pk_range, init_map)
+                    });
             let results: Vec<_> = stream::iter(futures).buffer_unordered(10).collect().await;
             for result in results {
                 let (vnode, map) = result?;
@@ -187,11 +190,10 @@ impl<S: StateStore> RangeCache<S> {
 
     async fn fetch_vnode_range(
         &self,
-        vnode: usize,
+        vnode: VirtualNode,
         pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
         initial_map: BTreeMap<Vec<u8>, CompactedRow>,
     ) -> StreamExecutorResult<(VirtualNode, BTreeMap<Vec<u8>, CompactedRow>)> {
-        let vnode = vnode.try_into().unwrap();
         let row_stream = self
             .state_table
             .iter_key_and_val_with_pk_range(pk_range, vnode)
@@ -204,7 +206,7 @@ impl<S: StateStore> RangeCache<S> {
             let (key_bytes, row) = res?;
 
             map.insert(
-                key_bytes[VIRTUAL_NODE_SIZE..].to_vec(),
+                key_bytes[VirtualNode::SIZE..].to_vec(),
                 (row.as_ref()).into(),
             );
         }
@@ -221,7 +223,7 @@ impl<S: StateStore> RangeCache<S> {
         let old_vnodes = self.state_table.update_vnode_bitmap(new_vnodes.clone());
         for (vnode, (old, new)) in old_vnodes.iter().zip_eq(new_vnodes.iter()).enumerate() {
             if old && !new {
-                let vnode = vnode.try_into().unwrap();
+                let vnode = VirtualNode::from_index(vnode);
                 self.cache.remove(&vnode);
             }
         }
@@ -232,9 +234,13 @@ impl<S: StateStore> RangeCache<S> {
             );
             let newly_owned_vnodes = Bitmap::bit_saturate_subtract(&new_vnodes, &old_vnodes);
 
-            let futures = newly_owned_vnodes
-                .ones()
-                .map(|vnode| self.fetch_vnode_range(vnode, &current_range, BTreeMap::new()));
+            let futures = newly_owned_vnodes.ones().map(|vnode| {
+                self.fetch_vnode_range(
+                    VirtualNode::from_index(vnode),
+                    &current_range,
+                    BTreeMap::new(),
+                )
+            });
             let results: Vec<_> = stream::iter(futures).buffer_unordered(10).collect().await;
             for result in results {
                 let (vnode, map) = result?;
@@ -254,18 +260,18 @@ impl<S: StateStore> RangeCache<S> {
 }
 
 pub struct UnorderedRangeCacheIter<'a> {
-    cache: &'a HashMap<u8, BTreeMap<Vec<u8>, CompactedRow>>,
+    cache: &'a HashMap<VirtualNode, BTreeMap<Vec<u8>, CompactedRow>>,
     current_map: Option<&'a BTreeMap<Vec<u8>, CompactedRow>>,
     current_iter: Option<BTreeMapRange<'a, Vec<u8>, CompactedRow>>,
     vnodes: Arc<Bitmap>,
-    next_vnode: u8,
+    vnode_iter: AllVirtualNodeIter,
     completed: bool,
     range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 }
 
 impl<'a> UnorderedRangeCacheIter<'a> {
     fn new(
-        cache: &'a HashMap<u8, BTreeMap<Vec<u8>, CompactedRow>>,
+        cache: &'a HashMap<VirtualNode, BTreeMap<Vec<u8>, CompactedRow>>,
         range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         vnodes: Arc<Bitmap>,
     ) -> Self {
@@ -273,7 +279,7 @@ impl<'a> UnorderedRangeCacheIter<'a> {
             cache,
             current_map: None,
             current_iter: None,
-            next_vnode: 0,
+            vnode_iter: VirtualNode::all(),
             vnodes,
             range,
             completed: false,
@@ -283,19 +289,14 @@ impl<'a> UnorderedRangeCacheIter<'a> {
     }
 
     fn refill_iterator(&mut self) {
-        loop {
-            if self.vnodes.is_set(self.next_vnode as usize) && let Some(vnode_range) = self.cache.get(&self.next_vnode) {
+        while let Some(vnode) = self.vnode_iter.next() {
+            if self.vnodes.is_set(vnode.to_index()) && let Some(vnode_range) = self.cache.get(&vnode) {
                 self.current_map = Some(vnode_range);
                 self.current_iter = self.current_map.map(|m| m.range(self.range.clone()));
                 return;
-            } else if self.next_vnode == u8::MAX {
-                // The iterator cannot be refilled further.
-                self.completed = true;
-                return;
-            } else {
-                self.next_vnode += 1;
             }
         }
+        self.completed = true;
     }
 }
 
@@ -306,20 +307,11 @@ impl<'a> std::iter::Iterator for UnorderedRangeCacheIter<'a> {
         if self.completed {
             None
         } else if let Some(iter) = &mut self.current_iter {
-            let res = iter.next();
-            if res.is_none() {
-                if self.next_vnode == u8::MAX {
-                    // The iterator cannot be refilled further.
-                    self.completed = true;
-                    None
-                } else {
-                    // Try to refill the iterator.
-                    self.next_vnode += 1;
-                    self.refill_iterator();
-                    self.next()
-                }
+            if let Some(r) = iter.next() {
+                Some(r.1)
             } else {
-                res.map(|r| r.1)
+                self.refill_iterator();
+                self.next()
             }
         } else {
             panic!("Not completed but no iterator");
@@ -437,6 +429,8 @@ fn range_contains_lower_upper(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::hash::VirtualNode;
+
     use super::*;
 
     #[test]
@@ -559,23 +553,31 @@ mod tests {
 
     #[test]
     fn test_dynamic_filter_range_cache_unordered_range_iter() {
-        let cache = (0..=u8::MAX)
+        let cache = VirtualNode::all()
             .map(|x| {
                 (
                     x,
-                    vec![(vec![x], CompactedRow { row: vec![x] })]
-                        .into_iter()
-                        .collect::<BTreeMap<_, _>>(),
+                    vec![(
+                        x.to_be_bytes().to_vec(),
+                        CompactedRow {
+                            row: x.to_be_bytes().to_vec(),
+                        },
+                    )]
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>(),
                 )
             })
             .collect::<HashMap<_, _>>();
         let range = (Unbounded, Unbounded);
-        let vnodes = Arc::new(Bitmap::from_bytes(bytes::Bytes::from_static(
-            &[u8::MAX; 32],
-        ))); // set all the bits
+        let vnodes = Bitmap::all_high_bits(VirtualNode::COUNT).into(); // set all the bits
         let mut iter = UnorderedRangeCacheIter::new(&cache, range, vnodes);
-        for i in 0..=u8::MAX {
-            assert_eq!(Some(&CompactedRow { row: vec![i] }), iter.next());
+        for i in VirtualNode::all() {
+            assert_eq!(
+                Some(&CompactedRow {
+                    row: i.to_be_bytes().to_vec()
+                }),
+                iter.next()
+            );
         }
         assert!(iter.next().is_none());
     }
