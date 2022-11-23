@@ -478,11 +478,12 @@ where
                 return Err(Error::InvalidContext(context_id));
             }
         }
-        trx.check_equal(
-            META_CF_NAME.to_owned(),
-            META_LEADER_KEY.as_bytes().to_vec(),
-            info.encode_to_vec(),
-        );
+        // Temporarily disabling because of https://github.com/risingwavelabs/risingwave/issues/6534
+        // trx.check_equal(
+        //     META_CF_NAME.to_owned(),
+        //     META_LEADER_KEY.as_bytes().to_vec(),
+        //     info.encode_to_vec(),
+        // );
         meta_store.txn(trx).await.map_err(Into::into)
     }
 
