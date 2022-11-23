@@ -344,7 +344,7 @@ mod test {
     use crate::sink::Sink;
 
     #[tokio::test]
-    async fn test_epoch_init_check() {
+    async fn test_epoch_check() {
         let (request_sender, mut request_recv) = mpsc::unbounded_channel();
         let (_, resp_recv) = mpsc::unbounded_channel();
 
@@ -360,20 +360,27 @@ mod test {
             ],
             None,
         );
+
         // test epoch check
-        tokio::time::timeout(Duration::from_secs(1), sink.commit())
-            .await
-            .map(|_| panic!("test failed: unchecked epoch"))
-            .expect("test failed: invalid epoch error not thrown");
+        assert!(
+            tokio::time::timeout(Duration::from_secs(10), sink.commit())
+                .await
+                .expect("test failed: should not commit without epoch")
+                .is_err(),
+            "test failed: no epoch check for commit()"
+        );
         assert!(
             request_recv.try_recv().is_err(),
             "test failed: unchecked epoch before request"
         );
 
-        tokio::time::timeout(Duration::from_secs(1), sink.write_batch(chunk))
-            .await
-            .map(|_| panic!("test failed: unchecked epoch"))
-            .expect("test failed: invalid epoch error not thrown");
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), sink.write_batch(chunk))
+                .await
+                .expect("test failed: should not write without epoch")
+                .is_err(),
+            "test failed: no epoch check for write_batch()"
+        );
         assert!(
             request_recv.try_recv().is_err(),
             "test failed: unchecked epoch before request"
