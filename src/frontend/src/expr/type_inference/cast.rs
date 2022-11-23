@@ -155,11 +155,38 @@ impl From<&CastContext> for String {
 
 /// Checks whether casting from `source` to `target` is ok in `allows` context.
 pub fn cast_ok(source: &DataType, target: &DataType, allows: CastContext) -> bool {
-    cast_ok_array(source, target, allows) || cast_ok_base(source.into(), target.into(), allows)
+    cast_ok_struct(source, target, allows)
+        || cast_ok_array(source, target, allows)
+        || cast_ok_base(source.into(), target.into(), allows)
 }
 
 pub fn cast_ok_base(source: DataTypeName, target: DataTypeName, allows: CastContext) -> bool {
     matches!(CAST_MAP.get(&(source, target)), Some(context) if *context <= allows)
+}
+
+fn cast_ok_struct(source: &DataType, target: &DataType, allows: CastContext) -> bool {
+    match (source, target) {
+        (DataType::Struct(lty), DataType::Struct(rty)) => {
+            if lty.fields.is_empty() || rty.fields.is_empty() {
+                unreachable!("record type should be already processed at this point");
+            }
+            if lty.fields.len() != rty.fields.len() {
+                // only cast structs of the same length
+                return false;
+            }
+            // ... and all fields are castable
+            lty.fields
+                .iter()
+                .zip_eq(rty.fields.iter())
+                .all(|(src, dst)| cast_ok(src, dst, allows))
+        }
+        // The automatic casts to string types are treated as assignment casts, while the automatic
+        // casts from string types are explicit-only.
+        // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
+        (DataType::Varchar, DataType::Struct(_)) => CastContext::Explicit <= allows,
+        (DataType::Struct(_), DataType::Varchar) => CastContext::Assign <= allows,
+        _ => false,
+    }
 }
 
 fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> bool {

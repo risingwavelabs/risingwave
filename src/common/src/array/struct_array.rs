@@ -417,9 +417,15 @@ fn cmp_struct_field(l: &Option<ScalarRefImpl<'_>>, r: &Option<ScalarRefImpl<'_>>
 
 impl Debug for StructRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut is_first = true;
         iter_fields_ref!(self, it, {
             for v in it {
-                v.fmt(f)?;
+                if is_first {
+                    write!(f, "{:?}", v)?;
+                    is_first = false;
+                } else {
+                    write!(f, ", {:?}", v)?;
+                }
             }
             Ok(())
         })

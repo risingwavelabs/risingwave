@@ -41,7 +41,7 @@ mod utils;
 
 pub use agg_call::AggCall;
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
-pub use function_call::{FunctionCall, FunctionCallDisplay};
+pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use subquery::{Subquery, SubqueryKind};

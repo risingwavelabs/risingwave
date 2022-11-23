@@ -13,16 +13,18 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
+use either::Either;
 use itertools::{iproduct, Itertools as _};
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, DataTypeName};
 
 use super::{align_types, cast_ok_base, CastContext};
 use crate::expr::type_inference::cast::align_array_and_element;
-use crate::expr::{Expr as _, ExprImpl, ExprType};
+use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
@@ -90,6 +92,162 @@ macro_rules! ensure_arity {
             .into());
         }
     };
+}
+
+type InferExprs = Vec<(Either<DataType, ExprImpl>, Option<String>)>;
+
+/// Decompose `row` expression into a list of types, whereas `None` means unknown type.
+fn decompose_row_into_fields(expr: &ExprImpl) -> Result<InferExprs> {
+    if is_row_function(expr) {
+        let func = expr.as_function_call().unwrap();
+        let ret = func
+            .inputs()
+            .iter()
+            .map(|e| {
+                if e.is_unknown() || is_row_function(e) {
+                    (Either::Right(e.clone()), None)
+                } else {
+                    (Either::Left(e.return_type()), None)
+                }
+            })
+            .collect::<Vec<_>>();
+        Ok(ret)
+    } else {
+        Err(ErrorCode::BindError("not a row expression".to_string()).into())
+    }
+}
+
+pub enum StructCastSig<'a> {
+    Expr(&'a ExprImpl),
+    StructType(Arc<StructType>),
+}
+
+impl<'a> StructCastSig<'a> {
+    fn extract_struct_fields(&self) -> Result<InferExprs> {
+        match self {
+            Self::Expr(e) => match e.return_type() {
+                DataType::Struct(t) => {
+                    if t.field_names.is_empty() {
+                        decompose_row_into_fields(e)
+                    } else {
+                        Ok(t.fields
+                            .iter()
+                            .zip_eq(t.field_names.iter())
+                            .map(|(x, y)| (Either::Left(x.clone()), Some(y.clone())))
+                            .collect())
+                    }
+                }
+                _ => unreachable!(),
+            },
+            Self::StructType(t) => Ok(t
+                .fields
+                .iter()
+                .zip_eq(t.field_names.iter())
+                .map(|(x, y)| (Either::Left(x.clone()), Some(y.clone())))
+                .collect()),
+        }
+    }
+}
+
+/// Handle struct comparisons for [`infer_type_for_special`].
+fn infer_struct_cast_target_type(
+    _func_type: ExprType,
+    lexpr: StructCastSig<'_>,
+    rexpr: StructCastSig<'_>,
+) -> Result<DataType> {
+    // TODO: use _func_type if we want to follow Postgres's approach.
+
+    let lfields = lexpr.extract_struct_fields()?;
+    let rfields = rexpr.extract_struct_fields()?;
+
+    if lfields.len() != rfields.len() {
+        return Err(ErrorCode::BindError(format!(
+            "cannot cast struct with {} fields to struct with {} fields",
+            lfields.len(),
+            rfields.len(),
+        ))
+        .into());
+    }
+
+    let mut fields = vec![];
+
+    for ((lfty, lfname), (rfty, rfname)) in lfields.iter().zip_eq(rfields.iter()) {
+        let field_name = lfname
+            .as_ref()
+            .or(rfname.as_ref())
+            .cloned()
+            .unwrap_or_default();
+        match (lfty, rfty) {
+            (Either::Left(DataType::Struct(lty)), Either::Left(DataType::Struct(rty))) => {
+                // both sides have concrete struct type
+                fields.push((
+                    infer_struct_cast_target_type(
+                        _func_type,
+                        StructCastSig::StructType(lty.clone()),
+                        StructCastSig::StructType(rty.clone()),
+                    )?,
+                    field_name,
+                ));
+            }
+            (Either::Left(DataType::Struct(lrty)), Either::Right(expr))
+            | (Either::Right(expr), Either::Left(DataType::Struct(lrty))) => {
+                // one side is struct, one side is record
+                fields.push((
+                    infer_struct_cast_target_type(
+                        _func_type,
+                        StructCastSig::StructType(lrty.clone()),
+                        StructCastSig::Expr(expr),
+                    )?,
+                    field_name,
+                ));
+            }
+            (Either::Right(lexpr), Either::Right(rexpr)) => {
+                // both sides are records
+                fields.push((
+                    infer_struct_cast_target_type(
+                        _func_type,
+                        StructCastSig::Expr(lexpr),
+                        StructCastSig::Expr(rexpr),
+                    )?,
+                    field_name,
+                ));
+            }
+            (Either::Left(DataType::List { .. }), _) | (_, Either::Left(DataType::List { .. })) => {
+                // TODO(chi): support nested list in struct
+                return Err(ErrorCode::BindError(
+                    "List comparison is not supported for nested struct".to_string(),
+                )
+                .into());
+            }
+            (Either::Left(DataType::Struct { .. }), _)
+            | (_, Either::Left(DataType::Struct { .. })) => {
+                return Err(ErrorCode::BindError("Type mismatch".to_string()).into());
+            }
+            (l, r) => {
+                let lf = match l {
+                    Either::Left(l) => l.clone(),
+                    Either::Right(r) => r.return_type(),
+                };
+                let rf = match r {
+                    Either::Left(l) => l.clone(),
+                    Either::Right(r) => r.return_type(),
+                };
+                // We don't infer the return type using `infer_type_name` because it's too
+                // restrictive.
+                if lf == rf || cast_ok(&lf, &rf, CastContext::Assign) {
+                    fields.push((rf.clone(), field_name));
+                } else if cast_ok(&rf, &lf, CastContext::Assign) {
+                    fields.push((lf.clone(), field_name));
+                } else {
+                    return Err(
+                        ErrorCode::BindError(format!("cannot cast {} to {}", lf, rf)).into(),
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(DataType::Struct(StructType::new(fields).into()))
 }
 
 /// Special exprs that cannot be handled by [`infer_type_name`] and [`FuncSigMap`] are handled here.
@@ -193,11 +351,20 @@ fn infer_type_for_special(
                 (false, false) => {}
             }
             let ok = match (inputs[0].return_type(), inputs[1].return_type()) {
-                // TODO(#3692): handle `Struct`
-                // It should tolerate field name differences and allow castable types.
-                // `row(int, date) = row(bigint, timestamp)`
-
-                // Unlink auto-cast in struct, PostgreSQL disallows `int[] = bigint[]` for array.
+                // Cast each field of the struct to their corresponding field in the other struct.
+                (DataType::Struct(_), DataType::Struct(_)) => {
+                    let ret = infer_struct_cast_target_type(
+                        func_type,
+                        StructCastSig::Expr(&inputs[0]),
+                        StructCastSig::Expr(&inputs[1]),
+                    )?;
+                    let owned0 = std::mem::replace(&mut inputs[0], ExprImpl::literal_bool(true));
+                    let owned1 = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
+                    inputs[0] = owned0.cast_assign(ret.clone())?;
+                    inputs[1] = owned1.cast_assign(ret)?;
+                    true
+                }
+                // Unlike auto-cast in struct, PostgreSQL disallows `int[] = bigint[]` for array.
                 // They have to match exactly.
                 (l @ DataType::List { .. }, r @ DataType::List { .. }) => l == r,
                 // use general rule unless `struct = struct` or `array = array`
