@@ -37,7 +37,7 @@ const SCORE_BASE: u64 = 100;
 
 pub trait LevelSelector: Sync + Send {
     fn need_compaction(&self, levels: &Levels, level_handlers: &[LevelHandler]) -> bool;
-    fn pending_schedule_compaction_bytes(
+    fn waiting_schedule_compaction_bytes(
         &self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
@@ -365,7 +365,7 @@ impl LevelSelector for DynamicLevelSelector {
             .unwrap_or(false)
     }
 
-    fn pending_schedule_compaction_bytes(
+    fn waiting_schedule_compaction_bytes(
         &self,
         levels: &Levels,
         level_handlers: &[LevelHandler],

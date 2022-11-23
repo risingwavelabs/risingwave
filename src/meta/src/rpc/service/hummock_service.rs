@@ -521,4 +521,12 @@ where
             .set_compactor_config(request.context_id, request.config.unwrap().into());
         Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
     }
+
+    async fn get_scale_compactor(
+        &self,
+        _: Request<GetScaleCompactorRequest>,
+    ) -> Result<Response<GetScaleCompactorResponse>, Status> {
+        let info = self.hummock_manager.get_scale_compactor_info().await;
+        Ok(Response::new(info.into()))
+    }
 }

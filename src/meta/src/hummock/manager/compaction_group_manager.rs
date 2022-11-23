@@ -106,6 +106,15 @@ impl<S: MetaStore> HummockManager<S> {
             .cloned()
     }
 
+    pub async fn compaction_config(&self, id: CompactionGroupId) -> Option<CompactionConfig> {
+        self.compaction_group_manager
+            .read()
+            .await
+            .compaction_groups
+            .get(&id)
+            .map(|group| group.compaction_config.clone())
+    }
+
     /// Registers `table_fragments` to compaction groups.
     pub async fn register_table_fragments(
         &self,

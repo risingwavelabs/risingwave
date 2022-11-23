@@ -52,7 +52,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
-use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
+use crate::hummock::compaction::{CompactStatus, ManualCompactionOption, ScaleCompactorInfo};
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
@@ -2145,6 +2145,32 @@ where
 
     pub fn cluster_manager(&self) -> &ClusterManagerRef<S> {
         &self.cluster_manager
+    }
+
+    #[named]
+    pub async fn get_scale_compactor_info(&self) -> ScaleCompactorInfo {
+        let total_score_count = self.compactor_manager.max_concurrent_task_number();
+        // TODO: avoid hold compaction lock too long.
+        let compaction = write_lock!(self, compaction).await;
+        let pending_task_count = compaction.compact_task_assignment.len();
+        let version = {
+            let guard = read_lock!(self, versioning).await;
+            guard.current_version.clone()
+        };
+        let mut global_info = ScaleCompactorInfo {
+            total_cores: total_score_count as u64,
+            running_cores: pending_task_count as u64,
+            ..Default::default()
+        };
+        for (group_id, status) in &compaction.compaction_statuses {
+            if let Some(levels) = version.levels.get(group_id) {
+                if let Some(config) = self.compaction_config(*group_id).await {
+                    let info = status.get_compaction_info(levels, config);
+                    global_info.add(&info);
+                }
+            }
+        }
+        global_info
     }
 }
 
