@@ -24,6 +24,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
@@ -596,67 +597,57 @@ impl Dispatcher for HashDataDispatcher {
             let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
                 .take(num_outputs)
                 .collect_vec();
-            let mut last_vnode_when_update_delete = 0;
+            let mut last_vnode_when_update_delete = None;
             let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
+            // TODO: refactor with `Vis`.
             let (ops, columns, visibility) = chunk.into_inner();
+
+            let mut build_op_vis = |vnode: VirtualNode, op: Op, visible: bool| {
+                // Build visibility map for every output chunk.
+                for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
+                    vis_map.append(
+                        visible && self.hash_mapping[vnode.to_index()] == output.actor_id(),
+                    );
+                }
+
+                if !visible {
+                    new_ops.push(op);
+                    return;
+                }
+
+                // The 'update' message, noted by an `UpdateDelete` and a successive `UpdateInsert`,
+                // need to be rewritten to common `Delete` and `Insert` if they were dispatched to
+                // different actors.
+                if op == Op::UpdateDelete {
+                    last_vnode_when_update_delete = Some(vnode);
+                } else if op == Op::UpdateInsert {
+                    if vnode != last_vnode_when_update_delete.unwrap() {
+                        new_ops.push(Op::Delete);
+                        new_ops.push(Op::Insert);
+                    } else {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::UpdateInsert);
+                    }
+                } else {
+                    new_ops.push(op);
+                }
+            };
 
             match visibility {
                 None => {
-                    vnodes.iter().zip_eq(ops).for_each(|(vnode, op)| {
-                        // get visibility map for every output chunk
-                        for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
-                            vis_map.append(self.hash_mapping[*vnode as usize] == output.actor_id());
-                        }
-                        // The 'update' message, noted by an UpdateDelete and a successive
-                        // UpdateInsert, need to be rewritten to common
-                        // Delete and Insert if they were dispatched to
-                        // different actors.
-                        if op == Op::UpdateDelete {
-                            last_vnode_when_update_delete = *vnode;
-                        } else if op == Op::UpdateInsert {
-                            if *vnode != last_vnode_when_update_delete {
-                                new_ops.push(Op::Delete);
-                                new_ops.push(Op::Insert);
-                            } else {
-                                new_ops.push(Op::UpdateDelete);
-                                new_ops.push(Op::UpdateInsert);
-                            }
-                        } else {
-                            new_ops.push(op);
-                        }
+                    vnodes.iter().copied().zip_eq(ops).for_each(|(vnode, op)| {
+                        build_op_vis(vnode, op, true);
                     });
                 }
                 Some(visibility) => {
                     vnodes
                         .iter()
-                        .zip_eq(visibility.iter())
+                        .copied()
                         .zip_eq(ops)
-                        .for_each(|((vnode, visible), op)| {
-                            for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut())
-                            {
-                                vis_map.append(
-                                    visible
-                                        && self.hash_mapping[*vnode as usize] == output.actor_id(),
-                                );
-                            }
-                            if !visible {
-                                new_ops.push(op);
-                                return;
-                            }
-                            if op == Op::UpdateDelete {
-                                last_vnode_when_update_delete = *vnode;
-                            } else if op == Op::UpdateInsert {
-                                if *vnode != last_vnode_when_update_delete {
-                                    new_ops.push(Op::Delete);
-                                    new_ops.push(Op::Insert);
-                                } else {
-                                    new_ops.push(Op::UpdateDelete);
-                                    new_ops.push(Op::UpdateInsert);
-                                }
-                            } else {
-                                new_ops.push(op);
-                            }
+                        .zip_eq(visibility.iter())
+                        .for_each(|((vnode, op), visible)| {
+                            build_op_vis(vnode, op, visible);
                         });
                 }
             }
@@ -871,9 +862,8 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
-    use risingwave_common::types::VIRTUAL_NODE_COUNT;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_pb::stream_plan::DispatcherType;
-    use static_assertions::const_assert_eq;
 
     use super::*;
     use crate::executor::exchange::output::Output;
@@ -908,14 +898,13 @@ mod tests {
     // TODO: this test contains update being shuffled to different partitions, which is not
     // supported for now.
     #[tokio::test]
-    #[ignore]
     async fn test_hash_dispatcher_complex() {
         test_hash_dispatcher_complex_inner().await
     }
 
     async fn test_hash_dispatcher_complex_inner() {
-        // This test only works when VIRTUAL_NODE_COUNT is 256.
-        const_assert_eq!(VIRTUAL_NODE_COUNT, 256);
+        // This test only works when VirtualNode::COUNT is 256.
+        static_assertions::const_assert_eq!(VirtualNode::COUNT, 256);
 
         let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
@@ -930,9 +919,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VIRTUAL_NODE_COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VIRTUAL_NODE_COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
         let mut hash_dispatcher =
             HashDataDispatcher::new(outputs, key_indices.to_vec(), hash_mapping, 0);
 
@@ -1167,9 +1156,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VIRTUAL_NODE_COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VIRTUAL_NODE_COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
         let mut hash_dispatcher =
             HashDataDispatcher::new(outputs, key_indices.to_vec(), hash_mapping.clone(), 0);
 
@@ -1198,7 +1187,7 @@ mod tests {
                 hasher.update(&bytes);
             }
             let output_idx =
-                hash_mapping[hasher.finish() as usize % VIRTUAL_NODE_COUNT] as usize - 1;
+                hash_mapping[hasher.finish() as usize % VirtualNode::COUNT] as usize - 1;
             for (builder, val) in builders.iter_mut().zip_eq(one_row.iter()) {
                 builder.append(Some(*val));
             }

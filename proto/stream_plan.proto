@@ -95,16 +95,19 @@ message Barrier {
 }
 
 message Watermark {
-  // the watermark column's index in the stream's schema
+  // The watermark column's index in the stream's schema.
   uint32 col_idx = 1;
-  // the watermark value, there will be no record having a greater value in the watermark column
-  data.Datum val = 2;
+  // The watermark type, used for deserialization of the watermark value.
+  data.DataType data_type = 2;
+  // The watermark value, there will be no record having a greater value in the watermark column.
+  data.Datum val = 3;
 }
 
 message StreamMessage {
   oneof stream_message {
     data.StreamChunk stream_chunk = 1;
     Barrier barrier = 2;
+    Watermark watermark = 3;
   }
 }
 
@@ -121,10 +124,7 @@ message SourceNode {
   repeated plan_common.ColumnCatalog columns = 4;
   repeated int32 pk_column_ids = 5;
   map<string, string> properties = 6;
-  oneof info {
-    catalog.StreamSourceInfo stream_source = 7;
-    catalog.TableSourceInfo table_source = 8;
-  }
+  catalog.SourceInfo info = 7;
 }
 
 message SinkNode {
@@ -428,6 +428,10 @@ message SortNode {
   uint32 sort_column_index = 2;
 }
 
+message RowIdGenNode {
+  uint64 row_id_index = 1;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -457,6 +461,7 @@ message StreamNode {
     GroupTopNNode group_top_n = 124;
     SortNode sort = 125;
     WatermarkFilterNode watermark_filter = 126;
+    RowIdGenNode row_id_gen = 128;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -534,8 +539,8 @@ enum FragmentType {
   FRAGMENT_UNSPECIFIED = 0;
   OTHERS = 1;
   SOURCE = 2;
-  // TODO: change it to MATERIALIZED_VIEW or other name, since we have sink type now.
-  SINK = 3;
+  MVIEW = 3;
+  SINK = 4;
 }
 
 message StreamFragmentGraph {

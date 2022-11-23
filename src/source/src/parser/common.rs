@@ -70,12 +70,12 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
         DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
         DataType::Timestamp => match v {
             Value::String(s) => str_to_timestamp(s)?.into(),
-            Value::Number(n) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
+            Value::Number(_n) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
             _ => anyhow::bail!("expect timestamp, but found {v}"),
         },
         DataType::Timestampz => match v {
             Value::String(s) => str_to_timestampz(s)?.into(),
-            Value::Number(n) => i64_to_timestampz(ensure_int!(v, i64))?.into(),
+            Value::Number(_n) => i64_to_timestampz(ensure_int!(v, i64))?.into(),
             _ => anyhow::bail!("expect timestampz, but found {v}"),
         },
         DataType::Struct(struct_type_info) => {

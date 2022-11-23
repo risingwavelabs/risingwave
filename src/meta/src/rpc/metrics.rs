@@ -62,6 +62,8 @@ pub struct MetaMetrics {
     pub checkpoint_version_id: IntGauge,
     /// The smallest version id that is being pinned.
     pub min_pinned_version_id: IntGauge,
+    /// Hummock version stats
+    pub version_stats: IntGaugeVec,
 
     /// Latency for hummock manager to acquire lock
     pub hummock_manager_lock_time: HistogramVec,
@@ -196,6 +198,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let version_stats = register_int_gauge_vec_with_registry!(
+            "storage_version_stats",
+            "per table stats in current hummock version",
+            &["table_id", "metric"],
+            registry
+        )
+        .unwrap();
+
         let hummock_manager_lock_time = register_histogram_vec_with_registry!(
             "hummock_manager_lock_time",
             "latency for hummock manager to acquire the rwlock",
@@ -238,6 +248,7 @@ impl MetaMetrics {
             compact_frequency,
             level_file_size,
             version_size,
+            version_stats,
             current_version_id,
             checkpoint_version_id,
             min_pinned_version_id,
