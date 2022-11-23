@@ -53,6 +53,7 @@ use tracing::trace;
 
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
+/// This num is arbitrary and we may want to improve this choice in the future.
 const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
