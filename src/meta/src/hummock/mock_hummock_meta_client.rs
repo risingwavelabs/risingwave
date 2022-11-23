@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use fail::fail_point;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStatsMap};
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
     SstIdRange,
@@ -116,9 +117,17 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn report_compaction_task(&self, mut compact_task: CompactTask) -> Result<()> {
+    async fn report_compaction_task(
+        &self,
+        mut compact_task: CompactTask,
+        table_stats_change: TableStatsMap,
+    ) -> Result<()> {
         self.hummock_manager
-            .report_compact_task(self.context_id, &mut compact_task)
+            .report_compact_task(
+                self.context_id,
+                &mut compact_task,
+                Some(to_prost_table_stats_map(table_stats_change)),
+            )
             .await
             .map(|_| ())
             .map_err(mock_err)

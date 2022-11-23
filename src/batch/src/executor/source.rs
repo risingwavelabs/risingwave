@@ -12,7 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub(crate) mod display_stats;
-pub(crate) mod latency_stat;
-mod my_stats;
-pub(crate) mod workload;
+use risingwave_common::error::Result;
+
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
+use crate::task::BatchTaskContext;
+
+pub struct SourceExecutor {}
+
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for SourceExecutor {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        _source: &ExecutorBuilder<'_, C>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        todo!("Can't support SourceExecutor now!")
+    }
+}

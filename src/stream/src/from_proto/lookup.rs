@@ -14,8 +14,9 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_pb::stream_plan::LookupNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -25,13 +26,15 @@ pub struct LookupExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for LookupExecutorBuilder {
+    type Node = LookupNode;
+
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         stream_manager: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let lookup = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Lookup)?;
+        let lookup = node;
 
         let [stream, arrangement]: [_; 2] = params.input.try_into().unwrap();
 
@@ -56,7 +59,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         .await;
 
         Ok(Box::new(LookupExecutor::new(LookupExecutorParams {
-            schema: Schema::new(node.fields.iter().map(Field::from).collect()),
+            schema: params.schema,
             arrangement,
             stream,
             arrangement_col_descs,

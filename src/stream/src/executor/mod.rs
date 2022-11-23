@@ -72,6 +72,7 @@ mod project;
 mod project_set;
 mod rearranged_chain;
 mod receiver;
+pub mod row_id_gen;
 mod simple;
 mod sink;
 mod sort;
@@ -82,6 +83,7 @@ mod union;
 mod watermark_filter;
 mod wrapper;
 
+mod backfill;
 #[cfg(test)]
 mod integration_tests;
 #[cfg(test)]
@@ -89,6 +91,7 @@ mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
+pub use backfill::*;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
@@ -522,6 +525,7 @@ impl Barrier {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Watermark {
     col_idx: usize,
+    data_type: DataType,
     val: ScalarImpl,
 }
 
@@ -543,27 +547,32 @@ impl Ord for Watermark {
 }
 
 impl Watermark {
-    pub fn new(col_idx: usize, val: ScalarImpl) -> Self {
-        Self { col_idx, val }
+    pub fn new(col_idx: usize, data_type: DataType, val: ScalarImpl) -> Self {
+        Self {
+            col_idx,
+            data_type,
+            val,
+        }
     }
 
     pub fn to_protobuf(&self) -> ProstWatermark {
         ProstWatermark {
             col_idx: self.col_idx as _,
+            data_type: Some(self.data_type.to_protobuf()),
             val: Some(ProstDatum {
                 body: serialize_datum_to_bytes(Some(&self.val)),
             }),
         }
     }
 
-    pub fn from_protobuf(
-        prost: &ProstWatermark,
-        data_type: &DataType,
-    ) -> StreamExecutorResult<Self> {
+    pub fn from_protobuf(prost: &ProstWatermark) -> StreamExecutorResult<Self> {
+        let data_type = DataType::from(prost.get_data_type()?);
+        let val = deserialize_datum(prost.get_val()?.get_body().as_slice(), &data_type)?
+            .expect("watermark value cannot be null");
         Ok(Watermark {
             col_idx: prost.col_idx as _,
-            // Should never receive a Null watermark value here
-            val: deserialize_datum(&*prost.get_val()?.body, data_type)?.unwrap(),
+            data_type,
+            val,
         })
     }
 }
@@ -610,7 +619,7 @@ impl Message {
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
             Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
-            Self::Watermark(_) => todo!("https://github.com/risingwavelabs/risingwave/issues/6042"),
+            Self::Watermark(watermark) => StreamMessage::Watermark(watermark.to_protobuf()),
         };
         ProstStreamMessage {
             stream_message: Some(prost),
@@ -619,11 +628,10 @@ impl Message {
 
     pub fn from_protobuf(prost: &ProstStreamMessage) -> StreamExecutorResult<Self> {
         let res = match prost.get_stream_message()? {
-            StreamMessage::StreamChunk(ref stream_chunk) => {
-                Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)
-            }
-            StreamMessage::Barrier(ref barrier) => {
-                Message::Barrier(Barrier::from_protobuf(barrier)?)
+            StreamMessage::StreamChunk(chunk) => Message::Chunk(StreamChunk::from_protobuf(chunk)?),
+            StreamMessage::Barrier(barrier) => Message::Barrier(Barrier::from_protobuf(barrier)?),
+            StreamMessage::Watermark(watermark) => {
+                Message::Watermark(Watermark::from_protobuf(watermark)?)
             }
         };
         Ok(res)

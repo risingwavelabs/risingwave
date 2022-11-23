@@ -39,6 +39,7 @@ const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
 const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
+const PARSE_ERROR_STR_TO_TIMESTAMPZ: &str = "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)";
 const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
 const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
@@ -150,8 +151,8 @@ fn parse_naive_time(s: &str) -> Result<NaiveTime> {
 #[inline(always)]
 pub fn str_to_timestampz(elem: &str) -> Result<i64> {
     elem.parse::<DateTime<Utc>>()
-        .map(|ret| ret.timestamp_nanos() / 1000)
-        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))
+        .map(|ret| ret.timestamp_micros())
+        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ))
 }
 
 /// Converts UNIX epoch time to timestamp in microseconds.
@@ -182,7 +183,13 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
 pub fn timestampz_to_utc_string(elem: i64) -> String {
     // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
     // from session. See #3552.
-    let instant = Utc.timestamp_nanos(elem * 1000);
+    let mut secs = elem / 1_000_000;
+    let mut nsecs = (elem % 1_000_000) * 1000;
+    if nsecs < 0 {
+        secs -= 1;
+        nsecs += 1_000_000_000;
+    }
+    let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     // PostgreSQL uses a space rather than `T` to separate the date and time.
     // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-OUTPUT
     instant.format("%Y-%m-%d %H:%M:%S%.f%:z").to_string()
@@ -191,7 +198,13 @@ pub fn timestampz_to_utc_string(elem: i64) -> String {
 pub fn timestampz_to_utc_binary(elem: i64) -> Bytes {
     // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
     // from session. See #3552.
-    let instant = Utc.timestamp_nanos(elem * 1000);
+    let mut secs = elem / 1_000_000;
+    let mut nsecs = (elem % 1_000_000) * 1000;
+    if nsecs < 0 {
+        secs -= 1;
+        nsecs += 1_000_000_000;
+    }
+    let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     let mut out = BytesMut::new();
     // postgres_types::Type::ANY is only used as a placeholder.
     instant
@@ -591,6 +604,10 @@ mod tests {
 
     #[test]
     fn parse_str() {
+        assert_eq!(
+            str_to_timestampz("2022-08-03 10:34:02Z").unwrap(),
+            str_to_timestampz("2022-08-03 02:34:02-08:00").unwrap()
+        );
         str_to_timestamp("1999-01-08 04:02").unwrap();
         str_to_timestamp("1999-01-08 04:05:06").unwrap();
         assert_eq!(
@@ -601,6 +618,12 @@ mod tests {
         str_to_time("04:05").unwrap();
         str_to_time("04:05:06").unwrap();
 
+        assert_eq!(
+            str_to_timestampz("1999-01-08 04:05:06")
+                .unwrap_err()
+                .to_string(),
+            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ).to_string()
+        );
         assert_eq!(
             str_to_timestamp("1999-01-08 04:05:06AA")
                 .unwrap_err()
@@ -842,5 +865,30 @@ mod tests {
                 Some(0i32.to_scalar_value()),
             ])
         );
+    }
+
+    #[test]
+    fn test_str_to_timestamp() {
+        let str1 = "0001-11-15 07:35:40.999999";
+        let timestamp1 = str_to_timestamp(str1).unwrap();
+        assert_eq!(timestamp1.0.timestamp_micros(), -62108094259000001);
+
+        let str2 = "1969-12-31 23:59:59.999999";
+        let timestamp2 = str_to_timestamp(str2).unwrap();
+        assert_eq!(timestamp2.0.timestamp_micros(), -1);
+    }
+
+    #[test]
+    fn test_timestampz() {
+        let str1 = "0001-11-15 15:35:40.999999+08:00";
+        let str1_utc0 = "0001-11-15 07:35:40.999999+00:00";
+        let timestampz1 = str_to_timestampz(str1).unwrap();
+        assert_eq!(timestampz1, -62108094259000001);
+        assert_eq!(timestampz_to_utc_string(timestampz1), str1_utc0);
+
+        let str2 = "1969-12-31 23:59:59.999999+00:00";
+        let timestampz2 = str_to_timestampz(str2).unwrap();
+        assert_eq!(timestampz2, -1);
+        assert_eq!(timestampz_to_utc_string(timestampz2), str2);
     }
 }

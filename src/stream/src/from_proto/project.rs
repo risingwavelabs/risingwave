@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_expr::expr::build_from_prost;
+use risingwave_pb::stream_plan::ProjectNode;
 
 use super::*;
 use crate::executor::ProjectExecutor;
@@ -21,13 +22,14 @@ pub struct ProjectExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for ProjectExecutorBuilder {
+    type Node = ProjectNode;
+
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Project)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let project_exprs: Vec<_> = node
             .get_select_list()
