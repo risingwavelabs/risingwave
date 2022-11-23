@@ -15,6 +15,7 @@
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod bool_array;
+pub mod bytes_array;
 mod chrono_array;
 pub mod column;
 mod column_proto_readers;
@@ -39,6 +40,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub use bool_array::{BoolArray, BoolArrayBuilder};
+pub use bytes_array::{BytesArray, BytesArrayBuilder};
 pub use chrono_array::{
     NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
     NaiveTimeArray, NaiveTimeArrayBuilder,
@@ -299,7 +301,8 @@ macro_rules! for_all_variants {
             { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
             { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder },
-            { List, list, ListArray, ListArrayBuilder }
+            { List, list, ListArray, ListArrayBuilder },
+            { Bytea, bytea, BytesArray, BytesArrayBuilder}
         }
     };
 }
@@ -344,6 +347,12 @@ impl From<StructArray> for ArrayImpl {
 impl From<ListArray> for ArrayImpl {
     fn from(arr: ListArray) -> Self {
         Self::List(arr)
+    }
+}
+
+impl From<BytesArray> for ArrayImpl {
+    fn from(arr: BytesArray) -> Self {
+        Self::Bytea(arr)
     }
 }
 

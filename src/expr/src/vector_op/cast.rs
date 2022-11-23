@@ -22,10 +22,9 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use num_traits::ToPrimitive;
 use postgres_types::ToSql;
+use regex::Regex;
 use risingwave_common::array::{Array, ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::types::struct_type::StructType;
-use regex::Regex;
-use risingwave_common::array::{Array, ListRef, ListValue};
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
@@ -189,13 +188,13 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
 }
 
 #[inline(always)]
-pub fn str_to_bytea(elem: &str) -> Result<String> {
+pub fn str_to_bytea(elem: &str) -> Result<Bytes> {
     // Valid whether a Hex decimal string.
     if !REGEX_FOR_HEXADECIMAL.is_match(elem) {
         Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA))
     } else if elem.starts_with("\\x") {
         // e.g. \x prefix just return as lowercase.
-        Ok(elem.to_ascii_lowercase())
+        Ok(elem.to_ascii_lowercase().into())
     } else {
         let mut s = String::with_capacity(2 * elem.len());
         // Postgres requires a \x prefix.
@@ -204,7 +203,7 @@ pub fn str_to_bytea(elem: &str) -> Result<String> {
             // Lowercase.
             write!(s, "{:02x}", byte).unwrap();
         }
-        Ok(s)
+        Ok(s.into())
     }
 }
 

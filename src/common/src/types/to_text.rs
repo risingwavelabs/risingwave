@@ -68,6 +68,7 @@ impl ToText for ScalarRefImpl<'_> {
             ScalarRefImpl::List(l) => l.to_text(),
             ScalarRefImpl::Struct(s) => s.to_text(),
             ScalarRefImpl::Utf8(v) => v.to_text(),
+            ScalarRefImpl::Bytea(v) => std::str::from_utf8(v).unwrap().to_string(),
         }
     }
 }

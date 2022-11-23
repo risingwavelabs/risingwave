@@ -18,7 +18,8 @@
 
 use std::sync::Arc;
 
-use chrono::Datelike;
+use bytes::Bytes;
+use chrono::{Datelike, NaiveTime};
 use num_traits::FromPrimitive;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
@@ -53,6 +54,18 @@ impl RandValue for Box<str> {
             .map(|_| rand.gen::<char>())
             .collect::<String>()
             .into_boxed_str()
+    }
+}
+
+impl RandValue for Bytes {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        let len = rand.gen_range(1..=10);
+        Bytes::from(
+            (0..len)
+                .map(|_| rand.gen::<char>())
+                .collect::<String>()
+                .into_bytes(),
+        )
     }
 }
 

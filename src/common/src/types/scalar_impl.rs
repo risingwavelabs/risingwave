@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::Hasher;
+
 use super::*;
 use crate::array::list_array::{ListRef, ListValue};
 use crate::array::struct_array::{StructRef, StructValue};
@@ -72,6 +74,19 @@ impl Scalar for Box<str> {
     }
 }
 
+/// Implement `Scalar` for `Bytes`.
+impl Scalar for Bytes {
+    type ScalarRefType<'a> = &'a [u8];
+
+    fn as_scalar_ref(&self) -> &[u8] {
+        self
+    }
+
+    fn to_scalar_value(self) -> ScalarImpl {
+        ScalarImpl::Bytea(self)
+    }
+}
+
 /// Implement `Scalar` for `StructValue`.
 impl Scalar for StructValue {
     type ScalarRefType<'a> = StructRef<'a>;
@@ -108,6 +123,18 @@ impl<'a> ScalarRef<'a> for &'a str {
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
+}
+
+impl<'a> ScalarRef<'a> for &'a [u8] {
+    type ScalarType = Bytes;
+
+    fn to_owned_scalar(&self) -> Bytes {
+        Bytes::from(self.to_vec())
+    }
+
+    fn hash_scalar<H: Hasher>(&self, state: &mut H) {
         self.hash(state)
     }
 }

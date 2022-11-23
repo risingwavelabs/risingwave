@@ -64,6 +64,7 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::NaiveTime(v) => v.to_binary(),
             ScalarRefImpl::Struct(_) => todo!(),
             ScalarRefImpl::List(_) => todo!(),
+            ScalarRefImpl::Bytea(_) => todo!(),
         }
     }
 }

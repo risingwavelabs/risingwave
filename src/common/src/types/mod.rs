@@ -267,7 +267,7 @@ impl DataType {
                 },
             )
             .into(),
-            DataType::Bytea => Utf8ArrayBuilder::new(capacity).into(),
+            DataType::Bytea => BytesArrayBuilder::new(capacity).into(),
         }
     }
 
@@ -373,7 +373,7 @@ impl DataType {
             DataType::Float64 => ScalarImpl::Float64(OrderedF64::neg_infinity()),
             DataType::Boolean => ScalarImpl::Bool(false),
             DataType::Varchar => ScalarImpl::Utf8("".into()),
-            DataType::Bytea => ScalarImpl::Utf8("".to_string()),
+            DataType::Bytea => ScalarImpl::Bytea("".into()),
             DataType::Date => ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::MIN)),
             DataType::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(0, 0, 0)),
             DataType::Timestamp => {
@@ -479,8 +479,8 @@ macro_rules! for_all_scalar_variants {
             { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
             { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
             { Struct, struct, StructValue, StructRef<'scalar> },
-            { List, list, ListValue, ListRef<'scalar> }
-            // { Bytea, bytea, String, &'scalar str }
+            { List, list, ListValue, ListRef<'scalar> },
+            { Bytea, bytea, Bytes, &'scalar [u8] }
         }
     };
 }
@@ -843,6 +843,7 @@ impl ScalarRefImpl<'_> {
             Self::Float32(v) => v.serialize(ser)?,
             Self::Float64(v) => v.serialize(ser)?,
             Self::Utf8(v) => v.serialize(ser)?,
+            Self::Bytea(v) => v.serialize(ser)?,
             Self::Bool(v) => v.serialize(ser)?,
             Self::Decimal(v) => ser.serialize_decimal((*v).into())?,
             Self::Interval(v) => v.serialize(ser)?,
@@ -904,7 +905,7 @@ impl ScalarImpl {
             }),
             Ty::Struct(t) => StructValue::deserialize(&t.fields, de)?.to_scalar_value(),
             Ty::List { datatype } => ListValue::deserialize(datatype, de)?.to_scalar_value(),
-            Ty::Bytea => Self::Utf8(String::deserialize(de)?),
+            Ty::Bytea => Self::Bytea(Bytes::deserialize(de)?),
         })
     }
 
@@ -977,7 +978,7 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
                     | (DataType::Float32, ScalarImpl::Float32(_))
                     | (DataType::Float64, ScalarImpl::Float64(_))
                     | (DataType::Varchar, ScalarImpl::Utf8(_))
-                    | (DataType::Bytea, ScalarImpl::Utf8(_))
+                    | (DataType::Bytea, ScalarImpl::Bytea(_))
                     | (DataType::Date, ScalarImpl::NaiveDate(_))
                     | (DataType::Time, ScalarImpl::NaiveTime(_))
                     | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
@@ -1164,7 +1165,7 @@ mod tests {
                     DataType::Date,
                 ),
                 DataTypeName::Varchar => (ScalarImpl::Utf8("233".into()), DataType::Varchar),
-                DataTypeName::Bytea => (ScalarImpl::Utf8("\\x233".to_string()), DataType::Bytea),
+                DataTypeName::Bytea => (ScalarImpl::Bytea("\\x233".into()), DataType::Bytea),
                 DataTypeName::Time => (
                     ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(2, 3, 3)),
                     DataType::Time,

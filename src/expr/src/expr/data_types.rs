@@ -172,7 +172,7 @@ macro_rules! bytea {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Bytea,
-            risingwave_common::array::Utf8Array
+            risingwave_common::array::BytesArray
         }
     };
 }
