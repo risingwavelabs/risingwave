@@ -361,6 +361,19 @@ fn gen_rand_lease_id() -> u64 {
 }
 
 // TODO: Docstring
+/// Runs an election every lease_time_sec to determine a leader
+/// A leaders term will last until the leader goes down/misses to renew the lease
+///
+/// ## Address
+/// addr: Address of the current leader, e.g. "127.0.0.1"
+/// meta_store: Store that will hold information about the leader
+/// lease_time_sec: Time that a lease will be valid for.
+/// If this lease_time_sec is large, elections will be less frequent, resulting in less traffic for
+/// the meta store, but node failover may be slow If this lease_time_sec is small, elections will be
+/// more frequent, resulting in more traffic for the meta store. Node failover will be fast
+///
+/// Returns:
+/// # TODO
 async fn run_elections<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,
