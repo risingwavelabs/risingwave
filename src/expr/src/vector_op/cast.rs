@@ -63,24 +63,26 @@ pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
 #[inline]
 fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
     if let Ok(res) = SpeedDateTime::parse_str(s) {
-        let date = NaiveDate::from_ymd(
+        Ok(NaiveDateWrapper::from_ymd_uncheck(
             res.date.year as i32,
             res.date.month as u32,
             res.date.day as u32,
-        );
-        let time = NaiveTime::from_hms_micro(
+        )
+        .and_hms_micro_uncheck(
             res.time.hour as u32,
             res.time.minute as u32,
             res.time.second as u32,
             res.time.microsecond,
-        );
-        Ok(NaiveDateTime::new(date, time))
+        )
+        .0)
     } else {
         let res =
             SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))?;
-        let date = NaiveDate::from_ymd(res.year as i32, res.month as u32, res.day as u32);
-        let time = NaiveTime::from_hms_micro(0, 0, 0, 0);
-        Ok(NaiveDateTime::new(date, time))
+        Ok(
+            NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
+                .and_hms_micro_uncheck(0, 0, 0, 0)
+                .0,
+        )
     }
 }
 
@@ -121,31 +123,28 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
 #[inline]
 pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
     let us = i64_to_timestampz(t)?;
-    Ok(NaiveDateTimeWrapper::new(NaiveDateTime::from_timestamp(
+    Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
         us / 1_000_000,
         (us % 1_000_000) as u32 * 1000,
-    )))
+    ))
 }
 
 #[inline]
 fn parse_naive_date(s: &str) -> Result<NaiveDate> {
     let res = SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE))?;
-    Ok(NaiveDate::from_ymd(
-        res.year as i32,
-        res.month as u32,
-        res.day as u32,
-    ))
+    Ok(NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32).0)
 }
 
 #[inline]
 fn parse_naive_time(s: &str) -> Result<NaiveTime> {
     let res = SpeedTime::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIME))?;
-    Ok(NaiveTime::from_hms_micro(
+    Ok(NaiveTimeWrapper::from_hms_micro_uncheck(
         res.hour as u32,
         res.minute as u32,
         res.second as u32,
         res.microsecond,
-    ))
+    )
+    .0)
 }
 
 #[inline(always)]
@@ -183,12 +182,8 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
 pub fn timestampz_to_utc_string(elem: i64) -> String {
     // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
     // from session. See #3552.
-    let mut secs = elem / 1_000_000;
-    let mut nsecs = (elem % 1_000_000) * 1000;
-    if nsecs < 0 {
-        secs -= 1;
-        nsecs += 1_000_000_000;
-    }
+    let secs = elem.div_floor(1_000_000);
+    let nsecs = elem.rem_euclid(1_000_000) * 1000;
     let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     // PostgreSQL uses a space rather than `T` to separate the date and time.
     // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-OUTPUT
@@ -198,12 +193,8 @@ pub fn timestampz_to_utc_string(elem: i64) -> String {
 pub fn timestampz_to_utc_binary(elem: i64) -> Bytes {
     // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
     // from session. See #3552.
-    let mut secs = elem / 1_000_000;
-    let mut nsecs = (elem % 1_000_000) * 1000;
-    if nsecs < 0 {
-        secs -= 1;
-        nsecs += 1_000_000_000;
-    }
+    let secs = elem.div_floor(1_000_000);
+    let nsecs = elem.rem_euclid(1_000_000) * 1000;
     let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     let mut out = BytesMut::new();
     // postgres_types::Type::ANY is only used as a placeholder.
@@ -298,9 +289,9 @@ pub fn interval_to_time(elem: IntervalUnit) -> Result<NaiveTimeWrapper> {
     let ms = elem.get_ms_of_day();
     let secs = (ms / 1000) as u32;
     let nano = (ms % 1000 * 1_000_000) as u32;
-    Ok(NaiveTimeWrapper(NaiveTime::from_num_seconds_from_midnight(
+    Ok(NaiveTimeWrapper::from_num_seconds_from_midnight_uncheck(
         secs, nano,
-    )))
+    ))
 }
 
 #[inline(always)]
