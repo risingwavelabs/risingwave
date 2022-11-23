@@ -360,39 +360,19 @@ fn gen_rand_lease_id() -> u64 {
     rand::thread_rng().gen_range(0..std::u64::MAX)
 }
 
-/// ## Returns
-///  returns true if current node is leader
-///
-/// ## Arguments
-/// addr: Address of the current leader, e.g. "127.0.0.1"
-/// meta_store: Store that will hold information about the leader
-/// lease_time_sec: Time that a lease will be valid for.
-/// If this lease_time_sec is large, elections will be less frequent, resulting in less traffic for
-/// the meta store, but node failover may be slow If this lease_time_sec is small, elections will be
-/// more frequent, resulting in more traffic for the meta store. Node failover will be fast
-///
-/// ## Returns
-/// TODO: Work in progress. Will fill this in later
-pub async fn register_leader_for_meta<S: MetaStore>(
+// TODO: Docstring
+async fn run_elections<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,
     lease_time_sec: u64,
 ) -> MetaResult<(MetaLeaderInfo, JoinHandle<()>, Sender<()>, Receiver<bool>)> {
-    tracing::info!(
-        "addr: {}, meta_store: ???, lease_time: {}",
-        addr.clone(),
-        lease_time_sec
-    );
-    let addr_clone = addr.clone();
-
     // Randomize interval to reduce mitigate likelihood of simultaneous requests
     let mut rng: StdRng = SeedableRng::from_entropy();
-    let rand_delay = rng.gen_range(0..500);
-    tracing::info!("Random delay is {}ms", rand_delay);
     let mut ticker = tokio::time::interval(
-        Duration::from_secs(lease_time_sec) + Duration::from_millis(rand_delay),
+        Duration::from_secs(lease_time_sec) + Duration::from_millis(rng.gen_range(0..500)),
     );
 
+    // runs the initial election, determining who the first leader is
     'initial_election: loop {
         ticker.tick().await;
 
@@ -401,8 +381,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         let init_lease_id = gen_rand_lease_id();
 
         // run the initial election
-        let election_outcome =
-            campaign(&meta_store, &addr_clone, lease_time_sec, init_lease_id).await;
+        let election_outcome = campaign(&meta_store, &addr, lease_time_sec, init_lease_id).await;
         let (leader, is_leader) = match election_outcome {
             Some(infos) => {
                 tracing::info!("initial election Succeeded");
@@ -419,7 +398,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let (leader_tx, leader_rx) = tokio::sync::watch::channel(is_leader);
         let handle = tokio::spawn(async move {
-            // election
+            // runs all follow-up elections
             'election: loop {
                 tokio::select! {
                     _ = &mut shutdown_rx => {
@@ -438,7 +417,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 };
 
                 let (leader_info, _, is_leader) =
-                    match campaign(&meta_store, &addr_clone, lease_time_sec, lease_id).await {
+                    match campaign(&meta_store, &addr, lease_time_sec, lease_id).await {
                         None => {
                             tracing::info!("Election failed. Repeating election");
                             continue 'election;
@@ -456,7 +435,8 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 // signal to observers if this node currently is leader
                 leader_tx.send(is_leader).unwrap();
 
-                // election done. Enter current term in loop below
+                // election done. Enter the term of the current leader
+                // Leader stays in power until leader crashes
                 'term: loop {
                     // sleep OR abort if shutdown
                     tokio::select! {
@@ -510,6 +490,33 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         });
         return Ok((leader, handle, shutdown_tx, leader_rx));
     }
+}
+
+/// ## Returns
+///  returns true if current node is leader
+///
+/// ## Arguments
+/// addr: Address of the current leader, e.g. "127.0.0.1"
+/// meta_store: Store that will hold information about the leader
+/// lease_time_sec: Time that a lease will be valid for.
+/// If this lease_time_sec is large, elections will be less frequent, resulting in less traffic for
+/// the meta store, but node failover may be slow If this lease_time_sec is small, elections will be
+/// more frequent, resulting in more traffic for the meta store. Node failover will be fast
+///
+/// ## Returns
+/// TODO: Work in progress. Will fill this in later
+pub async fn register_leader_for_meta<S: MetaStore>(
+    addr: String,
+    meta_store: Arc<S>,
+    lease_time_sec: u64,
+) -> MetaResult<(MetaLeaderInfo, JoinHandle<()>, Sender<()>, Receiver<bool>)> {
+    tracing::info!(
+        "addr: {}, meta_store: ???, lease_time: {}",
+        addr.clone(),
+        lease_time_sec
+    );
+
+    run_elections(addr, meta_store, lease_time_sec).await
 }
 
 pub async fn rpc_serve_with_store<S: MetaStore>(
