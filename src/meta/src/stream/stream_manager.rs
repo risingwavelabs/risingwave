@@ -19,7 +19,7 @@ use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
+use risingwave_common::hash::VirtualNode;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, Buffer, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -478,7 +478,7 @@ where
                     // This arm could be removed after the optimizer has been fully implemented.
                     &[single_downstream_actor] => {
                         dispatcher.hash_mapping = Some(ActorMapping {
-                            original_indices: vec![VIRTUAL_NODE_COUNT as u64 - 1],
+                            original_indices: vec![VirtualNode::COUNT as u64 - 1],
                             data: vec![single_downstream_actor],
                         });
                     }
