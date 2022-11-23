@@ -66,7 +66,7 @@ fn generate_hash_values(
             hasher_builder,
         )
         .iter_mut()
-        .map(|hash_value| consistent_hash_info.vmap[hash_value.to_vnode() as usize] as usize)
+        .map(|hash_value| consistent_hash_info.vmap[hash_value.to_vnode().to_index()] as usize)
         .collect::<Vec<_>>();
     Ok(hash_values)
 }
