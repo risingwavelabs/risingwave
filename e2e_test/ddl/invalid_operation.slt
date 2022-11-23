@@ -128,9 +128,9 @@ drop sink idx;
 statement error not found
 drop view idx;
 
-# 4.4 source
+# 4.4 materialized source
 statement ok
-create materialized source source (v int) with (
+create materialized source msrc (v int) with (
     connector = 'datagen',
     fields.v.kind = 'sequence',
     fields.v.start = '1',
@@ -140,23 +140,54 @@ create materialized source source (v int) with (
 ) row format json;
 
 statement error Use `DROP SOURCE`
-drop table source;
+drop table msrc;
 
 statement error Use `DROP SOURCE`
-drop materialized view source;
+drop materialized view msrc;
 
 statement error Use `DROP SOURCE`
-drop index source;
+drop index msrc;
 
 # FIXME: improve the error message
 statement error not found
-drop sink source;
+drop sink msrc;
 
 # FIXME: improve the error message
 statement error not found
-drop view source;
+drop view msrc;
 
-# 4.5 sink 
+# 4.5 non-materialized source
+statement ok
+create source src (v int) with (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) row format json;
+
+# FIXME: improve the error message
+statement error not found
+drop table src;
+
+# FIXME: improve the error message
+statement error not found
+drop materialized view src;
+
+# FIXME: improve the error message
+statement error not found
+drop index src;
+
+# FIXME: improve the error message
+statement error not found
+drop sink src;
+
+# FIXME: improve the error message
+statement error not found
+drop view src;
+
+# 4.6 sink 
 statement ok
 CREATE SINK sink FROM mv WITH (connector='console', prefix='DEBUG', suffix='');
 
@@ -180,7 +211,7 @@ drop source sink;
 statement error not found
 drop view sink;
 
-# 4.6 view
+# 4.7 view
 statement ok
 create view v as select 1;
 
@@ -218,7 +249,11 @@ SELECT * from idx limit 0;
 ----
 
 query I
-SELECT * from source limit 0;
+SELECT * from msrc limit 0;
+----
+
+query error no batch source operator
+SELECT * from src limit 0;
 ----
 
 # FIXME: improve the error message
@@ -261,20 +296,33 @@ update idx set v = 2;
 statement error cannot change index
 delete from idx;
 
-# 6.4 source
+# 6.4 materialized source
 # FIXME: what's this?
 statement error Get source table id not exists
-insert into source values (1);
+insert into msrc values (1);
 
 # FIXME: what's this?
 statement error Get source table id not exists
-update source set v = 2;
+update msrc set v = 2;
 
 # FIXME: what's this?
 statement error Get source table id not exists
-delete from source;
+delete from msrc;
 
-# 6.5 sink
+# 6.5 non-materialized source
+# FIXME: improve the error message
+statement error not found
+insert into src values (1);
+
+# FIXME: improve the error message
+statement error not found
+update src set v = 2;
+
+# FIXME: improve the error message
+statement error not found
+delete from src;
+
+# 6.6 sink
 # FIXME: improve the error message
 statement error not found
 insert into sink values (1);
@@ -287,7 +335,7 @@ update sink set v = 2;
 statement error not found
 delete from sink;
 
-# 6.6 view
+# 6.7 view
 # FIXME: improve the error message
 statement error not found
 insert into v values (1);
@@ -311,7 +359,10 @@ statement error index.*exists
 create table idx(v int);
 
 statement error source.*exists
-create table source(v int);
+create table msrc(v int);
+
+statement error source.*exists
+create table src(v int);
 
 statement error sink.*exists
 create table sink(v int);
@@ -328,7 +379,10 @@ statement ok
 drop sink sink;
 
 statement ok
-drop source source;
+drop source msrc;
+
+statement ok
+drop source src;
 
 statement ok
 drop index idx;
