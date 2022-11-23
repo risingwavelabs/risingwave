@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
-use risingwave_common::types::{ParallelUnitId, VnodeMapping, VIRTUAL_NODE_COUNT};
+use risingwave_common::hash::{ParallelUnitId, VirtualNode, VnodeMapping};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -492,7 +492,7 @@ impl BatchPlanFragmenter {
                                 .take(1)
                                 .update(|(_, info)| {
                                     info.vnode_bitmap =
-                                        Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).to_protobuf();
+                                        Bitmap::all_high_bits(VirtualNode::COUNT).to_protobuf();
                                 })
                                 .collect();
                         }
@@ -758,11 +758,11 @@ fn derive_partitions(
             }
             // scan a single partition
             Some(vnode) => {
-                let parallel_unit_id = vnode_mapping[vnode as usize];
+                let parallel_unit_id = vnode_mapping[vnode.to_index()];
                 let (bitmap, scan_ranges) = partitions
                     .entry(parallel_unit_id)
                     .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
-                bitmap.set(vnode as usize, true);
+                bitmap.set(vnode.to_index(), true);
                 scan_ranges.push(scan_range.to_protobuf());
             }
         }
@@ -786,7 +786,7 @@ fn derive_partitions(
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use risingwave_common::types::ParallelUnitId;
+    use risingwave_common::hash::ParallelUnitId;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::common::ParallelUnit;
 
