@@ -133,6 +133,53 @@ export function dispatcherTypeToJSON(object: DispatcherType): string {
   }
 }
 
+export const FragmentTypeFlag = {
+  FRAGMENT_UNSPECIFIED: "FRAGMENT_UNSPECIFIED",
+  SOURCE: "SOURCE",
+  MVIEW: "MVIEW",
+  SINK: "SINK",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type FragmentTypeFlag = typeof FragmentTypeFlag[keyof typeof FragmentTypeFlag];
+
+export function fragmentTypeFlagFromJSON(object: any): FragmentTypeFlag {
+  switch (object) {
+    case 0:
+    case "FRAGMENT_UNSPECIFIED":
+      return FragmentTypeFlag.FRAGMENT_UNSPECIFIED;
+    case 1:
+    case "SOURCE":
+      return FragmentTypeFlag.SOURCE;
+    case 2:
+    case "MVIEW":
+      return FragmentTypeFlag.MVIEW;
+    case 4:
+    case "SINK":
+      return FragmentTypeFlag.SINK;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return FragmentTypeFlag.UNRECOGNIZED;
+  }
+}
+
+export function fragmentTypeFlagToJSON(object: FragmentTypeFlag): string {
+  switch (object) {
+    case FragmentTypeFlag.FRAGMENT_UNSPECIFIED:
+      return "FRAGMENT_UNSPECIFIED";
+    case FragmentTypeFlag.SOURCE:
+      return "SOURCE";
+    case FragmentTypeFlag.MVIEW:
+      return "MVIEW";
+    case FragmentTypeFlag.SINK:
+      return "SINK";
+    case FragmentTypeFlag.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export interface AddMutation {
   /** New dispatchers for each actor. */
   actorDispatchers: { [key: number]: AddMutation_Dispatchers };
@@ -756,7 +803,10 @@ export interface StreamFragmentGraph_StreamFragment {
   /** 0-based on frontend, and will be rewritten to global id on meta. */
   fragmentId: number;
   /** root stream node in this fragment. */
-  node: StreamNode | undefined;
+  node:
+    | StreamNode
+    | undefined;
+  /** Bitwise-OR of FragmentTypeFlags */
   fragmentTypeMask: number;
   /** mark whether this fragment should only have one actor. */
   isSingleton: boolean;

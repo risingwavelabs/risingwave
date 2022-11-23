@@ -195,6 +195,7 @@ export function tableFragments_ActorStatus_ActorStateToJSON(object: TableFragmen
 
 export interface TableFragments_Fragment {
   fragmentId: number;
+  /** Bitwise-OR of FragmentTypeFlags */
   fragmentTypeMask: number;
   distributionType: TableFragments_Fragment_FragmentDistributionType;
   actors: StreamActor[];
