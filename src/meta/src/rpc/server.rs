@@ -140,24 +140,52 @@ fn since_epoch() -> Duration {
         .expect("Time went backwards")
 }
 
+/// Contains the outcome of an election
+/// Use this to get information about the current leader and yourself
 struct ElectionResult {
     pub meta_leader_info: MetaLeaderInfo,
     pub meta_lease_info: MetaLeaseInfo,
 
-    // True if current node is leader
+    // True if current node is leader, else false
     pub is_leader: bool,
 }
 
 // TODO: move leader election things to a new file
+// TODO: write definitions: Leader, follower, election, term, campaign
 
-// TODO: Write docstring
-// Sets a leader. Does not renew leaders term
-// lease_id: random id identifying the leader via the lease.
-async fn run_for_election<S: MetaStore>(
+/// Runs for election in an attempt to become leader
+///
+/// ## Returns
+/// Returns ElectionResult, containing infos about the leader who won or
+/// None if the election needs to be repeated
+///
+/// ## Arguments
+/// meta_store: The meta store which holds the lease, deciding about the election outcome
+/// addr: Address of the node that runs for election
+/// lease_time_sec: Amount of seconds that this lease will be valid
+/// next_lease_id: If the node wins, the lease used until the next election will have this id
+///
+/// ## Example
+/// ```rust
+/// let mut this_node_is_leader = false;
+/// loop {
+///     let outcome = campaign(&meta_store, &addr_clone, lease_time, init_lease_id).await;
+///     if outcome.is_some() {
+///         this_node_is_leader = outcome.unwrap().is_leader;
+///         break;
+///     }
+/// }
+/// if this_node_is_leader {
+///     // start services of leader node
+/// } else {
+///     // start services of follower node
+/// }
+/// ```
+async fn campaign<S: MetaStore>(
     meta_store: &Arc<S>,
     addr: &String,
-    lease_time: u64,    // in sec
-    next_lease_id: u64, //  Will be the new id, if this node gets elected
+    lease_time_sec: u64,
+    next_lease_id: u64,
 ) -> Option<ElectionResult> {
     tracing::info!("running for election with lease {}", next_lease_id);
 
@@ -180,7 +208,7 @@ async fn run_for_election<S: MetaStore>(
     let lease_info = MetaLeaseInfo {
         leader: Some(leader_info.clone()),
         lease_register_time: now.as_secs(),
-        lease_expire_time: now.as_secs() + lease_time,
+        lease_expire_time: now.as_secs() + lease_time_sec,
     };
 
     // Initial leader election
@@ -204,7 +232,7 @@ async fn run_for_election<S: MetaStore>(
         }
 
         // Check if new leader was elected in the meantime
-        return match try_acquire_renew_lease(&leader_info, lease_time, &meta_store).await {
+        return match renew_lease(&leader_info, lease_time_sec, &meta_store).await {
             Some(val) => {
                 if !val {
                     return None;
@@ -219,9 +247,8 @@ async fn run_for_election<S: MetaStore>(
         };
     }
 
-    // follow-up elections
-    // There has already been a leader before
-    let is_leader = match try_acquire_renew_lease(&leader_info, lease_time, meta_store).await {
+    // follow-up elections: There have already been leaders before
+    let is_leader = match renew_lease(&leader_info, lease_time_sec, meta_store).await {
         None => return None,
         Some(val) => val,
     };
@@ -233,12 +260,22 @@ async fn run_for_election<S: MetaStore>(
     })
 }
 
-// TODO: write docstring
-// Try to renew/acquire the lease of the current leader by lease_time
-// Returns true if node was leader and was able to renew/acquire the lease
-// Returns false if node was follower and thus could not renew/acquire lease
-// Returns None if operation has to be repeated
-async fn try_acquire_renew_lease<S: MetaStore>(
+/// Try to renew/acquire the leader lease
+///
+/// ## Returns
+/// True, if the current node could acquire/renew the lease
+/// False, if the current node could acquire/renew the lease
+/// None, if the operation failed
+///
+/// ## Arguments
+/// leader_info: Info of the node that tries to acquire/renew the lease
+/// lease_time_sec: Time for which the lease should be extended
+/// meta_store: Store which holds the lease
+///
+/// Returns true if node was leader and was able to renew/acquire the lease
+/// Returns false if node was follower and thus could not renew/acquire lease
+/// Returns None if operation has to be repeated
+async fn renew_lease<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
     lease_time_sec: u64,
     meta_store: &Arc<S>,
@@ -272,14 +309,12 @@ async fn try_acquire_renew_lease<S: MetaStore>(
                     "Renew/acquire lease: try again later, MetaStoreError: {:?}",
                     e
                 );
-                // operation has to be repeated
                 return None;
             }
             MetaStoreError::ItemNotFound(e) => {
                 tracing::warn!("Renew/acquire lease: MetaStoreError: {:?}", e);
                 return None;
-                // false // TODO: Should we repeat here or should we assume that we are not leader?
-                // TODO: Do we have to go to elections if we run into this one?
+                // TODO: is returning None here the right choice?
             }
         },
         Ok(_) => true,
@@ -290,9 +325,15 @@ async fn try_acquire_renew_lease<S: MetaStore>(
 type MetaLeaderInfoVec = Vec<u8>;
 type MetaLeaseInfoVec = Vec<u8>;
 
-// TODO: Write docstring
-// TODO: return MetaLeaderInfo and MetaLeaderLease types. Or return a infos type that contains both
-// of them getting leader_info and leader_lease or defaulting to none
+/// Retrieve infos about the current leader
+///
+/// ## Returns
+/// Returns a tuple containing information about the Leader and the Leader lease
+/// If there was never a leader elected or no lease is found this will return an empty vector
+/// Returns None if the operation failed
+///
+/// ## Attributes:
+/// meta_store: The store holding information about the leader
 async fn get_infos<S: MetaStore>(
     meta_store: &Arc<S>,
 ) -> Option<(MetaLeaderInfoVec, MetaLeaseInfoVec)> {
@@ -302,9 +343,7 @@ async fn get_infos<S: MetaStore>(
     {
         Err(MetaStoreError::ItemNotFound(_)) => vec![],
         Ok(v) => v,
-        _ => {
-            return None;
-        }
+        _ => return None,
     };
     let current_leader_lease = match meta_store
         .get_cf(META_CF_NAME, META_LEASE_KEY.as_bytes())
@@ -321,17 +360,28 @@ fn gen_rand_lease_id() -> u64 {
     rand::thread_rng().gen_range(0..std::u64::MAX)
 }
 
-// TODO: write docstring
-// returns true if current node is leader
+/// ## Returns
+///  returns true if current node is leader
+///
+/// ## Arguments
+/// addr: Address of the current leader, e.g. "127.0.0.1"
+/// meta_store: Store that will hold information about the leader
+/// lease_time_sec: Time that a lease will be valid for.
+/// If this lease_time_sec is large, elections will be less frequent, resulting in less traffic for
+/// the meta store, but node failover may be slow If this lease_time_sec is small, elections will be
+/// more frequent, resulting in more traffic for the meta store. Node failover will be fast
+///
+/// ## Returns
+/// TODO: Work in progress. Will fill this in later
 pub async fn register_leader_for_meta<S: MetaStore>(
-    addr: String, // Address of this node
+    addr: String,
     meta_store: Arc<S>,
-    lease_time: u64, // seconds
+    lease_time_sec: u64,
 ) -> MetaResult<(MetaLeaderInfo, JoinHandle<()>, Sender<()>, Receiver<bool>)> {
     tracing::info!(
         "addr: {}, meta_store: ???, lease_time: {}",
         addr.clone(),
-        lease_time
+        lease_time_sec
     );
     let addr_clone = addr.clone();
 
@@ -339,8 +389,9 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     let mut rng: StdRng = SeedableRng::from_entropy();
     let rand_delay = rng.gen_range(0..500);
     tracing::info!("Random delay is {}ms", rand_delay);
-    let mut ticker =
-        tokio::time::interval(Duration::from_secs(lease_time) + Duration::from_millis(rand_delay));
+    let mut ticker = tokio::time::interval(
+        Duration::from_secs(lease_time_sec) + Duration::from_millis(rand_delay),
+    );
 
     'initial_election: loop {
         ticker.tick().await;
@@ -351,7 +402,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
 
         // run the initial election
         let election_outcome =
-            run_for_election(&meta_store, &addr_clone, lease_time, init_lease_id).await;
+            campaign(&meta_store, &addr_clone, lease_time_sec, init_lease_id).await;
         let (leader, is_leader) = match election_outcome {
             Some(infos) => {
                 tracing::info!("initial election Succeeded");
@@ -387,7 +438,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 };
 
                 let (leader_info, _, is_leader) =
-                    match run_for_election(&meta_store, &addr_clone, lease_time, lease_id).await {
+                    match campaign(&meta_store, &addr_clone, lease_time_sec, lease_id).await {
                         None => {
                             tracing::info!("Election failed. Repeating election");
                             continue 'election;
@@ -417,8 +468,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     }
 
                     // renew the current lease if this is the leader
-                    let attempt =
-                        try_acquire_renew_lease(&leader_info, lease_time, &meta_store).await;
+                    let attempt = renew_lease(&leader_info, lease_time_sec, &meta_store).await;
                     if attempt.is_none() {
                         // something went wrong
                         continue 'election;
@@ -438,7 +488,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     }
 
                     // delete lease and run new election if lease is expired for some time
-                    let some_time = lease_time / 2;
+                    let some_time = lease_time_sec / 2;
                     let lease_info = MetaLeaseInfo::decode(&mut lease_info.as_slice()).unwrap();
                     if lease_info.get_lease_expire_time() + some_time < since_epoch().as_secs() {
                         tracing::warn!("Detected that leader is down");
