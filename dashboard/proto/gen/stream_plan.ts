@@ -137,7 +137,7 @@ export const FragmentType = {
   FRAGMENT_UNSPECIFIED: "FRAGMENT_UNSPECIFIED",
   OTHERS: "OTHERS",
   SOURCE: "SOURCE",
-  /** SINK - TODO: change it to MATERIALIZED_VIEW or other name, since we have sink type now. */
+  MVIEW: "MVIEW",
   SINK: "SINK",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
@@ -156,6 +156,9 @@ export function fragmentTypeFromJSON(object: any): FragmentType {
     case "SOURCE":
       return FragmentType.SOURCE;
     case 3:
+    case "MVIEW":
+      return FragmentType.MVIEW;
+    case 4:
     case "SINK":
       return FragmentType.SINK;
     case -1:
@@ -173,6 +176,8 @@ export function fragmentTypeToJSON(object: FragmentType): string {
       return "OTHERS";
     case FragmentType.SOURCE:
       return "SOURCE";
+    case FragmentType.MVIEW:
+      return "MVIEW";
     case FragmentType.SINK:
       return "SINK";
     case FragmentType.UNRECOGNIZED:

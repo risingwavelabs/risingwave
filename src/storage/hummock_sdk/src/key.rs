@@ -433,6 +433,12 @@ impl<'a> UserKey<&'a [u8]> {
     }
 }
 
+impl<T: AsRef<[u8]>> UserKey<T> {
+    pub fn as_ref(&self) -> UserKey<&[u8]> {
+        UserKey::new(self.table_id, TableKey(self.table_key.as_ref()))
+    }
+}
+
 impl UserKey<Vec<u8>> {
     pub fn decode_length_prefixed(buf: &mut &[u8]) -> Self {
         let table_id = buf.get_u32();
@@ -446,10 +452,6 @@ impl UserKey<Vec<u8>> {
         self.table_id = other.table_id;
         self.table_key.0.clear();
         self.table_key.0.extend_from_slice(other.table_key.as_ref());
-    }
-
-    pub fn as_ref(&self) -> UserKey<&[u8]> {
-        UserKey::new(self.table_id, TableKey(self.table_key.as_slice()))
     }
 
     /// Use this method to override an old `UserKey<Vec<u8>>` with a `UserKey<&[u8]>` to own the
@@ -513,6 +515,15 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         buf
     }
 
+    pub fn encode_reverse_epoch(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(
+            TABLE_PREFIX_LEN + self.user_key.table_key.as_ref().len() + EPOCH_LEN,
+        );
+        self.user_key.encode_into(&mut buf);
+        buf.put_u64(u64::MAX - self.epoch);
+        buf
+    }
+
     pub fn is_empty(&self) -> bool {
         self.user_key.is_empty()
     }
@@ -535,6 +546,17 @@ impl<'a> FullKey<&'a [u8]> {
         }
     }
 
+    /// Construct a [`FullKey`] from a byte slice.
+    pub fn decode_reverse_epoch(slice: &'a [u8]) -> Self {
+        let epoch_pos = slice.len() - EPOCH_LEN;
+        let epoch = (&slice[epoch_pos..]).get_u64();
+
+        Self {
+            user_key: UserKey::decode(&slice[..epoch_pos]),
+            epoch: u64::MAX - epoch,
+        }
+    }
+
     pub fn to_vec(self) -> FullKey<Vec<u8>> {
         FullKey {
             user_key: self.user_key.to_vec(),
@@ -543,14 +565,16 @@ impl<'a> FullKey<&'a [u8]> {
     }
 }
 
-impl FullKey<Vec<u8>> {
+impl<T: AsRef<[u8]>> FullKey<T> {
     pub fn to_ref(&self) -> FullKey<&[u8]> {
         FullKey {
             user_key: self.user_key.as_ref(),
             epoch: self.epoch,
         }
     }
+}
 
+impl FullKey<Vec<u8>> {
     /// Use this method to override an old `FullKey<Vec<u8>>` with a `FullKey<&[u8]>` to own the
     /// table key without reallocating a new `FullKey` object.
     pub fn set(&mut self, other: FullKey<&[u8]>) {

@@ -108,7 +108,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("tonic", Level::WARN)
             .with_target("isahc", Level::WARN)
             .with_target("console_subscriber", Level::WARN)
-            .with_target("reqwest", Level::WARN);
+            .with_target("reqwest", Level::WARN)
+            .with_target("sled", Level::INFO);
 
         // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
         // needed.
