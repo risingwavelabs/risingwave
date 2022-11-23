@@ -281,6 +281,7 @@ mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
 mod batch_sort_agg;
+mod batch_source;
 mod batch_table_function;
 mod batch_topn;
 mod batch_union;
@@ -347,6 +348,7 @@ pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
 pub use batch_sort_agg::BatchSortAgg;
+pub use batch_source::BatchSource;
 pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
@@ -456,6 +458,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, ProjectSet }
             , { Batch, Union }
             , { Batch, GroupTopN }
+            , { Batch, Source }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -539,6 +542,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, ProjectSet }
             , { Batch, Union }
             , { Batch, GroupTopN }
+            , { Batch, Source }
         }
     };
 }

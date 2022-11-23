@@ -95,4 +95,4 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! { LogicalApply, LogicalOverAgg, BatchExchange, BatchSeqScan }
+impl_has_variant! { LogicalApply, LogicalOverAgg, BatchExchange, BatchSeqScan, BatchSource }

@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::hash::ParallelUnitId;
 use risingwave_common::util::is_stream_source;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
@@ -134,13 +134,13 @@ impl TableFragments {
         self.state = state;
     }
 
-    /// Returns sink fragment vnode mapping.
-    /// Note that: the real sink fragment is also stored as `TableFragments`, it's possible that
-    /// there's no fragment with `FragmentType::Sink` exists.
-    pub fn sink_vnode_mapping(&self) -> Option<ParallelUnitMapping> {
+    /// Returns mview fragment vnode mapping.
+    /// Note that: the sink fragment is also stored as `TableFragments`, it's possible that
+    /// there's no fragment with `FragmentType::Mview` exists.
+    pub fn mview_vnode_mapping(&self) -> Option<ParallelUnitMapping> {
         self.fragments
             .values()
-            .find(|fragment| fragment.fragment_type == FragmentType::Sink as i32)
+            .find(|fragment| fragment.fragment_type == FragmentType::Mview as i32)
             .and_then(|fragment| fragment.vnode_mapping.clone())
     }
 
@@ -185,9 +185,9 @@ impl TableFragments {
         Self::filter_actor_ids(self, FragmentType::Source)
     }
 
-    /// Returns sink actor ids.
-    pub fn sink_actor_ids(&self) -> Vec<ActorId> {
-        Self::filter_actor_ids(self, FragmentType::Sink)
+    /// Returns mview actor ids.
+    pub fn mview_actor_ids(&self) -> Vec<ActorId> {
+        Self::filter_actor_ids(self, FragmentType::Mview)
     }
 
     fn contains_chain(stream_node: &StreamNode) -> bool {
@@ -398,11 +398,11 @@ impl TableFragments {
         }
     }
 
-    /// Returns sink actor vnode bitmap infos.
-    pub fn sink_vnode_bitmap_info(&self) -> Vec<(ActorId, Option<Buffer>)> {
+    /// Returns mview actor vnode bitmap infos.
+    pub fn mview_vnode_bitmap_info(&self) -> Vec<(ActorId, Option<Buffer>)> {
         self.fragments
             .values()
-            .filter(|fragment| fragment.fragment_type == FragmentType::Sink as i32)
+            .filter(|fragment| fragment.fragment_type == FragmentType::Mview as i32)
             .flat_map(|fragment| {
                 fragment
                     .actors
@@ -412,8 +412,8 @@ impl TableFragments {
             .collect_vec()
     }
 
-    pub fn sink_actor_parallel_units(&self) -> BTreeMap<ActorId, ParallelUnit> {
-        let sink_actor_ids = self.sink_actor_ids();
+    pub fn mview_actor_parallel_units(&self) -> BTreeMap<ActorId, ParallelUnit> {
+        let sink_actor_ids = self.mview_actor_ids();
         sink_actor_ids
             .iter()
             .map(|actor_id| {

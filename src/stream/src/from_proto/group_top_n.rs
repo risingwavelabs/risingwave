@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_pb::stream_plan::GroupTopNNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -24,13 +25,14 @@ pub struct GroupTopNExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for GroupTopNExecutorBuilder {
+    type Node = GroupTopNNode;
+
     async fn new_boxed_executor(
         mut params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::GroupTopN)?;
         let group_by = node
             .get_group_key()
             .iter()
@@ -52,6 +54,8 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
                 params.executor_id,
                 group_by,
                 state_table,
+                stream.context.lru_manager.clone(),
+                1 << 16,
             )?
             .boxed())
         } else {
@@ -65,6 +69,8 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
                 params.executor_id,
                 group_by,
                 state_table,
+                stream.context.lru_manager.clone(),
+                1 << 16,
             )?
             .boxed())
         }
