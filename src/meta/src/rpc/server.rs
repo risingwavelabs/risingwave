@@ -397,7 +397,7 @@ async fn run_elections<S: MetaStore>(
         let election_outcome = campaign(&meta_store, &addr, lease_time_sec, init_lease_id).await;
         let (leader, is_leader) = match election_outcome {
             Some(infos) => {
-                tracing::info!("initial election Succeeded");
+                tracing::info!("initial election finished");
                 (infos.meta_leader_info, infos.is_leader)
             }
             None => {
@@ -455,7 +455,7 @@ async fn run_elections<S: MetaStore>(
 
                 // election done. Enter the term of the current leader
                 // Leader stays in power until leader crashes
-                'term: loop {
+                '_term: loop {
                     // sleep OR abort if shutdown
                     tokio::select! {
                         _ = &mut shutdown_rx => {
@@ -465,15 +465,13 @@ async fn run_elections<S: MetaStore>(
                         _ = ticker.tick() => {},
                     }
 
-                    match manage_term(&leader_info, lease_time_sec, &meta_store).await {
-                        None => continue 'term, // error. Try again
-                        Some(leader_alive) => {
-                            if !leader_alive {
-                                // leader failed, we need to elect a new leader
-                                wait = false;
-                                continue 'election;
-                            }
-                            // leader is fine, await the next heartbeat
+                    if let Some(leader_alive) =
+                        manage_term(&leader_info, lease_time_sec, &meta_store).await
+                    {
+                        if !leader_alive {
+                            // leader failed, we need to elect a new leader
+                            wait = false;
+                            continue 'election;
                         }
                     }
                 }
