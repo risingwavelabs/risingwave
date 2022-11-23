@@ -592,9 +592,9 @@ impl Compactor {
                 local_stats.skip_multi_version_key_count += 1;
             }
 
-            if last_table_id.is_none()
-                || *last_table_id.as_ref().unwrap() != last_key.user_key.table_id.table_id
-            {
+            if last_table_id.map_or(true, |last_table_id| {
+                last_table_id != last_key.user_key.table_id.table_id
+            }) {
                 if let Some(last_table_id) = last_table_id.take() {
                     table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
                 }
