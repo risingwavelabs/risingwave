@@ -148,6 +148,9 @@ struct ElectionResult {
     pub is_leader: bool,
 }
 
+// TODO: move leader election things to a new file
+
+// TODO: Write docstring
 // Sets a leader. Does not renew leaders term
 // lease_id: random id identifying the leader via the lease.
 async fn run_for_election<S: MetaStore>(
