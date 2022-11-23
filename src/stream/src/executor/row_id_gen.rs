@@ -130,8 +130,9 @@ impl Executor for RowIdGenExecutor {
 mod tests {
     use risingwave_common::array::{Array, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{DataType, VIRTUAL_NODE_COUNT};
+    use risingwave_common::types::DataType;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -145,7 +146,7 @@ mod tests {
         ]);
         let pk_indices = vec![0];
         let row_id_index = 0;
-        let row_id_generator = Bitmap::all_high_bits(VIRTUAL_NODE_COUNT);
+        let row_id_generator = Bitmap::all_high_bits(VirtualNode::COUNT);
         let (mut tx, upstream) = MockSource::channel(schema.clone(), pk_indices.clone());
         let row_id_gen_executor = Box::new(RowIdGenExecutor::new(
             Box::new(upstream),
