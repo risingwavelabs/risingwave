@@ -18,7 +18,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use prost::Message;
-use rand::Rng;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
@@ -155,7 +156,7 @@ async fn run_for_election<S: MetaStore>(
     lease_time: u64,    // in sec
     next_lease_id: u64, //  Will be the new id, if this node gets elected
 ) -> Option<ElectionResult> {
-    tracing::info!("running an election with lease {}", next_lease_id);
+    tracing::info!("running for election with lease {}", next_lease_id);
 
     // below is old code
     // get old leader info and lease
@@ -215,7 +216,7 @@ async fn run_for_election<S: MetaStore>(
         };
     }
 
-    // follow-up election:
+    // follow-up elections
     // There has already been a leader before
     let is_leader = match try_acquire_renew_lease(&leader_info, lease_time, meta_store).await {
         None => return None,
@@ -332,9 +333,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     let addr_clone = addr.clone();
 
     // Randomize interval to reduce mitigate likelihood of simultaneous requests
-    let rand_delay = (since_epoch().as_micros() % 100) as u64;
-    tracing::info!("Pseudo random delay is {}ms", rand_delay);
-    let mut ticker = tokio::time::interval(Duration::from_millis(rand_delay / 2 + rand_delay));
+    let mut rng: StdRng = SeedableRng::from_entropy();
+    let rand_delay = rng.gen_range(0..500);
+    tracing::info!("Random delay is {}ms", rand_delay);
+    let mut ticker =
+        tokio::time::interval(Duration::from_secs(lease_time) + Duration::from_millis(rand_delay));
 
     'initial_election: loop {
         ticker.tick().await;
