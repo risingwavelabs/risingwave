@@ -155,11 +155,11 @@ async fn run_for_election<S: MetaStore>(
     lease_time: u64,    // in sec
     next_lease_id: u64, //  Will be the new id, if this node gets elected
 ) -> Option<ElectionResult> {
-    tracing::info!("running an election...");
+    tracing::info!("running an election with lease {}", next_lease_id);
 
     // below is old code
     // get old leader info and lease
-    let (current_leader_info, current_leader_lease) = match get_infos(&meta_store).await {
+    let (current_leader_info, _) = match get_infos(&meta_store).await {
         None => return None,
         Some(infos) => {
             let (leader, lease) = infos;
@@ -167,47 +167,17 @@ async fn run_for_election<S: MetaStore>(
         }
     };
 
-    let now = since_epoch();
-    if !current_leader_lease.is_empty() {
-        // TODO: why do we need this part?
-        let lease_info = MetaLeaseInfo::decode(&mut current_leader_lease.as_slice()).unwrap();
-
-        // Lease did not yet expire
-        if lease_info.lease_expire_time > now.as_secs()
-        //    && lease_info.leader.as_ref().unwrap().node_address != *addr
-        // TODO: all nodes have the same addr. Above line is useless.
-        // Will this be different in prod?
-        {
-            tracing::error!(
-                "We already have a leader with a lease that is valid for {} more sec",
-                lease_info.lease_expire_time - now.as_secs(),
-            );
-            return None;
-            // we do not know who is th leader. Repeat election
-            //   return Some(ElectionResult {
-            //       meta_leader_info: MetaLeaderInfo::decode(&mut current_leader_info.as_slice())
-            //           .unwrap(),
-            //       meta_lease_info: MetaLeaseInfo::decode(&mut current_leader_lease.as_slice())
-            //           .unwrap(),
-            //       is_leader: next_lease_id == lease_info.leader.unwrap().lease_id,
-            //   });
-        }
-    }
-
-    tracing::info!("lease_id: {}", next_lease_id);
-
     let leader_info = MetaLeaderInfo {
         lease_id: next_lease_id,
         node_address: addr.to_string(),
     };
-    tracing::info!("leader_info: {:?}", leader_info);
 
+    let now = since_epoch();
     let lease_info = MetaLeaseInfo {
         leader: Some(leader_info.clone()),
         lease_register_time: now.as_secs(),
         lease_expire_time: now.as_secs() + lease_time,
     };
-    tracing::info!("lease_info: {:?}", lease_info);
 
     // Initial leader election
     if current_leader_info.is_empty() {
@@ -228,6 +198,7 @@ async fn run_for_election<S: MetaStore>(
             );
             return None;
         }
+
         // Check if new leader was elected in the meantime
         return match try_acquire_renew_lease(&leader_info, lease_time, &meta_store).await {
             Some(val) => {
@@ -288,7 +259,7 @@ async fn try_acquire_renew_lease<S: MetaStore>(
     let is_leader = match meta_store.txn(txn).await {
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => {
-                // TODO: remove this
+                // TODO: remove this log line
                 //   tracing::info!("Renew/acquire lease: another node has become new leader");
                 false
             }
