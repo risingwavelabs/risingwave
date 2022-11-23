@@ -463,6 +463,9 @@ async fn run_elections<S: MetaStore>(
                     let (_, lease_info) = get_infos(&meta_store).await.unwrap_or_default();
                     if lease_info.is_empty() {
                         // ETCD does not have leader lease. Elect new leader
+                        // TODO: we currently wait for lease_timeout before doing going for the next
+                        // election should go to the next election
+                        // immediately
                         tracing::info!("ETCD does not have leader lease. Running new election");
                         continue 'election;
                     }
