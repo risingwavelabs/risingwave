@@ -215,10 +215,7 @@ impl<S: StateStore> SourceExecutor<S> {
             self.split_state_store.take_snapshot(cache).await?
         }
         // commit anyway, even if no message saved
-        self.split_state_store
-            .state_store
-            .commit(epoch, None)
-            .await?;
+        self.split_state_store.state_store.commit(epoch).await?;
 
         Ok(())
     }

@@ -222,7 +222,7 @@ impl<S: StateStore> SortExecutor<S> {
                             }
                         }
                         // Commit the epoch.
-                        self.state_table.commit(barrier.epoch, None).await?;
+                        self.state_table.commit(barrier.epoch).await?;
                     } else {
                         // If the barrier is not a checkpoint, then there is no actual data to
                         // commit. Therefore, we simply update the epoch of state table.

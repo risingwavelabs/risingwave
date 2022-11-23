@@ -467,10 +467,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
             // Commit all state tables.
             futures::future::try_join_all(
-                iter_table_storage(storages).map(|state_table| state_table.commit(epoch, None)),
+                iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
             )
             .await?;
-            result_table.commit(epoch, None).await?;
+            result_table.commit(epoch).await?;
 
             // Evict cache to target capacity.
             agg_groups.evict();

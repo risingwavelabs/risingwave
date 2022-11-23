@@ -396,7 +396,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             if let Some(row) = &current_epoch_row {
                                 self.right_table.insert(row.clone());
                             }
-                            self.right_table.commit(barrier.epoch, None).await?;
+                            self.right_table.commit(barrier.epoch).await?;
                         } else {
                             self.right_table.commit_no_data_expected(barrier.epoch);
                         }

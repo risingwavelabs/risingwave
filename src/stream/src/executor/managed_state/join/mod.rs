@@ -465,8 +465,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.metrics.flush();
-        self.state.table.commit(epoch, None).await?;
-        self.degree_state.table.commit(epoch, None).await?;
+        self.state.table.commit(epoch).await?;
+        self.degree_state.table.commit(epoch).await?;
         Ok(())
     }
 

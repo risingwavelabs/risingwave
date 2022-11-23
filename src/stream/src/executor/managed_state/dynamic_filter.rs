@@ -254,7 +254,7 @@ impl<S: StateStore> RangeCache<S> {
     /// Flush writes to the `StateTable` from the in-memory buffer.
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         // self.metrics.flush();
-        self.state_table.commit(epoch, None).await?;
+        self.state_table.commit(epoch).await?;
         Ok(())
     }
 }

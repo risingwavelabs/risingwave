@@ -29,7 +29,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, CompactedRow, Row, Row2, RowDeserializer, RowExt};
-use risingwave_common::types::{ScalarImpl, VirtualNode, VIRTUAL_NODE_SIZE};
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -112,6 +112,9 @@ pub struct StateTable<S: StateStore> {
 
     /// last watermark that is used to construct delete ranges in `ingest`
     last_watermark: Option<ScalarImpl>,
+
+    /// latest watermark
+    cur_watermark: Option<ScalarImpl>,
 
     /// number of commits with watermark since the last time we did state cleaning by watermark
     num_wmked_commits_since_last_clean: usize,
@@ -229,6 +232,7 @@ impl<S: StateStore> StateTable<S> {
             value_indices,
             epoch: None,
             last_watermark: None,
+            cur_watermark: None,
             num_wmked_commits_since_last_clean: 0,
         }
     }
@@ -333,6 +337,7 @@ impl<S: StateStore> StateTable<S> {
             value_indices,
             epoch: None,
             last_watermark: None,
+            cur_watermark: None,
             num_wmked_commits_since_last_clean: 0,
         }
     }
@@ -502,6 +507,7 @@ impl<S: StateStore> StateTable<S> {
         }
         assert_eq!(self.vnodes.len(), new_vnodes.len());
 
+        self.cur_watermark = None;
         self.last_watermark = None;
 
         std::mem::replace(&mut self.vnodes, new_vnodes)
@@ -645,15 +651,14 @@ impl<S: StateStore> StateTable<S> {
         self.epoch = Some(new_epoch);
     }
 
-    pub async fn commit(
-        &mut self,
-        new_epoch: EpochPair,
-        watermark: Option<&ScalarImpl>,
-    ) -> StreamExecutorResult<()> {
+    pub fn update_watermark(&mut self, watermark: ScalarImpl) {
+        self.cur_watermark = Some(watermark);
+    }
+
+    pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch.prev, watermark)
-            .await?;
+        self.batch_write_rows(mem_table, new_epoch.prev).await?;
         self.update_epoch(new_epoch);
         Ok(())
     }
@@ -661,8 +666,7 @@ impl<S: StateStore> StateTable<S> {
     /// used for unit test, and do not need to assert epoch.
     pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch.prev, None)
-            .await?;
+        self.batch_write_rows(mem_table, new_epoch.prev).await?;
         self.update_epoch(new_epoch);
         Ok(())
     }
@@ -673,6 +677,9 @@ impl<S: StateStore> StateTable<S> {
     pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
         assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
+        if self.cur_watermark.is_some() {
+            self.num_wmked_commits_since_last_clean += 1;
+        }
         self.update_epoch(new_epoch);
     }
 
@@ -681,15 +688,17 @@ impl<S: StateStore> StateTable<S> {
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
-        mut watermark: Option<&ScalarImpl>,
     ) -> StreamExecutorResult<()> {
-        if watermark.is_some() {
+        let watermark = self.cur_watermark.as_ref().and_then(|cur_watermark_ref| {
             self.num_wmked_commits_since_last_clean += 1;
 
-            if self.num_wmked_commits_since_last_clean < STATE_CLEANING_PERIOD_EPOCH {
-                watermark = None;
+            if self.num_wmked_commits_since_last_clean >= STATE_CLEANING_PERIOD_EPOCH {
+                Some(cur_watermark_ref)
+            } else {
+                None
             }
-        }
+        });
+
         let mut write_batch = self.local_store.start_write_batch(WriteOptions {
             epoch,
             table_id: self.table_id(),
@@ -707,7 +716,7 @@ impl<S: StateStore> StateTable<S> {
             )
         });
         for (pk, row_op) in buffer {
-            if let Some(ref range_end) = range_end_suffix && &pk[VIRTUAL_NODE_SIZE..] < range_end.as_slice() {
+            if let Some(ref range_end) = range_end_suffix && &pk[VirtualNode::SIZE..] < range_end.as_slice() {
                 continue;
             }
             match row_op {
@@ -753,8 +762,8 @@ impl<S: StateStore> StateTable<S> {
             }
         }
         write_batch.ingest().await?;
-        if let Some(watermark) = watermark {
-            self.last_watermark = Some(watermark.clone());
+        if watermark.is_some() {
+            self.last_watermark = self.cur_watermark.take();
             self.num_wmked_commits_since_last_clean = 0;
         }
         Ok(())

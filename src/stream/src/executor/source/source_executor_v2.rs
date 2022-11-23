@@ -230,10 +230,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
             core.split_state_store.take_snapshot(cache).await?
         }
         // commit anyway, even if no message saved
-        core.split_state_store
-            .state_store
-            .commit(epoch, None)
-            .await?;
+        core.split_state_store.state_store.commit(epoch).await?;
 
         core.state_cache.clear();
 
