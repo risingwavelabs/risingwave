@@ -640,11 +640,6 @@ mod tests {
         )
         .await;
 
-        let mut group_key_invert_idx = vec![None; input.info().schema.len()];
-        for (group_key_seq, group_key_idx) in group_key_indices.iter().enumerate() {
-            group_key_invert_idx[*group_key_idx] = Some(group_key_seq);
-        }
-
         HashAggExecutor::<SerializedKey, S>::new(
             ActorContext::create(123),
             input,
