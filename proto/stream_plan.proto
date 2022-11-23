@@ -536,10 +536,10 @@ message StreamActor {
 }
 
 enum FragmentTypeFlag {
-  FRAGMENT_UNSPECIFIED = 0x0;
-  SOURCE = 0x01;
-  MVIEW = 0x02;
-  SINK = 0x04;
+  FRAGMENT_UNSPECIFIED = 0;
+  SOURCE = 1;
+  MVIEW = 2;
+  SINK = 4;
 }
 
 message StreamFragmentGraph {
