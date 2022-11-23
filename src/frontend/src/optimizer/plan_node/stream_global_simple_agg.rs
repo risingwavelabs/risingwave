@@ -18,7 +18,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::plan_node::PlanAggCallDisplay;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -54,20 +53,18 @@ impl StreamGlobalSimpleAgg {
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }
-
-    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
-        self.logical.agg_calls_display()
-    }
 }
 
 impl fmt::Display for StreamGlobalSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.input().append_only() {
-            self.logical
-                .fmt_with_name(f, "StreamAppendOnlyGlobalSimpleAgg")
-        } else {
-            self.logical.fmt_with_name(f, "StreamGlobalSimpleAgg")
-        }
+        self.logical.fmt_with_name(
+            f,
+            if self.input().append_only() {
+                "StreamAppendOnlyGlobalSimpleAgg"
+            } else {
+                "StreamGlobalSimpleAgg"
+            },
+        )
     }
 }
 
