@@ -202,7 +202,9 @@ fn build_fragment(
     match stream_node.get_node_body()? {
         NodeBody::Source(_) => current_fragment.fragment_type = FragmentType::Source,
 
-        NodeBody::Materialize(_) => current_fragment.fragment_type = FragmentType::Sink,
+        NodeBody::Materialize(_) => current_fragment.fragment_type = FragmentType::Mview,
+
+        NodeBody::Sink(_) => current_fragment.fragment_type = FragmentType::Sink,
 
         // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
         NodeBody::TopN(_) => current_fragment.is_singleton = true,
