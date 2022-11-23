@@ -198,9 +198,13 @@ impl NaiveDateTimeWrapper {
     }
 
     pub fn from_protobuf(timestamp_micros: i64) -> ArrayResult<Self> {
-        let secs = timestamp_micros / 1_000_000;
-        let nsecs = (timestamp_micros % 1_000_000) as u32;
-        Self::with_secs_nsecs(secs, nsecs).map_err(Into::into)
+        let mut secs = timestamp_micros / 1_000_000;
+        let mut nsecs = (timestamp_micros % 1_000_000) * 1000;
+        if nsecs < 0 {
+            secs -= 1;
+            nsecs += 1_000_000_000;
+        }
+        Self::with_secs_nsecs(secs, nsecs as u32).map_err(Into::into)
     }
 
     /// Truncate the timestamp to the precision of microseconds.
