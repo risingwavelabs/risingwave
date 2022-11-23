@@ -68,17 +68,6 @@ use crate::array::{
     StructValue,
 };
 
-/// Parallel unit is the minimal scheduling unit.
-pub type ParallelUnitId = u32;
-pub type VnodeMapping = Vec<ParallelUnitId>;
-
-/// `VirtualNode` (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
-/// consistent hashing.
-pub type VirtualNode = u8;
-pub const VIRTUAL_NODE_SIZE: usize = std::mem::size_of::<VirtualNode>();
-pub const VNODE_BITS: usize = 8;
-pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
-
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
 
