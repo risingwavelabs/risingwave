@@ -18,11 +18,11 @@ use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::agg_impl::AppendOnlyStreamingApproxCountDistinct;
 use super::AggCall;
+use crate::common::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
 #[async_trait::async_trait]

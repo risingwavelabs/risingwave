@@ -20,6 +20,13 @@ export interface ColumnIndex {
   index: number;
 }
 
+export interface SourceInfo {
+  sourceInfo?: { $case: "streamSource"; streamSource: StreamSourceInfo } | {
+    $case: "tableSource";
+    tableSource: TableSourceInfo;
+  };
+}
+
 export interface StreamSourceInfo {
   rowFormat: RowFormatType;
   rowSchemaLocation: string;
@@ -126,6 +133,7 @@ export interface Table {
    */
   valueIndices: number[];
   definition: string;
+  handlePkConflict: boolean;
 }
 
 export interface Table_PropertiesEntry {
@@ -182,6 +190,58 @@ export const ColumnIndex = {
   fromPartial<I extends Exact<DeepPartial<ColumnIndex>, I>>(object: I): ColumnIndex {
     const message = createBaseColumnIndex();
     message.index = object.index ?? 0;
+    return message;
+  },
+};
+
+function createBaseSourceInfo(): SourceInfo {
+  return { sourceInfo: undefined };
+}
+
+export const SourceInfo = {
+  fromJSON(object: any): SourceInfo {
+    return {
+      sourceInfo: isSet(object.streamSource)
+        ? { $case: "streamSource", streamSource: StreamSourceInfo.fromJSON(object.streamSource) }
+        : isSet(object.tableSource)
+        ? { $case: "tableSource", tableSource: TableSourceInfo.fromJSON(object.tableSource) }
+        : undefined,
+    };
+  },
+
+  toJSON(message: SourceInfo): unknown {
+    const obj: any = {};
+    message.sourceInfo?.$case === "streamSource" && (obj.streamSource = message.sourceInfo?.streamSource
+      ? StreamSourceInfo.toJSON(message.sourceInfo?.streamSource)
+      : undefined);
+    message.sourceInfo?.$case === "tableSource" && (obj.tableSource = message.sourceInfo?.tableSource
+      ? TableSourceInfo.toJSON(message.sourceInfo?.tableSource)
+      : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SourceInfo>, I>>(object: I): SourceInfo {
+    const message = createBaseSourceInfo();
+    if (
+      object.sourceInfo?.$case === "streamSource" &&
+      object.sourceInfo?.streamSource !== undefined &&
+      object.sourceInfo?.streamSource !== null
+    ) {
+      message.sourceInfo = {
+        $case: "streamSource",
+        streamSource: StreamSourceInfo.fromPartial(object.sourceInfo.streamSource),
+      };
+    }
+    if (
+      object.sourceInfo?.$case === "tableSource" &&
+      object.sourceInfo?.tableSource !== undefined &&
+      object.sourceInfo?.tableSource !== null
+    ) {
+      message.sourceInfo = {
+        $case: "tableSource",
+        tableSource: TableSourceInfo.fromPartial(object.sourceInfo.tableSource),
+      };
+    }
     return message;
   },
 };
@@ -552,6 +612,7 @@ function createBaseTable(): Table {
     vnodeColIdx: undefined,
     valueIndices: [],
     definition: "",
+    handlePkConflict: false,
   };
 }
 
@@ -591,6 +652,7 @@ export const Table = {
         ? object.valueIndices.map((e: any) => Number(e))
         : [],
       definition: isSet(object.definition) ? String(object.definition) : "",
+      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
     };
   },
 
@@ -645,6 +707,7 @@ export const Table = {
       obj.valueIndices = [];
     }
     message.definition !== undefined && (obj.definition = message.definition);
+    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     return obj;
   },
 
@@ -687,6 +750,7 @@ export const Table = {
       : undefined;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
+    message.handlePkConflict = object.handlePkConflict ?? false;
     return message;
   },
 };

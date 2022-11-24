@@ -250,9 +250,14 @@ export interface UnpinSnapshotBeforeResponse {
   status: Status | undefined;
 }
 
+/**
+ * When `right_exclusive=false`, it represents [left, right], of which both boundary are open. When `right_exclusive=true`,
+ * it represents [left, right), of which right is exclusive.
+ */
 export interface KeyRange {
   left: Uint8Array;
   right: Uint8Array;
+  rightExclusive: boolean;
 }
 
 export interface TableOption {
@@ -435,6 +440,12 @@ export interface GetCompactionTasksResponse {
 export interface ReportCompactionTasksRequest {
   contextId: number;
   compactTask: CompactTask | undefined;
+  tableStatsChange: { [key: number]: TableStats };
+}
+
+export interface ReportCompactionTasksRequest_TableStatsChangeEntry {
+  key: number;
+  value: TableStats | undefined;
 }
 
 export interface ReportCompactionTasksResponse {
@@ -740,6 +751,23 @@ export function compactionConfig_CompactionModeToJSON(object: CompactionConfig_C
     default:
       return "UNRECOGNIZED";
   }
+}
+
+export interface TableStats {
+  totalKeySize: number;
+  totalValueSize: number;
+  totalKeyCount: number;
+  staleKeyCount: number;
+}
+
+export interface HummockVersionStats {
+  hummockVersionId: number;
+  tableStats: { [key: number]: TableStats };
+}
+
+export interface HummockVersionStats_TableStatsEntry {
+  key: number;
+  value: TableStats | undefined;
 }
 
 function createBaseSstableInfo(): SstableInfo {
@@ -1914,7 +1942,7 @@ export const UnpinSnapshotBeforeResponse = {
 };
 
 function createBaseKeyRange(): KeyRange {
-  return { left: new Uint8Array(), right: new Uint8Array() };
+  return { left: new Uint8Array(), right: new Uint8Array(), rightExclusive: false };
 }
 
 export const KeyRange = {
@@ -1922,6 +1950,7 @@ export const KeyRange = {
     return {
       left: isSet(object.left) ? bytesFromBase64(object.left) : new Uint8Array(),
       right: isSet(object.right) ? bytesFromBase64(object.right) : new Uint8Array(),
+      rightExclusive: isSet(object.rightExclusive) ? Boolean(object.rightExclusive) : false,
     };
   },
 
@@ -1931,6 +1960,7 @@ export const KeyRange = {
       (obj.left = base64FromBytes(message.left !== undefined ? message.left : new Uint8Array()));
     message.right !== undefined &&
       (obj.right = base64FromBytes(message.right !== undefined ? message.right : new Uint8Array()));
+    message.rightExclusive !== undefined && (obj.rightExclusive = message.rightExclusive);
     return obj;
   },
 
@@ -1938,6 +1968,7 @@ export const KeyRange = {
     const message = createBaseKeyRange();
     message.left = object.left ?? new Uint8Array();
     message.right = object.right ?? new Uint8Array();
+    message.rightExclusive = object.rightExclusive ?? false;
     return message;
   },
 };
@@ -2401,7 +2432,7 @@ export const GetCompactionTasksResponse = {
 };
 
 function createBaseReportCompactionTasksRequest(): ReportCompactionTasksRequest {
-  return { contextId: 0, compactTask: undefined };
+  return { contextId: 0, compactTask: undefined, tableStatsChange: {} };
 }
 
 export const ReportCompactionTasksRequest = {
@@ -2409,6 +2440,12 @@ export const ReportCompactionTasksRequest = {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
       compactTask: isSet(object.compactTask) ? CompactTask.fromJSON(object.compactTask) : undefined,
+      tableStatsChange: isObject(object.tableStatsChange)
+        ? Object.entries(object.tableStatsChange).reduce<{ [key: number]: TableStats }>((acc, [key, value]) => {
+          acc[Number(key)] = TableStats.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
@@ -2417,6 +2454,12 @@ export const ReportCompactionTasksRequest = {
     message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
     message.compactTask !== undefined &&
       (obj.compactTask = message.compactTask ? CompactTask.toJSON(message.compactTask) : undefined);
+    obj.tableStatsChange = {};
+    if (message.tableStatsChange) {
+      Object.entries(message.tableStatsChange).forEach(([k, v]) => {
+        obj.tableStatsChange[k] = TableStats.toJSON(v);
+      });
+    }
     return obj;
   },
 
@@ -2425,6 +2468,46 @@ export const ReportCompactionTasksRequest = {
     message.contextId = object.contextId ?? 0;
     message.compactTask = (object.compactTask !== undefined && object.compactTask !== null)
       ? CompactTask.fromPartial(object.compactTask)
+      : undefined;
+    message.tableStatsChange = Object.entries(object.tableStatsChange ?? {}).reduce<{ [key: number]: TableStats }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = TableStats.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseReportCompactionTasksRequest_TableStatsChangeEntry(): ReportCompactionTasksRequest_TableStatsChangeEntry {
+  return { key: 0, value: undefined };
+}
+
+export const ReportCompactionTasksRequest_TableStatsChangeEntry = {
+  fromJSON(object: any): ReportCompactionTasksRequest_TableStatsChangeEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? TableStats.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: ReportCompactionTasksRequest_TableStatsChangeEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? TableStats.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ReportCompactionTasksRequest_TableStatsChangeEntry>, I>>(
+    object: I,
+  ): ReportCompactionTasksRequest_TableStatsChangeEntry {
+    const message = createBaseReportCompactionTasksRequest_TableStatsChangeEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? TableStats.fromPartial(object.value)
       : undefined;
     return message;
   },
@@ -4194,6 +4277,115 @@ export const CompactionConfig = {
     message.targetFileSizeBase = object.targetFileSizeBase ?? 0;
     message.compactionFilterMask = object.compactionFilterMask ?? 0;
     message.maxSubCompaction = object.maxSubCompaction ?? 0;
+    return message;
+  },
+};
+
+function createBaseTableStats(): TableStats {
+  return { totalKeySize: 0, totalValueSize: 0, totalKeyCount: 0, staleKeyCount: 0 };
+}
+
+export const TableStats = {
+  fromJSON(object: any): TableStats {
+    return {
+      totalKeySize: isSet(object.totalKeySize) ? Number(object.totalKeySize) : 0,
+      totalValueSize: isSet(object.totalValueSize) ? Number(object.totalValueSize) : 0,
+      totalKeyCount: isSet(object.totalKeyCount) ? Number(object.totalKeyCount) : 0,
+      staleKeyCount: isSet(object.staleKeyCount) ? Number(object.staleKeyCount) : 0,
+    };
+  },
+
+  toJSON(message: TableStats): unknown {
+    const obj: any = {};
+    message.totalKeySize !== undefined && (obj.totalKeySize = Math.round(message.totalKeySize));
+    message.totalValueSize !== undefined && (obj.totalValueSize = Math.round(message.totalValueSize));
+    message.totalKeyCount !== undefined && (obj.totalKeyCount = Math.round(message.totalKeyCount));
+    message.staleKeyCount !== undefined && (obj.staleKeyCount = Math.round(message.staleKeyCount));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<TableStats>, I>>(object: I): TableStats {
+    const message = createBaseTableStats();
+    message.totalKeySize = object.totalKeySize ?? 0;
+    message.totalValueSize = object.totalValueSize ?? 0;
+    message.totalKeyCount = object.totalKeyCount ?? 0;
+    message.staleKeyCount = object.staleKeyCount ?? 0;
+    return message;
+  },
+};
+
+function createBaseHummockVersionStats(): HummockVersionStats {
+  return { hummockVersionId: 0, tableStats: {} };
+}
+
+export const HummockVersionStats = {
+  fromJSON(object: any): HummockVersionStats {
+    return {
+      hummockVersionId: isSet(object.hummockVersionId) ? Number(object.hummockVersionId) : 0,
+      tableStats: isObject(object.tableStats)
+        ? Object.entries(object.tableStats).reduce<{ [key: number]: TableStats }>((acc, [key, value]) => {
+          acc[Number(key)] = TableStats.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
+    };
+  },
+
+  toJSON(message: HummockVersionStats): unknown {
+    const obj: any = {};
+    message.hummockVersionId !== undefined && (obj.hummockVersionId = Math.round(message.hummockVersionId));
+    obj.tableStats = {};
+    if (message.tableStats) {
+      Object.entries(message.tableStats).forEach(([k, v]) => {
+        obj.tableStats[k] = TableStats.toJSON(v);
+      });
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<HummockVersionStats>, I>>(object: I): HummockVersionStats {
+    const message = createBaseHummockVersionStats();
+    message.hummockVersionId = object.hummockVersionId ?? 0;
+    message.tableStats = Object.entries(object.tableStats ?? {}).reduce<{ [key: number]: TableStats }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = TableStats.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseHummockVersionStats_TableStatsEntry(): HummockVersionStats_TableStatsEntry {
+  return { key: 0, value: undefined };
+}
+
+export const HummockVersionStats_TableStatsEntry = {
+  fromJSON(object: any): HummockVersionStats_TableStatsEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? TableStats.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: HummockVersionStats_TableStatsEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? TableStats.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<HummockVersionStats_TableStatsEntry>, I>>(
+    object: I,
+  ): HummockVersionStats_TableStatsEntry {
+    const message = createBaseHummockVersionStats_TableStatsEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? TableStats.fromPartial(object.value)
+      : undefined;
     return message;
   },
 };

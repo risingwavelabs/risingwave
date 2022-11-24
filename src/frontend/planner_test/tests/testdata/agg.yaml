@@ -60,13 +60,11 @@
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
-  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause
-    or be used in an aggregate function'
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
 - sql: |
     create table t(v1 int, v2 int);
     select sum(v1), v1 from t group by v2, v2;
-  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause
-    or be used in an aggregate function'
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select v3, min(v1) * avg(v1+v2) as agg from t group by v3;
@@ -117,8 +115,7 @@
     └─LogicalAgg { group_key: [(t.v1 + t.v2)], aggs: [] }
       └─LogicalProject { exprs: [(t.v1 + t.v2)] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-- name: "test logical_agg with complex group expression \nshould complain about nested
-    agg call \n"
+- name: "test logical_agg with complex group expression \nshould complain about nested agg call \n"
   sql: |
     create table t(v1 int, v2 int);
     select avg(sum(v1 + v2)) from t group by v1 + v2;
@@ -137,8 +134,7 @@
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v1 + v2;
-  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause
-    or be used in an aggregate function'
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
 - sql: |
     create table t(v1 int, v2 int);
     select count(v1 + v2) as cnt, sum(v1 + v2) as sum from t;
@@ -261,8 +257,7 @@
   sql: |
     create table t (v1 real, v2 int);
     select 1 from t group by v1 having v2 > 5;
-  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause
-    or be used in an aggregate function'
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
 - name: distinct without agg
   sql: |
     create table t (v1 int, v2 int);
@@ -555,8 +550,7 @@
   sql: |
     create table t(a int, b int);
     select avg(a) FILTER (WHERE abs(a)) AS avga from t;
-  binder_error: 'Invalid input syntax: the type of filter clause should be boolean,
-    but found Int32'
+  binder_error: 'Invalid input syntax: the type of filter clause should be boolean, but found Int32'
 - name: filter clause + subquery
   sql: |
     create table t(a int, b int);
@@ -575,8 +569,7 @@
   sql: |
     create table t(a int, b int);
     select abs(a) FILTER (WHERE a > 0) AS avga from t;
-  binder_error: 'Invalid input syntax: DISTINCT, ORDER BY or FILTER is only allowed
-    in aggregation functions, but `abs` is not an aggregation function'
+  binder_error: 'Invalid input syntax: DISTINCT, ORDER BY or FILTER is only allowed in aggregation functions, but `abs` is not an aggregation function'
 - name: prune column before filter
   sql: |
     create table t(v1 int, v2 int);
@@ -660,8 +653,7 @@
 - sql: |
     create table t(x int, y varchar);
     select string_agg(y, ',' order by y), count(distinct x) from t;
-  planner_error: 'Invalid input syntax: Order by aggregates are disallowed to occur
-    with distinct aggregates'
+  planner_error: 'Invalid input syntax: Order by aggregates are disallowed to occur with distinct aggregates'
 - sql: |
     create table t(v1 int, v2 int);
     with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
@@ -854,8 +846,7 @@
   sql: |
     create table t (v1 int, v2 int);
     select min(v1), unnest(array[2, v2]) from t;
-  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause
-    or be used in an aggregate function'
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
 - name: post-agg project set - grouped
   sql: |
     create table t (v1 int, v2 int);

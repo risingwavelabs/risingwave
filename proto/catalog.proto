@@ -14,6 +14,13 @@ message ColumnIndex {
   uint64 index = 1;
 }
 
+message SourceInfo {
+  oneof source_info {
+    StreamSourceInfo stream_source = 1;
+    TableSourceInfo table_source = 2;
+  }
+}
+
 message StreamSourceInfo {
   plan_common.RowFormatType row_format = 1;
   string row_schema_location = 2;
@@ -98,6 +105,7 @@ message Table {
   // `[0..columns.len()]`.
   repeated int32 value_indices = 19;
   string definition = 20;
+  bool handle_pk_conflict = 21;
 }
 
 message View {

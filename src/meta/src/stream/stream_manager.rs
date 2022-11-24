@@ -54,7 +54,7 @@ pub struct CreateStreamingJobContext {
     /// Upstream mview actor ids grouped by worker node id.
     pub upstream_worker_actors: HashMap<WorkerId, HashSet<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
-    pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
+    pub table_mview_map: HashMap<TableId, Vec<ActorId>>,
     /// Dependent table ids
     pub dependent_table_ids: HashSet<TableId>,
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
@@ -263,12 +263,12 @@ where
 
         let upstream_fragment_vnode_info = &self
             .fragment_manager
-            .get_sink_fragment_vnode_info(dependent_table_ids)
+            .get_mview_fragment_vnode_info(dependent_table_ids)
             .await?;
 
         let upstream_vnode_bitmap_info = &mut self
             .fragment_manager
-            .get_sink_vnode_bitmap_info(dependent_table_ids)
+            .get_mview_vnode_bitmap_info(dependent_table_ids)
             .await?;
 
         let tables_worker_actors = &self
@@ -387,7 +387,7 @@ where
         CreateStreamingJobContext {
             dispatchers,
             upstream_worker_actors,
-            table_sink_map,
+            table_mview_map,
             dependent_table_ids,
             table_properties,
             chain_fragment_upstream_table_map,
@@ -686,7 +686,7 @@ where
             .barrier_scheduler
             .run_command(Command::CreateStreamingJob {
                 table_fragments,
-                table_sink_map: table_sink_map.clone(),
+                table_mview_map: table_mview_map.clone(),
                 dispatchers: dispatchers.clone(),
                 init_split_assignment: split_assignment,
             })
@@ -1060,7 +1060,7 @@ mod tests {
             0,
             Fragment {
                 fragment_id: 0,
-                fragment_type: FragmentType::Sink as i32,
+                fragment_type: FragmentType::Mview as i32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 ..Default::default()
@@ -1102,15 +1102,15 @@ mod tests {
             );
         }
 
-        let sink_actor_ids = services
+        let mview_actor_ids = services
             .fragment_manager
-            .get_table_sink_actor_ids(&table_id)
+            .get_table_mview_actor_ids(&table_id)
             .await?;
         let actor_ids = services
             .fragment_manager
             .get_table_actor_ids(&HashSet::from([table_id]))
             .await?;
-        assert_eq!(sink_actor_ids, (0..=3).collect::<Vec<u32>>());
+        assert_eq!(mview_actor_ids, (0..=3).collect::<Vec<u32>>());
         assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
 
         // test drop materialized_view
@@ -1145,7 +1145,7 @@ mod tests {
             0,
             Fragment {
                 fragment_id: 0,
-                fragment_type: FragmentType::Sink as i32,
+                fragment_type: FragmentType::Mview as i32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 ..Default::default()
@@ -1191,9 +1191,9 @@ mod tests {
             );
         }
 
-        let sink_actor_ids = services
+        let mview_actor_ids = services
             .fragment_manager
-            .get_table_sink_actor_ids(&table_id)
+            .get_table_mview_actor_ids(&table_id)
             .await
             .unwrap();
         let actor_ids = services
@@ -1201,7 +1201,7 @@ mod tests {
             .get_table_actor_ids(&HashSet::from([table_id]))
             .await
             .unwrap();
-        assert_eq!(sink_actor_ids, (0..=3).collect::<Vec<u32>>());
+        assert_eq!(mview_actor_ids, (0..=3).collect::<Vec<u32>>());
         assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
         let notify = Arc::new(Notify::new());
         let notify1 = notify.clone();

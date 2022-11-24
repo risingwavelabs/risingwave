@@ -28,8 +28,10 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, user_key, FullKey, TableKey, TableKeyRange, UserKey,
 };
-use risingwave_hummock_sdk::{can_concat, HummockEpoch};
+use risingwave_hummock_sdk::key_range::KeyRangeCommon;
+use risingwave_hummock_sdk::{can_concat, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
+use sync_point::sync_point;
 
 use super::memtable::{ImmId, ImmutableMemtable};
 use super::state_store::StagingDataIterator;
@@ -62,22 +64,23 @@ pub type CommittedVersion = PinnedVersion;
 /// - Uncommitted SST: data that has been uploaded to persistent storage but not committed to
 ///   hummock version.
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StagingSstableInfo {
     // newer data comes first
-    sstable_infos: Vec<SstableInfo>,
+    sstable_infos: Vec<LocalSstableInfo>,
     /// Epochs whose data are included in the Sstable. The newer epoch comes first.
     /// The field must not be empty.
     epochs: Vec<HummockEpoch>,
-    #[allow(dead_code)]
     imm_ids: Vec<ImmId>,
+    imm_size: usize,
 }
 
 impl StagingSstableInfo {
     pub fn new(
-        sstable_infos: Vec<SstableInfo>,
+        sstable_infos: Vec<LocalSstableInfo>,
         epochs: Vec<HummockEpoch>,
         imm_ids: Vec<ImmId>,
+        imm_size: usize,
     ) -> Self {
         // the epochs are sorted from higher epoch to lower epoch
         assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2.partial_cmp(epoch1)));
@@ -85,11 +88,24 @@ impl StagingSstableInfo {
             sstable_infos,
             epochs,
             imm_ids,
+            imm_size,
         }
     }
 
-    pub fn sstable_infos(&self) -> &Vec<SstableInfo> {
+    pub fn sstable_infos(&self) -> &Vec<LocalSstableInfo> {
         &self.sstable_infos
+    }
+
+    pub fn imm_size(&self) -> usize {
+        self.imm_size
+    }
+
+    pub fn epochs(&self) -> &Vec<HummockEpoch> {
+        &self.epochs
+    }
+
+    pub fn imm_ids(&self) -> &Vec<ImmId> {
+        &self.imm_ids
     }
 }
 
@@ -155,6 +171,7 @@ impl StagingVersion {
                 staging_sst
                     .sstable_infos
                     .iter()
+                    .map(|sstable| &sstable.sst_info)
                     .filter(move |sstable| filter_single_sst(sstable, table_id, table_key_range))
             });
         (overlapped_imms, overlapped_ssts)
@@ -441,16 +458,14 @@ impl HummockVersionReader {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = user_key(
-                        &level.table_infos[table_info_idx]
-                            .key_range
-                            .as_ref()
-                            .unwrap()
-                            .right,
-                    )
-                    .cmp(encoded_user_key.as_ref());
+                    let ord = level.table_infos[table_info_idx]
+                        .key_range
+                        .as_ref()
+                        .unwrap()
+                        .compare_right_with_user_key(&encoded_user_key);
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
+                        sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_FILE");
                         continue;
                     }
 
@@ -503,22 +518,28 @@ impl HummockVersionReader {
             staging_iters.push(HummockIteratorUnion::First(imm.into_forward_iter()));
         }
         let mut staging_sst_iter_count = 0;
+        // encode once
+        let bloom_filter_key = if let Some(prefix) = read_options.prefix_hint.as_ref() {
+            Some(UserKey::new(read_options.table_id, TableKey(prefix)).encode())
+        } else {
+            None
+        };
+
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
                 .sstable_store
                 .sstable(sstable_info, &mut local_stats)
                 .in_span(Span::enter_with_local_parent("get_sstable"))
                 .await?;
-            if let Some(prefix) = read_options.prefix_hint.as_ref() {
+            if let Some(bloom_filter_key) = bloom_filter_key.as_ref() {
                 if !hit_sstable_bloom_filter(
                     table_holder.value(),
-                    UserKey::for_test(read_options.table_id, prefix)
-                        .encode()
-                        .as_slice(),
+                    bloom_filter_key.as_slice(),
                     &mut local_stats,
                 ) {
                     continue;
                 }
+
                 if !table_holder.value().meta.range_tombstone_list.is_empty()
                     && !read_options.ignore_range_tombstone
                 {
@@ -583,7 +604,7 @@ impl HummockVersionReader {
                     if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
                         if !hit_sstable_bloom_filter(
                             sstable.value(),
-                            UserKey::for_test(read_options.table_id, bloom_filter_key)
+                            UserKey::new(read_options.table_id, TableKey(bloom_filter_key))
                                 .encode()
                                 .as_slice(),
                             &mut local_stats,
@@ -614,16 +635,14 @@ impl HummockVersionReader {
                         .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
-                        if !hit_sstable_bloom_filter(
+                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref()
+                        && !hit_sstable_bloom_filter(
                             sstable.value(),
-                            UserKey::for_test(read_options.table_id, bloom_filter_key)
-                                .encode()
-                                .as_slice(),
+                            bloom_filter_key.as_slice(),
                             &mut local_stats,
-                        ) {
-                            continue;
-                        }
+                        )
+                    {
+                        continue;
                     }
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone

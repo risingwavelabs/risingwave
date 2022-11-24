@@ -21,7 +21,7 @@ use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 
 use self::managed_state::ManagedBarrierState;
-use crate::error::StreamResult;
+use crate::error::{StreamError, StreamResult};
 use crate::executor::*;
 use crate::task::ActorId;
 
@@ -60,7 +60,7 @@ enum BarrierState {
 /// barriers to and collect them from all actors, and finally report the progress.
 pub struct LocalBarrierManager {
     /// Stores all streaming job source sender.
-    senders: HashMap<ActorId, UnboundedSender<Barrier>>,
+    senders: HashMap<ActorId, Vec<UnboundedSender<Barrier>>>,
 
     /// Span of the current epoch.
     #[expect(dead_code)]
@@ -76,7 +76,7 @@ pub struct LocalBarrierManager {
 /// Information used after collection.
 pub struct CompleteReceiver {
     /// Notify all actors of completion of collection.
-    pub complete_receiver: Option<Receiver<CollectResult>>,
+    pub complete_receiver: Option<Receiver<StreamResult<CollectResult>>>,
     /// `barrier_inflight_timer`'s metrics.
     pub barrier_inflight_timer: Option<HistogramTimer>,
     /// Mark whether this is a checkpoint barrier.
@@ -101,7 +101,7 @@ impl LocalBarrierManager {
     /// Register sender for source actors, used to send barriers.
     pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
         tracing::trace!(actor_id = actor_id, "register sender");
-        self.senders.insert(actor_id, sender);
+        self.senders.entry(actor_id).or_default().push(sender);
     }
 
     /// Return all senders.
@@ -143,19 +143,24 @@ impl LocalBarrierManager {
                 assert!(!to_collect.is_empty());
 
                 let (tx, rx) = oneshot::channel();
-                state.transform_to_issued(barrier, to_collect, tx);
+                state.transform_to_issued(barrier, to_collect, tx)?;
                 Some(rx)
             }
         };
 
         for actor_id in to_send {
-            let sender = self
-                .senders
-                .get(&actor_id)
-                .unwrap_or_else(|| panic!("sender for actor {} does not exist", actor_id));
-            if let Err(err) = sender.send(barrier.clone()) {
-                // return err to trigger recovery.
-                bail!("failed to send barrier to actor {}: {:?}", actor_id, err)
+            match self.senders.get(&actor_id) {
+                Some(senders) => {
+                    for sender in senders {
+                        if let Err(err) = sender.send(barrier.clone()) {
+                            // return err to trigger recovery.
+                            bail!("failed to send barrier to actor {}: {:?}", actor_id, err)
+                        }
+                    }
+                }
+                None => {
+                    bail!("sender for actor {} does not exist", actor_id)
+                }
             }
         }
 
@@ -190,6 +195,11 @@ impl LocalBarrierManager {
             })
     }
 
+    // remove all senders
+    pub fn clear_senders(&mut self) {
+        self.senders.clear();
+    }
+
     /// remove all collect rx
     pub fn clear_collect_rx(&mut self) {
         self.collect_complete_receiver.clear();
@@ -205,7 +215,7 @@ impl LocalBarrierManager {
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
-    pub fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) -> StreamResult<()> {
+    pub fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}
@@ -214,8 +224,19 @@ impl LocalBarrierManager {
                 managed_state.collect(actor_id, barrier);
             }
         }
+    }
 
-        Ok(())
+    /// When a actor exit unexpectedly, it should report this event using this function, so meta
+    /// will notice actor's exit while collecting.
+    pub fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
+        match &mut self.state {
+            #[cfg(test)]
+            BarrierState::Local => {}
+
+            BarrierState::Managed(managed_state) => {
+                managed_state.notify_failure(actor_id, err);
+            }
+        }
     }
 }
 

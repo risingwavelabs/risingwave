@@ -17,6 +17,7 @@ use std::sync::Arc;
 use async_stack_trace::StackTrace;
 use itertools::Itertools;
 use risingwave_common::error::tonic_err;
+use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
@@ -181,10 +182,11 @@ impl StreamService for StreamServiceImpl {
                     |LocalSstableInfo {
                          compaction_group_id,
                          sst_info,
-                         ..
+                         table_stats,
                      }| GroupedSstableInfo {
                         compaction_group_id,
                         sst: Some(sst_info),
+                        table_stats_map: to_prost_table_stats_map(table_stats),
                     },
                 )
                 .collect_vec(),

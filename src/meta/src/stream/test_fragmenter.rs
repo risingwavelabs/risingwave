@@ -336,7 +336,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             table_id: 1,
             table: Some(make_internal_table(4, true)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
-            ignore_on_conflict: true,
+            handle_pk_conflict: false,
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
@@ -347,7 +347,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     fragments.push(StreamFragment {
         fragment_id: 0,
         node: Some(mview_node),
-        fragment_type: FragmentType::Sink as i32,
+        fragment_type: FragmentType::Mview as i32,
         is_singleton: true,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
@@ -409,7 +409,7 @@ async fn test_fragmenter() -> MetaResult<()> {
     let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
-    let sink_actor_ids = table_fragments.sink_actor_ids();
+    let sink_actor_ids = table_fragments.mview_actor_ids();
     let internal_table_ids = ctx.internal_table_ids();
     assert_eq!(actors.len(), 9);
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);

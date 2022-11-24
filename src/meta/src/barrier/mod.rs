@@ -25,7 +25,7 @@ use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo};
+use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableId};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -795,7 +795,7 @@ where
         checkpoint_control: &mut CheckpointControl<S>,
     ) -> MetaResult<()> {
         let prev_epoch = node.command_ctx.prev_epoch.0;
-        match &node.state {
+        match &mut node.state {
             Completed(resps) => {
                 // We must ensure all epochs are committed in ascending order,
                 // because the storage engine will query from new to old in the order in which
@@ -803,16 +803,20 @@ where
                 // See https://github.com/singularity-data/risingwave/issues/1251
                 let checkpoint = node.command_ctx.checkpoint;
                 let mut sst_to_worker: HashMap<HummockSstableId, WorkerId> = HashMap::new();
-                let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
-                for resp in resps {
-                    let mut t: Vec<LocalSstableInfo> = resp
+                let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
+                for resp in resps.iter_mut() {
+                    let mut t: Vec<ExtendedSstableInfo> = resp
                         .synced_sstables
-                        .iter()
-                        .cloned()
+                        .iter_mut()
                         .map(|grouped| {
-                            let sst = grouped.sst.expect("field not None");
-                            sst_to_worker.insert(sst.id, resp.worker_id);
-                            LocalSstableInfo::new(grouped.compaction_group_id, sst)
+                            let sst_info =
+                                std::mem::take(&mut grouped.sst).expect("field not None");
+                            sst_to_worker.insert(sst_info.id, resp.worker_id);
+                            ExtendedSstableInfo::new(
+                                grouped.compaction_group_id,
+                                sst_info,
+                                std::mem::take(&mut grouped.table_stats_map),
+                            )
                         })
                         .collect_vec();
                     synced_ssts.append(&mut t);

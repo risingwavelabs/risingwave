@@ -17,7 +17,7 @@ use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::catalog::ColumnIndex;
+use risingwave_pb::catalog::{ColumnIndex, SourceInfo};
 use risingwave_pb::stream_plan as pb;
 use smallvec::SmallVec;
 
@@ -658,7 +658,7 @@ pub fn to_stream_prost_body(
                 table_id: 0,
                 column_orders: me.table.pk().iter().map(FieldOrder::to_protobuf).collect(),
                 table: Some(me.table.to_internal_table_prost()),
-                ignore_on_conflict: true,
+                handle_pk_conflict: false,
             })
         }
         Node::ProjectSet(me) => {
@@ -698,7 +698,9 @@ pub fn to_stream_prost_body(
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
-                info: Some(me.info.clone()),
+                info: Some(SourceInfo {
+                    source_info: Some(me.info.clone()),
+                }),
                 row_id_index: me
                     .row_id_index
                     .map(|index| ColumnIndex { index: index as _ }),

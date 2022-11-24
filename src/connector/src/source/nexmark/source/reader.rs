@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -22,6 +22,7 @@ use itertools::Itertools;
 use nexmark::config::NexmarkConfig;
 use nexmark::event::EventType;
 use nexmark::EventGenerator;
+use tokio::time::Instant;
 
 use crate::source::nexmark::source::message::NexmarkMessage;
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
@@ -53,10 +54,6 @@ impl SplitReader for NexmarkSplitReader {
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let wall_clock_base_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
         let mut assigned_split = NexmarkSplit::default();
         let mut split_id = "".into();
         let mut split_index = 0;
@@ -79,29 +76,18 @@ impl SplitReader for NexmarkSplitReader {
         }
 
         Ok(NexmarkSplitReader {
-            generator: EventGenerator::new(
-                NexmarkConfig::from(&*properties),
-                events_so_far,
-                wall_clock_base_time,
-            ),
+            generator: EventGenerator::new(NexmarkConfig::from(&*properties))
+                .with_events_so_far(events_so_far)
+                .with_type_filter(properties.table_type),
             assigned_split,
             split_id,
             split_index,
             split_num,
             max_chunk_size: properties.max_chunk_size,
             event_num: properties.event_num,
-            event_type: match properties.table_type.as_str() {
-                "Person" => EventType::Person,
-                "Auction" => EventType::Auction,
-                "Bid" => EventType::Bid,
-                t => return Err(anyhow!("Unknown table type {t} found")),
-            },
+            event_type: properties.table_type,
             use_real_time: properties.use_real_time,
-            min_event_gap_in_ns: if properties.use_real_time {
-                0
-            } else {
-                properties.min_event_gap_in_ns
-            },
+            min_event_gap_in_ns: properties.min_event_gap_in_ns,
         })
     }
 
@@ -116,19 +102,10 @@ impl NexmarkSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_stream(mut self) {
         let mut last_event = None;
+        let wall_clock_base_time = Instant::now();
         loop {
             let mut msgs: Vec<SourceMessage> = vec![];
             let old_events_so_far = self.generator.events_so_far();
-
-            // Get unix timestamp in milliseconds
-            let current_timestamp_ms = if self.use_real_time {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64
-            } else {
-                0
-            };
 
             if let Some(event) = last_event.take() {
                 msgs.push(event);
@@ -137,15 +114,14 @@ impl NexmarkSplitReader {
             let mut finished = false;
 
             while (msgs.len() as u64) < self.max_chunk_size {
-                if self.event_num > 0 && self.generator.events_so_far() >= self.event_num as u64 {
+                let event = self.generator.next().unwrap();
+
+                if self.event_num > 0 && self.generator.events_so_far() > self.event_num as u64 {
                     finished = true;
                     break;
                 }
-                let event = self.generator.next().unwrap();
 
-                if event.event_type() != self.event_type
-                    || self.generator.events_so_far() % self.split_num as u64
-                        != self.split_index as u64
+                if self.generator.events_so_far() % self.split_num as u64 != self.split_index as u64
                 {
                     continue;
                 }
@@ -158,13 +134,8 @@ impl NexmarkSplitReader {
 
                 // When the generated timestamp is larger then current timestamp, if its the first
                 // event, sleep and continue. Otherwise, directly return.
-                if self.use_real_time
-                    && current_timestamp_ms < self.generator.wall_clock_base_time()
-                {
-                    tokio::time::sleep(Duration::from_millis(
-                        self.generator.wall_clock_base_time() - current_timestamp_ms,
-                    ))
-                    .await;
+                if self.use_real_time {
+                    tokio::time::sleep_until(wall_clock_base_time + self.generator.elapsed()).await;
 
                     last_event = Some(event.into());
                     break;
@@ -204,7 +175,7 @@ mod tests {
         let props = Box::new(NexmarkPropertiesInner {
             split_num: 2,
             min_event_gap_in_ns: 0,
-            table_type: "Bid".to_string(),
+            table_type: EventType::Bid,
             max_chunk_size: 5,
             ..Default::default()
         });

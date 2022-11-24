@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
 use risingwave_hummock_sdk::key::{user_key, FullKey};
-use risingwave_hummock_sdk::table_stats::TableStats;
+use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
 
@@ -113,7 +113,7 @@ pub struct SstableBuilder<W: SstableWriter> {
     /// `total_key_count` counts range_tombstones as well.
     total_key_count: u64,
     /// Per table stats.
-    table_stats: HashMap<u32, TableStats>,
+    table_stats: TableStatsMap,
     /// `last_table_stats` accumulates stats for `last_table_id` and finalizes it in `table_stats`
     /// by `finalize_last_table_stats`
     last_table_stats: TableStats,
@@ -218,8 +218,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
 
         self.block_builder
             .add(self.raw_key.as_ref(), self.raw_value.as_ref());
-        self.last_table_stats.total_key_size += self.raw_key.len();
-        self.last_table_stats.total_value_size += self.raw_value.len();
+        self.last_table_stats.total_key_size += full_key.encoded_len() as i64;
+        self.last_table_stats.total_value_size += value.encoded_len() as i64;
 
         self.last_full_key.clear();
         self.last_full_key.extend_from_slice(&self.raw_key);
@@ -256,6 +256,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.finalize_last_table_stats();
 
         self.build_block().await?;
+        let mut right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
         for tombstone in &self.range_tombstones {
             assert!(!tombstone.end_user_key.is_empty());
@@ -270,6 +271,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
                 largest_key =
                     FullKey::from_user_key(tombstone.end_user_key.clone(), HummockEpoch::MAX)
                         .encode();
+                right_exclusive = true;
             }
             if smallest_key.is_empty()
                 || KeyComparator::encoded_greater_than_unencoded(
@@ -310,6 +312,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             key_range: Some(risingwave_pb::hummock::KeyRange {
                 left: meta.smallest_key.clone(),
                 right: meta.largest_key.clone(),
+                right_exclusive,
             }),
             file_size: meta.estimated_size as u64,
             table_ids: self.table_ids.into_iter().collect(),
@@ -331,13 +334,13 @@ impl<W: SstableWriter> SstableBuilder<W> {
             let avg_key_size = self
                 .table_stats
                 .values()
-                .map(|s| s.total_key_size)
+                .map(|s| s.total_key_size as usize)
                 .sum::<usize>()
                 / self.table_stats.len();
             let avg_value_size = self
                 .table_stats
                 .values()
-                .map(|s| s.total_value_size)
+                .map(|s| s.total_value_size as usize)
                 .sum::<usize>()
                 / self.table_stats.len();
             (avg_key_size, avg_value_size)

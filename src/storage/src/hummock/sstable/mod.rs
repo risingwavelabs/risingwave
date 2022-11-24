@@ -169,6 +169,7 @@ impl Sstable {
             key_range: Some(KeyRange {
                 left: self.meta.smallest_key.clone(),
                 right: self.meta.largest_key.clone(),
+                right_exclusive: false,
             }),
             file_size: self.meta.estimated_size as u64,
             table_ids: vec![],
