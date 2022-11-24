@@ -18,6 +18,7 @@ mod empty;
 mod once;
 mod owned_row;
 mod project;
+mod repeat_n;
 
 use std::cmp::Ordering;
 use std::hash::{BuildHasher, Hasher};
@@ -29,6 +30,7 @@ pub use empty::{empty, Empty};
 pub use once::{once, Once};
 pub use owned_row::{Row, RowDeserializer};
 pub use project::Project;
+pub use repeat_n::{repeat_n, RepeatN};
 
 use crate::hash::HashCode;
 use crate::types::{hash_datum_ref, DatumRef, ToDatumRef, ToOwnedDatum};
@@ -85,7 +87,7 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     /// Serializes the row with value encoding and returns the bytes.
     #[inline]
     fn value_serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(self.len()); // each datum is at least 1 byte
         self.value_serialize_into(&mut buf);
         buf
     }
