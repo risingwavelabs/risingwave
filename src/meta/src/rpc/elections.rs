@@ -57,7 +57,7 @@ struct ElectionOutcome {
 /// `next_lease_id`: If the node wins, the lease used until the next election will have this id
 ///
 /// ## Example
-/// ```rust
+/// ```
 /// let mut this_node_is_leader = false;
 /// loop {
 ///     let outcome = campaign(&meta_store, &addr_clone, lease_time, init_lease_id).await;
