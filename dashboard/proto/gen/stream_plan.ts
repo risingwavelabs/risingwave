@@ -735,13 +735,9 @@ export interface StreamNode {
     | { $case: "groupTopN"; groupTopN: GroupTopNNode }
     | { $case: "sort"; sort: SortNode }
     | { $case: "watermarkFilter"; watermarkFilter: WatermarkFilterNode }
-<<<<<<< HEAD
     | { $case: "dml"; dml: DmlNode }
-    | { $case: "rowIdGen"; rowIdGen: RowIdGenNode };
-=======
     | { $case: "rowIdGen"; rowIdGen: RowIdGenNode }
     | { $case: "now"; now: NowNode };
->>>>>>> 5f8266a37 (add now executor builder)
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
