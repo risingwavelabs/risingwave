@@ -25,7 +25,7 @@ use crate::util::value_encoding;
 use crate::util::value_encoding::deserialize_datum;
 
 /// TODO(row trait): rename to `OwnedRow`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Row(pub Vec<Datum>);
 
 impl ops::Index<usize> for Row {
@@ -46,6 +46,23 @@ impl ops::IndexMut<usize> for Row {
 impl From<RowRef<'_>> for Row {
     fn from(row_ref: RowRef<'_>) -> Self {
         row_ref.into_owned_row()
+    }
+}
+
+impl PartialOrd for Row {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.0.len() != other.0.len() {
+            return None;
+        }
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+impl Ord for Row {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap_or_else(|| {
+            panic!("cannot compare rows with different lengths:\n left: {self:?}\nright: {other:?}")
+        })
     }
 }
 
