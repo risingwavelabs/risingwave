@@ -85,11 +85,11 @@ async fn campaign<S: MetaStore>(
 
     // below is old code
     // get old leader info and lease
-    let (current_leader_info, _) = match get_infos(&meta_store).await {
+    let current_leader_info = match get_infos(&meta_store).await {
         None => return None,
         Some(infos) => {
-            let (leader, lease) = infos;
-            (leader, lease)
+            let (leader, _) = infos;
+            leader
         }
     };
 
@@ -301,7 +301,11 @@ pub async fn run_elections<S: MetaStore>(
                 continue 'initial_election;
             }
         };
-        tracing::info!("current leader is {:?}", leader);
+        tracing::info!(
+            "Initial leader with address '{}' elected. New lease id is {}",
+            leader.node_address,
+            leader.lease_id
+        );
 
         // define all follow up elections and terms in handle
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -330,24 +334,34 @@ pub async fn run_elections<S: MetaStore>(
                     gen_rand_lease_id()
                 };
 
-                let (leader_info, _, is_leader) =
+                // TODO: rename election result into election outcome
+                let (leader_info, is_leader) =
                     match campaign(&meta_store, &addr, lease_time_sec, lease_id).await {
                         None => {
-                            tracing::info!("Election failed. Repeating election");
+                            tracing::info!("election failed. Repeating election");
                             continue 'election;
                         }
-                        Some(infos) => {
-                            tracing::info!("Election succeeded.");
-                            (
-                                infos.meta_leader_info,
-                                infos.meta_lease_info,
-                                infos.is_leader,
-                            )
+                        Some(outcome) => {
+                            tracing::info!("election finished");
+                            (outcome.meta_leader_info, outcome.is_leader)
                         }
                     };
 
+                tracing::info!(
+                    "Leader with address '{}' elected. New lease id is {}",
+                    leader_info.node_address,
+                    leader_info.lease_id
+                );
+
                 // signal to observers if this node currently is leader
-                leader_tx.send(is_leader).unwrap();
+                loop {
+                    if let Err(err) = leader_tx.send(is_leader) {
+                        tracing::info!("Error when sending leader update: {}", err);
+                        ticker.tick().await;
+                        continue;
+                    }
+                    break;
+                }
 
                 // election done. Enter the term of the current leader
                 // Leader stays in power until leader crashes
@@ -360,15 +374,6 @@ pub async fn run_elections<S: MetaStore>(
                         }
                         _ = ticker.tick() => {},
                     }
-
-                    //   if manage_term(&leader_info, lease_time_sec, &meta_store)
-                    //       .await
-                    //       .unwrap_or_default()
-                    //   {
-                    //       // leader failed, we need to elect a new leader
-                    //       wait = false;
-                    //       continue 'election;
-                    //   }
 
                     if let Some(leader_alive) =
                         manage_term(&leader_info, lease_time_sec, &meta_store).await
