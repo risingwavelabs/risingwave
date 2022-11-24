@@ -19,10 +19,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
-use replay_impl::{get_replay_notification_client, HummockInterface, Replay};
+use replay_impl::{get_replay_notification_client, GlobalReplayInterface};
 use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_hummock_trace::{
-    HummockReplay, Operation, Record, Replayable, Result, TraceReader, TraceReaderImpl,
+    GlobalReplay, HummockReplay, Operation, Record, Result, TraceReader, TraceReaderImpl,
 };
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -65,7 +65,7 @@ async fn run_replay(args: Args) -> Result<()> {
     Ok(())
 }
 
-async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn Replayable>> {
+async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn GlobalReplay>> {
     let config: ReplayConfig = load_config(&args.config).expect("failed to read config file");
     let config = Arc::new(config.storage);
 
@@ -117,9 +117,9 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn Replaya
     )
     .await
     .expect("fail to create a HummockStorage object");
-    let replay_interface = HummockInterface::new(storage, notifier);
+    let replay_interface = GlobalReplayInterface::new(storage, notifier);
 
-    Ok(Box::new(Replay::Global(replay_interface)))
+    Ok(Box::new(replay_interface))
 }
 
 #[derive(Serialize, Deserialize, Default)]

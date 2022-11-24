@@ -21,7 +21,8 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_trace::{
-    ReplayIter, Replayable, Result, TraceError, TraceReadOptions, TraceSubResp, TraceWriteOptions,
+    GlobalReplay, LocalReplay, ReplayIter, ReplayRead, ReplayStateStore, ReplayWrite, Result,
+    TraceError, TraceReadOptions, TraceSubResp, TraceWriteOptions,
 };
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
@@ -55,55 +56,128 @@ impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + Send + Sync> ReplayIt
     }
 }
 
-pub(crate) enum Replay {
-    Global(HummockInterface),
-    Local(LocalReplayInterface),
+pub(crate) struct GlobalReplayInterface {
+    store: HummockStorage,
+    notifier: NotificationManagerRef<MemStore>,
 }
 
-impl Replay {
-    fn from_trace_read_options(opt: TraceReadOptions) -> ReadOptions {
-        ReadOptions {
-            prefix_hint: opt.prefix_hint,
-            ignore_range_tombstone: opt.ignore_range_tombstone,
-            check_bloom_filter: opt.check_bloom_filter,
-            retention_seconds: opt.retention_seconds,
-            table_id: TableId {
-                table_id: opt.table_id,
-            },
-        }
-    }
-
-    fn from_trace_write_options(opt: TraceWriteOptions) -> WriteOptions {
-        WriteOptions {
-            epoch: opt.epoch,
-            table_id: TableId {
-                table_id: opt.table_id,
-            },
-        }
+impl GlobalReplayInterface {
+    pub(crate) fn new(store: HummockStorage, notifier: NotificationManagerRef<MemStore>) -> Self {
+        Self { store, notifier }
     }
 }
+impl GlobalReplay for GlobalReplayInterface {}
 
 #[async_trait::async_trait]
-impl Replayable for Replay {
+impl ReplayRead for GlobalReplayInterface {
+    async fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        epoch: u64,
+        read_options: TraceReadOptions,
+    ) -> Result<Box<dyn ReplayIter>> {
+        let read_options = from_trace_read_options(read_options);
+
+        let iter = self
+            .store
+            .iter(key_range, epoch, read_options)
+            .await
+            .map_err(|e| TraceError::IterFailed(format!("{e}")))?;
+
+        let iter = HummockReplayIter::new(iter);
+        Ok(Box::new(iter))
+    }
+
     async fn get(
         &self,
         key: Vec<u8>,
         epoch: u64,
         read_options: TraceReadOptions,
     ) -> Result<Option<Vec<u8>>> {
-        let read_options = Self::from_trace_read_options(read_options);
-        let value = match &self {
-            Replay::Global(interface) => interface
-                .store
-                .get(&key, epoch, read_options)
-                .await
-                .unwrap(),
-            Replay::Local(local) => local.0.get(&key, epoch, read_options).await.unwrap(),
-        };
+        let read_options = from_trace_read_options(read_options);
+
+        let value = self.store.get(&key, epoch, read_options).await.unwrap();
 
         Ok(value.map(|b| b.to_vec()))
     }
+}
 
+#[async_trait::async_trait]
+impl ReplayStateStore for GlobalReplayInterface {
+    async fn sync(&self, id: u64) -> Result<usize> {
+        let result: SyncResult = self
+            .store
+            .sync(id)
+            .await
+            .map_err(|e| TraceError::SyncFailed(format!("{e}")))?;
+        Ok(result.sync_size)
+    }
+
+    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
+        self.store.seal_epoch(epoch_id, is_checkpoint);
+    }
+
+    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
+        let prev_version_id = match &info {
+            Info::HummockVersionDeltas(deltas) => deltas.version_deltas.last().map(|d| d.prev_id),
+            _ => None,
+        };
+
+        let version = self.notifier.notify_hummock(op, info).await;
+
+        // wait till version updated
+        if let Some(prev_version_id) = prev_version_id {
+            self.store.wait_version_update(prev_version_id).await;
+        }
+        Ok(version)
+    }
+
+    async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay> {
+        let table_id = TableId { table_id };
+        let local_storage = self.store.new_local(table_id).await;
+        Box::new(LocalReplayInterface(local_storage))
+    }
+}
+pub(crate) struct LocalReplayInterface(LocalHummockStorage);
+
+impl LocalReplay for LocalReplayInterface {}
+
+#[async_trait::async_trait]
+impl ReplayRead for LocalReplayInterface {
+    async fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        epoch: u64,
+        read_options: TraceReadOptions,
+    ) -> Result<Box<dyn ReplayIter>> {
+        let read_options = from_trace_read_options(read_options);
+
+        let iter = self
+            .0
+            .iter(key_range, epoch, read_options)
+            .await
+            .map_err(|e| TraceError::IterFailed(format!("{e}")))?;
+
+        let iter = HummockReplayIter::new(iter);
+        Ok(Box::new(iter))
+    }
+
+    async fn get(
+        &self,
+        key: Vec<u8>,
+        epoch: u64,
+        read_options: TraceReadOptions,
+    ) -> Result<Option<Vec<u8>>> {
+        let read_options = from_trace_read_options(read_options);
+
+        let value = self.0.get(&key, epoch, read_options).await.unwrap();
+
+        Ok(value.map(|b| b.to_vec()))
+    }
+}
+
+#[async_trait::async_trait]
+impl ReplayWrite for LocalReplayInterface {
     async fn ingest(
         &self,
         mut kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
@@ -127,117 +201,17 @@ impl Replayable for Replay {
             .map(|(left, right)| (Bytes::from(left), Bytes::from(right)))
             .collect();
 
-        let write_options = Self::from_trace_write_options(write_options);
+        let write_options = from_trace_write_options(write_options);
 
-        let size = match &self {
-            Replay::Global(_) => {
-                unreachable!("GlobalStorage does not allow ingest");
-            }
-            Replay::Local(local) => local
-                .0
-                .ingest_batch(kv_pairs, delete_ranges, write_options)
-                .await
-                .map_err(|e| TraceError::IngestFailed(format!("{e}")))?,
-        };
+        let size = self
+            .0
+            .ingest_batch(kv_pairs, delete_ranges, write_options)
+            .await
+            .map_err(|e| TraceError::IngestFailed(format!("{e}")))?;
 
         Ok(size)
     }
-
-    async fn iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-        read_options: TraceReadOptions,
-    ) -> Result<Box<dyn ReplayIter>> {
-        let read_options = Self::from_trace_read_options(read_options);
-
-        let iter = match &self {
-            Replay::Global(interface) => interface.store.iter(key_range, epoch, read_options).await,
-            Replay::Local(local) => local.0.iter(key_range, epoch, read_options).await,
-        }
-        .map_err(|e| TraceError::IterFailed(format!("{e}")))?;
-
-        let iter = HummockReplayIter::new(iter);
-        Ok(Box::new(iter))
-    }
-
-    async fn sync(&self, id: u64) -> Result<usize> {
-        match &self {
-            Self::Global(interface) => {
-                let result: SyncResult = interface
-                    .store
-                    .sync(id)
-                    .await
-                    .map_err(|e| TraceError::SyncFailed(format!("{e}")))?;
-                Ok(result.sync_size)
-            }
-            Self::Local(_) => {
-                unreachable!("LocalStorage does not allow sync")
-            }
-        }
-    }
-
-    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
-        match &self {
-            Self::Global(interface) => {
-                interface.store.seal_epoch(epoch_id, is_checkpoint);
-            }
-            Self::Local(_) => {
-                unreachable!("LocalStorage does not allow seal_epoch")
-            }
-        }
-    }
-
-    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
-        match &self {
-            Self::Global(interface) => {
-                let prev_version_id = match &info {
-                    Info::HummockVersionDeltas(deltas) => {
-                        deltas.version_deltas.last().map(|d| d.prev_id)
-                    }
-                    _ => None,
-                };
-
-                let version = interface.notifier.notify_hummock(op, info).await;
-
-                // wait till version updated
-                if let Some(prev_version_id) = prev_version_id {
-                    interface.store.wait_version_update(prev_version_id).await;
-                }
-                Ok(version)
-            }
-            Self::Local(_) => {
-                unreachable!("LocalStorage does not allow seal_epoch")
-            }
-        }
-    }
-
-    async fn new_local(&self, table_id: u32) -> Box<dyn Replayable> {
-        match &self {
-            Self::Global(interface) => {
-                let table_id = TableId { table_id };
-                let local_storage = interface.store.new_local(table_id).await;
-                Box::new(Self::Local(LocalReplayInterface(local_storage)))
-            }
-            Self::Local(_) => {
-                unreachable!("should not create a local storage from local storage")
-            }
-        }
-    }
 }
-
-pub(crate) struct HummockInterface {
-    store: HummockStorage,
-    notifier: NotificationManagerRef<MemStore>,
-}
-
-impl HummockInterface {
-    pub(crate) fn new(store: HummockStorage, notifier: NotificationManagerRef<MemStore>) -> Self {
-        Self { store, notifier }
-    }
-}
-
-pub(crate) struct LocalReplayInterface(LocalHummockStorage);
 
 pub struct ReplayNotificationClient<S: MetaStore> {
     addr: HostAddr,
@@ -305,5 +279,26 @@ impl<T: Send + 'static> Channel for ReplayChannel<T> {
             None => Ok(None),
             Some(result) => result.map(|r| Some(r)),
         }
+    }
+}
+
+fn from_trace_read_options(opt: TraceReadOptions) -> ReadOptions {
+    ReadOptions {
+        prefix_hint: opt.prefix_hint,
+        ignore_range_tombstone: opt.ignore_range_tombstone,
+        check_bloom_filter: opt.check_bloom_filter,
+        retention_seconds: opt.retention_seconds,
+        table_id: TableId {
+            table_id: opt.table_id,
+        },
+    }
+}
+
+fn from_trace_write_options(opt: TraceWriteOptions) -> WriteOptions {
+    WriteOptions {
+        epoch: opt.epoch,
+        table_id: TableId {
+            table_id: opt.table_id,
+        },
     }
 }

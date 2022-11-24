@@ -18,7 +18,7 @@ mod worker;
 use std::ops::Bound;
 
 #[cfg(test)]
-use mockall::automock;
+use mockall::{automock, mock};
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 pub use runner::*;
 pub(crate) use worker::*;
@@ -41,6 +41,8 @@ pub(crate) enum WorkerId {
     Local(u64),
     OneShot(u64),
 }
+pub trait LocalReplay: ReplayRead + ReplayWrite + Send + Sync {}
+pub trait GlobalReplay: ReplayRead + ReplayStateStore + Send + Sync {}
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
@@ -68,6 +70,42 @@ pub trait Replayable: Send + Sync {
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
     async fn new_local(&self, table_id: u32) -> Box<dyn Replayable>;
 }
+#[cfg_attr(test, automock)]
+#[async_trait::async_trait]
+pub trait ReplayRead {
+    async fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        epoch: u64,
+        read_options: TraceReadOptions,
+    ) -> Result<Box<dyn ReplayIter>>;
+    async fn get(
+        &self,
+        key: Vec<u8>,
+        epoch: u64,
+        read_options: TraceReadOptions,
+    ) -> Result<Option<Vec<u8>>>;
+}
+
+#[cfg_attr(test, automock)]
+#[async_trait::async_trait]
+pub trait ReplayWrite {
+    async fn ingest(
+        &self,
+        kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+        delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
+        write_options: TraceWriteOptions,
+    ) -> Result<usize>;
+}
+
+#[cfg_attr(test, automock)]
+#[async_trait::async_trait]
+pub trait ReplayStateStore {
+    async fn sync(&self, id: u64) -> Result<usize>;
+    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
+    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
+    async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay>;
+}
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
@@ -75,18 +113,70 @@ pub trait ReplayIter: Send + Sync {
     async fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)>;
 }
 
-#[macro_export]
-macro_rules! dispatch_replay {
-    ($storage_type:ident, $replay:ident, $local_storages:ident, $table_id:expr) => {
-        match $storage_type {
-            StorageType::Global => $replay,
-            StorageType::Local(_) => {
-                if let Entry::Vacant(e) = $local_storages.entry($table_id) {
-                    e.insert($replay.new_local($table_id).await)
-                } else {
-                    $local_storages.get(&$table_id).unwrap()
-                }
-            }
-        }
-    };
+// define mock trait for replay interfaces
+#[cfg(test)]
+mock! {
+    pub GlobalReplayInterface{}
+    #[async_trait::async_trait]
+    impl ReplayRead for GlobalReplayInterface{
+        async fn iter(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            epoch: u64,
+            read_options: TraceReadOptions,
+        ) -> Result<Box<dyn ReplayIter>>;
+        async fn get(
+            &self,
+            key: Vec<u8>,
+            epoch: u64,
+            read_options: TraceReadOptions,
+        ) -> Result<Option<Vec<u8>>>;
+    }
+    #[async_trait::async_trait]
+    impl ReplayWrite for GlobalReplayInterface{
+        async fn ingest(
+            &self,
+            kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+            delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
+            write_options: TraceWriteOptions,
+        ) -> Result<usize>;
+    }
+    #[async_trait::async_trait]
+    impl ReplayStateStore for GlobalReplayInterface{
+        async fn sync(&self, id: u64) -> Result<usize>;
+        async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
+        async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
+        async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay>;
+    }
+    impl GlobalReplay for GlobalReplayInterface{}
+}
+
+#[cfg(test)]
+mock! {
+    pub LocalReplayInterface{}
+    #[async_trait::async_trait]
+    impl ReplayRead for LocalReplayInterface{
+        async fn iter(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            epoch: u64,
+            read_options: TraceReadOptions,
+        ) -> Result<Box<dyn ReplayIter>>;
+        async fn get(
+            &self,
+            key: Vec<u8>,
+            epoch: u64,
+            read_options: TraceReadOptions,
+        ) -> Result<Option<Vec<u8>>>;
+    }
+    #[async_trait::async_trait]
+    impl ReplayWrite for LocalReplayInterface{
+        async fn ingest(
+            &self,
+            kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+            delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
+            write_options: TraceWriteOptions,
+        ) -> Result<usize>;
+    }
+    impl LocalReplay for LocalReplayInterface{}
 }
