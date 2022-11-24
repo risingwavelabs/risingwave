@@ -22,7 +22,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, Row2};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
@@ -307,7 +307,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 
         let (point_gets, range_scans): (Vec<ScanRange>, Vec<ScanRange>) = scan_ranges
             .into_iter()
-            .partition(|x| x.pk_prefix.size() == table.pk_indices().len());
+            .partition(|x| x.pk_prefix.len() == table.pk_indices().len());
 
         let mut data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
         // Point Get
@@ -345,7 +345,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         histogram: Option<Histogram>,
     ) -> Result<Option<Row>> {
         let pk_prefix = scan_range.pk_prefix;
-        assert!(pk_prefix.size() == table.pk_indices().len());
+        assert!(pk_prefix.len() == table.pk_indices().len());
 
         let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
@@ -375,7 +375,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         } = scan_range;
 
         // Range Scan.
-        assert!(pk_prefix.size() < table.pk_indices().len());
+        assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
             .batch_iter_with_pk_bounds(
                 HummockReadEpoch::Committed(epoch),

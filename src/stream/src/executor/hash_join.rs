@@ -752,12 +752,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         row_matched: &Row,
         matched_start_pos: usize,
     ) -> Row {
-        let mut new_row = vec![None; row_update.size() + row_matched.size()];
+        let mut new_row = vec![None; row_update.size() + row_matched.len()];
 
         for (i, datum_ref) in row_update.values().enumerate() {
             new_row[i + update_start_pos] = datum_ref.to_owned_datum();
         }
-        for i in 0..row_matched.size() {
+        for i in 0..row_matched.len() {
             new_row[i + matched_start_pos] = row_matched[i].clone();
         }
         Row(new_row)

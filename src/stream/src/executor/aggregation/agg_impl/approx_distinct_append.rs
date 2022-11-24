@@ -18,6 +18,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::row::Row2;
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_storage::StateStore;
 
@@ -125,7 +126,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
         };
         if let Some(state_row) = state_row {
             if let ScalarImpl::List(list) = state_row
-                [group_key.map(|row| row.size()).unwrap_or_default()]
+                [group_key.map(|row| row.len()).unwrap_or_default()]
             .as_ref()
             .unwrap()
             {

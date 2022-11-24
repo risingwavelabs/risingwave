@@ -14,7 +14,7 @@
 
 //! An owned row type with a `Vec<Datum>`.
 
-use std::{cmp, ops};
+use std::ops;
 
 use super::{Row2, RowExt};
 use crate::array::RowRef;
@@ -115,13 +115,6 @@ impl Row {
         let mut bytes = vec![];
         serializer.serialize((&self).project(key_indices), &mut bytes);
         bytes
-    }
-
-    /// Return number of cells in the row.
-    ///
-    /// TODO(row trait): use `Row::len` instead.
-    pub fn size(&self) -> usize {
-        self.0.len()
     }
 
     /// TODO(row trait): use `Row::iter` instead.
