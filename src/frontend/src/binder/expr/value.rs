@@ -166,7 +166,7 @@ impl Binder {
         }
     }
 
-    /// `Row(...)` is represented as an function call at the binder stage.
+    /// `Row::new(...)` is represented as an function call at the binder stage.
     pub(super) fn bind_row(&mut self, exprs: Vec<Expr>) -> Result<ExprImpl> {
         let exprs = exprs
             .into_iter()

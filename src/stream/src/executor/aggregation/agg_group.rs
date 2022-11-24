@@ -175,7 +175,7 @@ impl<S: StateStore> AggGroup<S> {
                 .map(|(state, storage)| state.get_output(storage, self.group_key.as_ref())),
         )
         .await
-        .map(Row)
+        .map(Row::new)
     }
 
     /// Reset all in-memory states to their initial state, i.e. to reset all agg state structs to

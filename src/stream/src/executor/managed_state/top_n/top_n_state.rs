@@ -301,7 +301,8 @@ mod tests {
         order_by_len: usize,
         cache_key_serde: &(OrderedRowSerde, OrderedRowSerde),
     ) -> CacheKey {
-        let (cache_key_first, cache_key_second) = pk.0.split_at(order_by_len);
+        let pk = pk.into_inner();
+        let (cache_key_first, cache_key_second) = pk.split_at(order_by_len);
         let mut cache_key_first_bytes = vec![];
         let mut cache_key_second_bytes = vec![];
         cache_key_serde.0.serialize(

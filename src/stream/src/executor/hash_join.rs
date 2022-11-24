@@ -760,7 +760,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         for i in 0..row_matched.len() {
             new_row[i + matched_start_pos] = row_matched[i].clone();
         }
-        Row(new_row)
+        Row::new(new_row)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

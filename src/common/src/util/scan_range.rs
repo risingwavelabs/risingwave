@@ -189,7 +189,7 @@ mod tests {
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
-        let vnode = Row(vec![
+        let vnode = Row::new(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
         ])
@@ -215,7 +215,7 @@ mod tests {
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(114514)));
-        let vnode = Row(vec![
+        let vnode = Row::new(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
             Some(ScalarImpl::from(114514)),

@@ -76,14 +76,16 @@ impl ScanRange {
         scan_range: ProstScanRange,
         mut pk_types: impl Iterator<Item = DataType>,
     ) -> Result<Self> {
-        let pk_prefix = Row(scan_range
-            .eq_conds
-            .iter()
-            .map(|v| {
-                let ty = pk_types.next().unwrap();
-                deserialize_datum(v.as_slice(), &ty)
-            })
-            .try_collect()?);
+        let pk_prefix = Row::new(
+            scan_range
+                .eq_conds
+                .iter()
+                .map(|v| {
+                    let ty = pk_types.next().unwrap();
+                    deserialize_datum(v.as_slice(), &ty)
+                })
+                .try_collect()?,
+        );
         if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
             return Ok(Self {
                 pk_prefix,

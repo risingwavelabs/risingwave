@@ -25,7 +25,7 @@ use crate::util::value_encoding::deserialize_datum;
 
 /// TODO(row trait): rename to `OwnedRow`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Row(pub Vec<Datum>);
+pub struct Row(Vec<Datum>); // made private to avoid abuse
 
 /// Do not implement `IndexMut` to make it immutable.
 impl ops::Index<usize> for Row {
@@ -56,6 +56,11 @@ impl Ord for Row {
 impl Row {
     pub fn new(values: Vec<Datum>) -> Self {
         Self(values)
+    }
+
+    /// Retrieve the underlying [`Vec<Datum>`].
+    pub fn into_inner(self) -> Vec<Datum> {
+        self.0
     }
 
     /// Returns a reference to an empty row.
@@ -159,7 +164,7 @@ mod tests {
 
     #[test]
     fn row_value_encode_decode() {
-        let row = Row(vec![
+        let row = Row::new(vec![
             Some(ScalarImpl::Utf8("string".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Int16(1)),
@@ -192,7 +197,7 @@ mod tests {
     fn test_hash_row() {
         let hash_builder = Crc32FastBuilder;
 
-        let row1 = Row(vec![
+        let row1 = Row::new(vec![
             Some(ScalarImpl::Utf8("string".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Int16(1)),
@@ -203,7 +208,7 @@ mod tests {
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
-        let row2 = Row(vec![
+        let row2 = Row::new(vec![
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
             Some(ScalarImpl::Utf8("string".into())),
             Some(ScalarImpl::Bool(true)),

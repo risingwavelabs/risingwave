@@ -25,7 +25,7 @@ use crate::array::data_chunk_iter::RowRef;
 use crate::array::{ArrayBuilderImpl, StructValue};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
-use crate::row::Row;
+use crate::row::{Row, Row2};
 use crate::types::struct_type::StructType;
 use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
@@ -72,7 +72,7 @@ impl DataChunk {
             .collect::<Vec<_>>();
 
         for row in rows {
-            for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
+            for (datum, builder) in row.iter().zip_eq(array_builders.iter_mut()) {
                 builder.append_datum(datum);
             }
         }

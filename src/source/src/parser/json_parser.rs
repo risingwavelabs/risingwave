@@ -338,7 +338,7 @@ mod tests {
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
-        let row = row.into_owned_row().0;
+        let row = row.into_owned_row().into_inner();
 
         let expected = vec![
             Some(ScalarImpl::Struct(StructValue::new(vec![

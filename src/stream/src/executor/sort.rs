@@ -15,7 +15,6 @@
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
-use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
@@ -288,19 +287,15 @@ impl<S: StateStore> SortExecutor<S> {
             let mut stream = select_all(values_per_vnode);
             while let Some(storage_result) = stream.next().await {
                 // Insert the data into buffer.
-                let row = storage_result?.into_owned();
-                let timestamp_datum = row.0.get(self.sort_column_index).ok_or_else(|| {
-                    anyhow!(
-                        "column index {} out of range in row {:?}",
-                        self.sort_column_index,
-                        row
-                    )
-                })?;
+                let row: Row = storage_result?.into_owned();
+                let timestamp_datum = row
+                    .datum_at(self.sort_column_index)
+                    .to_owned_datum()
+                    .unwrap();
                 let pk = (&row).project(&self.pk_indices).into_owned_row();
                 // Null event time should not exist in the row since the `WatermarkFilter` before
                 // the `Sort` will filter out the Null event time.
-                self.buffer
-                    .insert((timestamp_datum.clone().unwrap(), pk), (row, true));
+                self.buffer.insert((timestamp_datum, pk), (row, true));
             }
         }
         Ok(())

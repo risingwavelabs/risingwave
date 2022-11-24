@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, Row2, RowExt};
 
 pub mod row_serde_util;
 
@@ -51,11 +51,7 @@ impl ColumnMapping {
     }
 
     /// Project a row with this mapping
-    pub fn project(&self, mut origin_row: Row) -> Row {
-        let mut output_row = Vec::with_capacity(self.output_indices.len());
-        for col_idx in &self.output_indices {
-            output_row.push(origin_row.0[*col_idx].take());
-        }
-        Row(output_row)
+    pub fn project(&self, origin_row: Row) -> Row {
+        origin_row.project(&self.output_indices).into_owned_row()
     }
 }

@@ -438,12 +438,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 let (row, degree) = row_and_degree?;
                 let pk = row
                     .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
-                let degree_i64 = degree
-                    .0
+                let degree_i64: ScalarImpl = degree
+                    .iter()
                     .last()
-                    .cloned()
                     .context("Empty row")?
-                    .context("Fail to fetch a degree")?;
+                    .context("Fail to fetch a degree")?
+                    .into_scalar_impl();
                 entry_state.insert(
                     pk,
                     JoinRow::new(row.into_owned(), *degree_i64.as_int64() as u64).encode(),

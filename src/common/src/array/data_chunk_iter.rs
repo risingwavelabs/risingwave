@@ -156,10 +156,12 @@ impl<'a> RowRef<'a> {
     ///
     /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
     pub fn row_by_indices(&self, indices: &[usize]) -> Row {
-        Row(indices
-            .iter()
-            .map(|&idx| self.value_at(idx).to_owned_datum())
-            .collect_vec())
+        Row::new(
+            indices
+                .iter()
+                .map(|&idx| self.value_at(idx).to_owned_datum())
+                .collect_vec(),
+        )
     }
 
     /// Get an iterator of datum refs by the given `indices` from current row ref.
