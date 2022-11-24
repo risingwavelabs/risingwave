@@ -29,8 +29,8 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, hash_datum, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarRefImpl,
+    deserialize_datum_from, hash_datum, serialize_datum_into, to_datum_ref, DataType, Datum,
+    DatumRef, Scalar, ScalarRefImpl,
 };
 
 #[derive(Debug)]
@@ -362,7 +362,7 @@ impl<'a> StructRef<'a> {
     ) -> memcomparable::Result<()> {
         iter_fields_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_ref_into(&datum_ref, serializer)?
+                serialize_datum_into(datum_ref, serializer)?
             }
             Ok(())
         })

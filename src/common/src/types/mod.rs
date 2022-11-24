@@ -542,39 +542,14 @@ pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
     datum.to_datum_ref()
 }
 
-// TODO: specify `NULL FIRST` or `NULL LAST`.
-pub fn serialize_datum_ref_into(
-    datum_ref: &DatumRef<'_>,
-    serializer: &mut memcomparable::Serializer<impl BufMut>,
-) -> memcomparable::Result<()> {
-    // By default, `null` is treated as largest in PostgreSQL.
-    if let Some(datum_ref) = datum_ref {
-        0u8.serialize(&mut *serializer)?;
-        datum_ref.serialize(serializer)?;
-    } else {
-        1u8.serialize(serializer)?;
-    }
-    Ok(())
-}
-
-pub fn serialize_datum_ref_not_null_into(
-    datum_ref: &DatumRef<'_>,
-    serializer: &mut memcomparable::Serializer<impl BufMut>,
-) -> memcomparable::Result<()> {
-    datum_ref
-        .as_ref()
-        .expect("datum cannot be null")
-        .serialize(serializer)
-}
-
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 // TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_into(
-    datum: &Datum,
+    datum: impl ToDatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
     // By default, `null` is treated as largest in PostgreSQL.
-    if let Some(datum) = datum {
+    if let Some(datum) = datum.to_datum_ref() {
         0u8.serialize(&mut *serializer)?;
         datum.serialize(serializer)?;
     } else {
@@ -585,10 +560,11 @@ pub fn serialize_datum_into(
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 pub fn serialize_datum_not_null_into(
-    datum: &Datum,
+    datum: impl ToDatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
     datum
+        .to_datum_ref()
         .as_ref()
         .expect("datum cannot be null")
         .serialize(serializer)

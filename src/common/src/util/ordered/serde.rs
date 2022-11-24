@@ -19,10 +19,7 @@ use itertools::Itertools;
 use crate::array::RowRef;
 use crate::error::Result;
 use crate::row::{Row, Row2};
-use crate::types::{
-    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
-    DatumRef,
-};
+use crate::types::{deserialize_datum_from, serialize_datum_into, DataType, Datum, DatumRef};
 use crate::util::sort_util::OrderType;
 /// `OrderedRowSerde` is responsible for serializing and deserializing Ordered Row.
 #[derive(Clone)]
@@ -84,7 +81,7 @@ impl OrderedRowSerde {
         for (datum, order_type) in datum_refs.zip_eq(self.order_types.iter()) {
             let mut serializer = memcomparable::Serializer::new(vec![]);
             serializer.set_reverse(*order_type == OrderType::Descending);
-            serialize_datum_ref_into(&datum, &mut serializer).unwrap();
+            serialize_datum_into(datum, &mut serializer).unwrap();
             append_to.extend(serializer.into_inner());
         }
     }

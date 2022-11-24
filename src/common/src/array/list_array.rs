@@ -29,8 +29,8 @@ use super::{
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, hash_datum, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarRefImpl,
+    deserialize_datum_from, hash_datum, serialize_datum_into, to_datum_ref, DataType, Datum,
+    DatumRef, Scalar, ScalarRefImpl,
 };
 
 /// This is a naive implementation of list array.
@@ -432,7 +432,7 @@ impl<'a> ListRef<'a> {
         let mut inner_serializer = memcomparable::Serializer::new(vec![]);
         iter_elems_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_ref_into(&datum_ref, &mut inner_serializer)?
+                serialize_datum_into(datum_ref, &mut inner_serializer)?
             }
         });
         serializer.serialize_bytes(&inner_serializer.into_inner())
