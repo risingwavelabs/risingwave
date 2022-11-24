@@ -16,12 +16,14 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use itertools::Itertools;
-use risingwave_common::array::Row;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, Result};
-use risingwave_common::hash::{HashKey, HashKeyDispatcher};
-use risingwave_common::types::{DataType, Datum, ParallelUnitId, VirtualNode, VnodeMapping};
+use risingwave_common::hash::{
+    HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode, VnodeMapping,
+};
+use risingwave_common::row::Row;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
@@ -102,7 +104,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
 
         list.iter().for_each(|(scan_range, vnode)| {
             scan_ranges.push(scan_range.to_protobuf());
-            vnode_bitmap.set(*vnode as usize, true);
+            vnode_bitmap.set(vnode.to_index(), true);
         });
 
         let row_seq_scan_node = NodeBody::RowSeqScan(RowSeqScanNode {
@@ -188,7 +190,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
         }
 
         let vnode = self.get_virtual_node(&scan_range)?;
-        let parallel_unit_id = self.vnode_mapping[vnode as usize];
+        let parallel_unit_id = self.vnode_mapping[vnode.to_index()];
 
         let list = self
             .pu_to_scan_range_mapping

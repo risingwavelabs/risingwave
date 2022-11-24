@@ -286,17 +286,24 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates aggregate expressions. For internal / unsupported aggregators, we return `None`.
     fn make_agg_expr(&mut self, func: AggKind, exprs: &[Expr], distinct: bool) -> Option<Expr> {
         use AggKind as A;
-
         match func {
             A::Sum | A::Sum0 => Some(Expr::Function(make_agg_func("sum", exprs, distinct))),
             A::Min => Some(Expr::Function(make_agg_func("min", exprs, distinct))),
             A::Max => Some(Expr::Function(make_agg_func("max", exprs, distinct))),
             A::Count => Some(Expr::Function(make_agg_func("count", exprs, distinct))),
             A::Avg => Some(Expr::Function(make_agg_func("avg", exprs, distinct))),
-            A::StringAgg => Some(Expr::Function(make_agg_func("string_agg", exprs, distinct))),
+            A::StringAgg => {
+                // distinct and non_distinct_string_agg are incompatible according to
+                // https://github.com/risingwavelabs/risingwave/blob/a703dc7d725aa995fecbaedc4e9569bc9f6ca5ba/src/frontend/src/optimizer/plan_node/logical_agg.rs#L394
+                if self.is_distinct_allowed && !distinct {
+                    None
+                } else {
+                    Some(Expr::Function(make_agg_func("string_agg", exprs, distinct)))
+                }
+            }
             A::FirstValue => None,
             A::ApproxCountDistinct => {
-                if distinct {
+                if self.is_distinct_allowed {
                     None
                 } else {
                     Some(Expr::Function(make_agg_func(
@@ -415,19 +422,17 @@ fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
 /// This is the function that generate aggregate function.
 /// DISTINCT , ORDER BY or FILTER is allowed in aggregation functions。
 /// Currently, distinct is allowed only, other and others rule is TODO: <https://github.com/risingwavelabs/risingwave/issues/3933>
-fn make_agg_func(func_name: &str, exprs: &[Expr], _distinct: bool) -> Function {
+fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool) -> Function {
     let args = exprs
         .iter()
         .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
         .collect();
 
-    // Distinct Aggregate shall be workaround until the following issue is resolved
-    // https://github.com/risingwavelabs/risingwave/issues/4220
     Function {
         name: ObjectName(vec![Ident::new(func_name)]),
         args,
         over: None,
-        distinct: false,
+        distinct,
         order_by: vec![],
         filter: None,
     }

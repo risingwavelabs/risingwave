@@ -1,7 +1,7 @@
 /* eslint-disable */
-import { ColumnIndex, StreamSourceInfo, Table, TableSourceInfo } from "./catalog";
+import { ColumnIndex, SourceInfo, Table } from "./catalog";
 import { Buffer } from "./common";
-import { Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
+import { DataType, Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem } from "./expr";
 import {
   ColumnCatalog,
@@ -16,6 +16,56 @@ import {
 import { ConnectorSplits } from "./source";
 
 export const protobufPackage = "stream_plan";
+
+export const ChainType = {
+  CHAIN_UNSPECIFIED: "CHAIN_UNSPECIFIED",
+  /** CHAIN - CHAIN is corresponding to the chain executor. */
+  CHAIN: "CHAIN",
+  /** REARRANGE - REARRANGE is corresponding to the rearranged chain executor. */
+  REARRANGE: "REARRANGE",
+  /** BACKFILL - BACKFILL is corresponding to the backfill executor. */
+  BACKFILL: "BACKFILL",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type ChainType = typeof ChainType[keyof typeof ChainType];
+
+export function chainTypeFromJSON(object: any): ChainType {
+  switch (object) {
+    case 0:
+    case "CHAIN_UNSPECIFIED":
+      return ChainType.CHAIN_UNSPECIFIED;
+    case 1:
+    case "CHAIN":
+      return ChainType.CHAIN;
+    case 2:
+    case "REARRANGE":
+      return ChainType.REARRANGE;
+    case 3:
+    case "BACKFILL":
+      return ChainType.BACKFILL;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return ChainType.UNRECOGNIZED;
+  }
+}
+
+export function chainTypeToJSON(object: ChainType): string {
+  switch (object) {
+    case ChainType.CHAIN_UNSPECIFIED:
+      return "CHAIN_UNSPECIFIED";
+    case ChainType.CHAIN:
+      return "CHAIN";
+    case ChainType.REARRANGE:
+      return "REARRANGE";
+    case ChainType.BACKFILL:
+      return "BACKFILL";
+    case ChainType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
 
 export const DispatcherType = {
   UNSPECIFIED: "UNSPECIFIED",
@@ -87,7 +137,7 @@ export const FragmentType = {
   FRAGMENT_UNSPECIFIED: "FRAGMENT_UNSPECIFIED",
   OTHERS: "OTHERS",
   SOURCE: "SOURCE",
-  /** SINK - TODO: change it to MATERIALIZED_VIEW or other name, since we have sink type now. */
+  MVIEW: "MVIEW",
   SINK: "SINK",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
@@ -106,6 +156,9 @@ export function fragmentTypeFromJSON(object: any): FragmentType {
     case "SOURCE":
       return FragmentType.SOURCE;
     case 3:
+    case "MVIEW":
+      return FragmentType.MVIEW;
+    case 4:
     case "SINK":
       return FragmentType.SINK;
     case -1:
@@ -123,6 +176,8 @@ export function fragmentTypeToJSON(object: FragmentType): string {
       return "OTHERS";
     case FragmentType.SOURCE:
       return "SOURCE";
+    case FragmentType.MVIEW:
+      return "MVIEW";
     case FragmentType.SINK:
       return "SINK";
     case FragmentType.UNRECOGNIZED:
@@ -242,14 +297,21 @@ export interface Barrier {
 }
 
 export interface Watermark {
-  /** the watermark column's index in the stream's schema */
+  /** The watermark column's index in the stream's schema. */
   colIdx: number;
-  /** the watermark value, there will be no record having a greater value in the watermark column */
+  /** The watermark type, used for deserialization of the watermark value. */
+  dataType:
+    | DataType
+    | undefined;
+  /** The watermark value, there will be no record having a greater value in the watermark column. */
   val: Datum | undefined;
 }
 
 export interface StreamMessage {
-  streamMessage?: { $case: "streamChunk"; streamChunk: StreamChunk } | { $case: "barrier"; barrier: Barrier };
+  streamMessage?: { $case: "streamChunk"; streamChunk: StreamChunk } | { $case: "barrier"; barrier: Barrier } | {
+    $case: "watermark";
+    watermark: Watermark;
+  };
 }
 
 /** Hash mapping for compute node. Stores mapping from virtual node to actor id. */
@@ -266,10 +328,7 @@ export interface SourceNode {
   columns: ColumnCatalog[];
   pkColumnIds: number[];
   properties: { [key: string]: string };
-  info?: { $case: "streamSource"; streamSource: StreamSourceInfo } | {
-    $case: "tableSource";
-    tableSource: TableSourceInfo;
-  };
+  info: SourceInfo | undefined;
 }
 
 export interface SourceNode_PropertiesEntry {
@@ -314,7 +373,7 @@ export interface MaterializeNode {
     | Table
     | undefined;
   /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  ignoreOnConflict: boolean;
+  handlePkConflict: boolean;
 }
 
 export interface AggCallState {
@@ -508,9 +567,9 @@ export interface ChainNode {
    * Generally, the barrier needs to be rearranged during the MV creation process, so that data can
    * be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
    * large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
-   * This option is used to disable barrier rearrangement.
+   * ChainType is used to decide which implementation for the ChainNode.
    */
-  disableRearrange: boolean;
+  chainType: ChainType;
   /** Whether to place this chain on the same worker node as upstream actors. */
   sameWorkerNode: boolean;
   /**
@@ -519,6 +578,8 @@ export interface ChainNode {
    * fragment in the downstream mview. Remove this when we refactor the fragmenter.
    */
   isSingleton: boolean;
+  /** The upstream materialized view info used by backfill. */
+  tableDesc: StorageTableDesc | undefined;
 }
 
 /**
@@ -557,7 +618,7 @@ export interface ArrangeNode {
     | Table
     | undefined;
   /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  ignoreOnConflict: boolean;
+  handlePkConflict: boolean;
 }
 
 /** Special node for shared state. LookupNode will join an arrangement with a stream. */
@@ -628,6 +689,18 @@ export interface SortNode {
   sortColumnIndex: number;
 }
 
+/** Merges two streams from streaming and batch for data manipulation. */
+export interface DmlNode {
+  /** Id of the table on which DML performs. */
+  tableId: number;
+  /** Column descriptions of the table. */
+  columnDescs: ColumnDesc[];
+}
+
+export interface RowIdGenNode {
+  rowIdIndex: number;
+}
+
 export interface StreamNode {
   nodeBody?:
     | { $case: "source"; source: SourceNode }
@@ -656,7 +729,9 @@ export interface StreamNode {
     | { $case: "projectSet"; projectSet: ProjectSetNode }
     | { $case: "groupTopN"; groupTopN: GroupTopNNode }
     | { $case: "sort"; sort: SortNode }
-    | { $case: "watermarkFilter"; watermarkFilter: WatermarkFilterNode };
+    | { $case: "watermarkFilter"; watermarkFilter: WatermarkFilterNode }
+    | { $case: "dml"; dml: DmlNode }
+    | { $case: "rowIdGen"; rowIdGen: RowIdGenNode };
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
@@ -1416,13 +1491,14 @@ export const Barrier = {
 };
 
 function createBaseWatermark(): Watermark {
-  return { colIdx: 0, val: undefined };
+  return { colIdx: 0, dataType: undefined, val: undefined };
 }
 
 export const Watermark = {
   fromJSON(object: any): Watermark {
     return {
       colIdx: isSet(object.colIdx) ? Number(object.colIdx) : 0,
+      dataType: isSet(object.dataType) ? DataType.fromJSON(object.dataType) : undefined,
       val: isSet(object.val) ? Datum.fromJSON(object.val) : undefined,
     };
   },
@@ -1430,6 +1506,7 @@ export const Watermark = {
   toJSON(message: Watermark): unknown {
     const obj: any = {};
     message.colIdx !== undefined && (obj.colIdx = Math.round(message.colIdx));
+    message.dataType !== undefined && (obj.dataType = message.dataType ? DataType.toJSON(message.dataType) : undefined);
     message.val !== undefined && (obj.val = message.val ? Datum.toJSON(message.val) : undefined);
     return obj;
   },
@@ -1437,6 +1514,9 @@ export const Watermark = {
   fromPartial<I extends Exact<DeepPartial<Watermark>, I>>(object: I): Watermark {
     const message = createBaseWatermark();
     message.colIdx = object.colIdx ?? 0;
+    message.dataType = (object.dataType !== undefined && object.dataType !== null)
+      ? DataType.fromPartial(object.dataType)
+      : undefined;
     message.val = (object.val !== undefined && object.val !== null) ? Datum.fromPartial(object.val) : undefined;
     return message;
   },
@@ -1453,6 +1533,8 @@ export const StreamMessage = {
         ? { $case: "streamChunk", streamChunk: StreamChunk.fromJSON(object.streamChunk) }
         : isSet(object.barrier)
         ? { $case: "barrier", barrier: Barrier.fromJSON(object.barrier) }
+        : isSet(object.watermark)
+        ? { $case: "watermark", watermark: Watermark.fromJSON(object.watermark) }
         : undefined,
     };
   },
@@ -1464,6 +1546,10 @@ export const StreamMessage = {
       : undefined);
     message.streamMessage?.$case === "barrier" &&
       (obj.barrier = message.streamMessage?.barrier ? Barrier.toJSON(message.streamMessage?.barrier) : undefined);
+    message.streamMessage?.$case === "watermark" &&
+      (obj.watermark = message.streamMessage?.watermark
+        ? Watermark.toJSON(message.streamMessage?.watermark)
+        : undefined);
     return obj;
   },
 
@@ -1485,6 +1571,13 @@ export const StreamMessage = {
       object.streamMessage?.barrier !== null
     ) {
       message.streamMessage = { $case: "barrier", barrier: Barrier.fromPartial(object.streamMessage.barrier) };
+    }
+    if (
+      object.streamMessage?.$case === "watermark" &&
+      object.streamMessage?.watermark !== undefined &&
+      object.streamMessage?.watermark !== null
+    ) {
+      message.streamMessage = { $case: "watermark", watermark: Watermark.fromPartial(object.streamMessage.watermark) };
     }
     return message;
   },
@@ -1551,11 +1644,7 @@ export const SourceNode = {
           return acc;
         }, {})
         : {},
-      info: isSet(object.streamSource)
-        ? { $case: "streamSource", streamSource: StreamSourceInfo.fromJSON(object.streamSource) }
-        : isSet(object.tableSource)
-        ? { $case: "tableSource", tableSource: TableSourceInfo.fromJSON(object.tableSource) }
-        : undefined,
+      info: isSet(object.info) ? SourceInfo.fromJSON(object.info) : undefined,
     };
   },
 
@@ -1582,10 +1671,7 @@ export const SourceNode = {
         obj.properties[k] = v;
       });
     }
-    message.info?.$case === "streamSource" &&
-      (obj.streamSource = message.info?.streamSource ? StreamSourceInfo.toJSON(message.info?.streamSource) : undefined);
-    message.info?.$case === "tableSource" &&
-      (obj.tableSource = message.info?.tableSource ? TableSourceInfo.toJSON(message.info?.tableSource) : undefined);
+    message.info !== undefined && (obj.info = message.info ? SourceInfo.toJSON(message.info) : undefined);
     return obj;
   },
 
@@ -1609,20 +1695,9 @@ export const SourceNode = {
       },
       {},
     );
-    if (
-      object.info?.$case === "streamSource" &&
-      object.info?.streamSource !== undefined &&
-      object.info?.streamSource !== null
-    ) {
-      message.info = { $case: "streamSource", streamSource: StreamSourceInfo.fromPartial(object.info.streamSource) };
-    }
-    if (
-      object.info?.$case === "tableSource" &&
-      object.info?.tableSource !== undefined &&
-      object.info?.tableSource !== null
-    ) {
-      message.info = { $case: "tableSource", tableSource: TableSourceInfo.fromPartial(object.info.tableSource) };
-    }
+    message.info = (object.info !== undefined && object.info !== null)
+      ? SourceInfo.fromPartial(object.info)
+      : undefined;
     return message;
   },
 };
@@ -1781,7 +1856,7 @@ export const FilterNode = {
 };
 
 function createBaseMaterializeNode(): MaterializeNode {
-  return { tableId: 0, columnOrders: [], table: undefined, ignoreOnConflict: false };
+  return { tableId: 0, columnOrders: [], table: undefined, handlePkConflict: false };
 }
 
 export const MaterializeNode = {
@@ -1792,7 +1867,7 @@ export const MaterializeNode = {
         ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
         : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      ignoreOnConflict: isSet(object.ignoreOnConflict) ? Boolean(object.ignoreOnConflict) : false,
+      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
     };
   },
 
@@ -1805,7 +1880,7 @@ export const MaterializeNode = {
       obj.columnOrders = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.ignoreOnConflict !== undefined && (obj.ignoreOnConflict = message.ignoreOnConflict);
+    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     return obj;
   },
 
@@ -1814,7 +1889,7 @@ export const MaterializeNode = {
     message.tableId = object.tableId ?? 0;
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.ignoreOnConflict = object.ignoreOnConflict ?? false;
+    message.handlePkConflict = object.handlePkConflict ?? false;
     return message;
   },
 };
@@ -2498,9 +2573,10 @@ function createBaseChainNode(): ChainNode {
     tableId: 0,
     upstreamFields: [],
     upstreamColumnIndices: [],
-    disableRearrange: false,
+    chainType: ChainType.CHAIN_UNSPECIFIED,
     sameWorkerNode: false,
     isSingleton: false,
+    tableDesc: undefined,
   };
 }
 
@@ -2514,9 +2590,10 @@ export const ChainNode = {
       upstreamColumnIndices: Array.isArray(object?.upstreamColumnIndices)
         ? object.upstreamColumnIndices.map((e: any) => Number(e))
         : [],
-      disableRearrange: isSet(object.disableRearrange) ? Boolean(object.disableRearrange) : false,
+      chainType: isSet(object.chainType) ? chainTypeFromJSON(object.chainType) : ChainType.CHAIN_UNSPECIFIED,
       sameWorkerNode: isSet(object.sameWorkerNode) ? Boolean(object.sameWorkerNode) : false,
       isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
+      tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
     };
   },
 
@@ -2533,9 +2610,11 @@ export const ChainNode = {
     } else {
       obj.upstreamColumnIndices = [];
     }
-    message.disableRearrange !== undefined && (obj.disableRearrange = message.disableRearrange);
+    message.chainType !== undefined && (obj.chainType = chainTypeToJSON(message.chainType));
     message.sameWorkerNode !== undefined && (obj.sameWorkerNode = message.sameWorkerNode);
     message.isSingleton !== undefined && (obj.isSingleton = message.isSingleton);
+    message.tableDesc !== undefined &&
+      (obj.tableDesc = message.tableDesc ? StorageTableDesc.toJSON(message.tableDesc) : undefined);
     return obj;
   },
 
@@ -2544,9 +2623,12 @@ export const ChainNode = {
     message.tableId = object.tableId ?? 0;
     message.upstreamFields = object.upstreamFields?.map((e) => Field.fromPartial(e)) || [];
     message.upstreamColumnIndices = object.upstreamColumnIndices?.map((e) => e) || [];
-    message.disableRearrange = object.disableRearrange ?? false;
+    message.chainType = object.chainType ?? ChainType.CHAIN_UNSPECIFIED;
     message.sameWorkerNode = object.sameWorkerNode ?? false;
     message.isSingleton = object.isSingleton ?? false;
+    message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
+      ? StorageTableDesc.fromPartial(object.tableDesc)
+      : undefined;
     return message;
   },
 };
@@ -2625,7 +2707,7 @@ export const ArrangementInfo = {
 };
 
 function createBaseArrangeNode(): ArrangeNode {
-  return { tableInfo: undefined, distributionKey: [], table: undefined, ignoreOnConflict: false };
+  return { tableInfo: undefined, distributionKey: [], table: undefined, handlePkConflict: false };
 }
 
 export const ArrangeNode = {
@@ -2634,7 +2716,7 @@ export const ArrangeNode = {
       tableInfo: isSet(object.tableInfo) ? ArrangementInfo.fromJSON(object.tableInfo) : undefined,
       distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      ignoreOnConflict: isSet(object.ignoreOnConflict) ? Boolean(object.ignoreOnConflict) : false,
+      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
     };
   },
 
@@ -2648,7 +2730,7 @@ export const ArrangeNode = {
       obj.distributionKey = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.ignoreOnConflict !== undefined && (obj.ignoreOnConflict = message.ignoreOnConflict);
+    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     return obj;
   },
 
@@ -2659,7 +2741,7 @@ export const ArrangeNode = {
       : undefined;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.ignoreOnConflict = object.ignoreOnConflict ?? false;
+    message.handlePkConflict = object.handlePkConflict ?? false;
     return message;
   },
 };
@@ -2950,6 +3032,59 @@ export const SortNode = {
   },
 };
 
+function createBaseDmlNode(): DmlNode {
+  return { tableId: 0, columnDescs: [] };
+}
+
+export const DmlNode = {
+  fromJSON(object: any): DmlNode {
+    return {
+      tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      columnDescs: Array.isArray(object?.columnDescs) ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: DmlNode): unknown {
+    const obj: any = {};
+    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    if (message.columnDescs) {
+      obj.columnDescs = message.columnDescs.map((e) => e ? ColumnDesc.toJSON(e) : undefined);
+    } else {
+      obj.columnDescs = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DmlNode>, I>>(object: I): DmlNode {
+    const message = createBaseDmlNode();
+    message.tableId = object.tableId ?? 0;
+    message.columnDescs = object.columnDescs?.map((e) => ColumnDesc.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseRowIdGenNode(): RowIdGenNode {
+  return { rowIdIndex: 0 };
+}
+
+export const RowIdGenNode = {
+  fromJSON(object: any): RowIdGenNode {
+    return { rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : 0 };
+  },
+
+  toJSON(message: RowIdGenNode): unknown {
+    const obj: any = {};
+    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RowIdGenNode>, I>>(object: I): RowIdGenNode {
+    const message = createBaseRowIdGenNode();
+    message.rowIdIndex = object.rowIdIndex ?? 0;
+    return message;
+  },
+};
+
 function createBaseStreamNode(): StreamNode {
   return { nodeBody: undefined, operatorId: 0, input: [], streamKey: [], appendOnly: false, identity: "", fields: [] };
 }
@@ -3011,6 +3146,10 @@ export const StreamNode = {
         ? { $case: "sort", sort: SortNode.fromJSON(object.sort) }
         : isSet(object.watermarkFilter)
         ? { $case: "watermarkFilter", watermarkFilter: WatermarkFilterNode.fromJSON(object.watermarkFilter) }
+        : isSet(object.dml)
+        ? { $case: "dml", dml: DmlNode.fromJSON(object.dml) }
+        : isSet(object.rowIdGen)
+        ? { $case: "rowIdGen", rowIdGen: RowIdGenNode.fromJSON(object.rowIdGen) }
         : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
       input: Array.isArray(object?.input)
@@ -3087,6 +3226,10 @@ export const StreamNode = {
     message.nodeBody?.$case === "watermarkFilter" && (obj.watermarkFilter = message.nodeBody?.watermarkFilter
       ? WatermarkFilterNode.toJSON(message.nodeBody?.watermarkFilter)
       : undefined);
+    message.nodeBody?.$case === "dml" &&
+      (obj.dml = message.nodeBody?.dml ? DmlNode.toJSON(message.nodeBody?.dml) : undefined);
+    message.nodeBody?.$case === "rowIdGen" &&
+      (obj.rowIdGen = message.nodeBody?.rowIdGen ? RowIdGenNode.toJSON(message.nodeBody?.rowIdGen) : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
       obj.input = message.input.map((e) =>
@@ -3294,6 +3437,16 @@ export const StreamNode = {
         $case: "watermarkFilter",
         watermarkFilter: WatermarkFilterNode.fromPartial(object.nodeBody.watermarkFilter),
       };
+    }
+    if (object.nodeBody?.$case === "dml" && object.nodeBody?.dml !== undefined && object.nodeBody?.dml !== null) {
+      message.nodeBody = { $case: "dml", dml: DmlNode.fromPartial(object.nodeBody.dml) };
+    }
+    if (
+      object.nodeBody?.$case === "rowIdGen" &&
+      object.nodeBody?.rowIdGen !== undefined &&
+      object.nodeBody?.rowIdGen !== null
+    ) {
+      message.nodeBody = { $case: "rowIdGen", rowIdGen: RowIdGenNode.fromPartial(object.nodeBody.rowIdGen) };
     }
     message.operatorId = object.operatorId ?? 0;
     message.input = object.input?.map((e) => StreamNode.fromPartial(e)) || [];

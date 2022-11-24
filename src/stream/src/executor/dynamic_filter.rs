@@ -18,18 +18,16 @@ use std::sync::Arc;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{
-    Array, ArrayImpl, DataChunk, Op, Row as RowData, RowDeserializer, StreamChunk,
-};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::{Row as RowData, RowDeserializer};
 use risingwave_common::types::{to_datum_ref, DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -39,6 +37,7 @@ use super::monitor::StreamingMetrics;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
+use crate::common::table::state_table::StateTable;
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::expect_first_barrier_from_aligned_stream;
 
@@ -52,7 +51,6 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     comparator: ExprNodeType,
     range_cache: RangeCache<S>,
     right_table: StateTable<S>,
-    is_right_table_writer: bool,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time.
@@ -71,7 +69,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         comparator: ExprNodeType,
         mut state_table_l: StateTable<S>,
         mut state_table_r: StateTable<S>,
-        is_right_table_writer: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         vnodes: Arc<Bitmap>,
@@ -91,7 +88,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             comparator,
             range_cache: RangeCache::new(state_table_l, usize::MAX, vnodes),
             right_table: state_table_r,
-            is_right_table_writer,
             metrics,
             schema,
             chunk_size,
@@ -222,7 +218,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let is_insert = matches!(self.comparator, GreaterThan | GreaterThanOrEqual);
                     (range, true, is_insert)
                 } else {
-                    // p > c
+                    // c > p
                     let range = match self.comparator {
                         GreaterThan | LessThanOrEqual => (Excluded(p), Included(c)),
                         GreaterThanOrEqual | LessThan => (Included(p), Excluded(c)),
@@ -360,6 +356,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 }
                 AlignedMessage::Barrier(barrier) => {
                     // Flush the difference between the `prev_value` and `current_value`
+                    //
+                    // This block is guaranteed to be idempotent even if we may encounter multiple
+                    // barriers since `prev_epoch_value` is always be reset to
+                    // the equivalent of `current_epoch_value` at the end of
+                    // this block. Likewise, `last_committed_epoch_row` will always be equal to
+                    // `current_epoch_row`.
+                    // It is thus guaranteed not to commit state or produce chunks as long as
+                    // no new chunks have arrived since the previous barrier.
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
                     let row_deserializer = RowDeserializer::new(self.schema.data_types());
@@ -379,30 +383,39 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         }
                     }
 
-                    if self.is_right_table_writer {
-                        if last_committed_epoch_row != current_epoch_row {
+                    // Update the committed value on RHS if it has changed.
+                    if last_committed_epoch_row != current_epoch_row {
+                        // Only write the RHS value if this actor is in charge of vnode 0
+                        // Otherwise, we only actively replicate the changes.
+                        if self.range_cache.state_table.vnode_bitmap().is_set(0) {
                             // If both `None`, then this branch is inactive.
                             // Hence, at least one is `Some`, hence at least one update.
-                            if let Some(old_row) = &last_committed_epoch_row {
-                                self.right_table.delete(old_row.clone());
+                            if let Some(old_row) = last_committed_epoch_row.take() {
+                                self.right_table.delete(old_row);
                             }
                             if let Some(row) = &current_epoch_row {
                                 self.right_table.insert(row.clone());
-                                last_committed_epoch_row = Some(row.clone());
                             }
                             self.right_table.commit(barrier.epoch).await?;
                         } else {
                             self.right_table.commit_no_data_expected(barrier.epoch);
                         }
+                        // Update the last committed row since it has changed
+                        last_committed_epoch_row = current_epoch_row.clone();
+                    } else {
+                        self.right_table.commit_no_data_expected(barrier.epoch);
                     }
 
                     self.range_cache.flush(barrier.epoch).await?;
 
                     prev_epoch_value = Some(curr);
 
+                    debug_assert_eq!(last_committed_epoch_row, current_epoch_row);
+
                     // Update the vnode bitmap for the left state table if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let _previous_vnode_bitmap = self.range_cache.update_vnodes(vnode_bitmap);
+                        let _previous_vnode_bitmap =
+                            self.range_cache.update_vnodes(vnode_bitmap).await?;
                     }
 
                     yield Message::Barrier(barrier);
@@ -495,7 +508,6 @@ mod tests {
             comparator,
             mem_state_l,
             mem_state_r,
-            true,
             Arc::new(StreamingMetrics::unused()),
             1024,
             fallback.vnodes,

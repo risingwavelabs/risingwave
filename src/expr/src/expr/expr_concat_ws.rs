@@ -16,8 +16,9 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Row, Utf8ArrayBuilder,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8ArrayBuilder,
 };
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -73,19 +74,19 @@ impl Expression for ConcatWsExpression {
             let mut string_columns = string_columns_ref.iter();
             for string_column in string_columns.by_ref() {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    writer.write_ref(string)?;
+                    writer.write_ref(string);
                     break;
                 }
             }
 
             for string_column in string_columns {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    writer.write_ref(sep)?;
-                    writer.write_ref(string)?;
+                    writer.write_ref(sep);
+                    writer.write_ref(string);
                 }
             }
 
-            builder = writer.finish()?.into_inner();
+            writer.finish();
         }
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
@@ -157,7 +158,8 @@ impl<'a> TryFrom<&'a ExprNode> for ConcatWsExpression {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::array::{DataChunk, DataChunkTestExt, Row};
+    use risingwave_common::array::{DataChunk, DataChunkTestExt};
+    use risingwave_common::row::Row;
     use risingwave_common::types::{Datum, Scalar};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;

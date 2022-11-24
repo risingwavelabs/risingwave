@@ -23,6 +23,7 @@ use async_stack_trace::{StackTraceManager, StackTraceReport, TraceConfig};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -104,6 +105,9 @@ pub struct ExecutorParams {
     /// Information of the operator from plan node.
     pub op_info: String,
 
+    /// The output schema of the executor.
+    pub schema: Schema,
+
     /// The input executor.
     pub input: Vec<BoxedExecutor>,
 
@@ -127,6 +131,7 @@ impl Debug for ExecutorParams {
             .field("executor_id", &self.executor_id)
             .field("operator_id", &self.operator_id)
             .field("op_info", &self.op_info)
+            .field("schema", &self.schema)
             .field("input", &self.input.len())
             .field("actor_id", &self.actor_context.id)
             .finish_non_exhaustive()
@@ -216,9 +221,10 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    /// Clear all collect rx in barrier manager.
-    pub fn clear_all_collect_rx(&self) {
+    /// Clear all senders and collect rx in barrier manager.
+    pub fn clear_all_senders_and_collect_rx(&self) {
         let mut barrier_manager = self.context.lock_barrier_manager();
+        barrier_manager.clear_senders();
         barrier_manager.clear_collect_rx();
     }
 
@@ -234,7 +240,7 @@ impl LocalStreamManager {
             .complete_receiver
             .expect("no rx for local mode")
             .await
-            .context("failed to collect barrier")?;
+            .context("failed to collect barrier")??;
         complete_receiver
             .barrier_inflight_timer
             .expect("no timer for test")
@@ -301,7 +307,7 @@ impl LocalStreamManager {
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
-        self.clear_all_collect_rx();
+        self.clear_all_senders_and_collect_rx();
         self.core.lock().await.drop_all_actors();
 
         Ok(())
@@ -346,6 +352,11 @@ impl LocalStreamManager {
     ) -> StreamResult<()> {
         let mut core = self.core.lock().await;
         core.build_actors(actors, env).await
+    }
+
+    pub async fn config(&self) -> StreamingConfig {
+        let core = self.core.lock().await;
+        core.config.clone()
     }
 }
 
@@ -507,6 +518,7 @@ impl LocalStreamManagerCore {
         // same.
         let executor_id = unique_executor_id(actor_context.id, node.operator_id);
         let operator_id = unique_operator_id(fragment_id, node.operator_id);
+        let schema = node.fields.iter().map(Field::from).collect();
 
         // Build the executor with params.
         let executor_params = ExecutorParams {
@@ -515,6 +527,7 @@ impl LocalStreamManagerCore {
             executor_id,
             operator_id,
             op_info,
+            schema,
             input,
             fragment_id,
             executor_stats: self.streaming_metrics.clone(),
@@ -614,28 +627,26 @@ impl LocalStreamManagerCore {
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
-            let trace_reporter = self
+            let trace = self
                 .stack_trace_manager
                 .as_mut()
-                .map(|(m, _)| m.register(actor_id));
+                .map(|(m, c)| (m.register(actor_id), c.clone()));
 
             let handle = {
+                let context = self.context.clone();
                 let actor = async move {
-                    let _ = actor.run().await.inspect_err(|err| {
+                    if let Err(err) = actor.run().await {
                         // TODO: check error type and panic if it's unexpected.
                         tracing::error!(actor=%actor_id, error=%err, "actor exit");
-                    });
+                        context.lock_barrier_manager().notify_failure(actor_id, err);
+                    }
                 };
                 #[auto_enums::auto_enum(Future)]
-                let traced = match trace_reporter {
-                    Some(trace_reporter) => trace_reporter.trace(
+                let traced = match trace {
+                    Some((reporter, config)) => reporter.trace(
                         actor,
                         format!("Actor {actor_id}: `{}`", mview_definition),
-                        TraceConfig {
-                            report_detached: true,
-                            verbose: true,
-                            interval: Duration::from_secs(1),
-                        },
+                        config,
                     ),
                     None => actor,
                 };

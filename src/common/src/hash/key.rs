@@ -33,18 +33,20 @@ use itertools::Itertools;
 
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, ListRef,
-    Row, StructRef,
+    StructRef,
 };
 use crate::collection::estimate_size::EstimateSize;
+use crate::hash::vnode::VirtualNode;
+use crate::row::Row;
 use crate::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode, VIRTUAL_NODE_COUNT,
+    OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum,
 };
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
 /// A wrapper for u64 hash result.
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Copy, Debug, PartialEq)]
 pub struct HashCode(pub u64);
 
 impl From<u64> for HashCode {
@@ -54,12 +56,12 @@ impl From<u64> for HashCode {
 }
 
 impl HashCode {
-    pub fn hash_code(&self) -> u64 {
+    pub fn hash_code(self) -> u64 {
         self.0
     }
 
-    pub fn to_vnode(&self) -> VirtualNode {
-        (self.0 % VIRTUAL_NODE_COUNT as u64) as VirtualNode
+    pub fn to_vnode(self) -> VirtualNode {
+        VirtualNode::from(self)
     }
 }
 

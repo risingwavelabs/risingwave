@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use chrono::{NaiveDate, NaiveDateTime};
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::distributions::Alphanumeric;
 use rand::prelude::*;
 use risingwave_common::catalog::ColumnId;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, NaiveDateTimeWrapper, NaiveDateWrapper};
 use risingwave_source::parser::JsonParser;
 use risingwave_source::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
@@ -35,9 +34,9 @@ fn generate_json(rng: &mut impl Rng) -> String {
             .take(7)
             .map(char::from)
             .collect::<String>(),
-        NaiveDate::from_num_days_from_ce((rng.gen::<u32>() % (1 << 20)) as i32),
+        NaiveDateWrapper::from_num_days_from_ce_uncheck((rng.gen::<u32>() % (1 << 20)) as i32).0,
         {
-            let datetime = NaiveDateTime::from_timestamp((rng.gen::<u32>() % (1u32 << 28)) as i64, 0);
+            let datetime = NaiveDateTimeWrapper::from_timestamp_uncheck((rng.gen::<u32>() % (1u32 << 28)) as i64, 0).0;
             format!("{:?} {:?}", datetime.date(), datetime.time())
         }
     )
@@ -124,12 +123,16 @@ fn bench_json_parser(c: &mut Criterion) {
     let descs = get_descs();
     let parser = JsonParser {};
     let records = generate_all_json();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     c.bench_function("json_parser", |b| {
-        b.iter(|| {
+        b.to_async(&rt).iter(|| async {
             let mut builder = SourceStreamChunkBuilder::with_capacity(descs.clone(), NUM_RECORDS);
             for record in &records {
                 let writer = builder.row_writer();
-                parser.parse(record, writer).unwrap();
+                parser.parse(record, writer).await.unwrap();
             }
         })
     });

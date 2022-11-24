@@ -518,6 +518,7 @@ mod tests {
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
+    use risingwave_pb::catalog::source_info::SourceInfo as ProstSourceInfo;
     use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, StreamSourceInfo};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
@@ -525,7 +526,6 @@ mod tests {
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
         RowFormatType as ProstRowFormatType,
     };
-    use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
     use risingwave_source::table_test_utils::create_table_source_desc_builder;
     use risingwave_source::*;
     use risingwave_storage::memory::MemoryStateStore;
@@ -765,7 +765,7 @@ mod tests {
         let pk_column_ids = vec![0];
         let stream_source_info = StreamSourceInfo {
             row_format: ProstRowFormatType::Json as i32,
-            row_schema_location: "".to_string(),
+            ..Default::default()
         };
         let source_manager = Arc::new(TableSourceManager::default());
         SourceDescBuilder::new(
@@ -776,6 +776,7 @@ mod tests {
             properties,
             ProstSourceInfo::StreamSource(stream_source_info),
             source_manager,
+            Default::default(),
         )
     }
 
@@ -836,6 +837,9 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids.clone(),
             2,
+            None,
+            0,
+            false,
         )
         .await
         .boxed()

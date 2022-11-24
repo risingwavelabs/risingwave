@@ -88,7 +88,8 @@ pub enum SourceSchema {
     Json,             // Keyword::JSON
     DebeziumJson,     // Keyword::DEBEZIUM_JSON
     Avro(AvroSchema), // Keyword::AVRO
-    Maxwell,
+    Maxwell,          // Keyword::MAXWELL
+    CanalJson,        // Keyword::CANAL_JSON
 }
 
 impl ParseTo for SourceSchema {
@@ -105,9 +106,11 @@ impl ParseTo for SourceSchema {
             SourceSchema::Avro(avro_schema)
         } else if p.parse_keywords(&[Keyword::MAXWELL]) {
             SourceSchema::Maxwell
+        } else if p.parse_keywords(&[Keyword::CANAL_JSON]) {
+            SourceSchema::CanalJson
         } else {
             return Err(ParserError::ParserError(
-                "expected JSON | PROTOBUF | DEBEZIUM JSON | AVRO after ROW FORMAT".to_string(),
+                "expected JSON | PROTOBUF | DEBEZIUM_JSON | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
             ));
         };
         Ok(schema)
@@ -122,6 +125,7 @@ impl fmt::Display for SourceSchema {
             SourceSchema::Maxwell => write!(f, "MAXWELL"),
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
+            SourceSchema::CanalJson => write!(f, "CANAL JSON"),
         }
     }
 }
@@ -137,6 +141,7 @@ impl fmt::Display for SourceSchema {
 pub struct ProtobufSchema {
     pub message_name: AstString,
     pub row_schema_location: AstString,
+    pub use_schema_registry: bool,
 }
 
 impl ParseTo for ProtobufSchema {
@@ -144,10 +149,12 @@ impl ParseTo for ProtobufSchema {
         impl_parse_to!([Keyword::MESSAGE], p);
         impl_parse_to!(message_name: AstString, p);
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
+        impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
         impl_parse_to!(row_schema_location: AstString, p);
         Ok(Self {
             message_name,
             row_schema_location,
+            use_schema_registry,
         })
     }
 }
@@ -158,6 +165,7 @@ impl fmt::Display for ProtobufSchema {
         impl_fmt_display!([Keyword::MESSAGE], v);
         impl_fmt_display!(message_name, v, self);
         impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
+        impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
         impl_fmt_display!(row_schema_location, v, self);
         v.iter().join(" ").fmt(f)
     }
@@ -174,6 +182,7 @@ impl fmt::Display for ProtobufSchema {
 pub struct AvroSchema {
     pub message_name: AstString,
     pub row_schema_location: AstString,
+    pub use_schema_registry: bool,
 }
 
 impl ParseTo for AvroSchema {
@@ -181,10 +190,12 @@ impl ParseTo for AvroSchema {
         impl_parse_to!([Keyword::MESSAGE], p);
         impl_parse_to!(message_name: AstString, p);
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
+        impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
         impl_parse_to!(row_schema_location: AstString, p);
         Ok(Self {
             message_name,
             row_schema_location,
+            use_schema_registry,
         })
     }
 }
@@ -195,6 +206,7 @@ impl fmt::Display for AvroSchema {
         impl_fmt_display!([Keyword::MESSAGE], v);
         impl_fmt_display!(message_name, v, self);
         impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
+        impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
         impl_fmt_display!(row_schema_location, v, self);
         v.iter().join(" ").fmt(f)
     }

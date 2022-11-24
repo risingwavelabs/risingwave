@@ -13,18 +13,13 @@
 // limitations under the License.
 
 use std::ops::Bound;
-use std::ops::Bound::Unbounded;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, HummockSstableId, LocalSstableInfo};
-use risingwave_meta::hummock::test_utils::{
-    register_table_ids_to_compaction_group, setup_compute_env,
-    update_filter_key_extractor_for_table_ids,
-};
+use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
@@ -50,7 +45,7 @@ async fn test_basic_v1() {
 
 #[tokio::test]
 async fn test_basic_v2() {
-    let (hummock_storage, meta_client) = with_hummock_storage_v2().await;
+    let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_basic_inner(hummock_storage, meta_client).await;
 }
 
@@ -125,6 +120,7 @@ async fn test_basic_inner(
             &anchor,
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -140,6 +136,7 @@ async fn test_basic_inner(
             &Bytes::from("bb"),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -157,6 +154,7 @@ async fn test_basic_inner(
             &Bytes::from("ab"),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -187,6 +185,7 @@ async fn test_basic_inner(
             &anchor,
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -218,6 +217,7 @@ async fn test_basic_inner(
             &anchor,
             epoch3,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -234,6 +234,7 @@ async fn test_basic_inner(
             &Bytes::from("ff"),
             epoch3,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -250,6 +251,7 @@ async fn test_basic_inner(
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -267,6 +269,7 @@ async fn test_basic_inner(
             &anchor,
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -284,6 +287,7 @@ async fn test_basic_inner(
             &anchor,
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -300,6 +304,7 @@ async fn test_basic_inner(
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -317,6 +322,7 @@ async fn test_basic_inner(
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch3,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -342,6 +348,7 @@ async fn test_basic_inner(
             &Bytes::from("bb"),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -357,6 +364,7 @@ async fn test_basic_inner(
             &Bytes::from("dd"),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -376,7 +384,7 @@ async fn test_state_store_sync_v1() {
 
 #[tokio::test]
 async fn test_state_store_sync_v2() {
-    let (hummock_storage, meta_client) = with_hummock_storage_v2().await;
+    let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_state_store_sync_inner(hummock_storage, meta_client).await;
 }
 
@@ -549,7 +557,7 @@ async fn test_reload_storage() {
     .await
     .unwrap();
 
-    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage).await;
+    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage, Default::default()).await;
 
     // Get the value after flushing to remote.
     let value = hummock_storage
@@ -557,6 +565,7 @@ async fn test_reload_storage() {
             &anchor,
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -574,6 +583,7 @@ async fn test_reload_storage() {
             &Bytes::from("ab"),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -604,6 +614,7 @@ async fn test_reload_storage() {
             &anchor,
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -621,6 +632,7 @@ async fn test_reload_storage() {
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -638,6 +650,7 @@ async fn test_reload_storage() {
             &anchor,
             epoch1,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -655,6 +668,7 @@ async fn test_reload_storage() {
             &anchor,
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -671,6 +685,7 @@ async fn test_reload_storage() {
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -691,7 +706,7 @@ async fn test_write_anytime_v1() {
 
 #[tokio::test]
 async fn test_write_anytime_v2() {
-    let (hummock_storage, meta_client) = with_hummock_storage_v2().await;
+    let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_write_anytime_inner(hummock_storage, meta_client).await;
 }
 
@@ -714,6 +729,7 @@ async fn test_write_anytime_inner(
                         "aa".as_bytes(),
                         epoch,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -731,6 +747,7 @@ async fn test_write_anytime_inner(
                         "bb".as_bytes(),
                         epoch,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -748,6 +765,7 @@ async fn test_write_anytime_inner(
                         "cc".as_bytes(),
                         epoch,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -767,6 +785,7 @@ async fn test_write_anytime_inner(
                     ),
                     epoch,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         check_bloom_filter: false,
                         prefix_hint: None,
                         table_id: Default::default(),
@@ -830,6 +849,7 @@ async fn test_write_anytime_inner(
                         "aa".as_bytes(),
                         epoch,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -845,6 +865,7 @@ async fn test_write_anytime_inner(
                     "bb".as_bytes(),
                     epoch,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         check_bloom_filter: true,
                         prefix_hint: None,
                         table_id: Default::default(),
@@ -861,6 +882,7 @@ async fn test_write_anytime_inner(
                         "cc".as_bytes(),
                         epoch,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -879,6 +901,7 @@ async fn test_write_anytime_inner(
                     ),
                     epoch,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         check_bloom_filter: false,
                         prefix_hint: None,
                         table_id: Default::default(),
@@ -972,7 +995,7 @@ async fn test_delete_get_v1() {
 
 #[tokio::test]
 async fn test_delete_get_v2() {
-    let (hummock_storage, meta_client) = with_hummock_storage_v2().await;
+    let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_delete_get_inner(hummock_storage, meta_client).await;
 }
 
@@ -1031,6 +1054,7 @@ async fn test_delete_get_inner(
             "bb".as_bytes(),
             epoch2,
             ReadOptions {
+                ignore_range_tombstone: false,
                 check_bloom_filter: true,
                 prefix_hint: None,
                 table_id: Default::default(),
@@ -1050,7 +1074,7 @@ async fn test_multiple_epoch_sync_v1() {
 
 #[tokio::test]
 async fn test_multiple_epoch_sync_v2() {
-    let (hummock_storage, meta_client) = with_hummock_storage_v2().await;
+    let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_multiple_epoch_sync_inner(hummock_storage, meta_client).await;
 }
 
@@ -1115,6 +1139,7 @@ async fn test_multiple_epoch_sync_inner(
                         "bb".as_bytes(),
                         epoch1,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -1131,6 +1156,7 @@ async fn test_multiple_epoch_sync_inner(
                     "bb".as_bytes(),
                     epoch2,
                     ReadOptions {
+                        ignore_range_tombstone: false,
                         check_bloom_filter: true,
                         prefix_hint: None,
                         table_id: Default::default(),
@@ -1146,6 +1172,7 @@ async fn test_multiple_epoch_sync_inner(
                         "bb".as_bytes(),
                         epoch3,
                         ReadOptions {
+                            ignore_range_tombstone: false,
                             check_bloom_filter: true,
                             prefix_hint: None,
                             table_id: Default::default(),
@@ -1199,7 +1226,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     .await
     .unwrap();
 
-    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage).await;
+    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage, Default::default()).await;
 
     assert_eq!(
         hummock_storage
@@ -1307,204 +1334,4 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
             .global_watermark_sst_id(),
         HummockSstableId::MAX
     );
-}
-
-// Make sure `table_id` in `ReadOptions` works as expected.
-#[tokio::test]
-async fn test_table_id_filter() {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-
-    let hummock_storage = HummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
-    )
-    .await
-    .unwrap();
-
-    let table_ids = vec![1, 2];
-    register_table_ids_to_compaction_group(
-        &hummock_manager_ref,
-        table_ids.as_ref(),
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
-    update_filter_key_extractor_for_table_ids(
-        hummock_storage.filter_key_extractor_manager().clone(),
-        table_ids.as_ref(),
-    );
-
-    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage).await;
-
-    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
-
-    let gen_value =
-        |value, table_id| Bytes::from(format!("{}_{}", value, table_id).as_bytes().to_vec());
-
-    let gen_batches = |table_id| {
-        vec![
-            vec![(
-                Bytes::from("aa"),
-                StorageValue::new_put(gen_value("111", table_id)),
-            )],
-            vec![(
-                Bytes::from("bb"),
-                StorageValue::new_put(gen_value("222", table_id)),
-            )],
-        ]
-    };
-
-    let epochs: Vec<HummockEpoch> = vec![initial_epoch + 1, initial_epoch + 2];
-
-    for table_id in &table_ids {
-        let batches = gen_batches(*table_id);
-        for (idx, epoch) in epochs.iter().enumerate() {
-            hummock_storage
-                .ingest_batch(
-                    batches[idx].clone(),
-                    vec![],
-                    WriteOptions {
-                        epoch: *epoch,
-                        table_id: TableId::new(*table_id),
-                    },
-                )
-                .await
-                .unwrap();
-        }
-    }
-
-    assert_eq!(
-        hummock_storage
-            .local
-            .read_version()
-            .read()
-            .staging()
-            .imm
-            .len(),
-        epochs.len() * table_ids.len()
-    );
-
-    let ssts = hummock_storage
-        .seal_and_sync_epoch(epochs[0])
-        .await
-        .unwrap()
-        .uncommitted_ssts;
-    meta_client.commit_epoch(epochs[0], ssts).await.unwrap();
-    hummock_storage
-        .try_wait_epoch(HummockReadEpoch::Committed(epochs[0]))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        hummock_storage
-            .local
-            .read_version()
-            .read()
-            .staging()
-            .imm
-            .len(),
-        (epochs.len() - 1) * table_ids.len()
-    );
-
-    let assert_for_table_id = |table_id: u32| {
-        let hummock_storage = hummock_storage.clone();
-        let epochs = epochs.clone();
-        let read_epoch = *epochs.last().unwrap();
-        async move {
-            // Assert point get.
-            assert_eq!(
-                hummock_storage
-                    .get(
-                        b"aa",
-                        read_epoch,
-                        ReadOptions {
-                            check_bloom_filter: true,
-                            prefix_hint: None,
-                            table_id: TableId::new(table_id),
-                            retention_seconds: None,
-                        },
-                    )
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                gen_value("111", table_id)
-            );
-
-            assert_eq!(
-                hummock_storage
-                    .get(
-                        b"bb",
-                        read_epoch,
-                        ReadOptions {
-                            check_bloom_filter: true,
-                            prefix_hint: None,
-                            table_id: TableId::new(table_id),
-                            retention_seconds: None,
-                        },
-                    )
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                gen_value("222", table_id)
-            );
-
-            assert!(hummock_storage
-                .get(
-                    b"cc",
-                    read_epoch,
-                    ReadOptions {
-                        check_bloom_filter: true,
-                        prefix_hint: None,
-                        table_id: TableId::new(table_id),
-                        retention_seconds: None,
-                    },
-                )
-                .await
-                .unwrap()
-                .is_none());
-
-            // Assert iter.
-            let mut iter = hummock_storage
-                .iter(
-                    (Unbounded, Unbounded),
-                    read_epoch,
-                    ReadOptions {
-                        check_bloom_filter: true,
-                        prefix_hint: None,
-                        table_id: TableId::new(table_id),
-                        retention_seconds: None,
-                    },
-                )
-                .await
-                .unwrap();
-
-            assert_eq!(
-                iter.next().await.unwrap(),
-                Some((
-                    FullKey::for_test(TableId::new(table_id), b"aa".to_vec(), epochs[0]),
-                    gen_value("111", table_id)
-                ))
-            );
-            assert_eq!(
-                iter.next().await.unwrap(),
-                Some((
-                    FullKey::for_test(TableId::new(table_id), b"bb".to_vec(), epochs[1]),
-                    gen_value("222", table_id)
-                ))
-            );
-            assert!(iter.next().await.unwrap().is_none());
-        }
-    };
-
-    for id in table_ids {
-        assert_for_table_id(id).await;
-    }
 }

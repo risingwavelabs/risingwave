@@ -46,11 +46,11 @@ impl Binder {
             )),
 
             Statement::Update {
-                table,
+                table_name,
                 assignments,
                 selection,
             } => Ok(BoundStatement::Update(
-                self.bind_update(table, assignments, selection)?.into(),
+                self.bind_update(table_name, assignments, selection)?.into(),
             )),
 
             Statement::Query(q) => Ok(BoundStatement::Query(self.bind_query(*q)?.into())),

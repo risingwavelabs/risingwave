@@ -546,13 +546,14 @@ impl Catalog {
         // Resolve source first.
         if let Some(source) = schema.get_source_by_name(relation_name) {
             // TODO: check if it is a materialized source and improve the err msg
-            if source.is_table() {
-                Err(CatalogError::Duplicated("table", relation_name.to_string()))
-            } else {
-                Err(CatalogError::Duplicated(
+            match source.kind() {
+                super::source_catalog::SourceKind::Table => {
+                    Err(CatalogError::Duplicated("table", relation_name.to_string()))
+                }
+                super::source_catalog::SourceKind::Stream => Err(CatalogError::Duplicated(
                     "source",
                     relation_name.to_string(),
-                ))
+                )),
             }
         } else if let Some(table) = schema.get_table_by_name(relation_name) {
             if table.is_index {

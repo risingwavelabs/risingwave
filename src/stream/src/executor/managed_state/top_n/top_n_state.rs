@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::array::Row;
+use risingwave_common::row::{Row, Row2};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::DataType;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::common::iter_state_table;
+use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::top_n::{serialize_pk_to_cache_key, CacheKey, TopNCache};
 
@@ -75,11 +75,11 @@ impl<S: StateStore> ManagedTopNState<S> {
         }
     }
 
-    pub fn insert(&mut self, value: Row) {
+    pub fn insert(&mut self, value: impl Row2) {
         self.state_table.insert(value);
     }
 
-    pub fn delete(&mut self, value: Row) {
+    pub fn delete(&mut self, value: impl Row2) {
         self.state_table.delete(value);
     }
 
@@ -354,7 +354,6 @@ mod tests {
         let row4_bytes = serialize_row_to_cache_key(row4.clone(), 1, &cache_key_serde);
         let rows = vec![row1, row2, row3, row4];
         let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes];
-
         managed_state.insert(rows[3].clone());
 
         // now ("ab", 4)

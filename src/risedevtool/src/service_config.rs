@@ -38,6 +38,7 @@ pub struct ComputeNodeConfig {
     pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub user_managed: bool,
     pub enable_in_memory_kv_state_backend: bool,
+    pub connector_source_endpoint: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -62,11 +63,7 @@ pub struct MetaNodeConfig {
     pub max_heartbeat_interval_secs: u64,
     pub unsafe_disable_recovery: bool,
     pub max_idle_secs_to_exit: Option<u64>,
-    pub vacuum_interval_sec: u64,
-    pub collect_gc_watermark_spin_interval_sec: u64,
-    pub min_sst_retention_time_sec: u64,
     pub enable_committed_sst_sanity_check: bool,
-    pub periodic_compaction_interval_sec: u64,
     pub enable_compaction_deterministic: bool,
 }
 
@@ -83,6 +80,7 @@ pub struct FrontendConfig {
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
+    pub health_check_port: u16,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
@@ -152,6 +150,8 @@ pub struct EtcdConfig {
     pub unsafe_no_fsync: bool,
 
     pub exporter_port: u16,
+
+    pub provide_etcd: Option<Vec<EtcdConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -277,6 +277,17 @@ pub struct RedisConfig {
     pub address: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct ConnectorNodeConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+    pub port: u16,
+    pub address: String,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -294,6 +305,7 @@ pub enum ServiceConfig {
     Redis(RedisConfig),
     ZooKeeper(ZooKeeperConfig),
     RedPanda(RedPandaConfig),
+    ConnectorNode(ConnectorNodeConfig),
 }
 
 impl ServiceConfig {
@@ -313,6 +325,7 @@ impl ServiceConfig {
             Self::Kafka(c) => &c.id,
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
+            Self::ConnectorNode(c) => &c.id,
         }
     }
 }

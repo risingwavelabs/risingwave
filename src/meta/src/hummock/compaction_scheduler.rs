@@ -122,9 +122,13 @@ where
         );
 
         tracing::info!("Start compaction scheduler.");
-        let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(
-            self.env.opts.periodic_compaction_interval_sec,
-        ));
+        let periodic_compaction_interval_sec = if self.env.opts.compaction_deterministic_test {
+            u64::MAX
+        } else {
+            self.env.opts.periodic_compaction_interval_sec
+        };
+        let mut min_trigger_interval =
+            tokio::time::interval(Duration::from_secs(periodic_compaction_interval_sec));
         min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let compaction_group: CompactionGroupId = tokio::select! {

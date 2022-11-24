@@ -12,17 +12,26 @@ import {
 export const protobufPackage = "catalog";
 
 /**
- * The rust prost library always treats uint64 as required and message as optional.
- * In order to allow `row_id_index` as optional field in `StreamSourceInfo` and `TableSourceInfo`,
- * we wrap uint64 inside this message.
+ * The rust prost library always treats uint64 as required and message as
+ * optional. In order to allow `row_id_index` as optional field in
+ * `StreamSourceInfo` and `TableSourceInfo`, we wrap uint64 inside this message.
  */
 export interface ColumnIndex {
   index: number;
 }
 
+export interface SourceInfo {
+  sourceInfo?: { $case: "streamSource"; streamSource: StreamSourceInfo } | {
+    $case: "tableSource";
+    tableSource: TableSourceInfo;
+  };
+}
+
 export interface StreamSourceInfo {
   rowFormat: RowFormatType;
   rowSchemaLocation: string;
+  useSchemaRegistry: boolean;
+  protoMessageName: string;
 }
 
 export interface TableSourceInfo {
@@ -33,13 +42,19 @@ export interface Source {
   schemaId: number;
   databaseId: number;
   name: string;
-  /** The column index of row ID. If the primary key is specified by the user, this will be `None`. */
+  /**
+   * The column index of row ID. If the primary key is specified by the user,
+   * this will be `None`.
+   */
   rowIdIndex:
     | ColumnIndex
     | undefined;
   /** Columns of the source. */
   columns: ColumnCatalog[];
-  /** Column id of the primary key specified by the user. If the user does not specify a primary key, the vector will be empty. */
+  /**
+   * Column id of the primary key specified by the user. If the user does not
+   * specify a primary key, the vector will be empty.
+   */
   pkColumnIds: number[];
   /** Properties specified by the user in WITH clause. */
   properties: { [key: string]: string };
@@ -104,16 +119,21 @@ export interface Table {
   owner: number;
   properties: { [key: string]: string };
   fragmentId: number;
-  /** an optional column index which is the vnode of each row computed by the table's consistent hash distribution */
+  /**
+   * an optional column index which is the vnode of each row computed by the
+   * table's consistent hash distribution
+   */
   vnodeColIdx:
     | ColumnIndex
     | undefined;
   /**
-   * The column indices which are stored in the state store's value with row-encoding.
-   * Currently is not supported yet and expected to be `[0..columns.len()]`.
+   * The column indices which are stored in the state store's value with
+   * row-encoding. Currently is not supported yet and expected to be
+   * `[0..columns.len()]`.
    */
   valueIndices: number[];
   definition: string;
+  handlePkConflict: boolean;
 }
 
 export interface Table_PropertiesEntry {
@@ -174,8 +194,65 @@ export const ColumnIndex = {
   },
 };
 
+function createBaseSourceInfo(): SourceInfo {
+  return { sourceInfo: undefined };
+}
+
+export const SourceInfo = {
+  fromJSON(object: any): SourceInfo {
+    return {
+      sourceInfo: isSet(object.streamSource)
+        ? { $case: "streamSource", streamSource: StreamSourceInfo.fromJSON(object.streamSource) }
+        : isSet(object.tableSource)
+        ? { $case: "tableSource", tableSource: TableSourceInfo.fromJSON(object.tableSource) }
+        : undefined,
+    };
+  },
+
+  toJSON(message: SourceInfo): unknown {
+    const obj: any = {};
+    message.sourceInfo?.$case === "streamSource" && (obj.streamSource = message.sourceInfo?.streamSource
+      ? StreamSourceInfo.toJSON(message.sourceInfo?.streamSource)
+      : undefined);
+    message.sourceInfo?.$case === "tableSource" && (obj.tableSource = message.sourceInfo?.tableSource
+      ? TableSourceInfo.toJSON(message.sourceInfo?.tableSource)
+      : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SourceInfo>, I>>(object: I): SourceInfo {
+    const message = createBaseSourceInfo();
+    if (
+      object.sourceInfo?.$case === "streamSource" &&
+      object.sourceInfo?.streamSource !== undefined &&
+      object.sourceInfo?.streamSource !== null
+    ) {
+      message.sourceInfo = {
+        $case: "streamSource",
+        streamSource: StreamSourceInfo.fromPartial(object.sourceInfo.streamSource),
+      };
+    }
+    if (
+      object.sourceInfo?.$case === "tableSource" &&
+      object.sourceInfo?.tableSource !== undefined &&
+      object.sourceInfo?.tableSource !== null
+    ) {
+      message.sourceInfo = {
+        $case: "tableSource",
+        tableSource: TableSourceInfo.fromPartial(object.sourceInfo.tableSource),
+      };
+    }
+    return message;
+  },
+};
+
 function createBaseStreamSourceInfo(): StreamSourceInfo {
-  return { rowFormat: RowFormatType.ROW_UNSPECIFIED, rowSchemaLocation: "" };
+  return {
+    rowFormat: RowFormatType.ROW_UNSPECIFIED,
+    rowSchemaLocation: "",
+    useSchemaRegistry: false,
+    protoMessageName: "",
+  };
 }
 
 export const StreamSourceInfo = {
@@ -183,6 +260,8 @@ export const StreamSourceInfo = {
     return {
       rowFormat: isSet(object.rowFormat) ? rowFormatTypeFromJSON(object.rowFormat) : RowFormatType.ROW_UNSPECIFIED,
       rowSchemaLocation: isSet(object.rowSchemaLocation) ? String(object.rowSchemaLocation) : "",
+      useSchemaRegistry: isSet(object.useSchemaRegistry) ? Boolean(object.useSchemaRegistry) : false,
+      protoMessageName: isSet(object.protoMessageName) ? String(object.protoMessageName) : "",
     };
   },
 
@@ -190,6 +269,8 @@ export const StreamSourceInfo = {
     const obj: any = {};
     message.rowFormat !== undefined && (obj.rowFormat = rowFormatTypeToJSON(message.rowFormat));
     message.rowSchemaLocation !== undefined && (obj.rowSchemaLocation = message.rowSchemaLocation);
+    message.useSchemaRegistry !== undefined && (obj.useSchemaRegistry = message.useSchemaRegistry);
+    message.protoMessageName !== undefined && (obj.protoMessageName = message.protoMessageName);
     return obj;
   },
 
@@ -197,6 +278,8 @@ export const StreamSourceInfo = {
     const message = createBaseStreamSourceInfo();
     message.rowFormat = object.rowFormat ?? RowFormatType.ROW_UNSPECIFIED;
     message.rowSchemaLocation = object.rowSchemaLocation ?? "";
+    message.useSchemaRegistry = object.useSchemaRegistry ?? false;
+    message.protoMessageName = object.protoMessageName ?? "";
     return message;
   },
 };
@@ -529,6 +612,7 @@ function createBaseTable(): Table {
     vnodeColIdx: undefined,
     valueIndices: [],
     definition: "",
+    handlePkConflict: false,
   };
 }
 
@@ -568,6 +652,7 @@ export const Table = {
         ? object.valueIndices.map((e: any) => Number(e))
         : [],
       definition: isSet(object.definition) ? String(object.definition) : "",
+      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
     };
   },
 
@@ -622,6 +707,7 @@ export const Table = {
       obj.valueIndices = [];
     }
     message.definition !== undefined && (obj.definition = message.definition);
+    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     return obj;
   },
 
@@ -664,6 +750,7 @@ export const Table = {
       : undefined;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
+    message.handlePkConflict = object.handlePkConflict ?? false;
     return message;
   },
 };

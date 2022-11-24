@@ -1,7 +1,11 @@
 [package]
 name = "risingwave_meta"
-version = "0.2.0-alpha"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
@@ -56,6 +60,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
+toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
@@ -65,7 +70,7 @@ uuid = { version = "1", features = ["v4"] }
 [target.'cfg(not(madsim))'.dependencies]
 axum = "0.5"
 tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"

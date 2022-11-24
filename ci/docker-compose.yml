@@ -14,6 +14,20 @@ services:
       timeout: 5s
       retries: 5
 
+  mysql:
+    image: mysql:8.0
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=123456
+      - MYSQL_USER=mysqluser
+      - MYSQL_PASSWORD=mysqlpw
+    healthcheck:
+      test: [ "CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p123456" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   zookeeper:
     image: confluentinc/cp-zookeeper
     ports:
@@ -41,13 +55,20 @@ services:
       timeout: 10s
       retries: 5
 
+  source-test-env:
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221123
+    depends_on:
+      - mysql
+    volumes:
+      - ..:/risingwave
+
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221105
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221123
     volumes:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221105
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221123
     depends_on:
       db:
         condition: service_healthy
@@ -55,7 +76,7 @@ services:
       - ..:/risingwave
 
   benchmark-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221105
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221123
     depends_on:
       - kafka
     volumes:

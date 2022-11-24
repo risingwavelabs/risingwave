@@ -47,7 +47,7 @@ pub mod to_text;
 
 mod ordered_float;
 
-use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 pub use chrono_wrapper::{
     NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,
 };
@@ -67,17 +67,6 @@ use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
     StructValue,
 };
-
-/// Parallel unit is the minimal scheduling unit.
-pub type ParallelUnitId = u32;
-pub type VnodeMapping = Vec<ParallelUnitId>;
-
-/// `VirtualNode` (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
-/// consistent hashing.
-pub type VirtualNode = u8;
-pub const VIRTUAL_NODE_SIZE: usize = std::mem::size_of::<VirtualNode>();
-pub const VNODE_BITS: usize = 8;
-pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -376,14 +365,14 @@ impl DataType {
             DataType::Boolean => ScalarImpl::Bool(false),
             DataType::Varchar => ScalarImpl::Utf8("".to_string()),
             DataType::Date => ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::MIN)),
-            DataType::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper(NaiveTime::from_hms(0, 0, 0))),
+            DataType::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(0, 0, 0)),
             DataType::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::MIN))
             }
             // FIXME(yuhao): Add a timestampz scalar.
             DataType::Timestampz => ScalarImpl::Int64(i64::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
-            DataType::Interval => ScalarImpl::Interval(IntervalUnit::min()),
+            DataType::Interval => ScalarImpl::Interval(IntervalUnit::MIN),
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
                     .fields
@@ -547,6 +536,8 @@ pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
 /// Convert a [`Datum`] to a [`DatumRef`].
+// TODO: use `ToDatumRef::to_datum_ref` instead.
+#[inline(always)]
 pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
     datum.as_ref().map(|d| d.as_scalar_ref_impl())
 }
@@ -631,8 +622,32 @@ pub trait ToOwnedDatum {
 }
 
 impl ToOwnedDatum for DatumRef<'_> {
+    #[inline(always)]
     fn to_owned_datum(self) -> Datum {
         self.map(ScalarRefImpl::into_scalar_impl)
+    }
+}
+
+pub trait ToDatumRef: PartialEq + Eq + std::fmt::Debug {
+    fn to_datum_ref(&self) -> DatumRef<'_>;
+}
+
+impl ToDatumRef for Datum {
+    #[inline(always)]
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        to_datum_ref(self)
+    }
+}
+impl ToDatumRef for &Datum {
+    #[inline(always)]
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        to_datum_ref(self)
+    }
+}
+impl ToDatumRef for DatumRef<'_> {
+    #[inline(always)]
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        *self
     }
 }
 
@@ -997,7 +1012,6 @@ mod tests {
     use std::hash::{BuildHasher, Hasher};
     use std::ops::Neg;
 
-    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use itertools::Itertools;
     use rand::thread_rng;
     use strum::IntoEnumIterator;
@@ -1146,18 +1160,18 @@ mod tests {
                     DataType::Decimal,
                 ),
                 DataTypeName::Date => (
-                    ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::from_ymd(2333, 3, 3))),
+                    ScalarImpl::NaiveDate(NaiveDateWrapper::from_ymd_uncheck(2333, 3, 3)),
                     DataType::Date,
                 ),
                 DataTypeName::Varchar => (ScalarImpl::Utf8("233".to_string()), DataType::Varchar),
                 DataTypeName::Time => (
-                    ScalarImpl::NaiveTime(NaiveTimeWrapper(NaiveTime::from_hms(2, 3, 3))),
+                    ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(2, 3, 3)),
                     DataType::Time,
                 ),
                 DataTypeName::Timestamp => (
-                    ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::from_timestamp(
+                    ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_timestamp_uncheck(
                         23333333, 2333,
-                    ))),
+                    )),
                     DataType::Timestamp,
                 ),
                 DataTypeName::Timestampz => (ScalarImpl::Int64(233333333), DataType::Timestampz),

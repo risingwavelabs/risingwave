@@ -128,10 +128,6 @@ async fn start_meta_node(listen_addr: String, config_path: String) {
         &listen_addr,
         "--backend",
         "mem",
-        "--periodic-compaction-interval-sec",
-        "999999",
-        "--vacuum-interval-sec",
-        "999999",
         "--enable-compaction-deterministic",
         "--config-path",
         &config_path,
@@ -592,6 +588,7 @@ async fn open_hummock_iters(
                     table_id: TableId { table_id },
                     retention_seconds: None,
                     check_bloom_filter: false,
+                    ignore_range_tombstone: false,
                 },
             )
             .await?;

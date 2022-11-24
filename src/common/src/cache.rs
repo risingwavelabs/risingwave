@@ -28,7 +28,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 
 const IN_CACHE: u8 = 1;
@@ -667,6 +666,11 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         }
     }
 
+    unsafe fn inc_reference(&self, handle: *mut LruHandle<K, T>) {
+        let _shard = self.shards[self.shard((*handle).hash)].lock();
+        (*handle).refs += 1;
+    }
+
     pub fn insert(
         self: &Arc<Self>,
         key: K,
@@ -794,43 +798,42 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
         hash: u64,
         key: K,
         fetch_value: F,
-    ) -> Result<Result<CacheableEntry<K, T>, E>, RecvError>
+    ) -> Result<CacheableEntry<K, T>, E>
     where
         F: FnOnce() -> VC,
         E: Error + Send + 'static,
         VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
     {
-        match self.lookup_for_request(hash, key.clone()) {
-            LookupResult::Cached(entry) => Ok(Ok(entry)),
-            LookupResult::WaitPendingRequest(recv) => {
-                let entry = recv.await?;
-                Ok(Ok(entry))
-            }
-            LookupResult::Miss => {
-                let this = self.clone();
-                let fetch_value = fetch_value();
-                let key2 = key.clone();
-                let mut guard = CleanCacheGuard {
-                    cache: self,
-                    key,
-                    hash,
-                    success: false,
-                };
-                let ret = tokio::spawn(async move {
-                    match fetch_value.await {
-                        Ok((value, charge)) => {
-                            let entry = this.insert(key2, hash, charge, value);
-                            Ok(Ok(entry))
-                        }
-                        Err(e) => Ok(Err(e)),
+        loop {
+            match self.lookup_for_request(hash, key.clone()) {
+                LookupResult::Cached(entry) => return Ok(entry),
+                LookupResult::WaitPendingRequest(recv) => {
+                    if let Ok(entry) = recv.await {
+                        return Ok(entry);
                     }
-                })
-                .await
-                .unwrap();
-                if let Ok(Ok(_)) = ret.as_ref() {
-                    guard.success = true;
                 }
-                ret
+                LookupResult::Miss => {
+                    let this = self.clone();
+                    let fetch_value = fetch_value();
+                    let key2 = key.clone();
+                    let mut guard = CleanCacheGuard {
+                        cache: self,
+                        key,
+                        hash,
+                        success: false,
+                    };
+                    let ret = tokio::spawn(async move {
+                        let (value, charge) = fetch_value.await?;
+                        let entry = this.insert(key2, hash, charge, value);
+                        Ok(entry)
+                    })
+                    .await
+                    .unwrap();
+                    if ret.is_ok() {
+                        guard.success = true;
+                    }
+                    return ret;
+                }
             }
         }
     }
@@ -860,6 +863,18 @@ impl<K: LruKey, T: LruValue> Drop for CacheableEntry<K, T> {
     fn drop(&mut self) {
         unsafe {
             self.cache.release(self.handle);
+        }
+    }
+}
+
+impl<K: LruKey, T: LruValue> Clone for CacheableEntry<K, T> {
+    fn clone(&self) -> Self {
+        unsafe {
+            self.cache.inc_reference(self.handle);
+            CacheableEntry {
+                cache: self.cache.clone(),
+                handle: self.handle,
+            }
         }
     }
 }
@@ -1298,7 +1313,6 @@ mod tests {
                     recv.await.map(|_| (1, 1))
                 })
                 .await
-                .unwrap()
                 .unwrap();
         });
         let wrapper = SyncPointFuture {

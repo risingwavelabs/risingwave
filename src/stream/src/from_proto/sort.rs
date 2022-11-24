@@ -14,22 +14,24 @@
 
 use std::sync::Arc;
 
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_pb::stream_plan::SortNode;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::SortExecutor;
 
 pub struct SortExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for SortExecutorBuilder {
+    type Node = SortNode;
+
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Sort)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for sort"));
         let state_table =

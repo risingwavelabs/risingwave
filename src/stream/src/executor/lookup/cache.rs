@@ -14,7 +14,8 @@
 
 use std::collections::BTreeSet;
 
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::row::Row;
 
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 
@@ -40,13 +41,12 @@ impl LookupCache {
             let key = row.row_by_indices(arrange_join_keys);
             if let Some(values) = self.data.get_mut(&key) {
                 // the item is in cache, update it
-                let value = row.to_owned_row();
                 match op {
                     Op::Insert | Op::UpdateInsert => {
-                        values.insert(value);
+                        values.insert(row.into());
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        values.remove(&value);
+                        values.remove(&row.into());
                     }
                 }
             }

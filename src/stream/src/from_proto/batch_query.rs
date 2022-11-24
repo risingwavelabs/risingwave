@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
+use risingwave_pb::stream_plan::BatchPlanNode;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
@@ -27,14 +28,14 @@ pub struct BatchQueryExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for BatchQueryExecutorBuilder {
+    type Node = BatchPlanNode;
+
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         state_store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
-
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
         let table_id = TableId {
             table_id: table_desc.table_id,
@@ -101,7 +102,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(
             table,
-            None,
+            stream.config.developer.stream_chunk_size,
             ExecutorInfo {
                 schema,
                 pk_indices: params.pk_indices,
