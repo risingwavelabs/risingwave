@@ -65,7 +65,7 @@ pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> R
 #[inline(always)]
 pub fn timestampz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
     let time_zone = lookup_time_zone(time_zone)?;
-    let secs = input.div_floor(1_000_000);
+    let secs = input.div_euclid(1_000_000);
     let nsecs = input.rem_euclid(1_000_000) * 1000;
     let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     let instant_local = instant_utc.with_timezone(&time_zone);

@@ -25,7 +25,6 @@
 #![feature(generators)]
 #![feature(iterator_try_collect)]
 #![feature(exclusive_range_pattern)]
-#![feature(int_roundings)]
 
 pub mod error;
 pub mod expr;

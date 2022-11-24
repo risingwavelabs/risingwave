@@ -239,7 +239,7 @@ impl NaiveDateTimeWrapper {
     }
 
     pub fn from_protobuf(timestamp_micros: i64) -> ArrayResult<Self> {
-        let secs = timestamp_micros.div_floor(1_000_000);
+        let secs = timestamp_micros.div_euclid(1_000_000);
         let nsecs = timestamp_micros.rem_euclid(1_000_000) * 1000;
         Self::with_secs_nsecs(secs, nsecs as u32).map_err(Into::into)
     }
