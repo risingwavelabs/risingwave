@@ -99,10 +99,11 @@ impl<S: StateStore> NowExecutor<S> {
             if !is_pausing {
                 let time_millis = Epoch::from(barrier.epoch.curr).as_unix_millis();
                 let timestamp = Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                    NaiveDateTime::from_timestamp(
+                    NaiveDateTime::from_timestamp_opt(
                         (time_millis / 1000) as i64,
                         (time_millis % 1000 * 1_000_000) as u32,
-                    ),
+                    )
+                    .unwrap(),
                 )));
 
                 let data_chunk = DataChunk::from_rows(
