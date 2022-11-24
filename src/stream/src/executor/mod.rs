@@ -73,6 +73,7 @@ mod project;
 mod project_set;
 mod rearranged_chain;
 mod receiver;
+pub mod row_id_gen;
 mod simple;
 mod sink;
 mod sort;

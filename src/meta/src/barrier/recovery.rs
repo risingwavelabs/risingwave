@@ -47,8 +47,6 @@ where
 {
     // Retry base interval in milliseconds.
     const RECOVERY_RETRY_BASE_INTERVAL: u64 = 100;
-    // Retry max attempts.
-    const RECOVERY_RETRY_MAX_ATTEMPTS: usize = 10;
     // Retry max interval.
     const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -57,7 +55,6 @@ where
     fn get_retry_strategy() -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(Self::RECOVERY_RETRY_BASE_INTERVAL)
             .max_delay(Self::RECOVERY_RETRY_MAX_INTERVAL)
-            .take(Self::RECOVERY_RETRY_MAX_ATTEMPTS)
             .map(jitter)
     }
 

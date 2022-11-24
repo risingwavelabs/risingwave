@@ -137,7 +137,7 @@ export const FragmentType = {
   FRAGMENT_UNSPECIFIED: "FRAGMENT_UNSPECIFIED",
   OTHERS: "OTHERS",
   SOURCE: "SOURCE",
-  /** SINK - TODO: change it to MATERIALIZED_VIEW or other name, since we have sink type now. */
+  MVIEW: "MVIEW",
   SINK: "SINK",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
@@ -156,6 +156,9 @@ export function fragmentTypeFromJSON(object: any): FragmentType {
     case "SOURCE":
       return FragmentType.SOURCE;
     case 3:
+    case "MVIEW":
+      return FragmentType.MVIEW;
+    case 4:
     case "SINK":
       return FragmentType.SINK;
     case -1:
@@ -173,6 +176,8 @@ export function fragmentTypeToJSON(object: FragmentType): string {
       return "OTHERS";
     case FragmentType.SOURCE:
       return "SOURCE";
+    case FragmentType.MVIEW:
+      return "MVIEW";
     case FragmentType.SINK:
       return "SINK";
     case FragmentType.UNRECOGNIZED:
@@ -692,6 +697,10 @@ export interface DmlNode {
   columnDescs: ColumnDesc[];
 }
 
+export interface RowIdGenNode {
+  rowIdIndex: number;
+}
+
 export interface StreamNode {
   nodeBody?:
     | { $case: "source"; source: SourceNode }
@@ -721,7 +730,8 @@ export interface StreamNode {
     | { $case: "groupTopN"; groupTopN: GroupTopNNode }
     | { $case: "sort"; sort: SortNode }
     | { $case: "watermarkFilter"; watermarkFilter: WatermarkFilterNode }
-    | { $case: "dml"; dml: DmlNode };
+    | { $case: "dml"; dml: DmlNode }
+    | { $case: "rowIdGen"; rowIdGen: RowIdGenNode };
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
@@ -3053,6 +3063,28 @@ export const DmlNode = {
   },
 };
 
+function createBaseRowIdGenNode(): RowIdGenNode {
+  return { rowIdIndex: 0 };
+}
+
+export const RowIdGenNode = {
+  fromJSON(object: any): RowIdGenNode {
+    return { rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : 0 };
+  },
+
+  toJSON(message: RowIdGenNode): unknown {
+    const obj: any = {};
+    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RowIdGenNode>, I>>(object: I): RowIdGenNode {
+    const message = createBaseRowIdGenNode();
+    message.rowIdIndex = object.rowIdIndex ?? 0;
+    return message;
+  },
+};
+
 function createBaseStreamNode(): StreamNode {
   return { nodeBody: undefined, operatorId: 0, input: [], streamKey: [], appendOnly: false, identity: "", fields: [] };
 }
@@ -3116,6 +3148,8 @@ export const StreamNode = {
         ? { $case: "watermarkFilter", watermarkFilter: WatermarkFilterNode.fromJSON(object.watermarkFilter) }
         : isSet(object.dml)
         ? { $case: "dml", dml: DmlNode.fromJSON(object.dml) }
+        : isSet(object.rowIdGen)
+        ? { $case: "rowIdGen", rowIdGen: RowIdGenNode.fromJSON(object.rowIdGen) }
         : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
       input: Array.isArray(object?.input)
@@ -3194,6 +3228,8 @@ export const StreamNode = {
       : undefined);
     message.nodeBody?.$case === "dml" &&
       (obj.dml = message.nodeBody?.dml ? DmlNode.toJSON(message.nodeBody?.dml) : undefined);
+    message.nodeBody?.$case === "rowIdGen" &&
+      (obj.rowIdGen = message.nodeBody?.rowIdGen ? RowIdGenNode.toJSON(message.nodeBody?.rowIdGen) : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
       obj.input = message.input.map((e) =>
@@ -3404,6 +3440,13 @@ export const StreamNode = {
     }
     if (object.nodeBody?.$case === "dml" && object.nodeBody?.dml !== undefined && object.nodeBody?.dml !== null) {
       message.nodeBody = { $case: "dml", dml: DmlNode.fromPartial(object.nodeBody.dml) };
+    }
+    if (
+      object.nodeBody?.$case === "rowIdGen" &&
+      object.nodeBody?.rowIdGen !== undefined &&
+      object.nodeBody?.rowIdGen !== null
+    ) {
+      message.nodeBody = { $case: "rowIdGen", rowIdGen: RowIdGenNode.fromPartial(object.nodeBody.rowIdGen) };
     }
     message.operatorId = object.operatorId ?? 0;
     message.input = object.input?.map((e) => StreamNode.fromPartial(e)) || [];

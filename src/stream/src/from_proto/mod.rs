@@ -33,6 +33,7 @@ mod merge;
 mod mview;
 mod project;
 mod project_set;
+mod row_id_gen;
 mod sink;
 mod sort;
 mod source;
@@ -65,6 +66,7 @@ use self::merge::*;
 use self::mview::*;
 use self::project::*;
 use self::project_set::*;
+use self::row_id_gen::RowIdGenExecutorBuilder;
 use self::sink::*;
 use self::sort::*;
 use self::source::*;
@@ -140,5 +142,6 @@ pub async fn create_executor(
         NodeBody::Sort => SortExecutorBuilder,
         NodeBody::WatermarkFilter => WatermarkFilterBuilder,
         NodeBody::Dml => DmlExecutorBuilder,
+        NodeBody::RowIdGen => RowIdGenExecutorBuilder,
     }
 }

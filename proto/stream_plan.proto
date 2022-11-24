@@ -436,6 +436,10 @@ message DmlNode {
   repeated plan_common.ColumnDesc column_descs = 2;
 }
 
+message RowIdGenNode {
+  uint64 row_id_index = 1;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -466,6 +470,7 @@ message StreamNode {
     SortNode sort = 125;
     WatermarkFilterNode watermark_filter = 126;
     DmlNode dml = 127;
+    RowIdGenNode row_id_gen = 128;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -543,8 +548,8 @@ enum FragmentType {
   FRAGMENT_UNSPECIFIED = 0;
   OTHERS = 1;
   SOURCE = 2;
-  // TODO: change it to MATERIALIZED_VIEW or other name, since we have sink type now.
-  SINK = 3;
+  MVIEW = 3;
+  SINK = 4;
 }
 
 message StreamFragmentGraph {
