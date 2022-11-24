@@ -14,12 +14,9 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
-use prost::Message;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
@@ -30,7 +27,7 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
-use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
+use risingwave_pb::meta::MetaLeaderInfo;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch::Receiver;
@@ -53,8 +50,7 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
-use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
-use crate::storage::{EtcdMetaStore, MemStore, MetaStore, MetaStoreError, Transaction};
+use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::{hummock, MetaResult};
 

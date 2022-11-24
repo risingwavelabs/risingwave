@@ -38,7 +38,7 @@ fn since_epoch() -> Duration {
 /// Use this to get information about the current leader and yourself
 struct ElectionOutcome {
     pub meta_leader_info: MetaLeaderInfo,
-    pub meta_lease_info: MetaLeaseInfo,
+    pub _meta_lease_info: MetaLeaseInfo,
 
     // True if current node is leader, else false
     pub is_leader: bool,
