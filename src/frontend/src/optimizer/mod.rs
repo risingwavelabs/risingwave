@@ -199,9 +199,8 @@ impl PlanRoot {
             .into());
         }
 
-        // Do predicate push down before translate apply, because we need to calculate the domain
+        // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
-        // Predicate Push-down
         plan = plan.predicate_pushdown(Condition::true_cond());
         if explain_trace {
             ctx.trace("Predicate Push Down:");

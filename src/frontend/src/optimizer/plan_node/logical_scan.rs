@@ -435,7 +435,8 @@ impl ColPrunable for LogicalScan {
 
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        // If predicate contains correlatedInputRef. We don't push down.
+        // If the predicate contains `CorrelatedInputRef`. We don't push down.
+        // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}
         impl ExprVisitor<bool> for HasCorrelated {
             fn merge(a: bool, b: bool) -> bool {
@@ -446,8 +447,8 @@ impl PredicatePushdown for LogicalScan {
                 true
             }
         }
-        let mut visitor = HasCorrelated {};
-        if predicate.visit_expr(&mut visitor) {
+        let mut has_correlated_visitor = HasCorrelated {};
+        if predicate.visit_expr(&mut has_correlated_visitor) {
             return LogicalFilter::create(
                 self.clone_with_predicate(self.predicate().clone()).into(),
                 predicate,
