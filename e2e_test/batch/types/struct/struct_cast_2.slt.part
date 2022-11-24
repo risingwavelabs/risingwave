@@ -43,7 +43,7 @@ select row(1, '1') = row('1', 1);
 statement ok
 select row(1, row('1', 1)) = row('1', row(1, '1'));
 
-statement ok
+statement error
 select row(1) < row(true);
 
 statement error
