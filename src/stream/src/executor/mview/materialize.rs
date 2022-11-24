@@ -249,8 +249,8 @@ fn generate_output(
     let mut data_chunk_builder = DataChunkBuilder::new(data_types, new_rows.len() + 1);
 
     for row_bytes in new_rows {
-        let res = data_chunk_builder
-            .append_one_row_from_datums(row_deserializer.deserialize(row_bytes.as_ref())?.0.iter());
+        let res =
+            data_chunk_builder.append_one_row(row_deserializer.deserialize(row_bytes.as_ref())?);
         debug_assert!(res.is_none());
     }
 

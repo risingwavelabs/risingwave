@@ -315,7 +315,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             let table = table.clone();
             let histogram = histogram.clone();
             if let Some(row) = Self::execute_point_get(table, point_get, epoch, histogram).await? {
-                if let Some(chunk) = data_chunk_builder.append_one_row_from_datums(row.values()) {
+                if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     yield chunk;
                 }
             }

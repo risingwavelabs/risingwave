@@ -18,7 +18,8 @@ use futures_async_stream::stream;
 use itertools::Itertools;
 
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk};
+use crate::row::Row2;
 use crate::types::{DataType, Datum, DatumRef};
 
 /// A [`SlicedDataChunk`] is a [`DataChunk`] with offset.
@@ -171,13 +172,6 @@ impl DataChunkBuilder {
         }
     }
 
-    /// Append one row from the given `row_ref`.
-    /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
-    #[must_use]
-    pub fn append_one_row_ref(&mut self, row_ref: RowRef<'_>) -> Option<DataChunk> {
-        self.append_one_row_from_datum_refs(row_ref.values())
-    }
-
     /// Append one row from the given iterator of owned datums.
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
     #[must_use]
@@ -194,6 +188,13 @@ impl DataChunkBuilder {
         } else {
             None
         }
+    }
+
+    /// Append one row from the given [`Row2`].
+    /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
+    #[must_use]
+    pub fn append_one_row(&mut self, row: impl Row2) -> Option<DataChunk> {
+        self.append_one_row_from_datum_refs(row.iter())
     }
 
     /// Append one row from the given two arrays.

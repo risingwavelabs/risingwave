@@ -323,7 +323,7 @@ impl NestedLoopJoinExecutor {
             .zip_eq(matched.finish().iter())
             .filter(|(_, matched)| if ANTI_JOIN { !*matched } else { *matched })
         {
-            if let Some(chunk) = chunk_builder.append_one_row_ref(left_row) {
+            if let Some(chunk) = chunk_builder.append_one_row(left_row) {
                 yield chunk
             }
         }

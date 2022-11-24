@@ -138,12 +138,8 @@ pub fn generate_output(
         let mut data_chunk_builder = DataChunkBuilder::new(schema.data_types(), new_rows.len() + 1);
         let row_deserializer = RowDeserializer::new(schema.data_types());
         for compacted_row in new_rows {
-            let res = data_chunk_builder.append_one_row_from_datums(
-                row_deserializer
-                    .deserialize(compacted_row.row.as_ref())?
-                    .0
-                    .iter(),
-            );
+            let res = data_chunk_builder
+                .append_one_row(row_deserializer.deserialize(compacted_row.row.as_ref())?);
             debug_assert!(res.is_none());
         }
         // since `new_rows` is not empty, we unwrap directly

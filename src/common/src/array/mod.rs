@@ -433,29 +433,23 @@ macro_rules! impl_array_builder {
             }
 
             /// Append a datum, return error while type not match.
-            pub fn append_datum(&mut self, datum: &Datum) {
-                match datum {
+            pub fn append_datum(&mut self, datum: impl ToDatumRef) {
+                match datum.to_datum_ref() {
                     None => self.append_null(),
-                    Some(ref scalar) => match (self, scalar) {
-                        $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
-                        _ => panic!("Invalid datum type"),
+                    Some(scalar_ref) => match (self, scalar_ref) {
+                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
+                        (this_builder, this_scalar_ref) => panic!(
+                            "Failed to append datum, array builder type: {}, scalar type: {}",
+                            this_builder.get_ident(),
+                            this_scalar_ref.get_ident()
+                        ),
                     },
                 }
             }
 
             /// Append a datum ref, return error while type not match.
             pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) {
-                match datum_ref {
-                    None => self.append_null(),
-                    Some(scalar_ref) => match (self, scalar_ref) {
-                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
-                        (this_builder, this_scalar_ref) => panic!(
-                            "Failed to append datum, array builder type: {}, scalar ref type: {}",
-                            this_builder.get_ident(),
-                            this_scalar_ref.get_ident()
-                        ),
-                    },
-                }
+                self.append_datum(datum_ref)
             }
 
             pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {

@@ -233,7 +233,7 @@ impl TopNExecutor {
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
         for HeapElem { chunk, row_id, .. } in heap.dump() {
             if let Some(spilled) =
-                chunk_builder.append_one_row_ref(chunk.row_at_unchecked_vis(row_id))
+                chunk_builder.append_one_row(chunk.row_at_unchecked_vis(row_id))
             {
                 yield spilled
             }

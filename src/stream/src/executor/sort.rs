@@ -154,9 +154,7 @@ impl<S: StateStore> SortExecutor<S> {
                                 // Add the record to stream chunk data. Note that we retrieve the
                                 // record from a BTreeMap, so data in this chunk should be ordered
                                 // by timestamp and pk.
-                                if let Some(data_chunk) =
-                                    data_chunk_builder.append_one_row_from_datums(row.values())
-                                {
+                                if let Some(data_chunk) = data_chunk_builder.append_one_row(row) {
                                     // When the chunk size reaches its maximum, we construct a
                                     // stream chunk and send it to downstream.
                                     let ops = vec![Op::Insert; data_chunk.capacity()];
