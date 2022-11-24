@@ -94,7 +94,7 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct RowRef<'a> {
     chunk: &'a DataChunk,
 
@@ -150,10 +150,6 @@ impl<'a> RowRef<'a> {
             columns: self.chunk.columns().iter(),
             row_idx: self.idx,
         }
-    }
-
-    pub fn to_owned_row(&self) -> Row {
-        Row(self.values().map(ToOwnedDatum::to_owned_datum).collect())
     }
 
     /// Get an owned `Row` by the given `indices` from current row ref.

@@ -22,8 +22,8 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{self, Row};
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::row::{self, Row, Row2, RowExt};
+use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
@@ -188,18 +188,12 @@ impl<S: StateStore> SortExecutor<S> {
                         match op {
                             Op::Insert => {
                                 // For insert operation, we buffer the record in memory.
-                                let row = row_ref.to_owned_row();
-                                let timestamp_datum = row.0.get(self.sort_column_index).ok_or_else(|| {
-                                    anyhow!(
-                                        "column index {} out of range in row {:?}",
-                                        self.sort_column_index,
-                                        row
-                                    )
-                                })?;
-                                let pk = row.by_indices(&self.pk_indices);
+                                let timestamp_datum = row_ref.datum_at(self.sort_column_index).to_owned_datum().unwrap();
+                                let pk = row_ref.project(&self.pk_indices).into_owned_row();
+                                let row = row_ref.into_owned_row();
                                 // Null event time should not exist in the row since the `WatermarkFilter`
                                 // before the `Sort` will filter out the Null event time.
-                                self.buffer.insert((timestamp_datum.clone().unwrap(), pk), (row, false));
+                                self.buffer.insert((timestamp_datum, pk), (row, false));
                             },
                             // Other operations are not supported currently.
                             _ => unimplemented!("operations other than insert currently are not supported by sort executor")
@@ -302,7 +296,7 @@ impl<S: StateStore> SortExecutor<S> {
                         row
                     )
                 })?;
-                let pk = row.by_indices(&self.pk_indices);
+                let pk = (&row).project(&self.pk_indices).into_owned_row();
                 // Null event time should not exist in the row since the `WatermarkFilter` before
                 // the `Sort` will filter out the Null event time.
                 self.buffer

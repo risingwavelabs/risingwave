@@ -50,7 +50,7 @@ mod test {
 
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
-    use risingwave_common::row::Row;
+    use risingwave_common::row::{Row, Row2};
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
@@ -104,7 +104,7 @@ mod test {
         let chunk = builder.finish();
         chunk
             .rows()
-            .map(|(op, row_ref)| (op, row_ref.to_owned_row()))
+            .map(|(op, row_ref)| (op, row_ref.into_owned_row()))
             .collect::<Vec<_>>()
     }
 

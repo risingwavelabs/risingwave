@@ -139,6 +139,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::ColumnDesc;
+    use risingwave_common::row::Row2;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
@@ -337,7 +338,7 @@ mod tests {
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
-        let row = row.to_owned_row().0;
+        let row = row.into_owned_row().0;
 
         let expected = vec![
             Some(ScalarImpl::Struct(StructValue::new(vec![

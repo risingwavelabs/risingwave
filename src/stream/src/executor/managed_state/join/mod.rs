@@ -25,15 +25,15 @@ use futures::future::try_join;
 use futures_async_stream::for_await;
 pub(super) use join_entry_state::JoinEntryState;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
-use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
-use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
+use risingwave_common::row::{CompactedRow, Row, Row2, RowDeserializer, RowExt};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::{bail, row};
 use risingwave_storage::StateStore;
 
 use self::iter_utils::zip_by_order_key;
@@ -45,10 +45,11 @@ use crate::task::ActorId;
 
 type DegreeType = u64;
 
-pub fn build_degree_row(mut order_key: Row, degree: DegreeType) -> Row {
-    let degree_datum = Some(ScalarImpl::Int64(degree as i64));
-    order_key.0.push(degree_datum);
+// TODO(row trait): no need to `into_owned_row` here
+pub fn build_degree_row(order_key: impl Row2, degree: DegreeType) -> Row {
     order_key
+        .chain(row::once(Some(ScalarImpl::Int64(degree as i64))))
+        .into_owned_row()
 }
 
 /// This is a row with a match degree
@@ -93,7 +94,7 @@ impl JoinRow {
     ///
     /// * `state_order_key_indices` - the order key of `row`
     pub fn into_table_rows(self, state_order_key_indices: &[usize]) -> (Row, Row) {
-        let order_key = self.row.by_indices(state_order_key_indices);
+        let order_key = (&self.row).project(state_order_key_indices);
         let degree = build_degree_row(order_key, self.degree);
         (self.row, degree)
     }
@@ -153,7 +154,7 @@ impl EncodedJoinRow {
     ) -> StreamExecutorResult<Row> {
         let order_key = self
             .decode_row(row_data_types)?
-            .by_indices(state_order_key_indices);
+            .project(state_order_key_indices);
         let schemaed_degree = build_degree_row(order_key, self.degree);
         Ok(schemaed_degree)
     }

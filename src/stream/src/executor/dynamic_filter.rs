@@ -22,7 +22,7 @@ use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{Row as RowData, RowDeserializer};
+use risingwave_common::row::{Row as RowData, Row2, RowDeserializer};
 use risingwave_common::types::{to_datum_ref, DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
@@ -171,10 +171,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             if let Some(val) = left_val {
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        self.range_cache.insert(&val, row.to_owned_row())?;
+                        self.range_cache.insert(&val, row.into_owned_row())?;
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        self.range_cache.delete(&val, row.to_owned_row())?;
+                        self.range_cache.delete(&val, row.into_owned_row())?;
                     }
                 }
             }
@@ -333,7 +333,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         match *op {
                             Op::UpdateInsert | Op::Insert => {
                                 current_epoch_value = Some(row.value_at(0).to_owned_datum());
-                                current_epoch_row = Some(row.to_owned_row());
+                                current_epoch_row = Some(row.into_owned_row());
                             }
                             _ => {
                                 // To be consistent, there must be an existing `current_epoch_value`

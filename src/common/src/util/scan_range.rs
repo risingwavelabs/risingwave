@@ -106,7 +106,7 @@ impl ScanRange {
         let pk_prefix_value = &self.eq_conds;
         let vnode = pk_prefix_value
             .project(&dist_key_in_pk_indices)
-            .hash(Crc32FastBuilder {})
+            .hash(Crc32FastBuilder)
             .to_vnode();
         Some(vnode)
     }
@@ -193,7 +193,8 @@ mod tests {
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
         ])
-        .hash_by_indices(&[0, 1], &Crc32FastBuilder {})
+        .project(&[0, 1])
+        .hash(Crc32FastBuilder)
         .to_vnode();
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }
@@ -219,7 +220,8 @@ mod tests {
             Some(ScalarImpl::from(514)),
             Some(ScalarImpl::from(114514)),
         ])
-        .hash_by_indices(&[2, 1], &Crc32FastBuilder {})
+        .project(&[2, 1])
+        .hash(Crc32FastBuilder)
         .to_vnode();
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }

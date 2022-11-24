@@ -14,16 +14,12 @@
 
 //! An owned row type with a `Vec<Datum>`.
 
-use std::hash::{BuildHasher, Hasher};
 use std::{cmp, ops};
 
-use itertools::Itertools;
-
-use super::Row2;
+use super::{Row2, RowExt};
 use crate::array::RowRef;
 use crate::collection::estimate_size::EstimateSize;
-use crate::hash::HashCode;
-use crate::types::{hash_datum, to_datum_ref, DataType, Datum, DatumRef};
+use crate::types::{to_datum_ref, DataType, Datum, DatumRef};
 use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
@@ -49,7 +45,7 @@ impl ops::IndexMut<usize> for Row {
 // TODO: remove this due to implicit allocation
 impl From<RowRef<'_>> for Row {
     fn from(row_ref: RowRef<'_>) -> Self {
-        row_ref.to_owned_row()
+        row_ref.into_owned_row()
     }
 }
 
@@ -135,7 +131,7 @@ impl Row {
         key_indices: &[usize],
     ) -> Vec<u8> {
         let mut bytes = vec![];
-        serializer.serialize_datums(self.datums_by_indices(key_indices), &mut bytes);
+        serializer.serialize_datum_refs((&self).project(key_indices).iter(), &mut bytes);
         bytes
     }
 
@@ -159,50 +155,6 @@ impl Row {
     /// TODO(row trait): use `Row::chain` instead.
     pub fn concat(&self, values: impl IntoIterator<Item = Datum>) -> Row {
         Row::new(self.values().cloned().chain(values).collect())
-    }
-
-    /// Hash row data all in one
-    ///
-    /// TODO(row trait): use `Row::hash` instead.
-    pub fn hash_row<H>(&self, hash_builder: &H) -> HashCode
-    where
-        H: BuildHasher,
-    {
-        let mut hasher = hash_builder.build_hasher();
-        for datum in &self.0 {
-            hash_datum(datum, &mut hasher);
-        }
-        HashCode(hasher.finish())
-    }
-
-    /// Compute hash value of a row on corresponding indices.
-    ///
-    /// TODO(row trait): use `Row::project` then `Row::hash` instead.
-    pub fn hash_by_indices<H>(&self, hash_indices: &[usize], hash_builder: &H) -> HashCode
-    where
-        H: BuildHasher,
-    {
-        let mut hasher = hash_builder.build_hasher();
-        for idx in hash_indices {
-            hash_datum(&self.0[*idx], &mut hasher);
-        }
-        HashCode(hasher.finish())
-    }
-
-    /// Get an owned `Row` by the given `indices` from current row.
-    ///
-    /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
-    ///
-    /// TODO(row trait): use `Row::project` instead.
-    pub fn by_indices(&self, indices: &[usize]) -> Row {
-        Row(indices.iter().map(|&idx| self.0[idx].clone()).collect_vec())
-    }
-
-    /// Get a reference to the datums in the row by the given `indices`.
-    ///
-    /// TODO(row trait): use `Row::project` instead.
-    pub fn datums_by_indices<'a>(&'a self, indices: &'a [usize]) -> impl Iterator<Item = &Datum> {
-        indices.iter().map(|&idx| &self.0[idx])
     }
 }
 
@@ -277,6 +229,8 @@ impl RowDeserializer {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use super::*;
     use crate::types::{DataType as Ty, IntervalUnit, ScalarImpl};
     use crate::util::hash_util::Crc32FastBuilder;
@@ -314,7 +268,7 @@ mod tests {
 
     #[test]
     fn test_hash_row() {
-        let hash_builder = Crc32FastBuilder {};
+        let hash_builder = Crc32FastBuilder;
 
         let row1 = Row(vec![
             Some(ScalarImpl::Utf8("string".into())),
@@ -338,9 +292,9 @@ mod tests {
             Some(ScalarImpl::Float64(5.0.into())),
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
         ]);
-        assert_ne!(row1.hash_row(&hash_builder), row2.hash_row(&hash_builder));
+        assert_ne!(row1.hash(hash_builder), row2.hash(hash_builder));
 
         let row_default = Row::default();
-        assert_eq!(row_default.hash_row(&hash_builder).0, 0);
+        assert_eq!(row_default.hash(hash_builder).0, 0);
     }
 }
