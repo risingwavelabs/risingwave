@@ -54,7 +54,7 @@ impl RisingWave {
         let rows = self.client.simple_query(sql).await?;
         for row in rows {
             match row {
-                tokio_postgres::SimpleQueryMessage::Row::new(row) => {
+                tokio_postgres::SimpleQueryMessage::Row(row) => {
                     for i in 0..row.len() {
                         if i != 0 {
                             write!(output, " ").unwrap();
