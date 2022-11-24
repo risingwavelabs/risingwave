@@ -36,7 +36,7 @@ fn since_epoch() -> Duration {
 
 /// Contains the outcome of an election
 /// Use this to get information about the current leader and yourself
-struct ElectionResult {
+struct ElectionOutcome {
     pub meta_leader_info: MetaLeaderInfo,
     pub meta_lease_info: MetaLeaseInfo,
 
@@ -80,7 +80,7 @@ async fn campaign<S: MetaStore>(
     addr: &String,
     lease_time_sec: u64,
     next_lease_id: u64,
-) -> Option<ElectionResult> {
+) -> Option<ElectionOutcome> {
     tracing::info!("running for election with lease {}", next_lease_id);
 
     // below is old code
@@ -131,7 +131,7 @@ async fn campaign<S: MetaStore>(
                 if !val {
                     return None;
                 }
-                Some(ElectionResult {
+                Some(ElectionOutcome {
                     meta_leader_info: leader_info,
                     meta_lease_info: lease_info,
                     is_leader: true,
@@ -147,7 +147,7 @@ async fn campaign<S: MetaStore>(
         Some(val) => val,
     };
 
-    Some(ElectionResult {
+    Some(ElectionOutcome {
         meta_leader_info: leader_info,
         meta_lease_info: lease_info,
         is_leader,
@@ -334,7 +334,6 @@ pub async fn run_elections<S: MetaStore>(
                     gen_rand_lease_id()
                 };
 
-                // TODO: rename election result into election outcome
                 let (leader_info, is_leader) =
                     match campaign(&meta_store, &addr, lease_time_sec, lease_id).await {
                         None => {
