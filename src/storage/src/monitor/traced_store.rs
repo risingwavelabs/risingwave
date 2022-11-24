@@ -20,11 +20,10 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
-    init_collector, should_use_trace, trace, trace_result, Operation, OperationResult, RecordId,
-    StorageType, TraceResult, TraceSpan,
+    init_collector, should_use_trace, trace, trace_result, ConcurrentId, Operation,
+    OperationResult, RecordId, StorageType, TraceResult, TraceSpan, LOCAL_ID,
 };
 
-use super::get_concurrent_id;
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
@@ -228,4 +227,13 @@ where
             Ok(kv_pair)
         }
     }
+}
+
+pub fn get_concurrent_id() -> ConcurrentId {
+    #[cfg(all(not(madsim), hm_trace))]
+    {
+        LOCAL_ID.get()
+    }
+    #[cfg(any(madsim, not(hm_trace)))]
+    0
 }

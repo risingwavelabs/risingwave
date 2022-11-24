@@ -16,19 +16,25 @@ use std::env;
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::BufWriter;
 use std::path::Path;
+use std::sync::atomic::AtomicU64;
 
 use bincode::{Decode, Encode};
 use either::Either;
 use flume::{unbounded, Receiver, Sender};
+use tokio::task_local;
 
 use crate::write::{TraceWriter, TraceWriterImpl};
-use crate::{Operation, OperationResult, Record, RecordId, RecordIdGenerator};
+use crate::{
+    ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
+    UniqueIdGenerator,
+};
 
 // create a global singleton of collector as well as record id generator
 lazy_static! {
     static ref GLOBAL_COLLECTOR: GlobalCollector = GlobalCollector::new();
-    static ref GLOBAL_RECORD_ID: RecordIdGenerator = RecordIdGenerator::new();
+    static ref GLOBAL_RECORD_ID: RecordIdGenerator = UniqueIdGenerator::new(AtomicU64::new(0));
     static ref SHOULD_USE_TRACE: bool = set_use_trace();
+    pub static ref CONCURRENT_ID: ConcurrentIdGenerator = UniqueIdGenerator::new(AtomicU64::new(0));
 }
 
 const USE_TRACE: &str = "USE_HM_TRACE";
@@ -267,6 +273,13 @@ pub enum StorageType {
     Local(ConcurrentId),
 }
 
+task_local! {
+    // This is why we need to ignore this rule
+    // https://github.com/rust-lang/rust-clippy/issues/9224
+    #[allow(clippy::declare_interior_mutable_const)]
+    pub static LOCAL_ID: ConcurrentId;
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -316,7 +329,7 @@ mod tests {
         let count = 200;
 
         let collector = Arc::new(GlobalCollector::new());
-        let generator = Arc::new(RecordIdGenerator::new());
+        let generator = Arc::new(UniqueIdGenerator::new(AtomicU64::new(0)));
         let mut handles = Vec::with_capacity(count);
 
         for i in 0..count {
@@ -342,7 +355,7 @@ mod tests {
     async fn test_collector_run() {
         let count = 5000;
         let collector = Arc::new(GlobalCollector::new());
-        let generator = Arc::new(RecordIdGenerator::new());
+        let generator = Arc::new(UniqueIdGenerator::new(AtomicU64::new(0)));
 
         let op = Operation::get(vec![74, 56, 43, 67], 256, None, true, Some(242), 167, false);
         let mut mock_writer = MockTraceWriter::new();

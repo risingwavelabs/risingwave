@@ -24,10 +24,27 @@ mod local_metrics;
 pub use local_metrics::StoreLocalStatistic;
 pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 
-mod traced_local;
-pub use traced_local::*;
-
 #[cfg(hm_trace)]
 mod traced_store;
+use futures::Future;
 #[cfg(hm_trace)]
 pub use traced_store::*;
+#[cfg(all(not(madsim), hm_trace))]
+use {
+    risingwave_hummock_trace::{ConcurrentId, CONCURRENT_ID, LOCAL_ID},
+    tokio::task::futures::TaskLocalFuture,
+};
+
+pub trait HummockTraceFuture: Sized + Future {
+    #[cfg(any(madsim, not(hm_trace)))]
+    fn may_trace_hummock(self) -> Self {
+        self
+    }
+    #[cfg(all(not(madsim), hm_trace))]
+    fn may_trace_hummock(self) -> TaskLocalFuture<ConcurrentId, Self> {
+        let id = CONCURRENT_ID.next();
+        LOCAL_ID.scope(id, self)
+    }
+}
+
+impl<F: Future> HummockTraceFuture for F {}
