@@ -22,10 +22,10 @@ use crate::collection::estimate_size::EstimateSize;
 use crate::types::{to_datum_ref, DataType, Datum, DatumRef};
 use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
-use crate::util::value_encoding::{deserialize_datum, serialize_datum};
+use crate::util::value_encoding::deserialize_datum;
 
 /// TODO(row trait): rename to `OwnedRow`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Row(pub Vec<Datum>);
 
 impl ops::Index<usize> for Row {
@@ -49,21 +49,6 @@ impl From<RowRef<'_>> for Row {
     }
 }
 
-impl PartialOrd for Row {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.0.len() != other.0.len() {
-            return None;
-        }
-        self.0.partial_cmp(&other.0)
-    }
-}
-
-impl Ord for Row {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
-    }
-}
-
 impl Row {
     pub fn new(values: Vec<Datum>) -> Self {
         Self(values)
@@ -75,33 +60,6 @@ impl Row {
     pub fn empty<'a>() -> &'a Self {
         static EMPTY_ROW: Row = Row(Vec::new());
         &EMPTY_ROW
-    }
-
-    /// Serialize the row into value encoding bytes.
-    /// WARNING: If you want to serialize to a memcomparable format, use
-    /// [`crate::util::ordered::OrderedRow`]
-    ///
-    /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-    ///
-    /// TODO(row trait): use `Row::value_serialize` instead.
-    pub fn serialize(&self, value_indices: &Option<Vec<usize>>) -> Vec<u8> {
-        let mut result = vec![];
-        // value_indices is None means serializing each `Datum` in sequence, otherwise only
-        // columns of given value_indices will be serialized.
-        match value_indices {
-            Some(value_indices) => {
-                for value_idx in value_indices {
-                    serialize_datum(&self.0[*value_idx], &mut result);
-                }
-            }
-            None => {
-                for cell in &self.0 {
-                    serialize_datum(cell, &mut result);
-                }
-            }
-        }
-
-        result
     }
 
     /// Serialize part of the row into memcomparable bytes.
@@ -209,7 +167,7 @@ mod tests {
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
         let value_indices = (0..9).collect_vec();
-        let bytes = row.serialize(&Some(value_indices));
+        let bytes = (&row).project(&value_indices).value_serialize();
         assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 16 + 16 + 9);
         let de = RowDeserializer::new(vec![
             Ty::Varchar,
