@@ -205,46 +205,70 @@ impl HummockReadVersion {
     }
 
     /// Updates the read version with `VersionUpdate`.
-    /// A `OrderIdx` that can uniquely identify the newly added entry will be returned.
+    /// There will be three data types to be processed
+    /// `VersionUpdate::Staging`
+    ///     - `StagingData::ImmMem` -> Insert into memory's `staging_imm`
+    ///     - `StagingData::Sst` -> Update the sst to memory's `staging_sst` and remove the
+    ///       corresponding `staging_imms` according to the `batch_id`
+    /// `VersionUpdate::CommittedDelta` -> Unimplemented yet
+    /// `VersionUpdate::CommittedSnapshot` -> Update `committed_version` , and clean up related
+    /// `staging_sst` and `staging_imm` in memory according to epoch
     pub fn update(&mut self, info: VersionUpdate) {
         match info {
             VersionUpdate::Staging(staging) => match staging {
                 // TODO: add a check to ensure that the added batch id of added imm is greater than
                 // the batch id of imm at the front
-                StagingData::ImmMem(imm) => self.staging.imm.push_front(imm),
-                StagingData::Sst(staging_sst) => {
-                    let staging_imm_ids_from_sst: HashSet<u64> =
-                        staging_sst.imm_ids.iter().cloned().collect();
+                StagingData::ImmMem(imm) => {
+                    if let Some(item) = self.staging.imm.front() {
+                        // check batch_id order from newest to old
+                        debug_assert!(item.batch_id() < imm.batch_id());
+                    }
 
+                    self.staging.imm.push_front(imm)
+                }
+                StagingData::Sst(staging_sst) => {
+                    // The following properties must be ensured:
+                    // 1) self.staging.imm is sorted by imm id descendingly
+                    // 2) staging_sst.imm_ids preserves the imm id partial
+                    //    ordering of the participating read version imms. Example:
+                    //    If staging_sst contains two read versions r1: [i1, i3] and  r2: [i2, i4],
+                    //    then [i2, i1, i3, i4] is valid while [i3, i1, i2, i4] is invalid.
+                    // 3) The intersection between staging_sst.imm_ids and self.staging.imm
+                    //    are always the suffix of self.staging.imm
+
+                    // Check 1)
+                    debug_assert!(self
+                        .staging
+                        .imm
+                        .iter()
+                        .rev()
+                        .is_sorted_by_key(|imm| imm.batch_id()));
+
+                    // Calculate intersection
                     let staging_imm_ids_from_imms: HashSet<u64> =
                         self.staging.imm.iter().map(|imm| imm.batch_id()).collect();
 
-                    let intersection =
-                        staging_imm_ids_from_imms.intersection(&staging_imm_ids_from_sst);
+                    // batch_id order from newest to old
+                    let intersect_imm_ids = staging_sst
+                        .imm_ids
+                        .iter()
+                        .copied()
+                        .filter(|id| staging_imm_ids_from_imms.contains(id))
+                        .collect_vec();
 
-                    // check intersection order of staging_imm
-                    let intersection_imm_ids = intersection.into_iter().copied().sorted();
-
-                    // Check order and if and only if there is data intersection between staging_sst
-                    // and imms involved in read_version
-                    if intersection_imm_ids.len() > 0 {
-                        // Ensure that the batch id in the same order in imms and sst
-                        assert!(check_subset_preserve_order(
-                            intersection_imm_ids.clone(),
-                            staging_sst.imm_ids.iter().cloned().rev(),
+                    if !intersect_imm_ids.is_empty() {
+                        // Check 2)
+                        debug_assert!(check_subset_preserve_order(
+                            intersect_imm_ids.iter().copied(),
+                            self.staging.imm.iter().map(|imm| imm.batch_id()),
                         ));
 
-                        assert!(check_subset_preserve_order(
-                            intersection_imm_ids.clone(),
-                            self.staging.imm.iter().map(|imm| imm.batch_id()).rev(),
-                        ));
-
-                        for clear_imm_id in intersection_imm_ids {
+                        // Check 3) and replace imms with a staging sst
+                        for clear_imm_id in intersect_imm_ids.into_iter().rev() {
                             let item = self.staging.imm.back().unwrap();
                             assert_eq!(clear_imm_id, item.batch_id());
                             self.staging.imm.pop_back();
                         }
-
                         self.staging.sst.push_front(staging_sst);
                     }
                 }
