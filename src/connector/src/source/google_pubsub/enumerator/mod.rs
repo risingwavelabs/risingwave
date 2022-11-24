@@ -12,20 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod base;
-pub mod cdc;
-pub mod datagen;
-pub mod dummy_connector;
-pub mod filesystem;
-pub mod google_pubsub;
-pub mod kafka;
-pub mod kinesis;
-pub mod nexmark;
-pub mod pulsar;
-pub use base::*;
-pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
-pub use kafka::KAFKA_CONNECTOR;
-pub use kinesis::KINESIS_CONNECTOR;
+mod client;
 
-pub use crate::source::nexmark::NEXMARK_CONNECTOR;
-pub use crate::source::pulsar::PULSAR_CONNECTOR;
+pub use client::*;

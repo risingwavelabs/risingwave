@@ -29,7 +29,8 @@ use risedev::{
     compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
     ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
     FrontendService, GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService,
-    PrometheusService, RedisService, ServiceConfig, Task, ZooKeeperService, RISEDEV_SESSION_NAME,
+    PrometheusService, PubsubService, RedisService, ServiceConfig, Task, ZooKeeperService,
+    RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -111,6 +112,7 @@ fn task_main(
             ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
             ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Pubsub(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
@@ -299,6 +301,16 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("kafka {}:{}", c.address, c.port));
+            }
+            ServiceConfig::Pubsub(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = PubsubService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task = risedev::PubsubReadyTaskCheck::new(c.clone())?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("pubsub {}:{}", c.address, c.port));
             }
             ServiceConfig::RedPanda(_) => {
                 return Err(anyhow!("redpanda is only supported in RiseDev compose."));

@@ -122,7 +122,6 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct ComputeNodeConfig {
     // For connection
     #[serde(default)]
