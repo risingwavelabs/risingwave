@@ -2,6 +2,8 @@
 heartbeat_interval_ms = 1000
 max_heartbeat_interval_secs = 600
 
+[meta]
+
 [batch]
 
 [streaming]

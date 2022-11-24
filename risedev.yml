@@ -101,7 +101,6 @@ risedev:
       bucket: some-bucket # configure a valid bucket name
     - use: etcd
     - use: meta-node
-      periodic-compaction-interval-sec: 99999
       enable-compaction-deterministic: true
     - use: compute-node
     - use: frontend
@@ -174,17 +173,6 @@ risedev:
       max-idle-secs-to-exit: 1800
     - use: compute-node
     - use: frontend
-
-  playground-test:
-    - use: meta-node
-      unsafe-disable-recovery: true
-      max-idle-secs-to-exit: 1800
-      vacuum-interval-sec: 1
-      collect-gc-watermark-spin-interval-sec: 1
-      min-sst-retention-time-sec: 0
-    - use: compute-node
-    - use: frontend
-    - use: compactor
 
   playground-3cn:
     - use: meta-node
@@ -490,7 +478,6 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
-      periodic-compaction-interval-sec: 99999
       enable-compaction-deterministic: true
     - use: compute-node
       enable-tiered-cache: true
@@ -644,21 +631,8 @@ template:
     # Whether to disable recovery mode
     unsafe-disable-recovery: false
 
-    # Interval of GC stale metadata and SST
-    vacuum-interval-sec: 30
-
-    # Interval of periodical compaction
-    periodic-compaction-interval-sec: 60
-
     # Whether run in compaction deterministic test mode
     enable-compaction-deterministic: false
-
-    # The spin interval when collecting global GC watermark in hummock
-    collect-gc-watermark-spin-interval-sec: 5
-
-    # Threshold used by worker node to filter out new SSTs when scanning object store, during full SST GC.
-    # 7 days by default.
-    min-sst-retention-time-sec: 604800
 
     # Enable sanity check when SSTs are committed. Disabled by default.
     enable-committed-sst-sanity-check: false
