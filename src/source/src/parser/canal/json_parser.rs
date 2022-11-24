@@ -50,7 +50,7 @@ impl CanalJsonParser {
     fn parse_inner(
         &self,
         payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         let event: CanalJsonEvent = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
