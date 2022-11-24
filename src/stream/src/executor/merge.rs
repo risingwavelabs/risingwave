@@ -235,6 +235,7 @@ struct BufferedWatermarks {
     pub other_buffered_watermarks: BTreeMap<ActorId, StagedWatermarks>,
 }
 
+/// A stream for merging messages from multiple upstreams.
 pub struct SelectReceivers {
     /// The barrier we're aligning to. If this is `None`, then `blocked_upstreams` is empty.
     barrier: Option<Barrier>,
@@ -254,7 +255,8 @@ impl Stream for SelectReceivers {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.active.is_terminated() {
-            // This only happens
+            // This only happens if we've been asked to stop.
+            assert!(self.blocked.is_empty());
             return Poll::Ready(None);
         }
 
@@ -298,9 +300,15 @@ impl Stream for SelectReceivers {
                         }
                     }
                 }
-                // If one upstream is finished, we finish the whole stream. This should not happen
-                // normally as we use the barrier as the control message.
-                Some((None, _)) => return Poll::Ready(None),
+                // If one upstream is finished, we finish the whole stream with an error. This
+                // should not happen normally as we use the barrier as the control message.
+                Some((None, r)) => {
+                    return Poll::Ready(Some(Err(StreamExecutorError::channel_closed(format!(
+                        "exchange from actor {} to actor {} closed unexpectedly",
+                        r.actor_id(),
+                        self.actor_id
+                    )))))
+                }
                 // There's no active upstreams. Process the barrier and resume the blocked ones.
                 None => break,
             }
@@ -309,13 +317,16 @@ impl Stream for SelectReceivers {
         assert!(self.active.is_terminated());
         let barrier = self.barrier.take().unwrap();
 
-        // If this barrier asks the actor to stop, we do not reset the upstreams so that the
+        // If this barrier asks the actor to stop, we do not reset the active upstreams so that the
         // next call would return `Poll::Ready(None)` due to `is_terminated`.
-        if !barrier.is_stop_or_update_drop_actor(self.actor_id) {
-            let upstreams = std::mem::take(&mut self.blocked);
+        let upstreams = std::mem::take(&mut self.blocked);
+        if barrier.is_stop_or_update_drop_actor(self.actor_id) {
+            drop(upstreams);
+        } else {
             self.extend_active(upstreams);
             assert!(!self.active.is_terminated());
         }
+
         Poll::Ready(Some(Ok(Message::Barrier(barrier))))
     }
 }
