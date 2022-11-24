@@ -211,7 +211,6 @@ impl<W: SstableWriter> SstableBuilder<W> {
             }
         } else {
             self.stale_key_count += 1;
-            self.last_table_stats.stale_key_count += 1;
         }
         self.total_key_count += 1;
         self.last_table_stats.total_key_count += 1;

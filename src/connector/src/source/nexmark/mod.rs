@@ -51,7 +51,7 @@ pub struct NexmarkPropertiesInner {
     /// The total event count of Bid + Auction + Person
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "nexmark.event.num", default = "default_event_num")]
-    pub event_num: i64,
+    pub event_num: u64,
 
     #[serde(rename = "nexmark.table.type", default = "default_event_type")]
     pub table_type: EventType,
@@ -217,8 +217,8 @@ pub struct NexmarkPropertiesInner {
     pub threads: Option<usize>,
 }
 
-fn default_event_num() -> i64 {
-    -1
+fn default_event_num() -> u64 {
+    u64::MAX
 }
 
 fn default_event_type() -> EventType {
