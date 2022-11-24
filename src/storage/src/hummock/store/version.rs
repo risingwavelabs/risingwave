@@ -229,15 +229,15 @@ impl HummockReadVersion {
                     // and imms involved in read_version
                     if intersection_imm_ids.len() > 0 {
                         // Ensure that the batch id in the same order in imms and sst
-                        check_subset_preserve_order(
+                        assert!(check_subset_preserve_order(
                             intersection_imm_ids.clone(),
-                            staging_sst.imm_ids.iter().cloned(),
-                        );
+                            staging_sst.imm_ids.iter().cloned().rev(),
+                        ));
 
-                        check_subset_preserve_order(
+                        assert!(check_subset_preserve_order(
                             intersection_imm_ids.clone(),
-                            self.staging.imm.iter().map(|imm| imm.batch_id()),
-                        );
+                            self.staging.imm.iter().map(|imm| imm.batch_id()).rev(),
+                        ));
 
                         for clear_imm_id in intersection_imm_ids {
                             let item = self.staging.imm.back().unwrap();
