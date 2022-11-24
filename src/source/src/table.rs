@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use futures_async_stream::try_stream;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
@@ -23,6 +25,8 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::StreamChunkWithState;
+
+pub type TableSourceRef = Arc<TableSource>;
 
 #[derive(Debug)]
 struct TableSourceCore {
@@ -141,6 +145,15 @@ impl TableStreamReader {
             yield chunk.into();
         }
     }
+
+    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
+    pub async fn into_stream_v2(mut self) {
+        while let Some((chunk, notifier)) = self.rx.recv().await {
+            // Notify about that we've taken the chunk.
+            _ = notifier.send(chunk.cardinality());
+            yield chunk;
+        }
+    }
 }
 
 impl TableSource {
@@ -162,6 +175,17 @@ impl TableSource {
         core.changes_txs.push(tx);
 
         Ok(TableStreamReader { rx, column_indices })
+    }
+
+    pub fn stream_reader_v2(&self) -> TableStreamReader {
+        let mut core = self.core.write();
+        let (tx, rx) = mpsc::unbounded_channel();
+        core.changes_txs.push(tx);
+
+        TableStreamReader {
+            rx,
+            column_indices: Default::default(),
+        }
     }
 }
 

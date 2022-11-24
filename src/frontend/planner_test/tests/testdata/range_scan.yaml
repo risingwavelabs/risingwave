@@ -37,7 +37,7 @@
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 2147483647 + 1
-  batch_error: 'Expr error: Out of range'
+  batch_error: 'Expr error: Numeric out of range'
 - before:
   - create_table_and_mv
   sql: |

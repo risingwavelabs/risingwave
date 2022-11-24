@@ -1149,7 +1149,7 @@ where
 
                 current_version.apply_version_delta(&version_delta);
 
-                trigger_version_stat(&self.metrics, current_version);
+                trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
 
                 if !deterministic_mode {
                     self.env
@@ -1658,7 +1658,11 @@ where
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
 
-        trigger_version_stat(&self.metrics, &versioning.current_version);
+        trigger_version_stat(
+            &self.metrics,
+            &versioning.current_version,
+            &versioning.version_stats,
+        );
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
                 &self.metrics,
