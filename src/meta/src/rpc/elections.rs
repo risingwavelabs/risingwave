@@ -47,7 +47,7 @@ struct ElectionOutcome {
 /// Runs for election in an attempt to become leader
 ///
 /// ## Returns
-/// Returns ElectionResult, containing infos about the leader who won or
+/// Returns `ElectionResult`, containing infos about the leader who won or
 /// None if the election needs to be repeated
 ///
 /// ## Arguments
@@ -82,7 +82,7 @@ async fn campaign<S: MetaStore>(
 
     // below is old code
     // get old leader info and lease
-    let current_leader_info = match get_infos(&meta_store).await {
+    let current_leader_info = match get_infos(meta_store).await {
         None => return None,
         Some(infos) => {
             let (leader, _) = infos;
@@ -219,7 +219,7 @@ type MetaLeaseInfoVec = Vec<u8>;
 /// Returns None if the operation failed
 ///
 /// ## Attributes:
-/// meta_store: The store holding information about the leader
+/// `meta_store`: The store holding information about the leader
 async fn get_infos<S: MetaStore>(
     meta_store: &Arc<S>,
 ) -> Option<(MetaLeaderInfoVec, MetaLeaseInfoVec)> {
@@ -246,7 +246,7 @@ fn gen_rand_lease_id() -> u64 {
     rand::thread_rng().gen_range(0..std::u64::MAX)
 }
 
-/// Used to manage single leader setup. Run_elections will continuously run elections to determine
+/// Used to manage single leader setup. `run_elections` will continuously run elections to determine
 /// which nodes are **leaders** and which are **followers**.
 ///
 /// To become a leader a **follower** node **campaigns**. A follower only ever campaigns if it
@@ -417,7 +417,7 @@ async fn manage_term<S: MetaStore>(
     // node is follower
 
     // get leader info
-    let (_, lease_info) = get_infos(&meta_store).await.unwrap_or_default();
+    let (_, lease_info) = get_infos(meta_store).await.unwrap_or_default();
     if lease_info.is_empty() {
         // ETCD does not have leader lease. Elect new leader
         tracing::info!("ETCD does not have leader lease. Running new election");

@@ -483,7 +483,7 @@ mod tests {
         closer.send(()).unwrap();
         handle.await.unwrap();
         sleep(Duration::from_secs(3)).await;
-        let x = rpc_serve_with_store(
+        rpc_serve_with_store(
             meta_store.clone(),
             info2,
             Duration::from_secs(10),
