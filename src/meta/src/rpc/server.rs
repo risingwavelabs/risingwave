@@ -154,12 +154,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     meta_store: Arc<S>,
     lease_time_sec: u64,
 ) -> MetaResult<(MetaLeaderInfo, JoinHandle<()>, Sender<()>, Receiver<bool>)> {
-    tracing::info!(
-        "addr: {}, meta_store: ???, lease_time: {}",
-        addr.clone(),
-        lease_time_sec
-    );
-
     run_elections(addr, meta_store, lease_time_sec).await
 }
 
