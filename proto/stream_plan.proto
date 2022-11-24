@@ -428,6 +428,14 @@ message SortNode {
   uint32 sort_column_index = 2;
 }
 
+// Merges two streams from streaming and batch for data manipulation.
+message DmlNode {
+  // Id of the table on which DML performs.
+  uint32 table_id = 1;
+  // Column descriptions of the table.
+  repeated plan_common.ColumnDesc column_descs = 2;
+}
+
 message RowIdGenNode {
   uint64 row_id_index = 1;
 }
@@ -461,6 +469,7 @@ message StreamNode {
     GroupTopNNode group_top_n = 124;
     SortNode sort = 125;
     WatermarkFilterNode watermark_filter = 126;
+    DmlNode dml = 127;
     RowIdGenNode row_id_gen = 128;
   }
   // The id for the operator. This is local per mview.

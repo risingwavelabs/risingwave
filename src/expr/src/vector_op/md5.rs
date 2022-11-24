@@ -13,15 +13,13 @@
 // limitations under the License.
 
 use md5 as lib_md5;
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use risingwave_common::array::{StringWriter, WrittenGuard};
 
 use crate::Result;
 
 #[inline(always)]
-pub fn md5(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
-    writer
-        .write_ref(&format!("{:x}", lib_md5::compute(s)))
-        .map_err(Into::into)
+pub fn md5(s: &str, writer: StringWriter<'_>) -> Result<WrittenGuard> {
+    Ok(writer.write_ref(&format!("{:x}", lib_md5::compute(s))))
 }
 
 #[cfg(test)]
@@ -42,10 +40,10 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
+            let mut builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
-            let guard = md5(s, writer)?;
-            let array = guard.into_inner().finish();
+            let _guard = md5(s, writer)?;
+            let array = builder.finish();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }
