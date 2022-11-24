@@ -331,7 +331,7 @@ impl ScaleCompactorInfo {
         self.pending_compaction_bytes += other.pending_compaction_bytes;
     }
 
-    pub fn scale_cores(&self) -> u64 {
+    pub fn scale_out_cores(&self) -> u64 {
         let mut scale_cores = self.waiting_compaction_bytes / COMPACTION_BYTES_PER_CORE;
         if self.running_cores < self.total_cores {
             scale_cores = scale_cores.saturating_sub(self.total_cores - self.running_cores);
@@ -342,10 +342,8 @@ impl ScaleCompactorInfo {
 
 impl From<ScaleCompactorInfo> for GetScaleCompactorResponse {
     fn from(info: ScaleCompactorInfo) -> Self {
-        let scale_cores = info.scale_cores();
-
         GetScaleCompactorResponse {
-            scale_cores,
+            suggest_cores: info.total_cores,
             running_cores: info.running_cores,
             total_cores: info.total_cores,
             waiting_compaction_bytes: info.waiting_compaction_bytes,

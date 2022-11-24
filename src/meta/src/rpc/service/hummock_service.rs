@@ -527,6 +527,9 @@ where
         _: Request<GetScaleCompactorRequest>,
     ) -> Result<Response<GetScaleCompactorResponse>, Status> {
         let info = self.hummock_manager.get_scale_compactor_info().await;
-        Ok(Response::new(info.into()))
+        let scale_cores = self.hummock_manager.suggest_compactor_cores(&info);
+        let mut resp: GetScaleCompactorResponse = info.into();
+        resp.suggest_cores = scale_cores;
+        Ok(Response::new(resp))
     }
 }

@@ -587,7 +587,7 @@ message GetScaleCompactorRequest {
 }
 
 message GetScaleCompactorResponse {
-  uint64 scale_cores = 1;
+  uint64 suggest_cores = 1;
   uint64 running_cores = 2;
   uint64 total_cores = 3;
   uint64 waiting_compaction_bytes = 4;

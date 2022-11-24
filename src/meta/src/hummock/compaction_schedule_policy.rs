@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+use std::time::Instant;
 
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -25,12 +26,20 @@ use crate::hummock::error::{Error, Result};
 use crate::MetaResult;
 
 const STREAM_BUFFER_SIZE: usize = 4;
+const MAX_BURST_TIME: u64 = 120;
+const MAX_IDLE_TIME: u64 = 600;
+
+pub enum ScalePolicy {
+    ScaleOut,
+    ScaleIn(u64),
+    NoChange,
+}
 
 /// The implementation of compaction task scheduling policy.
 pub trait CompactionSchedulePolicy: Send + Sync {
     /// Get next idle compactor to assign task.
     fn next_idle_compactor(
-        &self,
+        &mut self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>>;
 
@@ -76,6 +85,8 @@ pub trait CompactionSchedulePolicy: Send + Sync {
 
     fn compactor_num(&self) -> usize;
 
+    fn suggest_scale_policy(&self) -> ScalePolicy;
+
     fn max_concurrent_task_num(&self) -> usize;
 }
 
@@ -105,7 +116,7 @@ impl RoundRobinPolicy {
 
 impl CompactionSchedulePolicy for RoundRobinPolicy {
     fn next_idle_compactor(
-        &self,
+        &mut self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
         if self.compactors.is_empty() {
@@ -183,6 +194,10 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         self.compactors.len()
     }
 
+    fn suggest_scale_policy(&self) -> ScalePolicy {
+        ScalePolicy::NoChange
+    }
+
     fn max_concurrent_task_num(&self) -> usize {
         self.compactor_map
             .values()
@@ -196,9 +211,15 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
 /// Currently the score >= 0, but we use signed type because the score delta might be < 0.
 type Score = i64;
 
+#[derive(PartialEq, Eq)]
+enum CompactorState {
+    Burst(Instant),
+    Idle(Instant),
+    Busy,
+}
+
 /// Give priority to compactors with the least score. Currently the score is composed only of
 /// pending bytes compaction tasks.
-#[derive(Default)]
 pub struct ScoredPolicy {
     // We use `(score, context_id)` as the key to dedup compactor with the same pending
     // bytes.
@@ -210,6 +231,7 @@ pub struct ScoredPolicy {
     // That is to say `score_to_compactor` should be a subset of `context_id_to_score`.
     score_to_compactor: BTreeMap<(Score, HummockContextId), Arc<Compactor>>,
     context_id_to_score: HashMap<HummockContextId, Score>,
+    state: CompactorState,
 }
 
 impl ScoredPolicy {
@@ -227,6 +249,7 @@ impl ScoredPolicy {
         Self {
             score_to_compactor: BTreeMap::new(),
             context_id_to_score: compactor_to_score,
+            state: CompactorState::Idle(Instant::now()),
         }
     }
 
@@ -271,18 +294,34 @@ impl ScoredPolicy {
 
 impl CompactionSchedulePolicy for ScoredPolicy {
     fn next_idle_compactor(
-        &self,
+        &mut self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
         for compactor in self.score_to_compactor.values() {
-            if *compactor_assigned_task_num
+            let running_task = *compactor_assigned_task_num
                 .get(&compactor.context_id())
-                .unwrap_or(&0)
-                < compactor.max_concurrent_task_number()
-            {
-                return Some(compactor.clone());
+                .unwrap_or(&0);
+            match &self.state {
+                CompactorState::Busy => {
+                    if running_task < compactor.max_concurrent_task_number() {
+                        self.state = CompactorState::Idle(Instant::now());
+                        return Some(compactor.clone());
+                    }
+                }
+                CompactorState::Idle(_) => {
+                    self.state = CompactorState::Burst(Instant::now());
+                    return Some(compactor.clone());
+                }
+                CompactorState::Burst(start_time) => {
+                    if start_time.elapsed().as_secs() < MAX_BURST_TIME
+                        && running_task < 2 * compactor.max_concurrent_task_number()
+                    {
+                        return Some(compactor.clone());
+                    }
+                }
             }
         }
+        self.state = CompactorState::Busy;
         None
     }
 
@@ -352,6 +391,25 @@ impl CompactionSchedulePolicy for ScoredPolicy {
 
     fn compactor_num(&self) -> usize {
         self.score_to_compactor.len()
+    }
+
+    fn suggest_scale_policy(&self) -> ScalePolicy {
+        match &self.state {
+            CompactorState::Busy => return ScalePolicy::ScaleOut,
+            CompactorState::Burst(_) => (),
+            CompactorState::Idle(last_idle_time) => {
+                if last_idle_time.elapsed().as_secs() > MAX_IDLE_TIME {
+                    let decrease_core = self
+                        .score_to_compactor
+                        .iter()
+                        .map(|(_, compactor)| compactor.max_concurrent_task_number())
+                        .min()
+                        .unwrap_or(0);
+                    return ScalePolicy::ScaleIn(decrease_core);
+                }
+            }
+        }
+        ScalePolicy::NoChange
     }
 
     fn max_concurrent_task_num(&self) -> usize {

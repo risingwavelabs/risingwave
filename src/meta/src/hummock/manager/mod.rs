@@ -54,6 +54,7 @@ use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption, ScaleCompactorInfo};
 use crate::hummock::compaction_group::CompactionGroup;
+use crate::hummock::compaction_schedule_policy::ScalePolicy;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
@@ -2147,11 +2148,28 @@ where
         &self.cluster_manager
     }
 
+    pub fn suggest_compactor_cores(&self, info: &ScaleCompactorInfo) -> u64 {
+        let mut suggest_core = info.scale_out_cores() + info.total_cores;
+        match self.compactor_manager.suggest_scale_policy() {
+            ScalePolicy::ScaleIn(core) => {
+                if core + info.running_cores < info.total_cores {
+                    suggest_core = info.total_cores - core;
+                } else {
+                    suggest_core = info.total_cores;
+                }
+            }
+            ScalePolicy::NoChange => suggest_core = info.total_cores,
+            ScalePolicy::ScaleOut => (),
+        }
+        suggest_core
+    }
+
     pub async fn report_scale_compactor_info(&self) {
         let info = self.get_scale_compactor_info().await;
+        let suggest_core = self.suggest_compactor_cores(&info);
         self.metrics
             .scale_compactor_core_num
-            .set(info.scale_cores() as i64);
+            .set(suggest_core as i64);
     }
 
     #[named]
