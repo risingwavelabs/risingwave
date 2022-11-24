@@ -63,11 +63,7 @@ pub struct MetaNodeConfig {
     pub max_heartbeat_interval_secs: u64,
     pub unsafe_disable_recovery: bool,
     pub max_idle_secs_to_exit: Option<u64>,
-    pub vacuum_interval_sec: u64,
-    pub collect_gc_watermark_spin_interval_sec: u64,
-    pub min_sst_retention_time_sec: u64,
     pub enable_committed_sst_sanity_check: bool,
-    pub periodic_compaction_interval_sec: u64,
     pub enable_compaction_deterministic: bool,
 }
 
