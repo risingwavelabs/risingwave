@@ -294,6 +294,7 @@ fn infer_type_for_special(
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))
         }
+        ExprType::Now => Ok(Some(DataType::Timestamp)),
         _ => Ok(None),
     }
 }

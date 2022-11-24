@@ -17,14 +17,18 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
+use risingwave_common::must_match;
+use risingwave_common::types::DataType;
+use risingwave_pb::expr::expr_node::Type;
 
 use super::generic::{self, GenericPlanNode};
 use super::{
     ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{assert_input_ref, ExprImpl};
-use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
+use crate::expr::{assert_input_ref, ExprImpl, FunctionCall, InputRef};
+use crate::optimizer::plan_node::stream_now::StreamNow;
+use crate::optimizer::plan_node::{BatchFilter, StreamDynamicFilter, StreamFilter, StreamProject};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
@@ -98,6 +102,10 @@ impl LogicalFilter {
                 input_schema
             }
         )
+    }
+
+    fn clone_with_predicate(&self, predicate: Condition) -> Self {
+        Self::new(self.input(), predicate)
     }
 }
 
@@ -185,11 +193,79 @@ impl ToBatch for LogicalFilter {
     }
 }
 
+fn convert_comparator_to_priority(comparator: Type) -> i32 {
+    match comparator {
+        Type::Equal => 0,
+        Type::GreaterThan | Type::GreaterThanOrEqual => 1,
+        Type::LessThan | Type::LessThanOrEqual => 2,
+        _ => panic!(),
+    }
+}
+
 impl ToStream for LogicalFilter {
     fn to_stream(&self) -> Result<PlanRef> {
         let new_input = self.input().to_stream()?;
-        let new_logical = self.clone_with_input(new_input);
-        Ok(StreamFilter::new(new_logical).into())
+
+        let predicate = self.predicate();
+        let has_now = predicate
+            .conjunctions
+            .iter()
+            .any(|cond| cond.count_nows() > 0);
+        if has_now {
+            let mut conjunctions = predicate.conjunctions.clone();
+            let mut now_conds = conjunctions
+                .drain_filter(|cond| cond.count_nows() > 0)
+                .map(|cond| {
+                    must_match!(cond, ExprImpl::FunctionCall(function_call) => {
+                        (convert_comparator_to_priority(function_call.get_expr_type()), function_call)
+                    })
+                })
+                .collect_vec();
+            now_conds.sort_by_key(|(comparator_priority, _)| *comparator_priority);
+            let simple_logical = self.clone_with_predicate(Condition { conjunctions });
+            let mut cur_streaming = PlanRef::from(StreamFilter::new(
+                simple_logical.clone_with_input(new_input),
+            ));
+            for (_, now_cond) in now_conds {
+                let left_index = must_match!(now_cond.inputs()[0], ExprImpl::InputRef(box ref input_ref) => input_ref.index());
+                let rht = must_match!(now_cond.inputs()[1], ExprImpl::FunctionCall(box ref function_call) => {
+                    match function_call.get_expr_type() {
+                        Type::Now => PlanRef::from(StreamNow::new(self.ctx())),
+                        Type::Add | Type::Subtract => {
+                            let mut now_delta_expr = function_call.clone();
+                            now_delta_expr.inputs_mut()[0] = ExprImpl::from(InputRef::new(0, DataType::Timestamp));
+                            StreamProject::new(LogicalProject::new(StreamNow::new(self.ctx()).into(), vec![ExprImpl::from(now_delta_expr)])).into()
+                        },
+                        _ => panic!(),
+                    }
+                });
+                cur_streaming = StreamDynamicFilter::new(
+                    left_index,
+                    Condition {
+                        conjunctions: vec![ExprImpl::from(FunctionCall::new(
+                            now_cond.get_expr_type(),
+                            vec![
+                                ExprImpl::from(InputRef::new(
+                                    left_index,
+                                    self.schema().fields()[left_index].data_type(),
+                                )),
+                                ExprImpl::from(InputRef::new(
+                                    0,
+                                    rht.schema().fields()[0].data_type(),
+                                )),
+                            ],
+                        )?)],
+                    },
+                    cur_streaming,
+                    rht,
+                )
+                .into();
+            }
+            Ok(cur_streaming)
+        } else {
+            let new_logical = self.clone_with_input(new_input);
+            Ok(StreamFilter::new(new_logical).into())
+        }
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
