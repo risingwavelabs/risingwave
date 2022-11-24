@@ -397,6 +397,9 @@ script = '''
 
 set -e
 
+
+echo "$(tput bold)$(tput setaf 9)RisingWave playground SHOULD NEVER be used in benchmarks and production environment!!!
+It is fully in-memory and will be automatically stopped after being idle for 1800s.$(tput sgr0)"
 echo "Use \`./risedev d\` instead if you want to start a full cluster."
 
 set -ex

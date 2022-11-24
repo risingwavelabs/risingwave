@@ -163,9 +163,13 @@ pub async fn playground() -> Result<()> {
                 let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
                 tracing::info!("opts: {:#?}", opts);
                 let _meta_handle = tokio::spawn(async move {
+                    let idle = opts.dangerous_max_idle_secs;
                     risingwave_meta::start(opts).await;
-                    tracing::info!("meta is stopped, shutdown all nodes");
+                    tracing::warn!("meta is stopped, shutdown all nodes");
                     // As a playground, it's fine to just kill everything.
+                    if let Some(idle) = idle {
+                        eprintln!("RisingWave playground exited after being idle for {idle} seconds. Bye!");
+                    }
                     std::process::exit(0);
                 });
                 // wait for the service to be ready

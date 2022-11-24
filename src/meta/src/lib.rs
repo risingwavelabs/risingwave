@@ -120,7 +120,7 @@ pub struct MetaNodeOpts {
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// It is mainly useful for playgrounds.
     #[clap(long)]
-    dangerous_max_idle_secs: Option<u64>,
+    pub dangerous_max_idle_secs: Option<u64>,
 
     /// Whether to enable deterministic compaction scheduling, which
     /// will disable all auto scheduling of compaction tasks
