@@ -54,3 +54,13 @@ include ./q22.slt.part
 include ./drop_views.slt.part
 
 include ../drop_sources.slt.part
+
+# Drop tpch tables
+statement ok
+DROP TABLE supplier;
+
+statement ok
+DROP TABLE region;
+
+statement ok
+DROP TABLE  nation;
