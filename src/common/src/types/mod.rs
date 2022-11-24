@@ -539,7 +539,7 @@ pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 // TODO: use `ToDatumRef::to_datum_ref` instead.
 #[inline(always)]
 pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
-    datum.as_ref().map(|d| d.as_scalar_ref_impl())
+    datum.to_datum_ref()
 }
 
 // TODO: specify `NULL FIRST` or `NULL LAST`.
@@ -809,26 +809,15 @@ macro_rules! scalar_impl_hash {
 
 for_all_scalar_variants! { scalar_impl_hash }
 
-/// Feeds the raw scalar of `datum` to the given `state`, which should behave the same as
-/// [`crate::array::Array::hash_at`], where NULL value will be carefully handled.
-///
-/// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
-/// type alias of `Datum = Option<_>`, we should manually implement [`std::hash::Hash`] for
-/// [`Datum`] in the future when it becomes a newtype. (#477)
-#[inline(always)]
-pub fn hash_datum(datum: &Datum, state: &mut impl std::hash::Hasher) {
-    hash_datum_ref(to_datum_ref(datum), state)
-}
-
-/// Feeds the raw scalar reference of `datum_ref` to the given `state`, which should behave the same
+/// Feeds the raw scalar reference of `datum` to the given `state`, which should behave the same
 /// as [`crate::array::Array::hash_at`], where NULL value will be carefully handled.
 ///
 /// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
 /// type alias of `DatumRef = Option<_>`, we should manually implement [`std::hash::Hash`] for
 /// [`DatumRef`] in the future when it becomes a newtype. (#477)
 #[inline(always)]
-pub fn hash_datum_ref(datum_ref: DatumRef<'_>, state: &mut impl std::hash::Hasher) {
-    match datum_ref {
+pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
+    match datum.to_datum_ref() {
         Some(scalar_ref) => scalar_ref.hash(state),
         None => NULL_VAL_FOR_HASH.hash(state),
     }
@@ -1136,7 +1125,7 @@ mod tests {
 
             let hash_from_datum_ref = {
                 let mut state = Crc32FastBuilder.build_hasher();
-                hash_datum_ref(to_datum_ref(&datum), &mut state);
+                hash_datum(to_datum_ref(&datum), &mut state);
                 state.finish()
             };
 

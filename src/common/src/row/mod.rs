@@ -33,7 +33,7 @@ pub use project::Project;
 pub use repeat_n::{repeat_n, RepeatN};
 
 use crate::hash::HashCode;
-use crate::types::{hash_datum_ref, DatumRef, ToDatumRef, ToOwnedDatum};
+use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum};
 use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
@@ -97,7 +97,7 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
         let mut hasher = hash_builder.build_hasher();
         for datum in self.iter() {
-            hash_datum_ref(datum, &mut hasher);
+            hash_datum(datum, &mut hasher);
         }
         HashCode(hasher.finish())
     }

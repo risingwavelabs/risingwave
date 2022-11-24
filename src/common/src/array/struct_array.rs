@@ -29,7 +29,7 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, hash_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
+    deserialize_datum_from, hash_datum, serialize_datum_ref_into, to_datum_ref, DataType,
     Datum, DatumRef, Scalar, ScalarRefImpl,
 };
 
@@ -371,7 +371,7 @@ impl<'a> StructRef<'a> {
     pub fn hash_scalar_inner<H: std::hash::Hasher>(&self, state: &mut H) {
         iter_fields_ref!(self, it, {
             for datum_ref in it {
-                hash_datum_ref(datum_ref, state);
+                hash_datum(datum_ref, state);
             }
         })
     }
