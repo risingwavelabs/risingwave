@@ -297,7 +297,7 @@ impl MaterializeBuffer {
             .zip_eq(pks.iter_mut())
             .for_each(|(r, vnode_and_pk)| {
                 if let Some(r) = r {
-                    pk_serde.serialize_ref(r, vnode_and_pk);
+                    pk_serde.serialize(r, vnode_and_pk);
                 }
             });
 

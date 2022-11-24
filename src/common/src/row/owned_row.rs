@@ -69,32 +69,12 @@ impl Row {
         Self(values)
     }
 
-    /// TODO(row trait): use `row::empty` instead.
+    /// Returns a reference to an empty row.
+    ///
+    /// Note: use [`empty`](super::empty) if possible.
     pub fn empty<'a>() -> &'a Self {
         static EMPTY_ROW: Row = Row(Vec::new());
         &EMPTY_ROW
-    }
-
-    /// Compare two rows' key
-    pub fn cmp_by_key(
-        row1: impl AsRef<Self>,
-        key1: &[usize],
-        row2: impl AsRef<Self>,
-        key2: &[usize],
-    ) -> cmp::Ordering {
-        assert_eq!(key1.len(), key2.len());
-        let pk_len = key1.len();
-        for i in 0..pk_len {
-            let datum1 = &row1.as_ref()[key1[i]];
-            let datum2 = &row2.as_ref()[key2[i]];
-            if datum1 > datum2 {
-                return cmp::Ordering::Greater;
-            }
-            if datum1 < datum2 {
-                return cmp::Ordering::Less;
-            }
-        }
-        cmp::Ordering::Equal
     }
 
     /// Serialize the row into value encoding bytes.
@@ -125,13 +105,15 @@ impl Row {
     }
 
     /// Serialize part of the row into memcomparable bytes.
+    ///
+    /// TODO(row trait): introduce `Row::memcmp_serialize`.
     pub fn extract_memcomparable_by_indices(
         &self,
         serializer: &OrderedRowSerde,
         key_indices: &[usize],
     ) -> Vec<u8> {
         let mut bytes = vec![];
-        serializer.serialize_datum_refs((&self).project(key_indices).iter(), &mut bytes);
+        serializer.serialize((&self).project(key_indices), &mut bytes);
         bytes
     }
 
@@ -142,19 +124,9 @@ impl Row {
         self.0.len()
     }
 
-    /// TODO(row trait): use `Row::chain` with `row::once` instead.
-    pub fn push(&mut self, value: Datum) {
-        self.0.push(value);
-    }
-
     /// TODO(row trait): use `Row::iter` instead.
     pub fn values(&self) -> impl Iterator<Item = &Datum> {
         self.0.iter()
-    }
-
-    /// TODO(row trait): use `Row::chain` instead.
-    pub fn concat(&self, values: impl IntoIterator<Item = Datum>) -> Row {
-        Row::new(self.values().cloned().chain(values).collect())
     }
 }
 

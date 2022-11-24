@@ -25,7 +25,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_storage::StateStore;
@@ -447,7 +447,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         let old_row = agg_group
                             .group_key()
                             .unwrap_or_else(Row::empty)
-                            .concat(prev_outputs.into_iter());
+                            .chain(prev_outputs);
                         result_table.update(old_row, result_row);
                     } else {
                         result_table.insert(result_row);
