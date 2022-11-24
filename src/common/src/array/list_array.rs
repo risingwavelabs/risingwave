@@ -90,7 +90,7 @@ impl ArrayBuilder for ListArrayBuilder {
                 let values_ref = v.values_ref();
                 self.offsets.push(last + values_ref.len());
                 for f in values_ref {
-                    self.value.append_datum_ref(f);
+                    self.value.append_datum(f);
                 }
             }
         }
@@ -138,7 +138,7 @@ impl ListArrayBuilder {
         self.offsets.push(last + row.size());
         self.len += 1;
         for v in row.values() {
-            self.value.append_datum_ref(v);
+            self.value.append_datum(v);
         }
     }
 }

@@ -259,7 +259,7 @@ impl DataChunk {
                         .array_ref()
                         .create_builder(end_row_idx - start_row_idx + 1);
                     for row_idx in start_row_idx..=end_row_idx {
-                        array_builder.append_datum_ref(column.array_ref().value_at(row_idx));
+                        array_builder.append_datum(column.array_ref().value_at(row_idx));
                     }
                     builder.append_array(&array_builder.finish());
                 });
@@ -385,7 +385,7 @@ impl DataChunk {
             .collect();
         for &i in indexes {
             for (builder, col) in array_builders.iter_mut().zip_eq(&self.columns) {
-                builder.append_datum_ref(col.array_ref().value_at(i));
+                builder.append_datum(col.array_ref().value_at(i));
             }
         }
         let columns = array_builders

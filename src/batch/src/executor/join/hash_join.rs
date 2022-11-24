@@ -1376,7 +1376,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         probe_row_ref: RowRef<'_>,
         build_column_count: usize,
     ) -> Option<DataChunk> {
-        chunk_builder.append_one_row_from_datum_refs(
+        chunk_builder.append_one_row_from_datums(
             probe_row_ref
                 .values()
                 .chain(repeat_n(None, build_column_count)),
@@ -1388,7 +1388,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         build_row_ref: RowRef<'_>,
         probe_column_count: usize,
     ) -> Option<DataChunk> {
-        chunk_builder.append_one_row_from_datum_refs(
+        chunk_builder.append_one_row_from_datums(
             repeat_n(None, probe_column_count).chain(build_row_ref.values()),
         )
     }

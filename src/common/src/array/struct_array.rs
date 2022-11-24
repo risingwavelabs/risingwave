@@ -81,7 +81,7 @@ impl ArrayBuilder for StructArrayBuilder {
             None => {
                 self.bitmap.append(false);
                 for child in &mut self.children_array {
-                    child.append_datum_ref(None);
+                    child.append_datum(Datum::None);
                 }
             }
             Some(v) => {
@@ -89,7 +89,7 @@ impl ArrayBuilder for StructArrayBuilder {
                 let fields = v.fields_ref();
                 assert_eq!(fields.len(), self.children_array.len());
                 for (field_idx, f) in fields.into_iter().enumerate() {
-                    self.children_array[field_idx].append_datum_ref(f);
+                    self.children_array[field_idx].append_datum(f);
                 }
             }
         }

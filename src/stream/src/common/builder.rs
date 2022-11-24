@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayResult, Op, RowRef, StreamChunk};
 use risingwave_common::row::Row;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 
 type IndexMappings = Vec<(usize, usize)>;
 
@@ -126,7 +126,7 @@ impl StreamChunkBuilder {
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
         for &(update_idx, output_idx) in &self.update_to_output {
-            self.column_builders[output_idx].append_datum_ref(row_update.value_at(update_idx));
+            self.column_builders[output_idx].append_datum(row_update.value_at(update_idx));
         }
         for &(matched_idx, output_idx) in &self.matched_to_output {
             self.column_builders[output_idx].append_datum(&row_matched[matched_idx]);
@@ -145,10 +145,10 @@ impl StreamChunkBuilder {
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
         for &(update_idx, output_idx) in &self.update_to_output {
-            self.column_builders[output_idx].append_datum_ref(row_update.value_at(update_idx));
+            self.column_builders[output_idx].append_datum(row_update.value_at(update_idx));
         }
         for &(_matched_idx, output_idx) in &self.matched_to_output {
-            self.column_builders[output_idx].append_datum(&None);
+            self.column_builders[output_idx].append_datum(Datum::None);
         }
 
         self.inc_size()
@@ -164,7 +164,7 @@ impl StreamChunkBuilder {
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
         for &(_update_idx, output_idx) in &self.update_to_output {
-            self.column_builders[output_idx].append_datum_ref(None);
+            self.column_builders[output_idx].append_datum(Datum::None);
         }
         for &(matched_idx, output_idx) in &self.matched_to_output {
             self.column_builders[output_idx].append_datum(&row_matched[matched_idx]);

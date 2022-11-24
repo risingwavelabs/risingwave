@@ -432,7 +432,7 @@ macro_rules! impl_array_builder {
                 }
             }
 
-            /// Append a datum, return error while type not match.
+            /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
             pub fn append_datum(&mut self, datum: impl ToDatumRef) {
                 match datum.to_datum_ref() {
                     None => self.append_null(),
@@ -445,11 +445,6 @@ macro_rules! impl_array_builder {
                         ),
                     },
                 }
-            }
-
-            /// Append a datum ref, return error while type not match.
-            pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) {
-                self.append_datum(datum_ref)
             }
 
             pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
