@@ -1,5 +1,4 @@
 query II rowsort
 select * from ch_benchmark_q11;
-
 ----
 11 42

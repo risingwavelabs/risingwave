@@ -1,6 +1,5 @@
 query ITRTTT rowsort
 select * from ch_benchmark_q10;
-
 ----
     9 BARBARATION     998 Bgyigg02R06By        766-299-8660 BRAZIL
     8 BARBARCALLY     543 wLyBmkikB2044        908-531-5952 PERU

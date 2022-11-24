@@ -31,6 +31,10 @@ include ../../tpch/insert_supplier.slt.part
 # Create materialized sources from tpcc tables
 include ../create_sources.slt.part
 
+# Ensure that the upstream data is fully consumed
+statement ok
+flush;
+
 # Run CH-benCHmark queries
 include ./q1.slt.part
 include ./q2.slt.part

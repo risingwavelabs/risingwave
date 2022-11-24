@@ -1,3 +1,6 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
 # Create tpch tables
 include ../../tpch/create_tables.slt.part
 
