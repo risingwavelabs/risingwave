@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
@@ -42,6 +43,9 @@ pub struct StreamEnvironment {
 
     /// State store for table scanning.
     state_store: StateStoreImpl,
+
+    /// Manages dml information.
+    dml_manager: DmlManagerRef,
 }
 
 impl StreamEnvironment {
@@ -52,6 +56,7 @@ impl StreamEnvironment {
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
+        dml_manager: DmlManagerRef,
     ) -> Self {
         StreamEnvironment {
             server_addr,
@@ -60,12 +65,14 @@ impl StreamEnvironment {
             config,
             worker_id,
             state_store,
+            dml_manager,
         }
     }
 
     // Create an instance for testing purpose.
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use risingwave_source::dml_manager::DmlManager;
         use risingwave_storage::monitor::StateStoreMetrics;
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
@@ -76,6 +83,7 @@ impl StreamEnvironment {
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 StateStoreMetrics::unused(),
             )),
+            dml_manager: Arc::new(DmlManager::default()),
         }
     }
 
@@ -105,5 +113,9 @@ impl StreamEnvironment {
 
     pub fn connector_source_endpoint(&self) -> String {
         self.connector_source_endpoint.clone()
+    }
+
+    pub fn dml_manager_ref(&self) -> DmlManagerRef {
+        self.dml_manager.clone()
     }
 }
