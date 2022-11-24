@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::hash::ParallelUnitId;
 use risingwave_common::util::is_stream_source;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
@@ -34,7 +34,7 @@ use crate::stream::{build_actor_connector_splits, build_actor_split_impls, Split
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
-/// Fragments of a materialized view
+/// Fragments of a streaming job.
 ///
 /// We store whole fragments in a single column family as follow:
 /// `table_id` => `TableFragments`.
@@ -90,11 +90,11 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    /// Create a new `TableFragments` with state of `Creating`.
+    /// Create a new `TableFragments` with state of `Initialized`.
     pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self {
             table_id,
-            state: State::Creating,
+            state: State::Initial,
             fragments,
             actor_status: BTreeMap::default(),
             actor_splits: HashMap::default(),
@@ -124,18 +124,23 @@ impl TableFragments {
         self.state
     }
 
+    /// Returns whether the table fragments is in `Created` state.
+    pub fn is_created(&self) -> bool {
+        self.state == State::Created
+    }
+
     /// Set the state of the table fragments.
     pub fn set_state(&mut self, state: State) {
         self.state = state;
     }
 
-    /// Returns sink fragment vnode mapping.
-    /// Note that: the real sink fragment is also stored as `TableFragments`, it's possible that
-    /// there's no fragment with `FragmentType::Sink` exists.
-    pub fn sink_vnode_mapping(&self) -> Option<ParallelUnitMapping> {
+    /// Returns mview fragment vnode mapping.
+    /// Note that: the sink fragment is also stored as `TableFragments`, it's possible that
+    /// there's no fragment with `FragmentType::Mview` exists.
+    pub fn mview_vnode_mapping(&self) -> Option<ParallelUnitMapping> {
         self.fragments
             .values()
-            .find(|fragment| fragment.fragment_type == FragmentType::Sink as i32)
+            .find(|fragment| fragment.fragment_type == FragmentType::Mview as i32)
             .and_then(|fragment| fragment.vnode_mapping.clone())
     }
 
@@ -180,9 +185,9 @@ impl TableFragments {
         Self::filter_actor_ids(self, FragmentType::Source)
     }
 
-    /// Returns sink actor ids.
-    pub fn sink_actor_ids(&self) -> Vec<ActorId> {
-        Self::filter_actor_ids(self, FragmentType::Sink)
+    /// Returns mview actor ids.
+    pub fn mview_actor_ids(&self) -> Vec<ActorId> {
+        Self::filter_actor_ids(self, FragmentType::Mview)
     }
 
     fn contains_chain(stream_node: &StreamNode) -> bool {
@@ -222,8 +227,8 @@ impl TableFragments {
         None
     }
 
-    /// Extract the fragments that include source operators, grouping by source id.
-    pub fn source_fragments(&self) -> HashMap<SourceId, BTreeSet<FragmentId>> {
+    /// Extract the fragments that include stream source executors, grouping by source id.
+    pub fn stream_source_fragments(&self) -> HashMap<SourceId, BTreeSet<FragmentId>> {
         let mut source_fragments = HashMap::new();
 
         for fragment in self.fragments() {
@@ -393,11 +398,11 @@ impl TableFragments {
         }
     }
 
-    /// Returns sink actor vnode bitmap infos.
-    pub fn sink_vnode_bitmap_info(&self) -> Vec<(ActorId, Option<Buffer>)> {
+    /// Returns mview actor vnode bitmap infos.
+    pub fn mview_vnode_bitmap_info(&self) -> Vec<(ActorId, Option<Buffer>)> {
         self.fragments
             .values()
-            .filter(|fragment| fragment.fragment_type == FragmentType::Sink as i32)
+            .filter(|fragment| fragment.fragment_type == FragmentType::Mview as i32)
             .flat_map(|fragment| {
                 fragment
                     .actors
@@ -407,8 +412,8 @@ impl TableFragments {
             .collect_vec()
     }
 
-    pub fn sink_actor_parallel_units(&self) -> BTreeMap<ActorId, ParallelUnit> {
-        let sink_actor_ids = self.sink_actor_ids();
+    pub fn mview_actor_parallel_units(&self) -> BTreeMap<ActorId, ParallelUnit> {
+        let sink_actor_ids = self.mview_actor_ids();
         sink_actor_ids
             .iter()
             .map(|actor_id| {

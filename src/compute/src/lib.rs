@@ -14,10 +14,9 @@
 
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(generic_associated_types)]
-#![feature(let_else)]
 #![feature(generators)]
 #![feature(type_alias_impl_trait)]
+#![feature(let_chains)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
@@ -33,7 +32,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, ArgEnum)]
 pub enum AsyncStackTraceOption {
     Off,
-    On,
+    On, // default
     Verbose,
 }
 
@@ -72,7 +71,7 @@ pub struct ComputeNodeOpts {
     pub enable_jaeger_tracing: bool,
 
     /// Enable async stack tracing for risectl.
-    #[clap(long, arg_enum, default_value_t = AsyncStackTraceOption::Off)]
+    #[clap(long, arg_enum, default_value_t = AsyncStackTraceOption::On)]
     pub async_stack_trace: AsyncStackTraceOption,
 
     /// Path to file cache data directory.
@@ -80,9 +79,9 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "")]
     pub file_cache_dir: String,
 
-    /// Enable managed lru cache, or use local lru cache.
-    #[clap(long)]
-    pub enable_managed_cache: bool,
+    /// Endpoint of the connector node
+    #[clap(long, default_value = "127.0.0.1:60061")]
+    pub connector_source_endpoint: String,
 }
 
 use std::future::Future;
@@ -123,7 +122,6 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct ComputeNodeConfig {
     // For connection
     #[serde(default)]

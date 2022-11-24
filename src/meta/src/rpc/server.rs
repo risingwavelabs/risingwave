@@ -40,11 +40,9 @@ use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
-use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
-    StreamingJobBackgroundDeleter,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
@@ -265,7 +263,10 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 if let Err(e) = meta_store.txn(txn).await {
                     match e {
                         MetaStoreError::TransactionAbort() => {
-                            panic!("keep lease failed, another node has become new leader");
+                            tracing::error!(
+                                "keep lease failed, another node has become new leader"
+                            );
+                            futures::future::pending::<()>().await;
                         }
                         MetaStoreError::Internal(e) => {
                             tracing::warn!(
@@ -307,8 +308,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     )
     .await?;
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
-    let compaction_group_manager =
-        Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();
@@ -329,7 +328,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             env.clone(),
             cluster_manager.clone(),
             meta_metrics.clone(),
-            compaction_group_manager.clone(),
             compactor_manager.clone(),
         )
         .await
@@ -388,19 +386,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             barrier_scheduler.clone(),
             cluster_manager.clone(),
             source_manager.clone(),
-            compaction_group_manager.clone(),
+            hummock_manager.clone(),
         )
         .unwrap(),
     );
 
-    let (table_background_deleter, deleter_handle, deleter_shutdown) =
-        StreamingJobBackgroundDeleter::new(stream_manager.clone(), source_manager.clone())
-            .await
-            .unwrap();
-    let table_background_deleter = Arc::new(table_background_deleter);
-
-    compaction_group_manager
-        .purge_stale_members(
+    hummock_manager
+        .purge_stale(
             &fragment_manager
                 .list_table_fragments()
                 .await
@@ -424,7 +416,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         source_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
-        table_background_deleter,
     );
 
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
@@ -448,7 +439,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock_manager.clone(),
         compactor_manager.clone(),
         vacuum_trigger.clone(),
-        compaction_group_manager.clone(),
         fragment_manager.clone(),
     );
     let notification_manager = env.notification_manager_ref();
@@ -493,7 +483,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
     sub_tasks.push((lease_handle, lease_shutdown));
-    sub_tasks.push((deleter_handle, deleter_shutdown));
     if cfg!(not(test)) {
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,

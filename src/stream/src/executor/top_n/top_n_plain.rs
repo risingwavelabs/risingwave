@@ -20,11 +20,11 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::utils::*;
 use super::{TopNCache, TopNCacheTrait};
+use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
@@ -235,24 +235,23 @@ where
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
             let cache_key =
                 serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
-            let row = row_ref.to_owned_row();
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
-                    self.managed_state.insert(row.clone());
+                    self.managed_state.insert(row_ref.clone());
                     self.cache
-                        .insert(cache_key, row, &mut res_ops, &mut res_rows)
+                        .insert(cache_key, row_ref, &mut res_ops, &mut res_rows)
                 }
 
                 Op::Delete | Op::UpdateDelete => {
                     // First remove the row from state store
-                    self.managed_state.delete(row.clone());
+                    self.managed_state.delete(row_ref.clone());
                     self.cache
                         .delete(
                             None,
                             &mut self.managed_state,
                             cache_key,
-                            row,
+                            row_ref,
                             &mut res_ops,
                             &mut res_rows,
                         )
@@ -383,7 +382,8 @@ mod tests {
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
@@ -480,7 +480,8 @@ mod tests {
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
@@ -589,7 +590,8 @@ mod tests {
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties(
                     source as Box<dyn Executor>,
@@ -697,7 +699,8 @@ mod tests {
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
@@ -910,7 +913,8 @@ mod tests {
                 ],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 3],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
@@ -990,7 +994,8 @@ mod tests {
                 ],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 3],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     create_source_new_before_recovery() as Box<dyn Executor>,
@@ -1147,7 +1152,8 @@ mod tests {
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     source as Box<dyn Executor>,
@@ -1296,7 +1302,8 @@ mod tests {
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &[0, 1],
-            );
+            )
+            .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     create_source_before_recovery() as Box<dyn Executor>,

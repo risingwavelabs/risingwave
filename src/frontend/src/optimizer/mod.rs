@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod plan_node;
-
 pub use plan_node::PlanRef;
 pub mod property;
 
@@ -23,6 +22,7 @@ mod max_one_row_visitor;
 mod plan_correlated_id_finder;
 mod plan_rewriter;
 mod plan_visitor;
+pub use plan_visitor::PlanVisitor;
 mod rule;
 
 use fixedbitset::FixedBitSet;
@@ -33,12 +33,15 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
-use self::plan_visitor::{has_batch_seq_scan, has_batch_seq_scan_where, has_logical_over_agg};
+use self::plan_visitor::{
+    has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_logical_apply,
+    has_logical_over_agg,
+};
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
-use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply, PlanVisitor};
+use crate::optimizer::plan_visitor::has_batch_source;
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
@@ -285,7 +288,7 @@ impl PlanRoot {
         plan = self.optimize_by_rules(
             plan,
             "Convert Distinct Aggregation".to_string(),
-            vec![DistinctAggRule::create()],
+            vec![UnionToDistinctRule::create(), DistinctAggRule::create()],
             ApplyOrder::TopDown,
         );
 
@@ -357,8 +360,9 @@ impl PlanRoot {
         assert_eq!(plan.distribution(), &Distribution::Single);
 
         !has_batch_exchange(plan.clone()) // there's no (single) exchange
-            && has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
-            && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table()) // and it's not a system table
+            && ((has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
+            && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table())) // and it's not a system table
+            || has_batch_source(plan.clone())) // or there's a source
 
         // TODO: join between a normal table and a system table is not supported yet
     }
@@ -455,9 +459,6 @@ impl PlanRoot {
                 self.schema = plan.schema().clone();
                 plan.to_stream_with_dist_required(&self.required_dist)
             }
-            Convention::Stream => self
-                .required_dist
-                .enforce_if_not_satisfies(self.plan.clone(), &Order::any()),
             _ => unreachable!(),
         }?;
 
@@ -483,6 +484,7 @@ impl PlanRoot {
         mv_name: String,
         definition: String,
         col_names: Option<Vec<String>>,
+        handle_pk_conflict: bool,
     ) -> Result<StreamMaterialize> {
         let out_names = if let Some(col_names) = col_names {
             col_names
@@ -499,6 +501,7 @@ impl PlanRoot {
             out_names,
             false,
             definition,
+            handle_pk_conflict,
         )
     }
 
@@ -514,6 +517,7 @@ impl PlanRoot {
             self.out_names.clone(),
             true,
             "".into(),
+            false,
         )
     }
 

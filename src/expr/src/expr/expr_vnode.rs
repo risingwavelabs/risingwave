@@ -14,9 +14,8 @@
 
 use std::sync::Arc;
 
-use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder, Row,
-};
+use risingwave_common::array::{ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -73,7 +72,7 @@ impl Expression for VnodeExpression {
         let mut builder = I16ArrayBuilder::new(input.capacity());
         hash_values
             .into_iter()
-            .for_each(|h| builder.append(Some(h.to_vnode() as i16)));
+            .for_each(|h| builder.append(Some(h.to_vnode().to_scalar())));
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
@@ -81,7 +80,10 @@ impl Expression for VnodeExpression {
         let dist_key_row = input.by_indices(&self.dist_key_indices);
         // FIXME: currently the implementation of the hash function in Row::hash_row differs from
         // Array::hash_at, so their result might be different. #3457
-        let vnode = dist_key_row.hash_row(&Crc32FastBuilder {}).to_vnode() as i16;
+        let vnode = dist_key_row
+            .hash_row(&Crc32FastBuilder {})
+            .to_vnode()
+            .to_scalar();
         Ok(Some(vnode.into()))
     }
 }
@@ -89,7 +91,7 @@ impl Expression for VnodeExpression {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
-    use risingwave_common::types::VIRTUAL_NODE_COUNT;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;
@@ -132,7 +134,7 @@ mod tests {
         actual.iter().for_each(|vnode| {
             let vnode = vnode.unwrap().into_int16();
             assert!(vnode >= 0);
-            assert!((vnode as usize) < VIRTUAL_NODE_COUNT);
+            assert!((vnode as usize) < VirtualNode::COUNT);
         });
     }
 
@@ -158,7 +160,7 @@ mod tests {
             let actual = vnode_expr.eval_row(&row).unwrap();
             let vnode = actual.unwrap().into_int16();
             assert!(vnode >= 0);
-            assert!((vnode as usize) < VIRTUAL_NODE_COUNT);
+            assert!((vnode as usize) < VirtualNode::COUNT);
         }
     }
 }

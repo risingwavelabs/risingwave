@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::row::Row;
 
 pub mod row_serde_util;
 

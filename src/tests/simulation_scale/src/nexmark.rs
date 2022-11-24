@@ -21,7 +21,7 @@ use anyhow::Result;
 use crate::cluster::{Cluster, Configuration};
 
 /// The target number of events of the three sources per second totally.
-pub const THROUGHPUT: usize = 10_000;
+pub const THROUGHPUT: usize = 5_000;
 
 /// Cluster for nexmark tests.
 pub struct NexmarkCluster {
@@ -62,10 +62,11 @@ impl NexmarkCluster {
             if let Some(event_num) = event_num {
                 write!(output, ", nexmark.event.num = '{event_num}'")?;
             }
+            write!(output, ", nexmark.max.chunk.size = 256")?;
             output
         };
 
-        self.run(format!(
+        self.run(&format!(
             r#"
 create source auction (
     id INTEGER,
@@ -86,7 +87,7 @@ with (
         ))
         .await?;
 
-        self.run(format!(
+        self.run(&format!(
             r#"
 create source bid (
     auction INTEGER,
@@ -102,7 +103,7 @@ with (
         ))
         .await?;
 
-        self.run(format!(
+        self.run(&format!(
             r#"
 create source person (
     id INTEGER,
@@ -144,7 +145,7 @@ pub mod queries {
     use std::time::Duration;
 
     const DEFAULT_INITIAL_INTERVAL: Duration = Duration::from_secs(1);
-    const DEFAULT_INITIAL_TIMEOUT: Duration = Duration::from_secs(10);
+    const DEFAULT_INITIAL_TIMEOUT: Duration = Duration::from_secs(20);
 
     pub mod q3 {
         use super::*;

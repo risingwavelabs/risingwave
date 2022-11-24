@@ -22,6 +22,8 @@ use super::privilege::check_super_user;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::table_catalog::TableKind;
+use crate::catalog::CatalogError;
 use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
 
@@ -32,14 +34,11 @@ pub async fn handle_drop_mv(
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
 
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
-    };
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let table_id = {
         let reader = session.env().catalog_reader().read_guard();
@@ -56,8 +55,13 @@ pub async fn handle_drop_mv(
                             ),
                         ))
                     } else {
-                        Err(e)
-                    }
+                        match e {
+                            CatalogError::NotFound(kind, name) if kind == "table" => {
+                                Err(CatalogError::NotFound("materialized view", name).into())
+                            }
+                            _ => Err(e.into()),
+                        }
+                    };
                 }
             };
 
@@ -73,18 +77,19 @@ pub async fn handle_drop_mv(
         }
 
         // If associated source is `Some`, then it is actually a materialized source / table v2.
-        if table.associated_source_id().is_some() {
-            check_source(&reader, db_name, schema_name, &table_name)?;
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP TABLE` to drop a table.".to_owned(),
-            )));
-        }
-
-        // If is index on is `Some`, then it is actually an index.
-        if table.is_index {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP INDEX` to drop an index.".to_owned(),
-            )));
+        match table.kind() {
+            TableKind::TableOrSource => {
+                check_source(&reader, db_name, schema_name, &table_name)?;
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP TABLE` to drop a table.".to_owned(),
+                )));
+            }
+            TableKind::Index => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP INDEX` to drop an index.".to_owned(),
+                )));
+            }
+            TableKind::MView => {}
         }
 
         // If the name is not valid, then it is actually an internal table.

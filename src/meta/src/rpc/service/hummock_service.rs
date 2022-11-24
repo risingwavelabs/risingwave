@@ -22,7 +22,6 @@ use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
-use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::{
     CompactionResumeTrigger, CompactorManagerRef, HummockManagerRef, VacuumManagerRef,
 };
@@ -38,7 +37,6 @@ where
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
     vacuum_manager: VacuumManagerRef<S>,
-    compaction_group_manager: CompactionGroupManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
 
@@ -50,14 +48,12 @@ where
         hummock_manager: HummockManagerRef<S>,
         compactor_manager: CompactorManagerRef,
         vacuum_trigger: VacuumManagerRef<S>,
-        compaction_group_manager: CompactionGroupManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
             compactor_manager,
             vacuum_manager: vacuum_trigger,
-            compaction_group_manager,
             fragment_manager,
         }
     }
@@ -109,7 +105,7 @@ where
         let req = request.into_inner();
         let (version, compaction_groups) = self
             .hummock_manager
-            .replay_version_delta(req.version_delta_id)
+            .replay_version_delta(req.version_delta.unwrap())
             .await?;
         Ok(Response::new(ReplayVersionDeltaResponse {
             version: Some(version),
@@ -145,7 +141,7 @@ where
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .list_version_deltas(req.start_id, req.num_limit)
+            .list_version_deltas(req.start_id, req.num_limit, req.committed_epoch_limit)
             .await?;
         let resp = ListVersionDeltasResponse {
             version_deltas: Some(version_deltas),
@@ -164,7 +160,11 @@ where
             })),
             Some(mut compact_task) => {
                 self.hummock_manager
-                    .report_compact_task(req.context_id, &mut compact_task)
+                    .report_compact_task(
+                        req.context_id,
+                        &mut compact_task,
+                        Some(req.table_stats_change),
+                    )
                     .await?;
                 Ok(Response::new(ReportCompactionTasksResponse {
                     status: None,
@@ -253,12 +253,7 @@ where
             .compactor_manager
             .add_compactor(context_id, req.max_concurrent_task_number);
         // Trigger compaction on all compaction groups.
-        for cg_id in self
-            .hummock_manager
-            .compaction_group_manager()
-            .compaction_group_ids()
-            .await
-        {
+        for cg_id in self.hummock_manager.compaction_group_ids().await {
             if let Err(e) = self.hummock_manager.try_send_compaction_request(cg_id) {
                 tracing::warn!(
                     "Failed to schedule compaction for compaction group {}. {}",
@@ -303,7 +298,7 @@ where
         let resp = GetCompactionGroupsResponse {
             status: None,
             compaction_groups: self
-                .compaction_group_manager
+                .hummock_manager
                 .compaction_groups()
                 .await
                 .iter()
@@ -467,7 +462,7 @@ where
         _request: Request<RiseCtlListCompactionGroupRequest>,
     ) -> Result<Response<RiseCtlListCompactionGroupResponse>, Status> {
         let compaction_groups = self
-            .compaction_group_manager
+            .hummock_manager
             .compaction_groups()
             .await
             .iter()
@@ -487,7 +482,7 @@ where
             compaction_group_ids,
             configs,
         } = request.into_inner();
-        self.compaction_group_manager
+        self.hummock_manager
             .update_compaction_config(
                 compaction_group_ids.as_slice(),
                 configs
@@ -500,5 +495,30 @@ where
         Ok(Response::new(RiseCtlUpdateCompactionConfigResponse {
             status: None,
         }))
+    }
+
+    async fn init_metadata_for_replay(
+        &self,
+        request: Request<InitMetadataForReplayRequest>,
+    ) -> Result<Response<InitMetadataForReplayResponse>, Status> {
+        let InitMetadataForReplayRequest {
+            tables,
+            compaction_groups,
+        } = request.into_inner();
+
+        self.hummock_manager
+            .init_metadata_for_replay(tables, compaction_groups)
+            .await?;
+        Ok(Response::new(InitMetadataForReplayResponse {}))
+    }
+
+    async fn set_compactor_runtime_config(
+        &self,
+        request: Request<SetCompactorRuntimeConfigRequest>,
+    ) -> Result<Response<SetCompactorRuntimeConfigResponse>, Status> {
+        let request = request.into_inner();
+        self.compactor_manager
+            .set_compactor_config(request.context_id, request.config.unwrap().into());
+        Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
     }
 }

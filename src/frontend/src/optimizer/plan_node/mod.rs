@@ -41,6 +41,7 @@ use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 use serde::Serialize;
 
 use self::generic::GenericPlanRef;
+use self::stream::StreamPlanRef;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
@@ -79,17 +80,27 @@ pub enum Convention {
     Stream,
 }
 
-impl GenericPlanRef for PlanRef {
-    fn schema(&self) -> &Schema {
-        &self.plan_base().schema
-    }
-
+impl StreamPlanRef for PlanRef {
     fn distribution(&self) -> &Distribution {
         &self.plan_base().dist
     }
 
     fn append_only(&self) -> bool {
         self.plan_base().append_only
+    }
+}
+
+impl GenericPlanRef for PlanRef {
+    fn schema(&self) -> &Schema {
+        &self.plan_base().schema
+    }
+
+    fn logical_pk(&self) -> &[usize] {
+        &self.plan_base().logical_pk
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.plan_base().ctx()
     }
 }
 
@@ -228,6 +239,8 @@ impl dyn PlanNode {
 }
 
 mod plan_base;
+#[macro_use]
+mod plan_tree_node_v2;
 pub use plan_base::*;
 #[macro_use]
 mod plan_tree_node;
@@ -244,7 +257,9 @@ mod predicate_pushdown;
 pub use predicate_pushdown::*;
 
 pub mod generic;
+pub mod generic_derive;
 pub mod stream;
+pub mod stream_derive;
 
 pub use generic::{PlanAggCall, PlanAggCallDisplay};
 
@@ -266,6 +281,7 @@ mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
 mod batch_sort_agg;
+mod batch_source;
 mod batch_table_function;
 mod batch_topn;
 mod batch_union;
@@ -311,6 +327,7 @@ mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
 
+mod stream_union;
 pub mod utils;
 
 pub use batch_delete::BatchDelete;
@@ -331,6 +348,7 @@ pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
 pub use batch_sort_agg::BatchSortAgg;
+pub use batch_source::BatchSource;
 pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
@@ -375,6 +393,7 @@ pub use stream_sink::StreamSink;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
+pub use stream_union::StreamUnion;
 
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -439,6 +458,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, ProjectSet }
             , { Batch, Union }
             , { Batch, GroupTopN }
+            , { Batch, Source }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -458,6 +478,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
             , { Stream, GroupTopN }
+            , { Stream, Union }
         }
     };
 }
@@ -521,6 +542,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, ProjectSet }
             , { Batch, Union }
             , { Batch, GroupTopN }
+            , { Batch, Source }
         }
     };
 }
@@ -549,6 +571,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
             , { Stream, GroupTopN }
+            , { Stream, Union }
         }
     };
 }

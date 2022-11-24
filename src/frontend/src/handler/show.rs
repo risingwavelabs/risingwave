@@ -13,16 +13,16 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowObject};
 
 use super::RwPgResponse;
-use crate::binder::Binder;
-use crate::catalog::root_catalog::SchemaPath;
+use crate::binder::{Binder, Relation};
 use crate::catalog::CatalogError;
 use crate::handler::util::col_descs_to_rows;
 use crate::session::{OptimizerContext, SessionImpl};
@@ -31,28 +31,17 @@ pub fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<Vec<ColumnDesc>> {
-    let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
-    let search_path = session.config().get_search_path();
-    let user_name = &session.auth_context().user_name;
-
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
+    let mut binder = Binder::new(session);
+    let relation = binder.bind_relation_by_name(table_name.clone(), None)?;
+    let catalogs = match relation {
+        Relation::Source(s) => s.catalog.columns,
+        Relation::BaseTable(t) => t.table_catalog.columns,
+        Relation::SystemTable(t) => t.sys_table_catalog.columns,
+        _ => {
+            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
+        }
     };
 
-    let catalog_reader = session.env().catalog_reader().read_guard();
-    let catalogs = match catalog_reader.get_table_by_name(db_name, schema_path, &table_name) {
-        Ok((table, _)) => table.columns(),
-        Err(_) => match catalog_reader.get_source_by_name(db_name, schema_path, &table_name) {
-            Ok((source, _)) => &source.columns,
-            Err(_) => {
-                return Err(
-                    CatalogError::NotFound("table or source", table_name.to_string()).into(),
-                );
-            }
-        },
-    };
     Ok(catalogs
         .iter()
         .filter(|c| !c.is_hidden)
@@ -109,8 +98,16 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
                 Some(rows.len() as i32),
                 rows.into(),
                 vec![
-                    PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
-                    PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Type".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
                 ],
             ));
         }
@@ -125,7 +122,11 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
         StatementType::SHOW_COMMAND,
         Some(rows.len() as i32),
         rows.into(),
-        vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
+        vec![PgFieldDescriptor::new(
+            "Name".to_owned(),
+            DataType::VARCHAR.to_oid(),
+            DataType::VARCHAR.type_len(),
+        )],
     ))
 }
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -47,8 +47,6 @@ where
 {
     // Retry base interval in milliseconds.
     const RECOVERY_RETRY_BASE_INTERVAL: u64 = 100;
-    // Retry max attempts.
-    const RECOVERY_RETRY_MAX_ATTEMPTS: usize = 10;
     // Retry max interval.
     const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -57,7 +55,6 @@ where
     fn get_retry_strategy() -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(Self::RECOVERY_RETRY_BASE_INTERVAL)
             .max_delay(Self::RECOVERY_RETRY_MAX_INTERVAL)
-            .take(Self::RECOVERY_RETRY_MAX_ATTEMPTS)
             .map(jitter)
     }
 
@@ -69,26 +66,56 @@ where
         .await
     }
 
-    /// Clean up all dirty streaming jobs in topology order before recovery.
+    /// Clean up all dirty streaming jobs.
     async fn clean_dirty_fragments(&self) -> MetaResult<()> {
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
         let table_fragments = self.fragment_manager.list_table_fragments().await?;
-        let to_drop_table_ids = table_fragments
+        let to_drop_table_fragments = table_fragments
             .into_iter()
-            .filter(|table_fragment| !stream_job_ids.contains(&table_fragment.table_id().table_id))
-            .map(|t| t.table_id())
-            .collect::<HashSet<_>>();
+            .filter(|table_fragment| {
+                !stream_job_ids.contains(&table_fragment.table_id().table_id)
+                    || !table_fragment.is_created()
+            })
+            .collect_vec();
 
-        debug!("clean dirty table fragments: {:?}", to_drop_table_ids);
+        let to_drop_streaming_ids = to_drop_table_fragments
+            .iter()
+            .map(|t| t.table_id())
+            .collect();
+
+        debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
         self.fragment_manager
-            .drop_table_fragments_vec(&to_drop_table_ids)
+            .drop_table_fragments_vec(&to_drop_streaming_ids)
             .await?;
+
+        // unregister compaction group for dirty table fragments.
+        let _ = self.hummock_manager
+            .unregister_table_ids(
+                &to_drop_streaming_ids
+                    .iter()
+                    .map(|t| t.table_id)
+                    .collect_vec(),
+            )
+            .await.inspect_err(|e|
+            tracing::warn!(
+                "Failed to unregister compaction group for {:#?}.\nThey will be cleaned up on node restart.\n{:#?}",
+                to_drop_streaming_ids,
+                e)
+        );
+
+        // clean up source connector dirty changes.
+        self.source_manager
+            .drop_source_change(&to_drop_table_fragments)
+            .await;
 
         Ok(())
     }
 
     /// Recovery the whole cluster from the latest epoch.
     pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> RecoveryResult {
+        // pause discovery of all connector split changes and trigger config change.
+        let _source_pause_guard = self.source_manager.paused.lock().await;
+
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 

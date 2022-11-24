@@ -26,6 +26,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, summarize_group_deltas, GroupDeltasSummary, HummockLevelsExt,
     HummockVersionExt,
 };
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, LevelType};
@@ -37,7 +38,7 @@ use crate::hummock::local_version::{
 use crate::hummock::shared_buffer::{
     to_order_sorted, OrderSortedUncommittedData, SharedBuffer, UncommittedData,
 };
-use crate::hummock::utils::{filter_single_sst, range_overlap};
+use crate::hummock::utils::filter_single_sst;
 
 // state transition
 impl SyncUncommittedData {
@@ -113,11 +114,11 @@ impl SyncUncommittedData {
     pub fn get_overlap_data<R, B>(
         &self,
         table_id: TableId,
-        key_range: &R,
+        table_key_range: &R,
         epoch: HummockEpoch,
     ) -> OrderSortedUncommittedData
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
         match &self.stage {
@@ -126,7 +127,7 @@ impl SyncUncommittedData {
                     .range(..=epoch)
                     .rev() // take rev so that data of newer epoch comes first
                     .flat_map(|(_, shared_buffer)| {
-                        shared_buffer.get_overlap_data(table_id, key_range)
+                        shared_buffer.get_overlap_data(table_id, table_key_range)
                     })
                     .collect()
             }
@@ -138,14 +139,10 @@ impl SyncUncommittedData {
                             .filter(|data| match data {
                                 UncommittedData::Batch(batch) => {
                                     batch.epoch() <= epoch
-                                        && range_overlap(
-                                            key_range,
-                                            batch.start_user_key(),
-                                            batch.end_user_key(),
-                                        )
+                                        && batch.filter(table_id, table_key_range)
                                 }
-                                UncommittedData::Sst((_, info)) => {
-                                    filter_single_sst(info, table_id, key_range)
+                                UncommittedData::Sst(LocalSstableInfo { sst_info, .. }) => {
+                                    filter_single_sst(sst_info, table_id, table_key_range)
                                 }
                             })
                             .cloned()
@@ -155,7 +152,9 @@ impl SyncUncommittedData {
             }
             SyncUncommittedDataStage::Synced(ssts, _) => vec![ssts
                 .iter()
-                .filter(|(_, info)| filter_single_sst(info, table_id, key_range))
+                .filter(|LocalSstableInfo { sst_info, .. }| {
+                    filter_single_sst(sst_info, table_id, table_key_range)
+                })
                 .map(|info| UncommittedData::Sst(info.clone()))
                 .collect()],
         }
@@ -382,10 +381,10 @@ impl LocalVersion {
         this: &RwLock<Self>,
         read_epoch: HummockEpoch,
         table_id: TableId,
-        key_range: &R,
+        table_key_range: &R,
     ) -> ReadVersion
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
         use parking_lot::RwLockReadGuard;
@@ -401,7 +400,7 @@ impl LocalVersion {
                         .range(smallest_uncommitted_epoch..=read_epoch)
                         .rev() // Important: order by epoch descendingly
                         .map(|(_, shared_buffer)| {
-                            shared_buffer.get_overlap_data(table_id, key_range)
+                            shared_buffer.get_overlap_data(table_id, table_key_range)
                         })
                         .collect();
                     let sync_data: Vec<OrderSortedUncommittedData> = guard
@@ -415,7 +414,9 @@ impl LocalVersion {
                                 false
                             }
                         })
-                        .map(|(_, value)| value.get_overlap_data(table_id, key_range, read_epoch))
+                        .map(|(_, value)| {
+                            value.get_overlap_data(table_id, table_key_range, read_epoch)
+                        })
                         .collect();
                     RwLockReadGuard::unlock_fair(guard);
                     (shared_buffer_data, sync_data)
@@ -497,7 +498,12 @@ impl LocalVersion {
                     .collect_vec();
                 let mut compaction_group_ssts: HashMap<_, Vec<_>> = HashMap::new();
                 let mut sst_ids = HashSet::new();
-                for (compaction_group_id, sst) in synced_ssts {
+                for LocalSstableInfo {
+                    compaction_group_id,
+                    sst_info: sst,
+                    ..
+                } in synced_ssts
+                {
                     sst_ids.insert(sst.get_id());
                     compaction_group_ssts
                         .entry(compaction_group_id)

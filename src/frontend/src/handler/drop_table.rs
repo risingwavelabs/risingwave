@@ -22,6 +22,8 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::source_catalog::SourceKind;
+use crate::catalog::table_catalog::TableKind;
 use crate::session::OptimizerContext;
 
 pub fn check_source(
@@ -33,10 +35,13 @@ pub fn check_source(
     if let Ok((s, _)) =
         reader.get_source_by_name(db_name, SchemaPath::Name(schema_name), table_name)
     {
-        if s.is_stream() {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP SOURCE` to drop a source.".to_owned(),
-            )));
+        match s.kind() {
+            SourceKind::Stream => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP SOURCE` to drop a source.".to_owned(),
+                )))
+            }
+            SourceKind::Table => {}
         }
     }
     Ok(())
@@ -49,14 +54,11 @@ pub async fn handle_drop_table(
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
 
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
-    };
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let (source_id, table_id) = {
         let reader = session.env().catalog_reader().read_guard();
@@ -70,7 +72,7 @@ pub async fn handle_drop_table(
                         format!("table \"{}\" does not exist, skipping", table_name),
                     ))
                 } else {
-                    Err(e)
+                    Err(e.into())
                 }
             }
         };
@@ -86,24 +88,23 @@ pub async fn handle_drop_table(
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
 
-        // If return value is `Err`, it's actually a materialized source.
-        check_source(&reader, db_name, schema_name, &table_name)?;
-
-        if table.is_index {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP INDEX` to drop an index.".to_owned(),
-            )));
-        }
-
-        // If associated source is `None`, then it is a normal mview.
-        match table.associated_source_id() {
-            Some(source_id) => (source_id, table.id()),
-            None => {
+        match table.kind() {
+            TableKind::TableOrSource => {
+                check_source(&reader, db_name, schema_name, &table_name)?;
+            }
+            TableKind::Index => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP INDEX` to drop an index.".to_owned(),
+                )));
+            }
+            TableKind::MView => {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
-                )))
+                )));
             }
         }
+
+        (table.associated_source_id().unwrap(), table.id())
     };
 
     let catalog_writer = session.env().catalog_writer();

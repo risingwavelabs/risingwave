@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
 use std::{fmt, iter};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
-use super::generic::{self, GenericPlanRef, PlanAggCall, PlanAggCallDisplay, PlanAggOrderByField};
+use super::generic::{
+    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
+};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
@@ -34,13 +32,11 @@ use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
 };
-use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, BatchSortAgg, LogicalProject};
 use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
     Distribution, FieldOrder, FunctionalDependencySet, Order, RequiredDist,
 };
-use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
@@ -55,241 +51,15 @@ pub struct LogicalAgg {
     core: generic::Agg<PlanRef>,
 }
 
-pub enum AggCallState {
-    ResultValue,
-    Table(Box<AggTableState>),
-    MaterializedInput(Box<MaterializedAggInputState>),
-}
-
-impl AggCallState {
-    pub fn into_prost(self, state: &mut BuildFragmentGraphState) -> AggCallStateProst {
-        AggCallStateProst {
-            inner: Some(match self {
-                AggCallState::ResultValue => {
-                    agg_call_state::Inner::ResultValueState(agg_call_state::AggResultState {})
-                }
-                AggCallState::Table(s) => {
-                    agg_call_state::Inner::TableState(agg_call_state::AggTableState {
-                        table: Some(
-                            s.table
-                                .with_id(state.gen_table_id_wrapped())
-                                .to_internal_table_prost(),
-                        ),
-                    })
-                }
-                AggCallState::MaterializedInput(s) => agg_call_state::Inner::MaterializedState(
-                    agg_call_state::MaterializedAggInputState {
-                        table: Some(
-                            s.table
-                                .with_id(state.gen_table_id_wrapped())
-                                .to_internal_table_prost(),
-                        ),
-                        upstream_column_indices: s
-                            .column_mapping
-                            .into_iter()
-                            .map(|x| x as _)
-                            .collect(),
-                    },
-                ),
-            }),
-        }
-    }
-}
-
-pub struct AggTableState {
-    pub table: TableCatalog,
-}
-
-pub struct MaterializedAggInputState {
-    pub table: TableCatalog,
-    pub column_mapping: Vec<usize>,
-}
-
 impl LogicalAgg {
     /// Infer agg result table for streaming agg.
     pub fn infer_result_table(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
-        let out_fields = self.base.schema.fields();
-        let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
-        for field in out_fields.iter() {
-            let tb_column_idx = internal_table_catalog_builder.add_column(field);
-            if tb_column_idx < self.group_key().len() {
-                internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::Ascending);
-            }
-        }
-        let mapping = self.i2o_col_mapping();
-        let tb_dist = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
-        if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
-            internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
-        }
-
-        // the result_table is composed of group_key and all agg_call's values, so the value_indices
-        // of this table should skip group_key.len().
-        internal_table_catalog_builder
-            .set_value_indices((self.group_key().len()..out_fields.len()).collect());
-        internal_table_catalog_builder.build(tb_dist)
+        self.core.infer_result_table(&self.base, vnode_col_idx)
     }
 
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(&self, vnode_col_idx: Option<usize>) -> Vec<AggCallState> {
-        let in_fields = self.input().schema().fields().to_vec();
-        let in_pks = self.input().logical_pk().to_vec();
-        let in_append_only = self.input().append_only();
-        let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
-        let get_materialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
-                                            include_keys: Vec<usize>|
-         -> MaterializedAggInputState {
-            let mut internal_table_catalog_builder =
-                TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
-            let mut column_mapping = vec![];
-
-            let mut included_upstream_indices = BTreeSet::new();
-            let mut add_column = |upstream_idx, order_type| {
-                if !included_upstream_indices.contains(&upstream_idx) {
-                    let tb_column_idx =
-                        internal_table_catalog_builder.add_column(&in_fields[upstream_idx]);
-                    column_mapping.push(upstream_idx);
-                    if let Some(order_type) = order_type {
-                        internal_table_catalog_builder.add_order_column(tb_column_idx, order_type);
-                    }
-                    included_upstream_indices.insert(upstream_idx);
-                }
-            };
-
-            for &idx in self.group_key() {
-                add_column(idx, Some(OrderType::Ascending));
-            }
-            for (order_type, idx) in sort_keys {
-                add_column(idx, Some(order_type));
-            }
-            // Add upstream pk.
-            for &idx in &in_pks {
-                add_column(idx, Some(OrderType::Ascending));
-            }
-            for idx in include_keys {
-                add_column(idx, None);
-            }
-
-            let mapping = ColIndexMapping::with_column_mapping(&column_mapping, in_fields.len());
-            let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
-            if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
-                internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
-            }
-            MaterializedAggInputState {
-                table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
-                column_mapping,
-            }
-        };
-        let get_table_state = |agg_kind: AggKind| -> AggTableState {
-            let mut internal_table_catalog_builder =
-                TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
-            let mut column_mapping = vec![];
-
-            for &idx in self.group_key() {
-                let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
-                internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::Ascending);
-                column_mapping.push(idx);
-            }
-
-            // Add register column.
-            match agg_kind {
-                AggKind::Sum
-                | AggKind::Sum0
-                | AggKind::Count
-                | AggKind::Avg
-                | AggKind::Min
-                | AggKind::Max
-                | AggKind::StringAgg
-                | AggKind::ArrayAgg
-                | AggKind::FirstValue => {
-                    panic!("State of AggKind enum {} is not `TableState`. It does not have registers in its state table.", agg_kind);
-                }
-                AggKind::ApproxCountDistinct => {
-                    internal_table_catalog_builder.add_column(&Field {
-                        data_type: DataType::List {
-                            datatype: Box::new(DataType::Int64),
-                        },
-                        name: String::from("registers"),
-                        sub_fields: vec![],
-                        type_name: String::default(),
-                    });
-                }
-            }
-
-            let mapping = ColIndexMapping::with_column_mapping(&column_mapping, in_fields.len());
-            let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
-            if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
-                internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
-            }
-            AggTableState {
-                table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
-            }
-        };
-
-        self.agg_calls()
-            .iter()
-            .map(|agg_call| match agg_call.agg_kind {
-                AggKind::Min
-                | AggKind::Max
-                | AggKind::StringAgg
-                | AggKind::ArrayAgg
-                | AggKind::FirstValue => {
-                    if !in_append_only {
-                        let mut sort_column_set = BTreeSet::new();
-                        let sort_keys = {
-                            match agg_call.agg_kind {
-                                AggKind::Min => {
-                                    vec![(OrderType::Ascending, agg_call.inputs[0].index)]
-                                }
-                                AggKind::Max => {
-                                    vec![(OrderType::Descending, agg_call.inputs[0].index)]
-                                }
-                                AggKind::StringAgg | AggKind::ArrayAgg => agg_call
-                                    .order_by_fields
-                                    .iter()
-                                    .map(|o| {
-                                        let col_idx = o.input.index;
-                                        sort_column_set.insert(col_idx);
-                                        (o.direction.to_order(), col_idx)
-                                    })
-                                    .collect(),
-                                _ => unreachable!(),
-                            }
-                        };
-
-                        let include_keys = match agg_call.agg_kind {
-                            AggKind::StringAgg | AggKind::ArrayAgg => agg_call
-                                .inputs
-                                .iter()
-                                .map(|i| i.index)
-                                .filter(|i| !sort_column_set.contains(i))
-                                .collect(),
-                            _ => vec![],
-                        };
-                        let state = get_materialized_input_state(sort_keys, include_keys);
-                        AggCallState::MaterializedInput(Box::new(state))
-                    } else {
-                        AggCallState::ResultValue
-                    }
-                }
-                AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg => {
-                    AggCallState::ResultValue
-                }
-                AggKind::ApproxCountDistinct => {
-                    if !in_append_only {
-                        // FIXME: now the approx count distinct on a non-append-only stream does not
-                        // really has state and can handle failover or scale-out correctly
-                        AggCallState::ResultValue
-                    } else {
-                        let state = get_table_state(agg_call.agg_kind);
-                        AggCallState::Table(Box::new(state))
-                    }
-                }
-            })
-            .collect()
+        self.core.infer_stream_agg_state(&self.base, vnode_col_idx)
     }
 
     /// Generate plan for stateless 2-phase streaming agg.
@@ -434,7 +204,7 @@ impl LogicalAgg {
         match input_dist {
             Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
             Distribution::Broadcast => unreachable!(),
-            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => {
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
                 self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dists)
             }
         }
@@ -814,57 +584,38 @@ impl ExprRewriter for LogicalAggBuilder {
 impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
-        let schema = Self::derive_schema(input.schema(), &group_key, &agg_calls);
-        // there is only one row in simple agg's output, so its pk_indices is empty
-        let pk_indices = (0..group_key.len()).into_iter().collect_vec();
-        let functional_dependency = Self::derive_fd(
-            schema.len(),
-            input.schema().len(),
-            input.functional_dependency(),
-            &group_key,
-        );
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         let core = generic::Agg {
             agg_calls,
             group_key,
             input,
         };
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+        let functional_dependency = Self::derive_fd(
+            schema.len(),
+            core.input.schema().len(),
+            core.input.functional_dependency(),
+            &core.group_key,
+        );
+
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
         Self { base, core }
     }
 
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        let input_len = self.input().schema().len();
-        let agg_cal_num = self.agg_calls().len();
-        let group_key = self.group_key();
-        let mut map = vec![None; agg_cal_num + group_key.len()];
-        for (i, key) in group_key.iter().enumerate() {
-            map[i] = Some(*key);
-        }
-        ColIndexMapping::with_target_size(map, input_len)
+        self.core.o2i_col_mapping()
     }
 
     /// get the Mapping of columnIndex from input column index to out column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.o2i_col_mapping().inverse()
-    }
-
-    fn derive_schema(input: &Schema, group_key: &[usize], agg_calls: &[PlanAggCall]) -> Schema {
-        let fields = group_key
-            .iter()
-            .cloned()
-            .map(|i| input.fields()[i].clone())
-            .chain(agg_calls.iter().map(|agg_call| {
-                let plan_agg_call_display = PlanAggCallDisplay {
-                    plan_agg_call: agg_call,
-                    input_schema: input,
-                };
-                let name = format!("{:?}", plan_agg_call_display);
-                Field::with_name(agg_call.return_type.clone(), name)
-            }))
-            .collect();
-        Schema { fields }
+        self.core.i2o_col_mapping()
     }
 
     fn derive_fd(
@@ -927,14 +678,6 @@ impl LogicalAgg {
         &self.core.agg_calls
     }
 
-    pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
-        self.core.agg_calls_display()
-    }
-
-    pub fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
-        self.core.group_key_display()
-    }
-
     /// Get a reference to the logical agg's group key.
     pub fn group_key(&self) -> &Vec<usize> {
         &self.core.group_key
@@ -976,12 +719,7 @@ impl LogicalAgg {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        if !self.group_key().is_empty() {
-            builder.field("group_key", &self.group_key_display());
-        }
-        builder.field("aggs", &self.agg_calls_display());
-        builder.finish()
+        self.core.fmt_with_name(f, name)
     }
 }
 
@@ -1196,7 +934,7 @@ impl ToStream for LogicalAgg {
 mod tests {
     use std::rc::Rc;
 
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
     use super::*;

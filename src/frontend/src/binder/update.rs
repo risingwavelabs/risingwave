@@ -16,9 +16,8 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::ensure;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{Assignment, Expr, TableFactor, TableWithJoins};
+use risingwave_sqlparser::ast::{Assignment, Expr, ObjectName};
 
 use super::{Binder, BoundTableSource, Relation};
 use crate::expr::{Expr as _, ExprImpl};
@@ -41,19 +40,13 @@ pub struct BoundUpdate {
 impl Binder {
     pub(super) fn bind_update(
         &mut self,
-        table: TableWithJoins,
+        table_name: ObjectName,
         assignments: Vec<Assignment>,
         selection: Option<Expr>,
     ) -> Result<BoundUpdate> {
-        let table_source = {
-            ensure!(table.joins.is_empty());
-            let name = match &table.relation {
-                TableFactor::Table { name, .. } => name.clone(),
-                _ => unreachable!(),
-            };
-            let (schema_name, name) = Self::resolve_table_or_source_name(&self.db_name, name)?;
-            self.bind_table_source(schema_name.as_deref(), &name)?
-        };
+        let (schema_name, name) =
+            Self::resolve_schema_qualified_name(&self.db_name, table_name.clone())?;
+        let table_source = self.bind_table_source(schema_name.as_deref(), &name)?;
 
         if table_source.append_only {
             return Err(ErrorCode::BindError(
@@ -62,7 +55,7 @@ impl Binder {
             .into());
         }
 
-        let table = self.bind_vec_table_with_joins(vec![table])?.unwrap();
+        let table = self.bind_relation_by_name(table_name, None)?;
 
         let selection = selection.map(|expr| self.bind_expr(expr)).transpose()?;
 

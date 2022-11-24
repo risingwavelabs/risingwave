@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::types::VIRTUAL_NODE_SIZE;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
@@ -144,12 +144,12 @@ pub struct SchemaFilterKeyExtractor {
 
 impl FilterKeyExtractor for SchemaFilterKeyExtractor {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        if full_key.len() < TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE {
+        if full_key.len() < TABLE_PREFIX_LEN + VirtualNode::SIZE {
             return full_key;
         }
 
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
-        let (_vnode_prefix, pk) = key.split_at(VIRTUAL_NODE_SIZE);
+        let (_vnode_prefix, pk) = key.split_at(VirtualNode::SIZE);
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection
@@ -158,7 +158,7 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
             .deserialize_prefix_len_with_column_indices(pk, 0..self.read_pattern_prefix_column)
             .unwrap();
 
-        let prefix_len = TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + pk_prefix_len;
+        let prefix_len = TABLE_PREFIX_LEN + VirtualNode::SIZE + pk_prefix_len;
         &full_key[0..prefix_len]
     }
 }
@@ -224,7 +224,7 @@ impl Debug for MultiFilterKeyExtractor {
 
 impl FilterKeyExtractor for MultiFilterKeyExtractor {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        if full_key.len() < TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE {
+        if full_key.len() < TABLE_PREFIX_LEN + VirtualNode::SIZE {
             return full_key;
         }
 
@@ -359,11 +359,12 @@ mod tests {
 
     use bytes::{BufMut, BytesMut};
     use itertools::Itertools;
-    use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::row::Row;
+    use risingwave_common::types::DataType;
     use risingwave_common::types::ScalarImpl::{self};
-    use risingwave_common::types::{DataType, VIRTUAL_NODE_SIZE};
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::Table as ProstTable;
@@ -476,6 +477,7 @@ mod tests {
             vnode_col_idx: None,
             value_indices: vec![0],
             definition: "".into(),
+            handle_pk_conflict: false,
         }
     }
 
@@ -501,12 +503,12 @@ mod tests {
         };
 
         let vnode_prefix = "v".as_bytes();
-        assert_eq!(VIRTUAL_NODE_SIZE, vnode_prefix.len());
+        assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
 
         let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
         let output_key = schema_filter_key_extractor.extract(&full_key);
         assert_eq!(
-            TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + 1 + mem::size_of::<i64>(),
+            TABLE_PREFIX_LEN + VirtualNode::SIZE + 1 + mem::size_of::<i64>(),
             output_key.len()
         );
     }
@@ -539,7 +541,7 @@ mod tests {
             };
 
             let vnode_prefix = "v".as_bytes();
-            assert_eq!(VIRTUAL_NODE_SIZE, vnode_prefix.len());
+            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
@@ -552,7 +554,7 @@ mod tests {
                 .deserialize_prefix_len_with_column_indices(&row_bytes, 0..=0)
                 .unwrap();
             assert_eq!(
-                TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + pk_prefix_len,
+                TABLE_PREFIX_LEN + VirtualNode::SIZE + pk_prefix_len,
                 output_key.len()
             );
         }
@@ -582,7 +584,7 @@ mod tests {
             };
 
             let vnode_prefix = "v".as_bytes();
-            assert_eq!(VIRTUAL_NODE_SIZE, vnode_prefix.len());
+            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
@@ -596,7 +598,7 @@ mod tests {
                 .unwrap();
 
             assert_eq!(
-                TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + pk_prefix_len,
+                TABLE_PREFIX_LEN + VirtualNode::SIZE + pk_prefix_len,
                 output_key.len()
             );
         }
@@ -617,14 +619,14 @@ mod tests {
             };
 
             let vnode_prefix = "v".as_bytes();
-            assert_eq!(VIRTUAL_NODE_SIZE, vnode_prefix.len());
+            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
 
             let row_bytes = "full_key".as_bytes();
 
             let full_key = [&table_prefix, vnode_prefix, row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
             assert_eq!(
-                TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + row_bytes.len(),
+                TABLE_PREFIX_LEN + VirtualNode::SIZE + row_bytes.len(),
                 output_key.len()
             );
         }

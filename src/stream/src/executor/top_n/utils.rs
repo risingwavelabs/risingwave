@@ -18,10 +18,10 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::CompactedRow;
+use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
@@ -58,6 +58,7 @@ pub trait TopNExecutorBase: Send + 'static {
         unreachable!()
     }
 
+    fn evict(&mut self) {}
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 }
 
@@ -120,7 +121,7 @@ where
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
-
+                    self.inner.evict();
                     yield Message::Barrier(barrier)
                 }
             };

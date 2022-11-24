@@ -13,13 +13,21 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::io::{Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
+use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
+use postgres_types::{ToSql, Type};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
-#[derive(Debug, parse_display::Display, Copy, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+use super::to_binary::ToBinary;
+use super::to_text::ToText;
+use crate::array::ArrayResult;
+use crate::types::Decimal::Normalized;
+
+#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     #[display("{0}")]
     Normalized(RustDecimal),
@@ -29,6 +37,67 @@ pub enum Decimal {
     PositiveInf,
     #[display("-Infinity")]
     NegativeInf,
+}
+
+impl ToText for Decimal {
+    fn to_text(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl Decimal {
+    /// Used by `PrimitiveArray` to serialize the array to protobuf.
+    pub fn to_protobuf(self, output: &mut impl Write) -> ArrayResult<usize> {
+        let buf = self.unordered_serialize();
+        output.write_all(&buf)?;
+        Ok(buf.len())
+    }
+
+    /// Used by `DecimalValueReader` to deserialize the array from protobuf.
+    pub fn from_protobuf(input: &mut impl Read) -> ArrayResult<Self> {
+        let mut buf = [0u8; 16];
+        input.read_exact(&mut buf)?;
+        Ok(Self::unordered_deserialize(buf))
+    }
+
+    pub fn from_scientific(value: &str) -> Option<Self> {
+        let decimal = RustDecimal::from_scientific(value).ok()?;
+        Some(Normalized(decimal))
+    }
+}
+
+impl ToBinary for Decimal {
+    fn to_binary(&self) -> Option<Bytes> {
+        let mut output = BytesMut::new();
+        match self {
+            Decimal::Normalized(d) => {
+                d.to_sql(&Type::ANY, &mut output).unwrap();
+                return Some(output.freeze());
+            }
+            Decimal::NaN => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xC000);
+                output.put_i16(0);
+            }
+            Decimal::PositiveInf => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xD000);
+                output.put_i16(0);
+            }
+            Decimal::NegativeInf => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xF000);
+                output.put_i16(0);
+            }
+        };
+        Some(output.freeze())
+    }
 }
 
 macro_rules! impl_from_integer {

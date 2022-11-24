@@ -19,14 +19,14 @@ use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, ScalarImpl};
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::approx_distinct_utils::{
     deserialize_buckets_from_list, serialize_buckets, RegisterBucket, StreamingApproxCountDistinct,
 };
 use crate::common::iter_state_table;
-use crate::executor::aggregation::table_state::AggTable;
+use crate::common::table::state_table::StateTable;
+use crate::executor::aggregation::table::TableStateImpl;
 use crate::executor::StreamExecutorResult;
 
 #[derive(Clone, Debug)]
@@ -95,7 +95,7 @@ impl StreamingApproxCountDistinct for AppendOnlyStreamingApproxCountDistinct {
 }
 
 #[async_trait::async_trait]
-impl<S: StateStore> AggTable<S> for AppendOnlyStreamingApproxCountDistinct {
+impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct {
     fn apply_batch(
         &mut self,
         ops: Ops<'_>,
@@ -142,7 +142,7 @@ impl<S: StateStore> AggTable<S> for AppendOnlyStreamingApproxCountDistinct {
         Ok(())
     }
 
-    async fn commit_state(
+    async fn flush_state_if_needed(
         &self,
         state_table: &mut StateTable<S>,
         group_key: Option<&Row>,

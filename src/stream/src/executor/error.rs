@@ -49,7 +49,7 @@ enum Inner {
     #[error("RPC error: {0}")]
     RpcError(RpcError),
 
-    #[error("Channel `{0}` closed")]
+    #[error("Channel closed: {0}")]
     ChannelClosed(String),
 
     #[error("Failed to align barrier: expected {0:?} but got {1:?}")]
@@ -102,7 +102,7 @@ impl std::fmt::Debug for StreamExecutorError {
 
         write!(f, "{}", self.inner)?;
         writeln!(f)?;
-        if let Some(backtrace) = self.inner.backtrace() {
+        if let Some(backtrace) = (&self.inner as &dyn Error).request_ref::<Backtrace>() {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(

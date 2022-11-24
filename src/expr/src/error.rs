@@ -32,7 +32,7 @@ pub enum ExprError {
     #[error("Can't cast {0:?} to {1:?}")]
     Cast2(DataType, DataType),
 
-    #[error("Out of range")]
+    #[error("Numeric out of range")]
     NumericOutOfRange,
 
     #[error("Division by zero")]

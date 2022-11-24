@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::fmt::{Debug, Formatter};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::user_key;
+use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, TableKey, UserKey};
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
 use tokio::sync::Notify;
 
@@ -27,8 +28,8 @@ use super::{HummockError, HummockResult};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
-    inclusive_start_key: &[u8],
-    inclusive_end_key: &[u8],
+    inclusive_start_key: impl AsRef<[u8]>,
+    inclusive_end_key: impl AsRef<[u8]>,
 ) -> bool
 where
     R: RangeBounds<B>,
@@ -39,15 +40,15 @@ where
     //        RANGE
     // TABLE
     let too_left = match start_bound {
-        Included(range_start) => range_start.as_ref() > inclusive_end_key,
-        Excluded(range_start) => range_start.as_ref() >= inclusive_end_key,
+        Included(range_start) => range_start.as_ref() > inclusive_end_key.as_ref(),
+        Excluded(range_start) => range_start.as_ref() >= inclusive_end_key.as_ref(),
         Unbounded => false,
     };
     // RANGE
     //        TABLE
     let too_right = match end_bound {
-        Included(range_end) => range_end.as_ref() < inclusive_start_key,
-        Excluded(range_end) => range_end.as_ref() <= inclusive_start_key,
+        Included(range_end) => range_end.as_ref() < inclusive_start_key.as_ref(),
+        Excluded(range_end) => range_end.as_ref() <= inclusive_start_key.as_ref(),
         Unbounded => false,
     };
 
@@ -82,19 +83,24 @@ pub fn validate_table_key_range(version: &HummockVersion) {
     }
 }
 
-pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, key_range: &R) -> bool
+pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, table_key_range: &R) -> bool
 where
-    R: RangeBounds<B>,
+    R: RangeBounds<TableKey<B>>,
     B: AsRef<[u8]>,
 {
     let table_range = info.key_range.as_ref().unwrap();
     let table_start = user_key(table_range.left.as_slice());
     let table_end = user_key(table_range.right.as_slice());
+    let user_key_range = bound_table_key_range(table_id, table_key_range);
+    let encoded_user_key_range = (
+        user_key_range.start_bound().map(UserKey::encode),
+        user_key_range.end_bound().map(UserKey::encode),
+    );
     #[cfg(any(test, feature = "test"))]
     if table_id.table_id() == 0 {
-        return range_overlap(key_range, table_start, table_end);
+        return range_overlap(&encoded_user_key_range, table_start, table_end);
     }
-    range_overlap(key_range, table_start, table_end)
+    range_overlap(&encoded_user_key_range, table_start, table_end)
         && info
             .get_table_ids()
             .binary_search(&table_id.table_id())
@@ -106,13 +112,13 @@ where
 pub fn prune_ssts<'a, R, B>(
     ssts: impl Iterator<Item = &'a SstableInfo>,
     table_id: TableId,
-    key_range: &R,
+    table_key_range: &R,
 ) -> Vec<&'a SstableInfo>
 where
-    R: RangeBounds<B>,
+    R: RangeBounds<TableKey<B>>,
     B: AsRef<[u8]>,
 {
-    ssts.filter(|info| filter_single_sst(info, table_id, key_range))
+    ssts.filter(|info| filter_single_sst(info, table_id, table_key_range))
         .collect()
 }
 
@@ -208,6 +214,12 @@ pub struct MemoryLimiter {
 pub struct MemoryTracker {
     limiter: Arc<MemoryLimiterInner>,
     quota: u64,
+}
+
+impl Debug for MemoryTracker {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("quota").field("quota", &self.quota).finish()
+    }
 }
 
 use std::sync::atomic::Ordering as AtomicOrdering;

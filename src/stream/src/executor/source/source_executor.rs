@@ -29,6 +29,7 @@ use risingwave_source::row_id::RowIdGenerator;
 use risingwave_source::*;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::time::Instant;
 
 use super::reader::SourceReaderStream;
 use crate::error::StreamResult;
@@ -70,7 +71,6 @@ pub struct SourceExecutor<S: StateStore> {
 
     state_cache: HashMap<SplitId, SplitImpl>,
 
-    #[expect(dead_code)]
     /// Expected barrier latency
     expected_barrier_latency_ms: u64,
 }
@@ -211,6 +211,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .collect_vec();
 
         if !cache.is_empty() {
+            tracing::debug!(actor_id = self.ctx.id, state = ?cache, "take snapshot");
             self.split_state_store.take_snapshot(cache).await?
         }
         // commit anyway, even if no message saved
@@ -300,8 +301,8 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
+        tracing::info!(actor_id = self.ctx.id, state = ?recover_state, "start with state");
 
-        // todo: use epoch from msg to restore state from state store
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
             .stack_trace("source_build_reader")
@@ -315,10 +316,20 @@ impl<S: StateStore> SourceExecutor<S> {
 
         yield Message::Barrier(barrier);
 
+        // We allow data to flow for 5 * `expected_barrier_latency_ms` milliseconds, considering
+        // some other latencies like network and cost in Meta.
+        let max_wait_barrier_time_ms = self.expected_barrier_latency_ms as u128 * 5;
+        let mut last_barrier_time = Instant::now();
+        let mut self_paused = false;
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
                 Either::Left(barrier) => {
+                    last_barrier_time = Instant::now();
+                    if self_paused {
+                        stream.resume_source();
+                        self_paused = false;
+                    }
                     let epoch = barrier.epoch;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
@@ -363,6 +374,13 @@ impl<S: StateStore> SourceExecutor<S> {
                     mut chunk,
                     split_offset_mapping,
                 }) => {
+                    if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
+                        // Exceeds the max wait barrier time, the source will be paused. Currently
+                        // we can guarantee the source is not paused since it received stream
+                        // chunks.
+                        self_paused = true;
+                        stream.pause_source();
+                    }
                     if let Some(mapping) = split_offset_mapping {
                         let state: HashMap<_, _> = mapping
                             .iter()
@@ -371,8 +389,10 @@ impl<S: StateStore> SourceExecutor<S> {
                                     .stream_source_splits
                                     .iter()
                                     .filter(|origin_split| &origin_split.id() == split)
-                                    .exactly_one()
-                                    .ok();
+                                    .at_most_one()
+                                    .unwrap_or_else(|_| {
+                                        panic!("multiple splits with same id `{split}`")
+                                    });
 
                                 origin_split_impl.map(|split_impl| {
                                     (split.clone(), split_impl.update(offset.clone()))
@@ -417,6 +437,12 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
             if let Some(target_state) = self.get_diff(Some(target_splits)).await? {
+                tracing::info!(
+                    actor_id = self.ctx.id,
+                    state = ?target_state,
+                    "apply split change"
+                );
+
                 self.replace_stream_reader_with_target_state(source_desc, stream, target_state)
                     .await?;
             }
@@ -492,6 +518,7 @@ mod tests {
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
+    use risingwave_pb::catalog::source_info::SourceInfo as ProstSourceInfo;
     use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, StreamSourceInfo};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
@@ -499,7 +526,6 @@ mod tests {
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
         RowFormatType as ProstRowFormatType,
     };
-    use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
     use risingwave_source::table_test_utils::create_table_source_desc_builder;
     use risingwave_source::*;
     use risingwave_storage::memory::MemoryStateStore;
@@ -550,7 +576,8 @@ mod tests {
         let state_table = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             MemoryStateStore::new(),
-        );
+        )
+        .await;
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
         let executor = SourceExecutor::new(
@@ -652,7 +679,8 @@ mod tests {
         let state_table = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             MemoryStateStore::new(),
-        );
+        )
+        .await;
 
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
         let executor = SourceExecutor::new(
@@ -737,7 +765,7 @@ mod tests {
         let pk_column_ids = vec![0];
         let stream_source_info = StreamSourceInfo {
             row_format: ProstRowFormatType::Json as i32,
-            row_schema_location: "".to_string(),
+            ..Default::default()
         };
         let source_manager = Arc::new(TableSourceManager::default());
         SourceDescBuilder::new(
@@ -748,6 +776,7 @@ mod tests {
             properties,
             ProstSourceInfo::StreamSource(stream_source_info),
             source_manager,
+            Default::default(),
         )
     }
 
@@ -777,17 +806,18 @@ mod tests {
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
-        let mut source_state_handler = SourceStateTableHandler::from_table_catalog(
+        let source_state_handler = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             mem_state_store.clone(),
-        );
+        )
+        .await;
 
         let source_exec = SourceExecutor::new(
             ActorContext::create(0),
             source_builder,
             source_table_id,
             vnodes,
-            source_state_handler.clone(),
+            source_state_handler,
             column_ids.clone(),
             schema,
             pk_indices,
@@ -807,7 +837,11 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids.clone(),
             2,
+            None,
+            0,
+            false,
         )
+        .await
         .boxed()
         .execute();
 
@@ -868,6 +902,11 @@ mod tests {
 
         let _ = ready_chunks.next().await.unwrap(); // barrier
 
+        let mut source_state_handler = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            mem_state_store.clone(),
+        )
+        .await;
         // there must exist state for new add partition
         source_state_handler.init_epoch(EpochPair::new_test_epoch(2));
         source_state_handler

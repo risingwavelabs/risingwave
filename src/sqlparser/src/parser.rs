@@ -1355,6 +1355,13 @@ impl Parser {
         }
     }
 
+    pub fn peek_nth_any_of_keywords(&mut self, n: usize, keywords: &[Keyword]) -> bool {
+        match self.peek_nth_token(n) {
+            Token::Word(w) => keywords.iter().any(|keyword| *keyword == w.keyword),
+            _ => false,
+        }
+    }
+
     /// Bail out if the current token is not one of the expected keywords, or consume it if it is
     pub fn expect_one_of_keywords(&mut self, keywords: &[Keyword]) -> Result<Keyword, ParserError> {
         if let Some(keyword) = self.parse_one_of_keywords(keywords) {
@@ -1481,9 +1488,11 @@ impl Parser {
             self.parse_create_source(true, or_replace)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
+        } else if self.parse_keyword(Keyword::FUNCTION) {
+            self.parse_create_function(or_replace)
         } else if or_replace {
             self.expected(
-                "[EXTERNAL] TABLE or [MATERIALIZED] VIEW after CREATE OR REPLACE",
+                "[EXTERNAL] TABLE or [MATERIALIZED] VIEW or [MATERIALIZED] SOURCE or SINK or FUNCTION after CREATE OR REPLACE",
                 self.peek_token(),
             )
         } else if self.parse_keyword(Keyword::INDEX) {
@@ -1572,6 +1581,85 @@ impl Parser {
         Ok(Statement::CreateSink {
             stmt: CreateSinkStatement::parse_to(self)?,
         })
+    }
+
+    pub fn parse_create_function(&mut self, or_replace: bool) -> Result<Statement, ParserError> {
+        let name = self.parse_object_name()?;
+        self.expect_token(&Token::LParen)?;
+        let args = self.parse_comma_separated(Parser::parse_create_function_arg)?;
+        self.expect_token(&Token::RParen)?;
+
+        let return_type = if self.parse_keyword(Keyword::RETURNS) {
+            Some(self.parse_data_type()?)
+        } else {
+            None
+        };
+
+        let mut bodies = vec![];
+        while let Ok(body) = self.parse_create_function_body() {
+            bodies.push(body);
+        }
+
+        Ok(Statement::CreateFunction {
+            or_replace,
+            name,
+            args: Some(args),
+            return_type,
+            bodies,
+        })
+    }
+
+    fn parse_create_function_arg(&mut self) -> Result<CreateFunctionArg, ParserError> {
+        let mode = if self.parse_keyword(Keyword::IN) {
+            Some(ArgMode::In)
+        } else if self.parse_keyword(Keyword::OUT) {
+            Some(ArgMode::Out)
+        } else if self.parse_keyword(Keyword::INOUT) {
+            Some(ArgMode::InOut)
+        } else {
+            None
+        };
+
+        // parse: [ argname ] argtype
+        let mut name = None;
+        let mut data_type = self.parse_data_type()?;
+        if let DataType::Custom(n) = &data_type {
+            // the first token is actually a name
+            name = Some(n.0[0].clone());
+            data_type = self.parse_data_type()?;
+        }
+
+        let default_expr = if self.parse_keyword(Keyword::DEFAULT) || self.consume_token(&Token::Eq)
+        {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+        Ok(CreateFunctionArg {
+            mode,
+            name,
+            data_type,
+            default_expr,
+        })
+    }
+
+    fn parse_create_function_body(&mut self) -> Result<CreateFunctionBody, ParserError> {
+        if self.parse_keyword(Keyword::AS) {
+            Ok(CreateFunctionBody::As(self.parse_literal_string()?))
+        } else if self.parse_keyword(Keyword::LANGUAGE) {
+            Ok(CreateFunctionBody::Language(self.parse_identifier()?))
+        } else if self.parse_keyword(Keyword::IMMUTABLE) {
+            Ok(CreateFunctionBody::Behavior(FunctionBehavior::Immutable))
+        } else if self.parse_keyword(Keyword::STABLE) {
+            Ok(CreateFunctionBody::Behavior(FunctionBehavior::Stable))
+        } else if self.parse_keyword(Keyword::VOLATILE) {
+            Ok(CreateFunctionBody::Behavior(FunctionBehavior::Volatile))
+        } else if self.parse_keyword(Keyword::RETURN) {
+            let expr = self.parse_expr()?;
+            Ok(CreateFunctionBody::Return(expr))
+        } else {
+            self.expected("AS or LANGUAGE or RETURN", self.peek_token())
+        }
     }
 
     // CREATE USER name [ [ WITH ] option [ ... ] ]
@@ -2430,15 +2518,18 @@ impl Parser {
 
     pub fn parse_explain(&mut self) -> Result<Statement, ParserError> {
         let mut options = ExplainOptions::default();
+
+        let explain_key_words = [
+            Keyword::VERBOSE,
+            Keyword::TRACE,
+            Keyword::TYPE,
+            Keyword::LOGICAL,
+            Keyword::PHYSICAL,
+            Keyword::DISTSQL,
+        ];
+
         let parse_explain_option = |parser: &mut Parser| -> Result<(), ParserError> {
-            let keyword = parser.expect_one_of_keywords(&[
-                Keyword::VERBOSE,
-                Keyword::TRACE,
-                Keyword::TYPE,
-                Keyword::LOGICAL,
-                Keyword::PHYSICAL,
-                Keyword::DISTSQL,
-            ])?;
+            let keyword = parser.expect_one_of_keywords(&explain_key_words)?;
             match keyword {
                 Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
                 Keyword::TRACE => options.trace = parser.parse_optional_boolean(true),
@@ -2464,7 +2555,12 @@ impl Parser {
         };
 
         let analyze = self.parse_keyword(Keyword::ANALYZE);
-        if self.consume_token(&Token::LParen) {
+        // In order to support following statement, we need to peek before consume.
+        // explain (select 1) union (select 1)
+        if self.peek_token() == Token::LParen
+            && self.peek_nth_any_of_keywords(1, &explain_key_words)
+            && self.consume_token(&Token::LParen)
+        {
             self.parse_comma_separated(parse_explain_option)?;
             self.expect_token(&Token::RParen)?;
         }
@@ -3204,7 +3300,8 @@ impl Parser {
     }
 
     pub fn parse_update(&mut self) -> Result<Statement, ParserError> {
-        let table = self.parse_table_and_joins()?;
+        let table_name = self.parse_object_name()?;
+
         self.expect_keyword(Keyword::SET)?;
         let assignments = self.parse_comma_separated(Parser::parse_assignment)?;
         let selection = if self.parse_keyword(Keyword::WHERE) {
@@ -3213,7 +3310,7 @@ impl Parser {
             None
         };
         Ok(Statement::Update {
-            table,
+            table_name,
             assignments,
             selection,
         })

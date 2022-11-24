@@ -18,15 +18,16 @@
 #![feature(negative_impls)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
-#![feature(let_else)]
 #![feature(trait_alias)]
 #![feature(drain_filter)]
 #![feature(if_let_guard)]
+#![feature(let_chains)]
 #![feature(assert_matches)]
-#![feature(map_first_last)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
 #![feature(once_cell)]
+#![feature(result_option_inspect)]
+#![feature(macro_metavar_expr)]
 #![recursion_limit = "256"]
 
 #[macro_use]
@@ -53,6 +54,7 @@ mod meta_client;
 pub mod test_utils;
 mod user;
 
+pub mod health_service;
 mod monitor;
 
 use std::ffi::OsString;
@@ -87,6 +89,9 @@ pub struct FrontendOpts {
 
     #[clap(long, default_value = "127.0.0.1:2222")]
     pub prometheus_listener_addr: String,
+
+    #[clap(long, default_value = "127.0.0.1:6786")]
+    pub health_check_listener_addr: String,
 
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics

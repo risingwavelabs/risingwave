@@ -62,11 +62,8 @@ fn make_prost_privilege(
 
             for name in tables {
                 let (schema_name, table_name) =
-                    Binder::resolve_table_or_source_name(db_name, name)?;
-                let schema_path = match schema_name.as_deref() {
-                    Some(schema_name) => SchemaPath::Name(schema_name),
-                    None => SchemaPath::Path(&search_path, user_name),
-                };
+                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (table, _) = reader.get_table_by_name(db_name, schema_path, &table_name)?;
                 grant_objs.push(ProstObject::TableId(table.id().table_id));
@@ -79,11 +76,8 @@ fn make_prost_privilege(
 
             for name in sources {
                 let (schema_name, source_name) =
-                    Binder::resolve_table_or_source_name(db_name, name)?;
-                let schema_path = match schema_name.as_deref() {
-                    Some(schema_name) => SchemaPath::Name(schema_name),
-                    None => SchemaPath::Path(&search_path, user_name),
-                };
+                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (source, _) = reader.get_source_by_name(db_name, schema_path, &source_name)?;
                 grant_objs.push(ProstObject::SourceId(source.id));
@@ -149,7 +143,7 @@ pub async fn handle_grant_privilege(
         let user_reader = session.env().user_info_reader();
         let reader = user_reader.read_guard();
         for grantee in grantees {
-            if let Some(user) = reader.get_user_by_name(&grantee.value) {
+            if let Some(user) = reader.get_user_by_name(&grantee.real_value()) {
                 users.push(user.id);
             } else {
                 return Err(ErrorCode::BindError("Grantee does not exist".to_string()).into());
@@ -157,7 +151,7 @@ pub async fn handle_grant_privilege(
         }
         if let Some(granted_by) = &granted_by {
             // We remark that the user name is always case-sensitive.
-            if reader.get_user_by_name(&granted_by.value).is_none() {
+            if reader.get_user_by_name(&granted_by.real_value()).is_none() {
                 return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());
             }
         }
@@ -190,14 +184,14 @@ pub async fn handle_revoke_privilege(
         let user_reader = session.env().user_info_reader();
         let reader = user_reader.read_guard();
         for grantee in grantees {
-            if let Some(user) = reader.get_user_by_name(&grantee.value) {
+            if let Some(user) = reader.get_user_by_name(&grantee.real_value()) {
                 users.push(user.id);
             } else {
                 return Err(ErrorCode::BindError("Grantee does not exist".to_string()).into());
             }
         }
         if let Some(granted_by) = &granted_by {
-            if let Some(user) = reader.get_user_by_name(&granted_by.value) {
+            if let Some(user) = reader.get_user_by_name(&granted_by.real_value()) {
                 granted_by_id = Some(user.id);
             } else {
                 return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());

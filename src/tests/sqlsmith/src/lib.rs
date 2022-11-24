@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(once_cell)]
+#![feature(let_chains)]
 
 use std::vec;
 
@@ -67,7 +68,7 @@ pub struct Column {
 impl From<ColumnDef> for Column {
     fn from(c: ColumnDef) -> Self {
         Self {
-            name: c.name.value.clone(),
+            name: c.name.real_value(),
             data_type: bind_data_type(&c.data_type).unwrap().into(),
         }
     }
@@ -238,7 +239,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
 
         let with_tables = vec![Table {
-            name: alias.name.value,
+            name: alias.name.real_value(),
             columns: query_schema,
         }];
         (
@@ -444,7 +445,7 @@ pub fn parse_sql(sql: &str) -> Vec<Statement> {
 pub fn create_table_statement_to_table(statement: &Statement) -> Table {
     match statement {
         Statement::CreateTable { name, columns, .. } => Table {
-            name: name.0[0].value.clone(),
+            name: name.0[0].real_value(),
             columns: columns.iter().map(|c| c.clone().into()).collect(),
         },
         _ => panic!("Unexpected statement: {}", statement),

@@ -10,7 +10,7 @@ async-trait = "0.1"
 clap = "3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
-madsim = "0.2.7"
+madsim = "0.2.10"
 paste = "1"
 rand = "0.8"
 risingwave_common = { path = "../../common" }
@@ -25,4 +25,4 @@ tokio-postgres = "0.7.7"
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }
+workspace-hack = { path = "../../workspace-hack" }

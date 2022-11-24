@@ -1,7 +1,11 @@
 [package]
 name = "risingwave_cmd"
-version = "0.2.0-alpha"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [features]
 static-link = ["workspace-config/enable-static-link"]
@@ -12,7 +16,7 @@ anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 global_stats_alloc = { path = "../utils/global_stats_alloc" }
 log = { version = "0.4" }
-risingwave_compaction_test = { path = "../storage/compaction_test" }
+risingwave_compaction_test = { path = "../tests/compaction_test" }
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }
 risingwave_ctl = { path = "../ctl" }
@@ -33,7 +37,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tracing = { version = "0.1" }
 workspace-config = { path = "../utils/workspace-config", optional = true }
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { path = "../workspace-hack" }
 
 [[bin]]
 name = "frontend"
@@ -54,7 +58,3 @@ path = "src/bin/compactor.rs"
 [[bin]]
 name = "risectl"
 path = "src/bin/ctl.rs"
-
-[[bin]]
-name = "compaction-test"
-path = "src/bin/compaction_test.rs"

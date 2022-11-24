@@ -21,11 +21,10 @@ use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::ActorInfo;
 use risingwave_rpc_client::ComputeClientPool;
-use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::cache::{LruManager, LruManagerRef};
 use crate::error::StreamResult;
-use crate::executor::Message;
+use crate::executor::exchange::permit::{self, Receiver, Sender};
 
 mod barrier_manager;
 mod env;
@@ -36,10 +35,7 @@ pub use env::*;
 use risingwave_storage::StateStoreImpl;
 pub use stream_manager::*;
 
-/// Default capacity of channel if two actors are on the same node
-pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
-
-pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
+pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
 pub type ActorId = u32;
 pub type FragmentId = u32;
 pub type DispatcherId = u64;
@@ -145,7 +141,7 @@ impl SharedContext {
     }
 
     #[inline]
-    pub fn take_sender(&self, ids: &UpDownActorIds) -> StreamResult<Sender<Message>> {
+    pub fn take_sender(&self, ids: &UpDownActorIds) -> StreamResult<Sender> {
         self.lock_channel_map()
             .get_mut(ids)
             .ok_or_else(|| anyhow!("channel between {} and {} does not exist", ids.0, ids.1))?
@@ -155,7 +151,7 @@ impl SharedContext {
     }
 
     #[inline]
-    pub fn take_receiver(&self, ids: &UpDownActorIds) -> StreamResult<Receiver<Message>> {
+    pub fn take_receiver(&self, ids: &UpDownActorIds) -> StreamResult<Receiver> {
         self.lock_channel_map()
             .get_mut(ids)
             .ok_or_else(|| anyhow!("channel between {} and {} does not exist", ids.0, ids.1))?
@@ -165,9 +161,12 @@ impl SharedContext {
     }
 
     #[inline]
-    pub fn add_channel_pairs(&self, ids: UpDownActorIds, channels: ConsumableChannelPair) {
+    pub fn add_channel_pairs(&self, ids: UpDownActorIds) {
+        let (tx, rx) = permit::channel();
         assert!(
-            self.lock_channel_map().insert(ids, channels).is_none(),
+            self.lock_channel_map()
+                .insert(ids, (Some(tx), Some(rx)))
+                .is_none(),
             "channel already exists: {:?}",
             ids
         );
@@ -194,13 +193,13 @@ impl SharedContext {
     }
 }
 
-/// Generate a globally unique executor id. Useful when constructing per-actor keyspace
+/// Generate a globally unique executor id.
 pub fn unique_executor_id(actor_id: u32, operator_id: u64) -> u64 {
     assert!(operator_id <= u32::MAX as u64);
     ((actor_id as u64) << 32) + operator_id
 }
 
-/// Generate a globally unique operator id. Useful when constructing per-fragment keyspace.
+/// Generate a globally unique operator id.
 pub fn unique_operator_id(fragment_id: u32, operator_id: u64) -> u64 {
     assert!(operator_id <= u32::MAX as u64);
     ((fragment_id as u64) << 32) + operator_id

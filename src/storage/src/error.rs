@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::backtrace::Backtrace;
+
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use thiserror::Error;
@@ -29,6 +31,13 @@ pub enum StorageError {
 
     #[error("Deserialize row error {0}.")]
     DeserializeRow(ValueEncodingError),
+
+    #[error("Sled error: {0}")]
+    Sled(
+        #[backtrace]
+        #[from]
+        sled::Error,
+    ),
 }
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;
@@ -51,7 +60,7 @@ impl std::fmt::Debug for StorageError {
 
         write!(f, "{}", self)?;
         writeln!(f)?;
-        if let Some(backtrace) = self.backtrace() {
+        if let Some(backtrace) = (&self as &dyn Error).request_ref::<Backtrace>() {
             // Since we forward all backtraces from source, `self.backtrace()` is the backtrace of
             // inner error.
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;

@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::DerefMut;
 
 use fail::fail_point;
 use function_name::named;
-use risingwave_hummock_sdk::HummockContextId;
+use itertools::Itertools;
+use risingwave_hummock_sdk::{
+    ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableId,
+};
+use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+use risingwave_pb::hummock::{HummockVersion, ValidationTask};
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{
@@ -65,6 +70,7 @@ where
         commit_multi_var!(
             self,
             None,
+            Transaction::default(),
             compact_statuses,
             compact_task_assignment,
             pinned_versions,
@@ -118,5 +124,67 @@ where
         self.release_contexts(&invalid_context_ids).await?;
 
         Ok(invalid_context_ids)
+    }
+
+    pub(crate) async fn commit_epoch_sanity_check(
+        &self,
+        epoch: HummockEpoch,
+        sstables: &Vec<ExtendedSstableInfo>,
+        sst_to_context: &HashMap<HummockSstableId, HummockContextId>,
+        current_version: &HummockVersion,
+    ) -> Result<()> {
+        for (sst_id, context_id) in sst_to_context {
+            #[cfg(test)]
+            {
+                if *context_id == crate::manager::META_NODE_ID {
+                    continue;
+                }
+            }
+            if !self.check_context(*context_id).await {
+                return Err(Error::InvalidSst(*sst_id));
+            }
+        }
+
+        if epoch <= current_version.max_committed_epoch {
+            return Err(anyhow::anyhow!(
+                "Epoch {} <= max_committed_epoch {}",
+                epoch,
+                current_version.max_committed_epoch
+            )
+            .into());
+        }
+
+        async {
+            if !self.env.opts.enable_committed_sst_sanity_check {
+                return;
+            }
+            if sstables.is_empty() {
+                return;
+            }
+            let compactor = match self.compactor_manager.next_compactor() {
+                None => {
+                    tracing::warn!("Skip committed SST sanity check due to no available worker");
+                    return;
+                }
+                Some(compactor) => compactor,
+            };
+            let sst_infos = sstables
+                .iter()
+                .map(|ExtendedSstableInfo { sst_info, .. }| sst_info.clone())
+                .collect_vec();
+            if compactor
+                .send_task(Task::ValidationTask(ValidationTask {
+                    sst_infos,
+                    sst_id_to_worker_id: sst_to_context.clone(),
+                    epoch,
+                }))
+                .await
+                .is_err()
+            {
+                tracing::warn!("Skip committed SST sanity check due to send failure");
+            }
+        }
+        .await;
+        Ok(())
     }
 }

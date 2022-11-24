@@ -17,9 +17,12 @@ use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::drop_table::check_source;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::table_catalog::TableKind;
+use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_index(
@@ -29,14 +32,10 @@ pub async fn handle_drop_index(
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let db_name = session.database();
-    let (schema_name, index_name) =
-        Binder::resolve_schema_qualified_index_name(db_name, index_name)?;
+    let (schema_name, index_name) = Binder::resolve_schema_qualified_name(db_name, index_name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
-    };
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let index_id = {
         let reader = session.env().catalog_reader().read_guard();
@@ -49,28 +48,38 @@ pub async fn handle_drop_index(
                 index.id
             }
             Err(err) => {
-                return match reader.get_table_by_name(db_name, schema_path, &index_name) {
-                    Ok((table, _)) => {
-                        // If associated source is `Some`, then it is a actually a materialized
-                        // source / table v2.
-                        if table.associated_source_id().is_some() {
-                            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                                "Use `DROP TABLE` to drop a table.".to_owned(),
-                            )));
-                        }
-
-                        Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                            "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
-                        )))
+                match err {
+                    CatalogError::NotFound(kind, _) if kind == "index" => {
+                        // index not found, try to find table below to give a better error message
                     }
-                    Err(_) => {
+                    _ => return Err(err.into()),
+                };
+                return match reader.get_table_by_name(db_name, schema_path, &index_name) {
+                    Ok((table, schema_name)) => match table.kind() {
+                        TableKind::TableOrSource => {
+                            check_source(&reader, db_name, schema_name, &index_name)?;
+                            Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                                "Use `DROP TABLE` to drop a table.".to_owned(),
+                            )))
+                        }
+                        TableKind::MView => Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                            "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
+                        ))),
+                        TableKind::Index => unreachable!(),
+                    },
+                    Err(e) => {
                         if if_exists {
                             Ok(RwPgResponse::empty_result_with_notice(
                                 StatementType::DROP_INDEX,
                                 format!("index \"{}\" does not exist, skipping", index_name),
                             ))
                         } else {
-                            Err(err)
+                            match e {
+                                CatalogError::NotFound(kind, name) if kind == "table" => {
+                                    Err(CatalogError::NotFound("index", name).into())
+                                }
+                                _ => Err(e.into()),
+                            }
                         }
                     }
                 };

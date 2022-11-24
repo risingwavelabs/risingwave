@@ -26,7 +26,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum_to_bytes};
 use risingwave_connector::source::SplitImpl;
@@ -54,6 +54,7 @@ pub mod aggregation;
 mod batch_query;
 mod chain;
 mod dispatch;
+pub mod dml;
 mod dynamic_filter;
 mod error;
 mod expand;
@@ -72,14 +73,18 @@ mod project;
 mod project_set;
 mod rearranged_chain;
 mod receiver;
+pub mod row_id_gen;
 mod simple;
 mod sink;
+mod sort;
 pub mod source;
 pub mod subtask;
 mod top_n;
 mod union;
+mod watermark_filter;
 mod wrapper;
 
+mod backfill;
 #[cfg(test)]
 mod integration_tests;
 #[cfg(test)]
@@ -87,6 +92,7 @@ mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
+pub use backfill::*;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
@@ -101,7 +107,6 @@ pub use hop_window::HopWindowExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
-pub use managed_state::join::JoinManagedCache;
 pub use merge::MergeExecutor;
 pub use mview::*;
 pub use project::ProjectExecutor;
@@ -111,9 +116,11 @@ pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use sink::SinkExecutor;
+pub use sort::SortExecutor;
 pub use source::*;
 pub use top_n::{AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor};
 pub use union::UnionExecutor;
+pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;
@@ -516,29 +523,57 @@ impl Barrier {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Watermark {
     col_idx: usize,
-    val: Datum,
+    data_type: DataType,
+    val: ScalarImpl,
+}
+
+impl PartialOrd for Watermark {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.col_idx == other.col_idx {
+            self.val.partial_cmp(&other.val)
+        } else {
+            None
+        }
+    }
+}
+
+impl Ord for Watermark {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other)
+            .unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
+    }
 }
 
 impl Watermark {
+    pub fn new(col_idx: usize, data_type: DataType, val: ScalarImpl) -> Self {
+        Self {
+            col_idx,
+            data_type,
+            val,
+        }
+    }
+
     pub fn to_protobuf(&self) -> ProstWatermark {
         ProstWatermark {
             col_idx: self.col_idx as _,
+            data_type: Some(self.data_type.to_protobuf()),
             val: Some(ProstDatum {
-                body: serialize_datum_to_bytes(self.val.as_ref()),
+                body: serialize_datum_to_bytes(Some(&self.val)),
             }),
         }
     }
 
-    pub fn from_protobuf(
-        prost: &ProstWatermark,
-        data_type: &DataType,
-    ) -> StreamExecutorResult<Self> {
+    pub fn from_protobuf(prost: &ProstWatermark) -> StreamExecutorResult<Self> {
+        let data_type = DataType::from(prost.get_data_type()?);
+        let val = deserialize_datum(prost.get_val()?.get_body().as_slice(), &data_type)?
+            .expect("watermark value cannot be null");
         Ok(Watermark {
             col_idx: prost.col_idx as _,
-            val: deserialize_datum(&*prost.get_val()?.body, data_type)?,
+            data_type,
+            val,
         })
     }
 }
@@ -585,7 +620,7 @@ impl Message {
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
             Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
-            Self::Watermark(_) => todo!("https://github.com/risingwavelabs/risingwave/issues/6042"),
+            Self::Watermark(watermark) => StreamMessage::Watermark(watermark.to_protobuf()),
         };
         ProstStreamMessage {
             stream_message: Some(prost),
@@ -594,11 +629,10 @@ impl Message {
 
     pub fn from_protobuf(prost: &ProstStreamMessage) -> StreamExecutorResult<Self> {
         let res = match prost.get_stream_message()? {
-            StreamMessage::StreamChunk(ref stream_chunk) => {
-                Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)
-            }
-            StreamMessage::Barrier(ref barrier) => {
-                Message::Barrier(Barrier::from_protobuf(barrier)?)
+            StreamMessage::StreamChunk(chunk) => Message::Chunk(StreamChunk::from_protobuf(chunk)?),
+            StreamMessage::Barrier(barrier) => Message::Barrier(Barrier::from_protobuf(barrier)?),
+            StreamMessage::Watermark(watermark) => {
+                Message::Watermark(Watermark::from_protobuf(watermark)?)
             }
         };
         Ok(res)

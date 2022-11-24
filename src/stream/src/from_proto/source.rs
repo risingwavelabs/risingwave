@@ -14,6 +14,7 @@
 
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
+use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::SourceDescBuilder;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -23,14 +24,16 @@ use crate::executor::SourceExecutor;
 
 pub struct SourceExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for SourceExecutorBuilder {
-    fn new_boxed_executor(
+    type Node = SourceNode;
+
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Source)?;
         let (sender, barrier_receiver) = unbounded_channel();
         stream
             .context
@@ -38,14 +41,16 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .register_sender(params.actor_context.id, sender);
 
         let source_id = TableId::new(node.source_id);
+
         let source_builder = SourceDescBuilder::new(
             source_id,
             node.row_id_index.clone(),
             node.columns.clone(),
             node.pk_column_ids.clone(),
             node.properties.clone(),
-            node.get_info()?.clone(),
+            node.get_info()?.get_source_info()?.clone(),
             params.env.source_manager_ref(),
+            params.env.connector_source_endpoint(),
         );
 
         let columns = node.columns.clone();
@@ -69,7 +74,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .expect("vnodes not set for source executor");
 
         let state_table_handler =
-            SourceStateTableHandler::from_table_catalog(node.state_table.as_ref().unwrap(), store);
+            SourceStateTableHandler::from_table_catalog(node.state_table.as_ref().unwrap(), store)
+                .await;
 
         Ok(Box::new(SourceExecutor::new(
             params.actor_context,

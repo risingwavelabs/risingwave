@@ -13,20 +13,23 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_pb::stream_plan::SinkNode;
 
 use super::*;
 use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for SinkExecutorBuilder {
-    fn new_boxed_executor(
+    type Node = SinkNode;
+
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Sink)?;
         let [materialize_executor]: [_; 1] = params.input.try_into().unwrap();
 
         let _sink_id = TableId::from(node.table_id);

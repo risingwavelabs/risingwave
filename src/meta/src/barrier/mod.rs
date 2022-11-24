@@ -25,7 +25,7 @@ use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo};
+use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableId};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -185,19 +185,20 @@ where
     /// the commands that requires a checkpoint, else we will finish all the commands.
     ///
     /// Returns whether there are still remaining stashed commands to finish.
-    fn finish_commands(&mut self, checkpoint: bool) -> bool {
-        if checkpoint {
-            self.finished_commands
-                .drain(..)
-                .flat_map(|c| c.notifiers)
-                .for_each(Notifier::notify_finished);
-        } else {
-            self.finished_commands
-                .drain_filter(|c| !c.context.checkpoint)
-                .flat_map(|c| c.notifiers)
+    async fn finish_commands(&mut self, checkpoint: bool) -> MetaResult<bool> {
+        for command in self
+            .finished_commands
+            .drain_filter(|c| checkpoint || !c.context.checkpoint)
+        {
+            // The command is ready to finish. We can now call `pre_finish`.
+            command.context.pre_finish().await?;
+            command
+                .notifiers
+                .into_iter()
                 .for_each(Notifier::notify_finished);
         }
-        !self.finished_commands.is_empty()
+
+        Ok(!self.finished_commands.is_empty())
     }
 
     /// Before resolving the actors to be sent or collected, we should first record the newly
@@ -408,6 +409,7 @@ where
             tracing::warn!("there are some changes in dropping_tables");
             self.dropping_tables.clear();
         }
+        self.finished_commands.clear();
     }
 }
 
@@ -554,9 +556,7 @@ where
             // is an advance optimization. Besides if another barrier comes immediately,
             // it may send a same epoch and fail the epoch check.
             if info.nothing_to_do() {
-                let mut notifiers = notifiers;
-                notifiers.iter_mut().for_each(Notifier::notify_to_send);
-                notifiers.iter_mut().for_each(Notifier::notify_collected);
+                notifiers.into_iter().for_each(Notifier::notify_all);
                 continue;
             }
             let prev_epoch = state.in_flight_prev_epoch;
@@ -795,7 +795,7 @@ where
         checkpoint_control: &mut CheckpointControl<S>,
     ) -> MetaResult<()> {
         let prev_epoch = node.command_ctx.prev_epoch.0;
-        match &node.state {
+        match &mut node.state {
             Completed(resps) => {
                 // We must ensure all epochs are committed in ascending order,
                 // because the storage engine will query from new to old in the order in which
@@ -803,16 +803,20 @@ where
                 // See https://github.com/singularity-data/risingwave/issues/1251
                 let checkpoint = node.command_ctx.checkpoint;
                 let mut sst_to_worker: HashMap<HummockSstableId, WorkerId> = HashMap::new();
-                let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
-                for resp in resps {
-                    let mut t: Vec<LocalSstableInfo> = resp
+                let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
+                for resp in resps.iter_mut() {
+                    let mut t: Vec<ExtendedSstableInfo> = resp
                         .synced_sstables
-                        .iter()
-                        .cloned()
+                        .iter_mut()
                         .map(|grouped| {
-                            let sst = grouped.sst.expect("field not None");
-                            sst_to_worker.insert(sst.id, resp.worker_id);
-                            (grouped.compaction_group_id, sst)
+                            let sst_info =
+                                std::mem::take(&mut grouped.sst).expect("field not None");
+                            sst_to_worker.insert(sst_info.id, resp.worker_id);
+                            ExtendedSstableInfo::new(
+                                grouped.compaction_group_id,
+                                sst_info,
+                                std::mem::take(&mut grouped.table_stats_map),
+                            )
                         })
                         .collect_vec();
                     synced_ssts.append(&mut t);
@@ -862,12 +866,10 @@ where
                 };
 
                 for command in finished_commands {
-                    // The command is ready to finish. We can now call `pre_finish`.
-                    command.context.pre_finish().await?;
                     checkpoint_control.stash_command_to_finish(command);
                 }
 
-                let remaining = checkpoint_control.finish_commands(checkpoint);
+                let remaining = checkpoint_control.finish_commands(checkpoint).await?;
                 // If there are remaining commands (that requires checkpoint to finish), we force
                 // the next barrier to be a checkpoint.
                 if remaining {

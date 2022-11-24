@@ -95,6 +95,10 @@ pub struct Args {
     #[clap(long)]
     kill_compactor: bool,
 
+    /// The probability of a node being killed.
+    #[clap(long, default_value = "1.0")]
+    kill_rate: f32,
+
     /// The number of sqlsmith test cases to generate.
     ///
     /// If this argument is set, the `files` argument refers to a directory containing sqlsmith
@@ -165,7 +169,7 @@ async fn main() {
         })
         .build();
     // wait for the service to be ready
-    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
 
     // frontend node
     let mut frontend_ip = vec![];
@@ -322,7 +326,7 @@ async fn main() {
         });
 
     // wait for the service to be ready
-    tokio::time::sleep(Duration::from_secs(30)).await;
+    tokio::time::sleep(Duration::from_secs(15)).await;
     // client
     let client_node = handle
         .create_node()
@@ -401,13 +405,6 @@ async fn run_slt_task(glob: &str, host: &str) {
         .await
         .unwrap();
     let kill = ARGS.kill_compute || ARGS.kill_meta || ARGS.kill_frontend || ARGS.kill_compactor;
-    if ARGS.kill_compute || ARGS.kill_meta {
-        risingwave
-            .client
-            .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
-            .await
-            .expect("failed to set");
-    }
     risingwave
         .client
         .simple_query("SET CREATE_COMPACTION_GROUP_FOR_MV TO true;")
@@ -419,6 +416,11 @@ async fn run_slt_task(glob: &str, host: &str) {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
+        if kill && (path.ends_with("tpch_snapshot.slt") || path.ends_with("tpch_upstream.slt")) {
+            // Simply ignore the tpch test cases when enable kill nodes.
+            continue;
+        }
+
         // XXX: hack for kafka source test
         let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
         let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
@@ -445,13 +447,18 @@ async fn run_slt_task(glob: &str, host: &str) {
                     Err(e) => panic!("{}", e),
                 }
             }
+            let should_kill = thread_rng().gen_ratio((ARGS.kill_rate * 1000.0) as u32, 1000);
             // spawn a background task to kill nodes
-            let handle = tokio::spawn(async {
-                let t = thread_rng().gen_range(Duration::default()..Duration::from_secs(1));
-                tokio::time::sleep(t).await;
-                kill_node().await;
-                tokio::time::sleep(Duration::from_secs(30)).await;
-            });
+            let handle = if should_kill {
+                Some(tokio::spawn(async {
+                    let t = thread_rng().gen_range(Duration::default()..Duration::from_secs(1));
+                    tokio::time::sleep(t).await;
+                    kill_node().await;
+                    tokio::time::sleep(Duration::from_secs(15)).await;
+                }))
+            } else {
+                None
+            };
             // retry up to 5 times until it succeed
             for i in 0usize.. {
                 let delay = Duration::from_secs(1 << i);
@@ -473,7 +480,9 @@ async fn run_slt_task(glob: &str, host: &str) {
                 }
                 tokio::time::sleep(delay).await;
             }
-            handle.await.unwrap();
+            if let Some(handle) = handle {
+                handle.await.unwrap();
+            }
         }
     }
 }
@@ -552,6 +561,11 @@ impl Risingwave {
                 tracing::error!("postgres connection error: {e}");
             }
         });
+        if ARGS.kill_frontend {
+            client
+                .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
+                .await?;
+        }
         Ok(Risingwave {
             client,
             task,

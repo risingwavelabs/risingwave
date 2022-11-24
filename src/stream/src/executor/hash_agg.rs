@@ -21,19 +21,19 @@ use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{Row, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
+use risingwave_common::row::Row;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorage};
 use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo, AggGroup};
 use crate::executor::error::StreamExecutorError;
@@ -224,7 +224,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .map(|(key, hash_code)| {
                 (
                     key.clone(),
-                    hash_code.clone(),
+                    *hash_code,
                     key_to_vis_maps.remove(key).unwrap().into_iter().collect(),
                 )
             })
@@ -400,40 +400,26 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .with_label_values(&[&actor_id_str])
             .set(agg_groups.values().map(|_| 1).sum());
 
-        // --- Flush agg result to the result table and downtream ---
-
         let dirty_cnt = group_change_set.len();
         if dirty_cnt > 0 {
-            // Batch commit data.
-            for changed_key in group_change_set.iter() {
-                if let Some(agg_group) = agg_groups
-                    .get(changed_key)
-                    .and_then(|agg_group_item| agg_group_item.as_ref())
-                {
-                    agg_group.commit_state(storages).await?;
-                }
-            }
-            futures::future::try_join_all(
-                iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
-            )
-            .await?;
-            // --- Produce the stream chunk ---
+            // Produce the stream chunk
             let group_key_data_types = &schema.data_types()[..group_key_indices.len()];
             let mut group_chunks = IterChunks::chunks(group_change_set.drain(), *chunk_size);
             while let Some(batch) = group_chunks.next() {
-                // --- Create array builders ---
+                // Create array builders.
                 // As the datatype is retrieved from schema, it contains both group key and
                 // aggregation state outputs.
                 let mut builders = schema.create_array_builders(chunk_size * 2);
                 let mut new_ops = Vec::with_capacity(chunk_size * 2);
 
-                // --- Retrieve modified states and put the changes into the array builders ---
+                // Retrieve modified states and put the changes into the array builders.
                 for key in batch {
                     let agg_group = agg_groups
                         .get_mut(&key)
                         .expect("changed group must have corresponding AggState")
                         .as_mut()
                         .unwrap();
+                    agg_group.flush_state_if_needed(storages).await?;
 
                     let AggChangesInfo {
                         n_appended_ops,
@@ -468,7 +454,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     }
                 }
 
-                let columns: Vec<Column> = builders
+                let columns = builders
                     .into_iter()
                     .map(|builder| Ok::<_, StreamExecutorError>(builder.finish().into()))
                     .try_collect()?;
@@ -479,7 +465,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 yield chunk;
             }
 
-            // Commit agg result of all groups.
+            // Commit all state tables.
+            futures::future::try_join_all(
+                iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
+            )
+            .await?;
             result_table.commit(epoch).await?;
 
             // Evict cache to target capacity.
@@ -570,11 +560,11 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array::data_chunk_iter::Row;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::hash::SerializedKey;
+    use risingwave_common::row::Row;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
@@ -587,7 +577,7 @@ mod tests {
     use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
 
     #[allow(clippy::too_many_arguments)]
-    fn new_boxed_hash_agg_executor<S: StateStore>(
+    async fn new_boxed_hash_agg_executor<S: StateStore>(
         store: S,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
@@ -597,10 +587,9 @@ mod tests {
         extreme_cache_size: usize,
         executor_id: u64,
     ) -> Box<dyn Executor> {
-        let agg_state_tables = agg_calls
-            .iter()
-            .enumerate()
-            .map(|(idx, agg_call)| {
+        let mut agg_state_tables = Vec::with_capacity(agg_calls.iter().len());
+        for (idx, agg_call) in agg_calls.iter().enumerate() {
+            agg_state_tables.push(
                 create_agg_state_table(
                     store.clone(),
                     TableId::new(idx as u32),
@@ -609,15 +598,18 @@ mod tests {
                     &pk_indices,
                     input.as_ref(),
                 )
-            })
-            .collect();
+                .await,
+            )
+        }
+
         let result_table = create_result_table(
             store,
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
             &group_key_indices,
             input.as_ref(),
-        );
+        )
+        .await;
 
         HashAggExecutor::<SerializedKey, S>::new(
             ActorContext::create(123),
@@ -720,7 +712,8 @@ mod tests {
             1 << 16,
             1 << 10,
             1,
-        );
+        )
+        .await;
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -822,7 +815,8 @@ mod tests {
             1 << 16,
             1 << 10,
             1,
-        );
+        )
+        .await;
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -916,7 +910,8 @@ mod tests {
             1 << 16,
             1 << 10,
             1,
-        );
+        )
+        .await;
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -1015,7 +1010,8 @@ mod tests {
             1 << 16,
             1 << 10,
             1,
-        );
+        )
+        .await;
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier

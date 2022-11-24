@@ -17,6 +17,7 @@ use std::sync::Arc;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
@@ -52,6 +53,9 @@ pub struct BatchEnvironment {
 
     /// Compute client pool for grpc exchange.
     client_pool: ComputeClientPoolRef,
+
+    /// Manages dml information.
+    dml_manager: DmlManagerRef,
 }
 
 impl BatchEnvironment {
@@ -65,6 +69,7 @@ impl BatchEnvironment {
         state_store: StateStoreImpl,
         task_metrics: Arc<BatchTaskMetrics>,
         client_pool: ComputeClientPoolRef,
+        dml_manager: DmlManagerRef,
     ) -> Self {
         BatchEnvironment {
             server_addr,
@@ -75,6 +80,7 @@ impl BatchEnvironment {
             state_store,
             task_metrics,
             client_pool,
+            dml_manager,
         }
     }
 
@@ -82,10 +88,11 @@ impl BatchEnvironment {
     #[cfg(test)]
     pub fn for_test() -> Self {
         use risingwave_rpc_client::ComputeClientPool;
+        use risingwave_source::dml_manager::DmlManager;
         use risingwave_storage::monitor::StateStoreMetrics;
 
         BatchEnvironment {
-            task_manager: Arc::new(BatchManager::new(None)),
+            task_manager: Arc::new(BatchManager::new(BatchConfig::default())),
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             source_manager: std::sync::Arc::new(TableSourceManager::default()),
             config: Arc::new(BatchConfig::default()),
@@ -95,6 +102,7 @@ impl BatchEnvironment {
             )),
             task_metrics: Arc::new(BatchTaskMetrics::for_test()),
             client_pool: Arc::new(ComputeClientPool::default()),
+            dml_manager: Arc::new(DmlManager::default()),
         }
     }
 
@@ -106,9 +114,8 @@ impl BatchEnvironment {
         self.task_manager.clone()
     }
 
-    #[expect(clippy::explicit_auto_deref)]
     pub fn source_manager(&self) -> &TableSourceManager {
-        &*self.source_manager
+        &self.source_manager
     }
 
     pub fn source_manager_ref(&self) -> TableSourceManagerRef {
@@ -133,5 +140,9 @@ impl BatchEnvironment {
 
     pub fn client_pool(&self) -> ComputeClientPoolRef {
         self.client_pool.clone()
+    }
+
+    pub fn dml_manager_ref(&self) -> DmlManagerRef {
+        self.dml_manager.clone()
     }
 }

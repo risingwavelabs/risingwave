@@ -22,26 +22,29 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use rand::RngCore;
+use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{load_config, BatchConfig};
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
+use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
-use risingwave_sqlparser::ast::{ShowObject, Statement};
+use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -49,13 +52,16 @@ use tokio::task::JoinHandle;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
-use crate::catalog::root_catalog::Catalog;
+use crate::catalog::root_catalog::{Catalog, SchemaPath};
+use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
 use crate::expr::CorrelatedId;
 use crate::handler::handle;
+use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
+use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
-use crate::observer::observer_manager::FrontendObserverNode;
+use crate::observer::FrontendObserverNode;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
@@ -65,7 +71,8 @@ use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
 use crate::utils::WithOptions;
-use crate::{FrontendConfig, FrontendOpts, PgResponseStream};
+use crate::{FrontendConfig, FrontendOpts, PgResponseStream, TableCatalog};
+
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
@@ -282,6 +289,7 @@ impl FrontendEnv {
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(frontend_config.server.heartbeat_interval_ms as u64),
+            Duration::from_secs(frontend_config.server.max_heartbeat_interval_secs as u64),
             vec![],
         );
 
@@ -327,7 +335,7 @@ impl FrontendEnv {
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
                 .await;
-        let observer_join_handle = observer_manager.start().await?;
+        let observer_join_handle = observer_manager.start().await;
 
         meta_client.activate(&frontend_address).await?;
 
@@ -342,6 +350,20 @@ impl FrontendEnv {
         if opts.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
+
+        let health_srv = HealthServiceImpl::new();
+        let host = opts.health_check_listener_addr.clone();
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(HealthServer::new(health_srv))
+                .serve(host.parse().unwrap())
+                .await
+                .unwrap();
+        });
+        tracing::info!(
+            "Health Check RPC Listener is set up on {}",
+            opts.health_check_listener_addr.clone()
+        );
 
         Ok((
             Self {
@@ -366,7 +388,6 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's catalog writer.
-    #[expect(clippy::explicit_auto_deref)]
     pub fn catalog_writer(&self) -> &dyn CatalogWriter {
         &*self.catalog_writer
     }
@@ -377,7 +398,6 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's user info writer.
-    #[expect(clippy::explicit_auto_deref)]
     pub fn user_info_writer(&self) -> &dyn UserInfoWriter {
         &*self.user_info_writer
     }
@@ -395,7 +415,6 @@ impl FrontendEnv {
         self.worker_node_manager.clone()
     }
 
-    #[expect(clippy::explicit_auto_deref)]
     pub fn meta_client(&self) -> &dyn FrontendMetaClient {
         &*self.meta_client
     }
@@ -515,6 +534,92 @@ impl SessionImpl {
 
     pub fn session_id(&self) -> SessionId {
         self.id
+    }
+
+    pub fn check_relation_name_duplicated(&self, name: ObjectName) -> Result<()> {
+        let db_name = self.database();
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let (schema_name, view_name) = {
+            let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+            let search_path = self.config().get_search_path();
+            let user_name = &self.auth_context().user_name;
+            let schema_name = match schema_name {
+                Some(schema_name) => schema_name,
+                None => catalog_reader
+                    .first_valid_schema(db_name, &search_path, user_name)?
+                    .name(),
+            };
+            (schema_name, table_name)
+        };
+        catalog_reader
+            .check_relation_name_duplicated(db_name, &schema_name, &view_name)
+            .map_err(RwError::from)
+    }
+
+    /// Also check if the user has the privilege to create in the schema.
+    pub fn get_database_and_schema_id_for_create(
+        &self,
+        schema_name: Option<String>,
+    ) -> Result<(DatabaseId, SchemaId)> {
+        let db_name = self.database();
+
+        let search_path = self.config().get_search_path();
+        let user_name = &self.auth_context().user_name;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
+
+        check_schema_writable(&schema.name())?;
+        if schema.name() != DEFAULT_SCHEMA_NAME {
+            check_privileges(
+                self,
+                &vec![ObjectCheckItem::new(
+                    schema.owner(),
+                    Action::Create,
+                    Object::SchemaId(schema.id()),
+                )],
+            )?;
+        }
+
+        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
+        Ok((db_id, schema.id()))
+    }
+
+    /// Also check if the user has the privilege to create in the schema.
+    pub fn get_table_catalog_for_create(
+        &self,
+        schema_name: Option<String>,
+        table_name: &str,
+    ) -> Result<(DatabaseId, SchemaId, Arc<TableCatalog>)> {
+        let db_name = self.database();
+
+        let search_path = self.config().get_search_path();
+        let user_name = &self.auth_context().user_name;
+        let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let (table, schema_name) =
+            catalog_reader.get_table_by_name(db_name, schema_path, table_name)?;
+
+        let schema = catalog_reader.get_schema_by_name(db_name, schema_name)?;
+
+        check_schema_writable(schema_name)?;
+        if schema_name != DEFAULT_SCHEMA_NAME {
+            check_privileges(
+                self,
+                &vec![ObjectCheckItem::new(
+                    schema.owner(),
+                    Action::Create,
+                    Object::SchemaId(schema.id()),
+                )],
+            )?;
+        }
+
+        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
+        Ok((db_id, schema.id(), table.clone()))
     }
 }
 
@@ -706,7 +811,7 @@ impl Session<PgResponseStream> for SessionImpl {
             )));
         }
         let stmt = stmts.swap_remove(0);
-        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescripyor> is same as
+        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescriptor> is same as
         // result of run_statement().
         let rsp = match stmt {
             Statement::Query(_) => infer(self, stmt, sql).map_err(|e| {
@@ -716,34 +821,74 @@ impl Session<PgResponseStream> for SessionImpl {
             Statement::ShowObjects(show_object) => match show_object {
                 ShowObject::Columns { table: _ } => {
                     vec![
-                        PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
-                        PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                        PgFieldDescriptor::new(
+                            "Name".to_owned(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Type".to_owned(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
                     ]
                 }
                 _ => {
-                    vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)]
+                    vec![PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    )]
                 }
             },
             Statement::ShowVariable { variable } => {
-                let name = &variable[0].value.to_lowercase();
+                let name = &variable[0].real_value().to_lowercase();
                 if name.eq_ignore_ascii_case("ALL") {
                     vec![
-                        PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
-                        PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
-                        PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new(
+                            "Name".to_string(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Setting".to_string(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Description".to_string(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
                     ]
                 } else {
                     vec![PgFieldDescriptor::new(
                         name.to_ascii_lowercase(),
-                        TypeOid::Varchar,
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
                     )]
                 }
             }
             Statement::Describe { name: _ } => {
                 vec![
-                    PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
-                    PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Type".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
                 ]
+            }
+            Statement::Explain { .. } => {
+                vec![PgFieldDescriptor::new(
+                    "QUERY PLAN".to_owned(),
+                    DataType::VARCHAR.to_oid(),
+                    DataType::VARCHAR.type_len(),
+                )]
             }
             _ => {
                 panic!("infer_return_type only support query statement");

@@ -15,10 +15,11 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, Executor, Message, PkIndices, StreamChunk};
+use super::{Barrier, Executor, Message, PkIndices, StreamChunk, Watermark};
 
 pub struct MockSource {
     schema: Schema,
@@ -45,6 +46,22 @@ impl MessageSender {
             barrier = barrier.with_stop();
         }
         self.0.send(Message::Barrier(barrier)).unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_watermark(&mut self, col_idx: usize, data_type: DataType, val: ScalarImpl) {
+        self.0
+            .send(Message::Watermark(Watermark {
+                col_idx,
+                data_type,
+                val,
+            }))
+            .unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_int64_watermark(&mut self, col_idx: usize, val: i64) {
+        self.push_watermark(col_idx, DataType::Int64, ScalarImpl::Int64(val));
     }
 }
 
@@ -147,9 +164,9 @@ pub mod agg_executor {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::AggKind;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
     use risingwave_storage::StateStore;
 
+    use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::{AggCall, AggStateStorage};
     use crate::executor::{
@@ -158,7 +175,7 @@ pub mod agg_executor {
 
     /// Create state table for the given agg call.
     /// Should infer the schema in the same way as `LogicalAgg::infer_stream_agg_state`.
-    pub fn create_agg_state_table<S: StateStore>(
+    pub async fn create_agg_state_table<S: StateStore>(
         store: S,
         table_id: TableId,
         agg_call: &AggCall,
@@ -205,9 +222,9 @@ pub mod agg_executor {
                     column_descs,
                     order_types.clone(),
                     (0..order_types.len()).collect(),
-                );
+                ).await;
 
-                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns) }
+                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None) }
             }
             AggKind::Min /* append only */
             | AggKind::Max /* append only */
@@ -224,7 +241,7 @@ pub mod agg_executor {
     }
 
     /// Create result state table for agg executor.
-    pub fn create_result_table<S: StateStore>(
+    pub async fn create_result_table<S: StateStore>(
         store: S,
         table_id: TableId,
         agg_calls: &[AggCall],
@@ -261,9 +278,10 @@ pub mod agg_executor {
             order_types,
             (0..group_key_indices.len()).collect(),
         )
+        .await
     }
 
-    pub fn new_boxed_simple_agg_executor<S: StateStore>(
+    pub async fn new_boxed_simple_agg_executor<S: StateStore>(
         ctx: ActorContextRef,
         store: S,
         input: BoxedExecutor,
@@ -271,10 +289,9 @@ pub mod agg_executor {
         pk_indices: PkIndices,
         executor_id: u64,
     ) -> Box<dyn Executor> {
-        let agg_state_tables = agg_calls
-            .iter()
-            .enumerate()
-            .map(|(idx, agg_call)| {
+        let mut agg_state_tables = Vec::with_capacity(agg_calls.iter().len());
+        for (idx, agg_call) in agg_calls.iter().enumerate() {
+            agg_state_tables.push(
                 create_agg_state_table(
                     store.clone(),
                     TableId::new(idx as u32),
@@ -283,15 +300,18 @@ pub mod agg_executor {
                     &pk_indices,
                     input.as_ref(),
                 )
-            })
-            .collect();
+                .await,
+            )
+        }
+
         let result_table = create_result_table(
             store,
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
             &[],
             input.as_ref(),
-        );
+        )
+        .await;
 
         Box::new(
             GlobalSimpleAggExecutor::new(
@@ -315,9 +335,9 @@ pub mod top_n_executor {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
 
-    pub fn create_in_memory_state_table(
+    use crate::common::table::state_table::StateTable;
+    pub async fn create_in_memory_state_table(
         data_types: &[DataType],
         order_types: &[OrderType],
         pk_indices: &[usize],
@@ -334,5 +354,6 @@ pub mod top_n_executor {
             order_types.to_vec(),
             pk_indices.to_vec(),
         )
+        .await
     }
 }
