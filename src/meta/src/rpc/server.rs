@@ -130,22 +130,22 @@ pub async fn rpc_serve(
     }
 }
 
-/// Wrapper for elections::run_elections
+/// Wrapper for `elections::run_elections`
 /// Start single leader setup
 ///
 /// ## Arguments
-/// addr: Address of the current leader, e.g. "127.0.0.1"
-/// meta_store: Store that will hold information about the leader
-/// lease_time_sec: Time that a lease will be valid for.
-/// If this lease_time_sec is large, elections will be less frequent, resulting in less traffic for
-/// the meta store, but node failover may be slow If this lease_time_sec is small, elections will be
+/// `addr`: Address of the current leader, e.g. "127.0.0.1"
+/// `meta_store`: Store that will hold information about the leader
+/// `lease_time_sec`: Time that a lease will be valid for.
+/// If this `lease_time_sec` is large, elections will be less frequent, resulting in less traffic for
+/// the meta store, but node failover may be slow If this `lease_time_sec` is small, elections will be
 /// more frequent, resulting in more traffic for the meta store. Node failover will be fast
 ///
 /// ## Returns
-/// MetaLeaderInfo containing the leader who got initially elected
-/// JoinHandle running all future elections concurrently
-/// Sender for signaling a shutdown
-/// Receiver receiving true if this node got elected as leader and false if it is a follower
+/// `MetaLeaderInfo` containing the leader who got initially elected
+/// `JoinHandle` running all future elections concurrently
+/// `Sender` for signaling a shutdown
+/// `Receiver` receiving true if this node got elected as leader and false if it is a follower
 pub async fn register_leader_for_meta<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,
@@ -171,7 +171,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     loop {
         // wait for leader update
-        if !leader_rx.changed().await.is_ok() {
+        if leader_rx.changed().await.is_err() {
             tracing::error!("issue receiving leader value from channel");
         }
 

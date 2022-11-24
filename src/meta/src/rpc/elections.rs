@@ -51,10 +51,10 @@ struct ElectionOutcome {
 /// None if the election needs to be repeated
 ///
 /// ## Arguments
-/// meta_store: The meta store which holds the lease, deciding about the election outcome
-/// addr: Address of the node that runs for election
-/// lease_time_sec: Amount of seconds that this lease will be valid
-/// next_lease_id: If the node wins, the lease used until the next election will have this id
+/// `meta_store`: The meta store which holds the lease, deciding about the election outcome
+/// `addr`: Address of the node that runs for election
+/// `lease_time_sec`: Amount of seconds that this lease will be valid
+/// `next_lease_id`: If the node wins, the lease used until the next election will have this id
 ///
 /// ## Example
 /// ```rust
@@ -123,7 +123,7 @@ async fn campaign<S: MetaStore>(
         }
 
         // Check if new leader was elected in the meantime
-        return match renew_lease(&leader_info, lease_time_sec, &meta_store).await {
+        return match renew_lease(&leader_info, lease_time_sec, meta_store).await {
             Some(is_leader) => {
                 if !is_leader {
                     return None;
@@ -159,9 +159,9 @@ async fn campaign<S: MetaStore>(
 /// None, if the operation failed
 ///
 /// ## Arguments
-/// leader_info: Info of the node that tries to acquire/renew the lease
-/// lease_time_sec: Time for which the lease should be extended
-/// meta_store: Store which holds the lease
+/// `leader_info`: Info of the node that tries to acquire/renew the lease
+/// `lease_time_sec`: Time for which the lease should be extended
+/// `meta_store`: Store which holds the lease
 ///
 /// Returns true if node was leader and was able to renew/acquire the lease
 /// Returns false if node was follower and thus could not renew/acquire lease
@@ -255,16 +255,16 @@ fn gen_rand_lease_id() -> u64 {
 /// A term lasts until the current leader crashes.   
 ///
 /// ## Arguments
-/// addr: Address of the current leader, e.g. "127.0.0.1"
-/// meta_store: Holds information about the leader
-/// lease_time_sec: Time that a lease will be valid for.
+/// `addr`: Address of the current leader, e.g. "127.0.0.1"
+/// `meta_store`: Holds information about the leader
+/// `lease_time_sec`: Time that a lease will be valid for.
 /// A large value reduces the meta store traffic. A small value reduces the downtime during failover
 ///
 /// ## Returns:
-/// MetaLeaderInfo containing the leader who got initially elected
-/// JoinHandle running all future elections concurrently
-/// Sender for signaling a shutdown
-/// Receiver receiving true if this node got elected as leader and false if it is a follower
+/// `MetaLeaderInfo` containing the leader who got initially elected
+/// `JoinHandle` running all future elections concurrently
+/// `Sender` for signaling a shutdown
+/// `Receiver` receiving true if this node got elected as leader and false if it is a follower
 pub async fn run_elections<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,
@@ -406,7 +406,7 @@ async fn manage_term<S: MetaStore>(
     meta_store: &Arc<S>,
 ) -> Option<bool> {
     // try to renew/acquire the lease
-    match renew_lease(&leader_info, lease_time_sec, &meta_store).await {
+    match renew_lease(leader_info, lease_time_sec, meta_store).await {
         None => return Some(false),
         Some(val) => {
             if val {
