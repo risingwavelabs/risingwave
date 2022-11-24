@@ -44,7 +44,9 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::store::state_store::HummockStorageIterator;
-use crate::hummock::utils::{filter_single_sst, prune_ssts, range_overlap, search_sst_idx};
+use crate::hummock::utils::{
+    check_subset_preserve_order, filter_single_sst, prune_ssts, range_overlap, search_sst_idx,
+};
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, DeleteRangeAggregator,
     SstableDeleteRangeIterator, SstableIterator,
@@ -213,18 +215,33 @@ impl HummockReadVersion {
                 StagingData::Sst(staging_sst) => {
                     let staging_imm_ids_from_sst: HashSet<u64> =
                         staging_sst.imm_ids.iter().cloned().collect();
+
                     let staging_imm_ids_from_imms: HashSet<u64> =
                         self.staging.imm.iter().map(|imm| imm.batch_id()).collect();
+
                     let intersection =
                         staging_imm_ids_from_imms.intersection(&staging_imm_ids_from_sst);
 
                     // check intersection order of staging_imm
-                    let staging_imm_ids_from_sst_vec =
-                        intersection.collect_vec().into_iter().sorted();
-                    if staging_imm_ids_from_sst_vec.len() > 0 {
-                        for clear_imm_id in staging_imm_ids_from_sst_vec {
+                    let intersection_imm_ids = intersection.into_iter().copied().sorted();
+
+                    // Check order and if and only if there is data intersection between staging_sst
+                    // and imms involved in read_version
+                    if intersection_imm_ids.len() > 0 {
+                        // Ensure that the batch id in the same order in imms and sst
+                        check_subset_preserve_order(
+                            intersection_imm_ids.clone(),
+                            staging_sst.imm_ids.iter().cloned(),
+                        );
+
+                        check_subset_preserve_order(
+                            intersection_imm_ids.clone(),
+                            self.staging.imm.iter().map(|imm| imm.batch_id()),
+                        );
+
+                        for clear_imm_id in intersection_imm_ids {
                             let item = self.staging.imm.back().unwrap();
-                            assert_eq!(*clear_imm_id, item.batch_id());
+                            assert_eq!(clear_imm_id, item.batch_id());
                             self.staging.imm.pop_back();
                         }
 

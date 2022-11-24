@@ -136,7 +136,7 @@ pub struct HummockStorage {
     read_version_mapping: Arc<ReadVersionMappingType>,
 
     #[cfg(not(madsim))]
-    pub tracing: Arc<risingwave_tracing::RwTracingService>,
+    tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
 impl HummockStorage {

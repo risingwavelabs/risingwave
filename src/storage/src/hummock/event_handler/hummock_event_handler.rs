@@ -105,7 +105,7 @@ pub struct HummockEventHandler {
 
     uploader: HummockUploader,
 
-    instance_id_generator: LocalInstanceId,
+    last_instance_id: LocalInstanceId,
 
     sstable_id_manager: SstableIdManagerRef,
 }
@@ -168,7 +168,7 @@ impl HummockEventHandler {
             write_conflict_detector,
             read_version_mapping,
             uploader,
-            instance_id_generator: 0,
+            last_instance_id: 0,
             sstable_id_manager,
         }
     }
@@ -529,8 +529,8 @@ impl HummockEventHandler {
     }
 
     fn generate_instance_id(&mut self) -> LocalInstanceId {
-        self.instance_id_generator += 1;
-        self.instance_id_generator
+        self.last_instance_id += 1;
+        self.last_instance_id
     }
 }
 
