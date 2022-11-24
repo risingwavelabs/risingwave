@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -28,6 +29,7 @@ use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
+use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::hummock::compactor::{compact, Context};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::uploader::{
@@ -91,12 +93,10 @@ impl BufferTracker {
 }
 
 pub struct HummockEventHandler {
-    sstable_id_manager: SstableIdManagerRef,
+    hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
     hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
     pending_sync_requests: BTreeMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
-
-    // TODO: replace it with hashmap<id, read_version>
-    read_version: Arc<RwLock<HummockReadVersion>>,
+    read_version_mapping: Arc<ReadVersionMappingType>,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
     seal_epoch: Arc<AtomicU64>,
@@ -104,6 +104,10 @@ pub struct HummockEventHandler {
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
     uploader: HummockUploader,
+
+    last_instance_id: LocalInstanceId,
+
+    sstable_id_manager: SstableIdManagerRef,
 }
 
 async fn flush_imms(
@@ -133,18 +137,19 @@ async fn flush_imms(
 
 impl HummockEventHandler {
     pub fn new(
+        hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
         compactor_context: Arc<Context>,
     ) -> Self {
-        let read_version = Arc::new(RwLock::new(HummockReadVersion::new(pinned_version.clone())));
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
-        let sstable_id_manager = compactor_context.sstable_id_manager.clone();
+        let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
         let buffer_tracker = BufferTracker::from_storage_config(&compactor_context.options);
         let write_conflict_detector = ConflictDetector::new_from_config(&compactor_context.options);
+        let sstable_id_manager = compactor_context.sstable_id_manager.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
@@ -152,16 +157,19 @@ impl HummockEventHandler {
             }),
             buffer_tracker,
         );
+
         Self {
-            sstable_id_manager,
+            hummock_event_tx,
             hummock_event_rx,
             pending_sync_requests: Default::default(),
-            read_version,
             version_update_notifier_tx,
             seal_epoch,
             pinned_version: Arc::new(ArcSwap::from_pointee(pinned_version)),
             write_conflict_detector,
+            read_version_mapping,
             uploader,
+            last_instance_id: 0,
+            sstable_id_manager,
         }
     }
 
@@ -173,12 +181,12 @@ impl HummockEventHandler {
         self.version_update_notifier_tx.clone()
     }
 
-    pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
-        self.read_version.clone()
-    }
-
     pub fn pinned_version(&self) -> Arc<ArcSwap<PinnedVersion>> {
         self.pinned_version.clone()
+    }
+
+    pub fn read_version_mapping(&self) -> Arc<ReadVersionMappingType> {
+        self.read_version_mapping.clone()
     }
 
     pub fn buffer_tracker(&self) -> &BufferTracker {
@@ -208,16 +216,17 @@ impl HummockEventHandler {
         newly_uploaded_sstables: Vec<StagingSstableInfo>,
     ) {
         if !newly_uploaded_sstables.is_empty() {
-            let mut read_version_guard = self.read_version.write();
             newly_uploaded_sstables
                 .into_iter()
                 // Take rev because newer data come first in `newly_uploaded_sstables` but we apply
                 // older data first
                 .rev()
                 .for_each(|staging_sstable_info| {
-                    read_version_guard.update(VersionUpdate::Staging(StagingData::Sst(
-                        staging_sstable_info,
-                    )))
+                    Self::for_each_read_version(&self.read_version_mapping, |read_version| {
+                        read_version.update(VersionUpdate::Staging(StagingData::Sst(
+                            staging_sstable_info.clone(),
+                        )))
+                    });
                 });
         }
         let result = self
@@ -249,12 +258,27 @@ impl HummockEventHandler {
         }
     }
 
+    /// This function will be performed under the protection of the `read_version_mapping` read
+    /// lock, and add write lock on each `read_version` operation
+    fn for_each_read_version<F>(read_version: &Arc<ReadVersionMappingType>, mut f: F)
+    where
+        F: FnMut(&mut HummockReadVersion),
+    {
+        let read_version_mapping_guard = read_version.read();
+
+        read_version_mapping_guard
+            .values()
+            .flat_map(HashMap::values)
+            .for_each(|read_version| f(read_version.write().deref_mut()));
+    }
+
     fn handle_data_spilled(&mut self, staging_sstable_info: StagingSstableInfo) {
-        self.read_version
-            .write()
-            .update(VersionUpdate::Staging(StagingData::Sst(
-                staging_sstable_info,
-            )));
+        // todo: do some prune for version update
+        Self::for_each_read_version(&self.read_version_mapping, |read_version| {
+            read_version.update(VersionUpdate::Staging(StagingData::Sst(
+                staging_sstable_info.clone(),
+            )))
+        })
     }
 
     fn handle_await_sync_epoch(
@@ -322,8 +346,12 @@ impl HummockEventHandler {
             );
         }
 
-        // Clear read version
-        self.read_version.write().clear_uncommitted();
+        {
+            Self::for_each_read_version(&self.read_version_mapping, |read_version| {
+                read_version.clear_uncommitted()
+            });
+        }
+
         self.sstable_id_manager
             .remove_watermark_sst_id(TrackerId::Epoch(HummockEpoch::MAX));
 
@@ -355,9 +383,11 @@ impl HummockEventHandler {
         self.pinned_version
             .store(Arc::new(new_pinned_version.clone()));
 
-        self.read_version
-            .write()
-            .update(VersionUpdate::CommittedSnapshot(new_pinned_version.clone()));
+        {
+            Self::for_each_read_version(&self.read_version_mapping, |read_version| {
+                read_version.update(VersionUpdate::CommittedSnapshot(new_pinned_version.clone()))
+            });
+        }
 
         let max_committed_epoch = new_pinned_version.max_committed_epoch();
 
@@ -376,7 +406,9 @@ impl HummockEventHandler {
             conflict_detector.set_watermark(max_committed_epoch);
         }
         self.sstable_id_manager
-            .remove_watermark_sst_id(TrackerId::Epoch(max_committed_epoch));
+            .remove_watermark_sst_id(TrackerId::Epoch(
+                self.pinned_version.load().max_committed_epoch(),
+            ));
 
         self.uploader.update_pinned_version(new_pinned_version);
     }
@@ -390,55 +422,115 @@ impl HummockEventHandler {
                     UploaderEvent::SyncFinish(epoch, newly_uploaded_sstables) => {
                         self.handle_epoch_synced(epoch, newly_uploaded_sstables);
                     }
+
                     UploaderEvent::DataSpilled(staging_sstable_info) => {
                         self.handle_data_spilled(staging_sstable_info);
                     }
                 },
-                Either::Right(event) => match event {
-                    HummockEvent::BufferMayFlush => {
-                        self.uploader.try_flush();
-                    }
-                    HummockEvent::AwaitSyncEpoch {
-                        new_sync_epoch,
-                        sync_result_sender,
-                    } => {
-                        self.handle_await_sync_epoch(new_sync_epoch, sync_result_sender);
-                    }
-                    HummockEvent::Clear(notifier) => {
-                        self.handle_clear(notifier);
-                    }
-                    HummockEvent::Shutdown => {
-                        info!("buffer tracker shutdown");
-                        break;
-                    }
-
-                    HummockEvent::VersionUpdate(version_payload) => {
-                        self.handle_version_update(version_payload);
-                    }
-
-                    HummockEvent::ImmToUploader(imm) => {
-                        self.uploader.add_imm(imm);
-                    }
-
-                    HummockEvent::SealEpoch {
-                        epoch,
-                        is_checkpoint,
-                    } => {
-                        self.uploader.seal_epoch(epoch);
-                        if is_checkpoint {
-                            self.uploader.start_sync_epoch(epoch);
+                Either::Right(event) => {
+                    match event {
+                        HummockEvent::BufferMayFlush => {
+                            self.uploader.try_flush();
                         }
-                        self.seal_epoch.store(epoch, Ordering::SeqCst);
+                        HummockEvent::AwaitSyncEpoch {
+                            new_sync_epoch,
+                            sync_result_sender,
+                        } => {
+                            self.handle_await_sync_epoch(new_sync_epoch, sync_result_sender);
+                        }
+                        HummockEvent::Clear(notifier) => {
+                            self.handle_clear(notifier);
+                        }
+                        HummockEvent::Shutdown => {
+                            info!("buffer tracker shutdown");
+                            break;
+                        }
+
+                        HummockEvent::VersionUpdate(version_payload) => {
+                            self.handle_version_update(version_payload);
+                        }
+
+                        HummockEvent::ImmToUploader(imm) => {
+                            self.uploader.add_imm(imm);
+                        }
+
+                        HummockEvent::SealEpoch {
+                            epoch,
+                            is_checkpoint,
+                        } => {
+                            self.uploader.seal_epoch(epoch);
+                            if is_checkpoint {
+                                self.uploader.start_sync_epoch(epoch);
+                            }
+                            self.seal_epoch.store(epoch, Ordering::SeqCst);
+                        }
+                        #[cfg(any(test, feature = "test"))]
+                        HummockEvent::FlushEvent(sender) => {
+                            let _ = sender.send(()).inspect_err(|e| {
+                                error!("unable to send flush result: {:?}", e);
+                            });
+                        }
+
+                        HummockEvent::RegisterReadVersion {
+                            table_id,
+                            new_read_version_sender,
+                        } => {
+                            let pinned_version = self.pinned_version.load();
+                            let basic_read_version = Arc::new(RwLock::new(
+                                HummockReadVersion::new((**pinned_version).clone()),
+                            ));
+
+                            let instance_id = self.generate_instance_id();
+
+                            {
+                                let mut read_version_mapping_guard =
+                                    self.read_version_mapping.write();
+
+                                read_version_mapping_guard
+                                    .entry(table_id)
+                                    .or_default()
+                                    .insert(instance_id, basic_read_version.clone());
+                            }
+
+                            match new_read_version_sender.send((
+                                basic_read_version,
+                                LocalInstanceGuard {
+                                    table_id,
+                                    instance_id,
+                                    event_sender: self.hummock_event_tx.clone(),
+                                },
+                            )) {
+                                Ok(_) => {}
+                                Err(_) => {
+                                    panic!("RegisterReadVersion send fail table_id {:?} instance_is {:?}", table_id, instance_id)
+                                }
+                            }
+                        }
+
+                        HummockEvent::DestroyReadVersion {
+                            table_id,
+                            instance_id,
+                        } => {
+                            let mut read_version_mapping_guard = self.read_version_mapping.write();
+                            read_version_mapping_guard
+                                .get_mut(&table_id)
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "DestroyHummockInstance table_id {} instance_id {} fail",
+                                        table_id, instance_id
+                                    )
+                                })
+                                .remove(&instance_id).unwrap_or_else(|| panic!("DestroyHummockInstance inexist instance table_id {} instance_id {}",  table_id, instance_id));
+                        }
                     }
-                    #[cfg(any(test, feature = "test"))]
-                    HummockEvent::FlushEvent(sender) => {
-                        let _ = sender.send(()).inspect_err(|e| {
-                            error!("unable to send flush result: {:?}", e);
-                        });
-                    }
-                },
+                }
             };
         }
+    }
+
+    fn generate_instance_id(&mut self) -> LocalInstanceId {
+        self.last_instance_id += 1;
+        self.last_instance_id
     }
 }
 
