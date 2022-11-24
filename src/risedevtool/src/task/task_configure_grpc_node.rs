@@ -42,8 +42,10 @@ impl Task for ConfigureGrpcNodeTask {
             );
             ctx.wait_tcp_user(&address)?;
         } else {
-            ctx.pb.set_message("NOT waiting for online...");
-            // ctx.wait_tcp(&address)?;
+            // FIXME
+            // Disable waiting for https://github.com/risingwavelabs/risingwave/pull/6466/files
+            ctx.pb.set_message("waiting for online...");
+            ctx.wait_tcp(&address)?;
         }
 
         ctx.complete_spin();
