@@ -564,7 +564,7 @@ mod tests {
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::hash::SerializedKey;
-    use risingwave_common::row::Row;
+    use risingwave_common::row::{Row, Row2};
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
@@ -1055,7 +1055,7 @@ mod tests {
         fn sorted_rows(self) -> Vec<(Op, Row)> {
             let (chunk, ops) = self.into_parts();
             ops.into_iter()
-                .zip_eq(chunk.rows().map(Row::from))
+                .zip_eq(chunk.rows().map(Row2::into_owned_row))
                 .sorted()
                 .collect_vec()
         }

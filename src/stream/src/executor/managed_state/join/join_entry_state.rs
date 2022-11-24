@@ -124,7 +124,7 @@ mod tests {
         );
 
         for row_ref in data_chunk.rows() {
-            let row: Row = row_ref.into();
+            let row: Row = row_ref.into_owned_row();
             let value_indices = (0..row.0.len() - 1).collect_vec();
             let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
             // Pk is only a `i64` here, so encoding method does not matter.

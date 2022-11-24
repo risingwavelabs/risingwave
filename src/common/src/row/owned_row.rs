@@ -17,7 +17,6 @@
 use std::ops;
 
 use super::{Row2, RowExt};
-use crate::array::RowRef;
 use crate::collection::estimate_size::EstimateSize;
 use crate::types::{to_datum_ref, DataType, Datum, DatumRef};
 use crate::util::ordered::OrderedRowSerde;
@@ -28,24 +27,12 @@ use crate::util::value_encoding::deserialize_datum;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Row(pub Vec<Datum>);
 
+/// Do not implement `IndexMut` to make it immutable.
 impl ops::Index<usize> for Row {
     type Output = Datum;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
-    }
-}
-
-impl ops::IndexMut<usize> for Row {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.0[index]
-    }
-}
-
-// TODO: remove this due to implicit allocation
-impl From<RowRef<'_>> for Row {
-    fn from(row_ref: RowRef<'_>) -> Self {
-        row_ref.into_owned_row()
     }
 }
 
