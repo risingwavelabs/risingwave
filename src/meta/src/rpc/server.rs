@@ -134,10 +134,8 @@ pub async fn rpc_serve(
     }
 }
 
-// TODO: write definitions: Leader, follower, election, term, campaign
-
-/// ## Returns
-///  returns true if current node is leader
+/// Wrapper for elections::run_elections
+/// Start single leader setup
 ///
 /// ## Arguments
 /// addr: Address of the current leader, e.g. "127.0.0.1"
@@ -148,7 +146,10 @@ pub async fn rpc_serve(
 /// more frequent, resulting in more traffic for the meta store. Node failover will be fast
 ///
 /// ## Returns
-/// TODO: Work in progress. Will fill this in later
+/// MetaLeaderInfo containing the leader who got initially elected
+/// JoinHandle running all future elections concurrently
+/// Sender for signaling a shutdown
+/// Receiver receiving true if this node got elected as leader and false if it is a follower
 pub async fn register_leader_for_meta<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,

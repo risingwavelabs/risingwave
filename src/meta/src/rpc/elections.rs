@@ -44,9 +44,6 @@ struct ElectionOutcome {
     pub is_leader: bool,
 }
 
-// TODO: move leader election things to a new file
-// TODO: write definitions: Leader, follower, election, term, campaign
-
 /// Runs for election in an attempt to become leader
 ///
 /// ## Returns
@@ -193,11 +190,7 @@ async fn renew_lease<S: MetaStore>(
     );
     let is_leader = match meta_store.txn(txn).await {
         Err(e) => match e {
-            MetaStoreError::TransactionAbort() => {
-                // TODO: remove this log line
-                //   tracing::info!("Renew/acquire lease: another node has become new leader");
-                false
-            }
+            MetaStoreError::TransactionAbort() => false,
             MetaStoreError::Internal(e) => {
                 tracing::warn!(
                     "Renew/acquire lease: try again later, MetaStoreError: {:?}",
@@ -208,7 +201,6 @@ async fn renew_lease<S: MetaStore>(
             MetaStoreError::ItemNotFound(e) => {
                 tracing::warn!("Renew/acquire lease: MetaStoreError: {:?}", e);
                 return None;
-                // TODO: is returning None here the right choice?
             }
         },
         Ok(_) => true,
@@ -268,8 +260,11 @@ fn gen_rand_lease_id() -> u64 {
 /// lease_time_sec: Time that a lease will be valid for.
 /// A large value reduces the meta store traffic. A small value reduces the downtime during failover
 ///
-/// Returns:
-/// # TODO
+/// ## Returns:
+/// MetaLeaderInfo containing the leader who got initially elected
+/// JoinHandle running all future elections concurrently
+/// Sender for signaling a shutdown
+/// Receiver receiving true if this node got elected as leader and false if it is a follower
 pub async fn run_elections<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,
