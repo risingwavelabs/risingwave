@@ -735,4 +735,38 @@ pub mod tests {
         let compaction = selector.pick_compaction(2, &levels, &mut levels_handlers);
         assert!(compaction.is_none());
     }
+
+    #[test]
+    fn test_waiting_schedule_compaction_bytes() {
+        let config = CompactionConfigBuilder::new()
+            .max_bytes_for_level_base(200)
+            .max_level(4)
+            .max_bytes_for_level_multiplier(5)
+            .compaction_mode(CompactionMode::Range as i32)
+            .build();
+        let levels = vec![
+            generate_level(1, vec![]),
+            generate_level(2, generate_tables(0..5, 0..1000, 3, 50)),
+            generate_level(3, generate_tables(5..10, 0..1000, 2, 100)),
+            generate_level(4, generate_tables(10..15, 0..1000, 1, 250)),
+        ];
+        let levels = Levels {
+            levels,
+            l0: Some(generate_l0_nonoverlapping_sublevels(generate_tables(
+                15..25,
+                0..600,
+                3,
+                10,
+            ))),
+        };
+
+        let selector =
+            DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
+        let levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();
+        let waiting_bytes = selector.waiting_schedule_compaction_bytes(&levels, &levels_handlers);
+        // select 10 files in level0; select one file in level2 which overlap with one file in
+        // level3; select three files in level3 which overlap with three files in level4. 10
+        // * 10 + 50 + 100 + 100 * 3 + 250 * 3 = 1300
+        assert_eq!(waiting_bytes, 1300);
+    }
 }

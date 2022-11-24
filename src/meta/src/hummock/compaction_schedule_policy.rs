@@ -256,7 +256,9 @@ impl ScoredPolicy {
     #[cfg(test)]
     fn for_test() -> Self {
         Self {
-            ..Default::default()
+            score_to_compactor: BTreeMap::default(),
+            context_id_to_score: HashMap::default(),
+            state: CompactorState::Idle(Instant::now()),
         }
     }
 
@@ -292,33 +294,56 @@ impl ScoredPolicy {
     }
 }
 
-impl CompactionSchedulePolicy for ScoredPolicy {
-    fn next_idle_compactor(
-        &mut self,
+impl ScoredPolicy {
+    fn fetch_idle_compactor(
+        &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
         for compactor in self.score_to_compactor.values() {
             let running_task = *compactor_assigned_task_num
                 .get(&compactor.context_id())
                 .unwrap_or(&0);
-            match &self.state {
-                CompactorState::Busy => {
-                    if running_task < compactor.max_concurrent_task_number() {
-                        self.state = CompactorState::Idle(Instant::now());
-                        return Some(compactor.clone());
-                    }
+            if running_task < compactor.max_concurrent_task_number() {
+                return Some(compactor.clone());
+            }
+        }
+        None
+    }
+}
+
+impl CompactionSchedulePolicy for ScoredPolicy {
+    fn next_idle_compactor(
+        &mut self,
+        compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
+    ) -> Option<Arc<Compactor>> {
+        if let Some(compactor) = self.fetch_idle_compactor(compactor_assigned_task_num) {
+            if let CompactorState::Idle(_) = &self.state {
+                // do not change state.
+            } else {
+                self.state = CompactorState::Idle(Instant::now());
+            }
+            return Some(compactor);
+        }
+        match self.state {
+            CompactorState::Idle(_) => {
+                self.state = CompactorState::Burst(Instant::now());
+            }
+            CompactorState::Burst(last_burst) => {
+                if last_burst.elapsed().as_secs() > MAX_BURST_TIME {
+                    self.state = CompactorState::Busy;
+                    return None;
                 }
-                CompactorState::Idle(_) => {
-                    self.state = CompactorState::Burst(Instant::now());
-                    return Some(compactor.clone());
-                }
-                CompactorState::Burst(start_time) => {
-                    if start_time.elapsed().as_secs() < MAX_BURST_TIME
-                        && running_task < 2 * compactor.max_concurrent_task_number()
-                    {
-                        return Some(compactor.clone());
-                    }
-                }
+            }
+            CompactorState::Busy => {
+                return None;
+            }
+        }
+        for compactor in self.score_to_compactor.values() {
+            let running_task = *compactor_assigned_task_num
+                .get(&compactor.context_id())
+                .unwrap_or(&0);
+            if running_task < 2 * compactor.max_concurrent_task_number() {
+                return Some(compactor.clone());
             }
         }
         self.state = CompactorState::Busy;
