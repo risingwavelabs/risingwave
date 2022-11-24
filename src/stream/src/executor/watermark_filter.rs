@@ -282,11 +282,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};
+    use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::Distribution;
@@ -429,9 +428,9 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                NaiveDate::from_ymd(2022, 11, 7).and_hms(0, 0, 0)
-            )))
+            watermark!(ScalarImpl::NaiveDateTime(
+                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 7).and_hms_uncheck(0, 0, 0)
+            ))
         );
 
         // push the 2nd barrier
@@ -452,9 +451,9 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                NaiveDate::from_ymd(2022, 11, 9).and_hms(0, 0, 0)
-            )))
+            watermark!(ScalarImpl::NaiveDateTime(
+                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
+            ))
         );
 
         // push the 3nd barrier
@@ -476,9 +475,9 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                NaiveDate::from_ymd(2022, 11, 9).and_hms(0, 0, 0)
-            )))
+            watermark!(ScalarImpl::NaiveDateTime(
+                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
+            ))
         );
 
         // push the 3rd chunk
@@ -495,9 +494,9 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                NaiveDate::from_ymd(2022, 11, 13).and_hms(0, 0, 0)
-            )))
+            watermark!(ScalarImpl::NaiveDateTime(
+                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 13).and_hms_uncheck(0, 0, 0)
+            ))
         );
     }
 }
