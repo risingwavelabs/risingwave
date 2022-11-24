@@ -29,8 +29,8 @@ use super::{
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, hash_datum, serialize_datum_into, to_datum_ref, DataType, Datum,
-    DatumRef, Scalar, ScalarRefImpl,
+    deserialize_datum_from, hash_datum, serialize_datum_into, DataType, Datum, DatumRef, Scalar,
+    ScalarRefImpl, ToDatumRef,
 };
 
 /// This is a naive implementation of list array.
@@ -380,7 +380,7 @@ macro_rules! iter_elems_ref {
                 $($body)*
             }
             ListRef::ValueRef { val } => {
-                let $it = val.values.iter().map(to_datum_ref);
+                let $it = val.values.iter().map(ToDatumRef::to_datum_ref);
                 $($body)*
             }
         }
@@ -417,7 +417,7 @@ impl<'a> ListRef<'a> {
             }
             ListRef::ValueRef { val } => {
                 if let Some(datum) = val.values().iter().nth(index - 1) {
-                    Ok(to_datum_ref(datum))
+                    Ok(datum.to_datum_ref())
                 } else {
                     Ok(None)
                 }

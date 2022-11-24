@@ -18,7 +18,7 @@ use std::ops;
 
 use super::{Row2, RowExt};
 use crate::collection::estimate_size::EstimateSize;
-use crate::types::{to_datum_ref, DataType, Datum, DatumRef};
+use crate::types::{DataType, Datum, DatumRef, ToDatumRef};
 use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 use crate::util::value_encoding::deserialize_datum;
@@ -99,12 +99,12 @@ impl Row2 for Row {
 
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        to_datum_ref(&self[index])
+        self[index].to_datum_ref()
     }
 
     #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        to_datum_ref(self.0.get_unchecked(index))
+        self.0.get_unchecked(index).to_datum_ref()
     }
 
     #[inline]
@@ -114,7 +114,7 @@ impl Row2 for Row {
 
     #[inline]
     fn iter(&self) -> Self::Iter<'_> {
-        Iterator::map(self.0.iter(), to_datum_ref)
+        Iterator::map(self.0.iter(), ToDatumRef::to_datum_ref)
     }
 
     #[inline]

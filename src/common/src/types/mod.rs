@@ -535,13 +535,6 @@ for_all_scalar_variants! { scalar_impl_partial_ord }
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
-/// Convert a [`Datum`] to a [`DatumRef`].
-// TODO: use `ToDatumRef::to_datum_ref` instead.
-#[inline(always)]
-pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
-    datum.to_datum_ref()
-}
-
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 // TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_into(
@@ -593,7 +586,7 @@ pub fn deserialize_datum_not_null_from(
 
 /// This trait is to implement `to_owned_datum` for `Option<ScalarImpl>`
 pub trait ToOwnedDatum {
-    /// implement `to_owned_datum` for `DatumRef` to convert to `Datum`
+    /// Convert the datum to an owned [`Datum`].
     fn to_owned_datum(self) -> Datum;
 }
 
@@ -605,19 +598,20 @@ impl ToOwnedDatum for DatumRef<'_> {
 }
 
 pub trait ToDatumRef: PartialEq + Eq + std::fmt::Debug {
+    /// Convert the datum to [`DatumRef`].
     fn to_datum_ref(&self) -> DatumRef<'_>;
 }
 
 impl ToDatumRef for Datum {
     #[inline(always)]
     fn to_datum_ref(&self) -> DatumRef<'_> {
-        to_datum_ref(self)
+        self.as_ref().map(|d| d.as_scalar_ref_impl())
     }
 }
 impl ToDatumRef for &Datum {
     #[inline(always)]
     fn to_datum_ref(&self) -> DatumRef<'_> {
-        to_datum_ref(self)
+        self.as_ref().map(|d| d.as_scalar_ref_impl())
     }
 }
 impl ToDatumRef for DatumRef<'_> {
@@ -1101,7 +1095,7 @@ mod tests {
 
             let hash_from_datum_ref = {
                 let mut state = Crc32FastBuilder.build_hasher();
-                hash_datum(to_datum_ref(&datum), &mut state);
+                hash_datum(datum.to_datum_ref(), &mut state);
                 state.finish()
             };
 

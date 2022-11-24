@@ -23,7 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row as RowData, Row2, RowDeserializer};
-use risingwave_common::types::{to_datum_ref, DataType, Datum, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
@@ -340,7 +340,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                                 // equivalent to row indicated for
                                 // deletion.
                                 if Some(row.value_at(0))
-                                    != current_epoch_value.as_ref().map(to_datum_ref)
+                                    != current_epoch_value.as_ref().map(ToDatumRef::to_datum_ref)
                                 {
                                     bail!(
                                         "Inconsistent Delete - current: {:?}, delete: {:?}",
