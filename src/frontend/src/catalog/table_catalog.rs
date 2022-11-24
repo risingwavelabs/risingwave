@@ -98,6 +98,8 @@ pub struct TableCatalog {
     pub definition: String,
 
     pub handle_pk_conflict: bool,
+
+    pub distribution_key_start_index_in_pk: usize,
 }
 
 impl TableCatalog {
@@ -197,6 +199,7 @@ impl TableCatalog {
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
             definition: self.definition.clone(),
             handle_pk_conflict: self.handle_pk_conflict,
+            distribution_key_start_index_in_pk: self.distribution_key_start_index_in_pk as u32,
         }
     }
 }
@@ -244,6 +247,7 @@ impl From<ProstTable> for TableCatalog {
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition.clone(),
             handle_pk_conflict: tb.handle_pk_conflict,
+            distribution_key_start_index_in_pk: tb.distribution_key_start_index_in_pk as usize,
         }
     }
 }
@@ -329,6 +333,7 @@ mod tests {
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,
+            distribution_key_start_index_in_pk: 0,
         }
         .into();
 
@@ -386,7 +391,8 @@ mod tests {
                 vnode_col_idx: None,
                 value_indices: vec![0],
                 definition: "".into(),
-                handle_pk_conflict: false
+                handle_pk_conflict: false,
+                distribution_key_start_index_in_pk: 0,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

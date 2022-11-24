@@ -136,6 +136,7 @@ pub struct SchemaFilterKeyExtractor {
     /// Prefix key length can be decoded through its `DataType` and `OrderType` which obtained from
     /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
     /// from storage key.
+    distribution_key_start_index_in_pk: usize,
     read_pattern_prefix_column: usize,
     deserializer: OrderedRowSerde,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
@@ -155,19 +156,23 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
         // detection
         let pk_prefix_len = self
             .deserializer
-            .deserialize_prefix_len_with_column_indices(pk, 0..self.read_pattern_prefix_column)
+            .deserialize_prefix_len_with_column_indices(
+                pk,
+                self.distribution_key_start_index_in_pk..self.read_pattern_prefix_column,
+            )
             .unwrap();
 
         let prefix_len = TABLE_PREFIX_LEN + VirtualNode::SIZE + pk_prefix_len;
-        &full_key[0..prefix_len]
+        &full_key[self.distribution_key_start_index_in_pk..prefix_len]
     }
 }
 
 impl SchemaFilterKeyExtractor {
     pub fn new(table_catalog: &Table) -> Self {
         let read_pattern_prefix_column = table_catalog.distribution_key.len();
+        let distribution_key_start_index_in_pk =
+            table_catalog.distribution_key_start_index_in_pk as usize;
         assert_ne!(0, read_pattern_prefix_column);
-
         // column_index in pk
         let pk_indices: Vec<usize> = table_catalog
             .pk
@@ -192,6 +197,7 @@ impl SchemaFilterKeyExtractor {
             .collect();
 
         Self {
+            distribution_key_start_index_in_pk,
             read_pattern_prefix_column,
             deserializer: OrderedRowSerde::new(data_types, order_types),
         }
@@ -478,6 +484,7 @@ mod tests {
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,
+            distribution_key_start_index_in_pk: 0,
         }
     }
 

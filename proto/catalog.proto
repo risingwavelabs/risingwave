@@ -106,6 +106,7 @@ message Table {
   repeated int32 value_indices = 19;
   string definition = 20;
   bool handle_pk_conflict = 21;
+  uint32 distribution_key_start_index_in_pk = 22;
 }
 
 message View {
