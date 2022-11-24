@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn test_singularity_system_time() {
-        let utc = Utc.ymd(2021, 4, 1).and_hms(0, 0, 0);
+        let utc = Utc.with_ymd_and_hms(2021, 4, 1, 0, 0, 0).unwrap();
         let singularity_dt = Local.from_utc_datetime(&utc.naive_utc());
         let singularity_st = SystemTime::from(singularity_dt);
         assert_eq!(singularity_st, *UNIX_SINGULARITY_DATE_EPOCH);

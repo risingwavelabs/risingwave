@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
 use nexmark::event::{Event, EventType};
@@ -29,6 +29,14 @@ pub struct Args {
     /// If not specified, generate events forever.
     #[clap(short, long)]
     number: Option<usize>,
+
+    /// The start event offset.
+    #[clap(long, default_value = "0")]
+    offset: u64,
+
+    /// The step for each iteration.
+    #[clap(long, default_value = "1")]
+    step: u64,
 
     /// Print format.
     #[clap(long, value_enum, default_value = "json")]
@@ -59,19 +67,22 @@ fn main() {
     let opts = Args::parse();
     let number = opts.number.unwrap_or(usize::MAX);
 
-    let iter = EventGenerator::default();
-    let mut iter = match opts.type_ {
+    let iter = EventGenerator::default()
+        .with_offset(opts.offset)
+        .with_step(opts.step);
+    let iter = match opts.type_ {
         Type::All => iter,
         Type::Person => iter.with_type_filter(EventType::Person),
         Type::Auction => iter.with_type_filter(EventType::Auction),
         Type::Bid => iter.with_type_filter(EventType::Bid),
     };
     let start_time = Instant::now();
-    let mut i = 0;
-    while let Some(event) = iter.next() {
+    let start_ts = iter.timestamp();
+    for event in iter.take(number) {
         if !opts.no_wait {
+            let emit_time = start_time + Duration::from_millis(event.timestamp() - start_ts);
             // sleep until the timestamp of the event
-            if let Some(t) = (start_time + iter.elapsed()).checked_duration_since(Instant::now()) {
+            if let Some(t) = emit_time.checked_duration_since(Instant::now()) {
                 std::thread::sleep(t);
             }
         }
@@ -82,10 +93,6 @@ fn main() {
                 Event::Auction(e) => println!("{e:?}"),
                 Event::Bid(e) => println!("{e:?}"),
             },
-        }
-        i += 1;
-        if i >= number {
-            break;
         }
     }
 }
