@@ -4957,6 +4957,7 @@ version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap 3.2.23",
+ "console",
  "global_stats_alloc",
  "log",
  "madsim-tokio",

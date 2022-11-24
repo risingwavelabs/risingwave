@@ -15,8 +15,10 @@
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use clap::StructOpt;
@@ -155,20 +157,27 @@ pub async fn playground() -> Result<()> {
         }
     };
 
+    let mut port = 4566;
+    let mut idle = None;
+
     for service in services {
         match service {
             RisingWaveService::Meta(mut opts) => {
                 opts.insert(0, "meta-node".into());
                 tracing::info!("starting meta-node thread with cli args: {:?}", opts);
                 let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
+                idle = opts.dangerous_max_idle_secs;
+
                 tracing::info!("opts: {:#?}", opts);
                 let _meta_handle = tokio::spawn(async move {
-                    let idle = opts.dangerous_max_idle_secs;
                     risingwave_meta::start(opts).await;
                     tracing::warn!("meta is stopped, shutdown all nodes");
                     // As a playground, it's fine to just kill everything.
                     if let Some(idle) = idle {
-                        eprintln!("RisingWave playground exited after being idle for {idle} seconds. Bye!");
+                        eprintln!("{}",
+                        console::style(format_args!(
+                                "RisingWave playground exited after being idle for {idle} seconds. Bye!"
+                            )).bold());
                     }
                     std::process::exit(0);
                 });
@@ -187,6 +196,7 @@ pub async fn playground() -> Result<()> {
                 opts.insert(0, "frontend-node".into());
                 tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
                 let opts = risingwave_frontend::FrontendOpts::parse_from(opts);
+                port = SocketAddr::from_str(&opts.host).unwrap().port();
                 tracing::info!("opts: {:#?}", opts);
                 let _frontend_handle =
                     tokio::spawn(async move { risingwave_frontend::start(opts).await });
@@ -203,6 +213,34 @@ pub async fn playground() -> Result<()> {
     }
 
     sync_point::sync_point!("CLUSTER_READY");
+
+    // wait for log messages to be flushed
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    eprintln!("-------------------------------");
+    eprintln!("RisingWave playground is ready.");
+    eprint!(
+        "* {} RisingWave playground SHOULD NEVER be used in benchmarks and production environment!!!\n  It is fully in-memory",
+        console::style("WARNING:").red().bold(),
+    );
+    if let Some(idle) = idle {
+        eprintln!(
+            " and will be automatically stopped after being idle for {}.",
+            console::style(format_args!("{idle}s")).dim()
+        );
+    } else {
+        eprintln!("");
+    }
+    eprintln!(
+        "* Use {} instead if you want to start a full cluster.",
+        console::style("./risedev d").blue().bold()
+    );
+    eprintln!(
+        "* Run {} in a different terminal to start Postgres interactive shell.",
+        console::style(format_args!("psql -h localhost -p {port} -d dev -U root"))
+            .blue()
+            .bold()
+    );
+    eprintln!("-------------------------------");
 
     // TODO: should we join all handles?
     // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.
