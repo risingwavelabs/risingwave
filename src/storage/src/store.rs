@@ -126,11 +126,11 @@ pub trait StateStoreRead: StaticSendSync {
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_>;
 
-    /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
-    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included in
-    /// `key_range`) The returned iterator will iterate data based on a snapshot corresponding to
-    /// the given `epoch`.
+    /// Opens and returns an iterator for given `dist_key_hint` and `full_key_range`
+    /// Internally, `dist_key_hint` will be used to for checking `bloom_filter` and
+    /// `full_key_range` used for iter. (if the `dist_key_hint` not None, it should be be included
+    /// in `key_range`) The returned iterator will iterate data based on a snapshot
+    /// corresponding to the given `epoch`.
     fn iter(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
@@ -146,7 +146,7 @@ pub trait StateStoreReadExt: StaticSendSync {
     type ScanFuture<'a>: ScanFutureTrait<'a>;
 
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// Internally, `dist_key_hint` will be used to for checking `bloom_filter` and
     /// `full_key_range` used for iter.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     ///
@@ -305,9 +305,9 @@ pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
 #[derive(Default, Clone)]
 pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.
-    /// If the `prefix_hint` is not None, it should be included in
+    /// If the `dist_key_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
-    pub prefix_hint: Option<Vec<u8>>,
+    pub dist_key_hint: Option<Vec<u8>>,
     pub ignore_range_tombstone: bool,
     pub check_bloom_filter: bool,
 

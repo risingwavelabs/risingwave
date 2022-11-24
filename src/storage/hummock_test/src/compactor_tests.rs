@@ -273,7 +273,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: true,
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },
@@ -291,7 +291,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: true,
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },
@@ -395,7 +395,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: true,
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },
@@ -726,7 +726,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: false,
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     table_id: TableId::from(existing_table_ids),
                     retention_seconds: None,
                 },
@@ -896,7 +896,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: false,
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                 },
@@ -1069,7 +1069,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: true,
-                    prefix_hint: Some(bloom_filter_key),
+                    dist_key_hint: Some(bloom_filter_key),
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                 },

@@ -136,6 +136,8 @@ pub struct SchemaFilterKeyExtractor {
     /// Prefix key length can be decoded through its `DataType` and `OrderType` which obtained from
     /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
     /// from storage key.
+
+    /// distribution_key does not need to be the prefix of pk.
     distribution_key_start_index_in_pk: usize,
     read_pattern_prefix_column: usize,
     deserializer: OrderedRowSerde,

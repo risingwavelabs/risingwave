@@ -307,7 +307,7 @@ mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     check_bloom_filter: false,
                     ignore_range_tombstone: false,
                     table_id: Default::default(),

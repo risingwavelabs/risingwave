@@ -473,7 +473,7 @@ impl<S: StateStore> StateTable<S> {
                     .collect_vec();
 
                 let read_options = ReadOptions {
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     check_bloom_filter: is_subset(self.dist_key_indices.clone(), key_indices),
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
@@ -781,7 +781,7 @@ impl<S: StateStore> StateTable<S> {
         epoch: u64,
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
-            prefix_hint: None,
+            dist_key_hint: None,
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
@@ -813,7 +813,7 @@ impl<S: StateStore> StateTable<S> {
         epoch: u64,
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
-            prefix_hint: None,
+            dist_key_hint: None,
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
@@ -847,7 +847,7 @@ impl<S: StateStore> StateTable<S> {
         epoch: u64,
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
-            prefix_hint: None,
+            dist_key_hint: None,
             ignore_range_tombstone: false,
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
@@ -1013,7 +1013,7 @@ impl<S: StateStore> StateTable<S> {
 
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
-        let prefix_hint = {
+        let dist_key_hint = {
             if self.dist_key_indices.is_empty()
                 || !is_subset(self.dist_key_indices.clone(), pk_prefix_indices.to_vec())
             {
@@ -1025,27 +1025,27 @@ impl<S: StateStore> StateTable<S> {
 
         trace!(
             table_id = ?self.table_id(),
-            ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
+            ?dist_key_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
             dist_key_indices = ?self.dist_key_indices, ?pk_prefix_indices,
             "storage_iter_with_prefix"
         );
 
-        self.iter_inner(encoded_key_range_with_vnode, prefix_hint, epoch)
+        self.iter_inner(encoded_key_range_with_vnode, dist_key_hint, epoch)
             .await
     }
 
     async fn iter_inner(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        prefix_hint: Option<Vec<u8>>,
+        dist_key_hint: Option<Vec<u8>>,
         epoch: u64,
     ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         // Mem table iterator.
         let mem_table_iter = self.mem_table.iter(key_range.clone());
 
-        let check_bloom_filter = prefix_hint.is_some();
+        let check_bloom_filter = dist_key_hint.is_some();
         let read_options = ReadOptions {
-            prefix_hint,
+            dist_key_hint,
             check_bloom_filter,
             ignore_range_tombstone: false,
             retention_seconds: self.table_option.retention_seconds,

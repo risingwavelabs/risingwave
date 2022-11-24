@@ -255,7 +255,7 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
         let read_options = ReadOptions {
-            prefix_hint: None,
+            dist_key_hint: None,
             check_bloom_filter: self.dist_key_indices == key_indices,
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
@@ -293,7 +293,7 @@ impl<S: StateStore> StorageTable<S> {
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
-        prefix_hint: Option<Vec<u8>>,
+        dist_key_hint: Option<Vec<u8>>,
         encoded_key_range: R,
         wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
@@ -322,14 +322,14 @@ impl<S: StateStore> StorageTable<S> {
         // can use a single iterator.
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-            let prefix_hint = prefix_hint
+            let dist_key_hint = dist_key_hint
                 .clone()
-                .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
+                .map(|dist_key_hint| [&vnode.to_be_bytes(), dist_key_hint.as_slice()].concat());
             let wait_epoch = wait_epoch.clone();
             async move {
-                let check_bloom_filter = prefix_hint.is_some();
+                let check_bloom_filter = dist_key_hint.is_some();
                 let read_options = ReadOptions {
-                    prefix_hint,
+                    dist_key_hint,
                     check_bloom_filter,
                     ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
@@ -439,7 +439,7 @@ impl<S: StateStore> StorageTable<S> {
             .into_iter()
             .map(|index| self.pk_indices[index])
             .collect_vec();
-        let prefix_hint = if self.dist_key_indices.is_empty()
+        let dist_key_hint = if self.dist_key_indices.is_empty()
             || !is_subset(self.dist_key_indices.clone(), pk_prefix_indices.clone())
         {
             trace!(
@@ -457,9 +457,9 @@ impl<S: StateStore> StorageTable<S> {
         };
 
         trace!(
-            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
+            "iter_with_pk_bounds table_id {} dist_key_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
             self.table_id,
-            prefix_hint,
+            dist_key_hint,
             start_key,
             end_key,
             pk_prefix,
@@ -468,7 +468,7 @@ impl<S: StateStore> StorageTable<S> {
         );
 
         self.iter_with_encoded_key_range(
-            prefix_hint,
+            dist_key_hint,
             (start_key, end_key),
             epoch,
             self.try_compute_vnode_by_pk_prefix(pk_prefix),

@@ -176,15 +176,12 @@ impl StreamMaterialize {
             false => distribution_key
                 .iter()
                 .map(|&di| {
-                    pk
-                        .iter()
-                        .position(|&pi| di == pi)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "distribution key {:?} must be a subset of primary key {:?}",
-                                distribution_key, pk
-                            )
-                        })
+                    pk.iter().position(|&pi| di == pi).unwrap_or_else(|| {
+                        panic!(
+                            "distribution key {:?} must be a subset of primary key {:?}",
+                            distribution_key, pk
+                        )
+                    })
                 })
                 .next()
                 .unwrap(),

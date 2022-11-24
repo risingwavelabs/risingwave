@@ -127,7 +127,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -143,7 +143,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -161,7 +161,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -192,7 +192,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -224,7 +224,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -241,7 +241,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -258,7 +258,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: false,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -276,7 +276,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -294,7 +294,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -311,7 +311,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: false,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -329,7 +329,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -355,7 +355,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -371,7 +371,7 @@ async fn test_basic_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -572,7 +572,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -590,7 +590,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -621,7 +621,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -639,7 +639,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -657,7 +657,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -675,7 +675,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -692,7 +692,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -736,7 +736,7 @@ async fn test_write_anytime_inner(
                         ReadOptions {
                             ignore_range_tombstone: false,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -754,7 +754,7 @@ async fn test_write_anytime_inner(
                         ReadOptions {
                             ignore_range_tombstone: false,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -772,7 +772,7 @@ async fn test_write_anytime_inner(
                         ReadOptions {
                             ignore_range_tombstone: false,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -792,7 +792,7 @@ async fn test_write_anytime_inner(
                     ReadOptions {
                         ignore_range_tombstone: false,
                         check_bloom_filter: false,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
                     },
@@ -856,7 +856,7 @@ async fn test_write_anytime_inner(
                         ReadOptions {
                             ignore_range_tombstone: false,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -872,7 +872,7 @@ async fn test_write_anytime_inner(
                     ReadOptions {
                         ignore_range_tombstone: false,
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
                     }
@@ -889,7 +889,7 @@ async fn test_write_anytime_inner(
                         ReadOptions {
                             ignore_range_tombstone: false,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -908,7 +908,7 @@ async fn test_write_anytime_inner(
                     ReadOptions {
                         ignore_range_tombstone: false,
                         check_bloom_filter: false,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
                     },
@@ -1061,7 +1061,7 @@ async fn test_delete_get_inner(
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             }
@@ -1146,7 +1146,7 @@ async fn test_multiple_epoch_sync_inner(
                         ReadOptions {
                             ignore_range_tombstone: false,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -1163,7 +1163,7 @@ async fn test_multiple_epoch_sync_inner(
                     ReadOptions {
                         ignore_range_tombstone: false,
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
                     }
@@ -1179,7 +1179,7 @@ async fn test_multiple_epoch_sync_inner(
                         ReadOptions {
                             ignore_range_tombstone: false,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -1460,7 +1460,7 @@ async fn test_table_id_filter() {
                         ReadOptions {
                             ignore_range_tombstone: false,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                             table_id: TableId::new(table_id),
                             retention_seconds: None,
                         },
@@ -1479,7 +1479,7 @@ async fn test_table_id_filter() {
                         ReadOptions {
                             ignore_range_tombstone: false,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                             table_id: TableId::new(table_id),
                             retention_seconds: None,
                         },
@@ -1497,7 +1497,7 @@ async fn test_table_id_filter() {
                     ReadOptions {
                         ignore_range_tombstone: false,
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                         table_id: TableId::new(table_id),
                         retention_seconds: None,
                     },
@@ -1514,7 +1514,7 @@ async fn test_table_id_filter() {
                     ReadOptions {
                         ignore_range_tombstone: false,
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                         table_id: TableId::new(table_id),
                         retention_seconds: None,
                     },

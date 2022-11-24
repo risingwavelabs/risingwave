@@ -193,7 +193,7 @@ async fn test_storage_basic() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
             },
         )
         .await
@@ -209,7 +209,7 @@ async fn test_storage_basic() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
             },
         )
         .await
@@ -227,7 +227,7 @@ async fn test_storage_basic() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
             },
         )
         .await
@@ -257,7 +257,7 @@ async fn test_storage_basic() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
             },
         )
         .await
@@ -289,7 +289,7 @@ async fn test_storage_basic() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
             },
         )
         .await
@@ -306,7 +306,7 @@ async fn test_storage_basic() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
             },
         )
         .await
@@ -323,7 +323,7 @@ async fn test_storage_basic() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
             },
         )
         .await
@@ -354,7 +354,7 @@ async fn test_storage_basic() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
             },
         )
         .await
@@ -372,7 +372,7 @@ async fn test_storage_basic() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
             },
         )
         .await
@@ -389,7 +389,7 @@ async fn test_storage_basic() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
             },
         )
         .await
@@ -427,7 +427,7 @@ async fn test_storage_basic() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 check_bloom_filter: true,
-                prefix_hint: None,
+                dist_key_hint: None,
             },
         )
         .await
@@ -589,7 +589,7 @@ async fn test_state_store_sync() {
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                     },
                 )
                 .await
@@ -632,7 +632,7 @@ async fn test_state_store_sync() {
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                     },
                 )
                 .await
@@ -653,7 +653,7 @@ async fn test_state_store_sync() {
                     table_id: Default::default(),
                     retention_seconds: None,
                     check_bloom_filter: true,
-                    prefix_hint: None,
+                    dist_key_hint: None,
                 },
             )
             .await
@@ -691,7 +691,7 @@ async fn test_state_store_sync() {
                     table_id: Default::default(),
                     retention_seconds: None,
                     check_bloom_filter: true,
-                    prefix_hint: None,
+                    dist_key_hint: None,
                 },
             )
             .await
@@ -802,7 +802,7 @@ async fn test_delete_get() {
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                prefix_hint: None,
+                dist_key_hint: None,
                 check_bloom_filter: true,
                 table_id: Default::default(),
                 retention_seconds: None,
@@ -909,7 +909,7 @@ async fn test_multiple_epoch_sync() {
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                         },
                     )
                     .await
@@ -926,7 +926,7 @@ async fn test_multiple_epoch_sync() {
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                     },
                 )
                 .await
@@ -942,7 +942,7 @@ async fn test_multiple_epoch_sync() {
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                         },
                     )
                     .await
@@ -1074,7 +1074,7 @@ async fn test_iter_with_min_epoch() {
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                     },
                 )
                 .await
@@ -1094,7 +1094,7 @@ async fn test_iter_with_min_epoch() {
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                     },
                 )
                 .await
@@ -1114,7 +1114,7 @@ async fn test_iter_with_min_epoch() {
                         table_id: Default::default(),
                         retention_seconds: Some(1),
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                     },
                 )
                 .await
@@ -1151,7 +1151,7 @@ async fn test_iter_with_min_epoch() {
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                     },
                 )
                 .await
@@ -1171,7 +1171,7 @@ async fn test_iter_with_min_epoch() {
                         table_id: Default::default(),
                         retention_seconds: None,
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                     },
                 )
                 .await
@@ -1191,7 +1191,7 @@ async fn test_iter_with_min_epoch() {
                         table_id: Default::default(),
                         retention_seconds: Some(1),
                         check_bloom_filter: true,
-                        prefix_hint: None,
+                        dist_key_hint: None,
                     },
                 )
                 .await
@@ -1340,7 +1340,7 @@ async fn test_hummock_version_reader() {
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                         },
                         read_snapshot,
                     )
@@ -1369,7 +1369,7 @@ async fn test_hummock_version_reader() {
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                         },
                         read_snapshot,
                     )
@@ -1398,7 +1398,7 @@ async fn test_hummock_version_reader() {
                             table_id: Default::default(),
                             retention_seconds: Some(1),
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                         },
                         read_snapshot,
                     )
@@ -1465,7 +1465,7 @@ async fn test_hummock_version_reader() {
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                         },
                         read_snapshot,
                     )
@@ -1503,7 +1503,7 @@ async fn test_hummock_version_reader() {
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                         },
                         read_snapshot,
                     )
@@ -1541,7 +1541,7 @@ async fn test_hummock_version_reader() {
                             table_id: Default::default(),
                             retention_seconds: Some(1),
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                         },
                         read_snapshot,
                     )
@@ -1579,7 +1579,7 @@ async fn test_hummock_version_reader() {
                             table_id: Default::default(),
                             retention_seconds: None,
                             check_bloom_filter: true,
-                            prefix_hint: None,
+                            dist_key_hint: None,
                         },
                         read_snapshot,
                     )
@@ -1623,7 +1623,7 @@ async fn test_hummock_version_reader() {
                                 table_id: Default::default(),
                                 retention_seconds: None,
                                 check_bloom_filter: true,
-                                prefix_hint: None,
+                                dist_key_hint: None,
                             },
                             read_snapshot,
                         )
@@ -1661,7 +1661,7 @@ async fn test_hummock_version_reader() {
                                 table_id: Default::default(),
                                 retention_seconds: None,
                                 check_bloom_filter: true,
-                                prefix_hint: None,
+                                dist_key_hint: None,
                             },
                             read_snapshot,
                         )
