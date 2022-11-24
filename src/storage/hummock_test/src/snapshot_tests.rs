@@ -385,7 +385,7 @@ async fn test_snapshot_v1() {
 
 #[tokio::test]
 async fn test_snapshot_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2().await;
+    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_inner(storage, meta_client, false, false).await;
 }
 
@@ -397,7 +397,7 @@ async fn test_snapshot_with_sync_v1() {
 
 #[tokio::test]
 async fn test_snapshot_with_sync_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2().await;
+    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_inner(storage, meta_client, true, false).await;
 }
 
@@ -409,7 +409,7 @@ async fn test_snapshot_with_commit_v1() {
 
 #[tokio::test]
 async fn test_snapshot_with_commit_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2().await;
+    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_inner(storage, meta_client, true, true).await;
 }
 
@@ -421,7 +421,7 @@ async fn test_snapshot_range_scan_v1() {
 
 #[tokio::test]
 async fn test_snapshot_range_scan_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2().await;
+    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, false, false).await;
 }
 
@@ -433,7 +433,7 @@ async fn test_snapshot_range_scan_with_sync_v1() {
 
 #[tokio::test]
 async fn test_snapshot_range_scan_with_sync_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2().await;
+    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, true, false).await;
 }
 
@@ -445,7 +445,7 @@ async fn test_snapshot_range_scan_with_commit_v1() {
 
 #[tokio::test]
 async fn test_snapshot_range_scan_with_commit_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2().await;
+    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, true, true).await;
 }
 

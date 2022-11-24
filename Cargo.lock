@@ -1058,9 +1058,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "chrono"
-version = "0.4.22"
+version = "0.4.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfd4d1b31faaa3a89d7934dbded3111da0d2ef28e3ebccdb4f0179f5929d1ef1"
+checksum = "16b0a3d9ed01224b22057780a37bb8c5dbfe1be8ba48678e7bf57ec4b385411f"
 dependencies = [
  "iana-time-zone",
  "js-sys",
@@ -2915,17 +2915,6 @@ checksum = "b67380fd3b2fbe7527a606e18729d21c6f3951633d0500574c4dc22d2d638b9f"
 dependencies = [
  "cfg-if",
  "winapi",
-]
-
-[[package]]
-name = "libtest-mimic"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79529479c298f5af41375b0c1a77ef670d450b4c9cd7949d2b43af08121b20ec"
-dependencies = [
- "clap 3.2.23",
- "termcolor",
- "threadpool",
 ]
 
 [[package]]
@@ -5110,6 +5099,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
+ "risingwave_tracing",
  "serde",
  "tokio-retry",
  "tokio-stream",
@@ -5159,6 +5149,7 @@ dependencies = [
  "risingwave_source",
  "risingwave_storage",
  "risingwave_stream",
+ "risingwave_tracing",
  "serde",
  "serde-value",
  "serde_json",
@@ -5408,6 +5399,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "risingwave_test_runner",
+ "risingwave_tracing",
  "serial_test",
  "sync-point",
  "workspace-hack",
@@ -5529,7 +5521,7 @@ dependencies = [
  "console",
  "futures",
  "itertools",
- "libtest-mimic 0.6.0",
+ "libtest-mimic",
  "madsim-tokio",
  "risingwave_frontend",
  "risingwave_sqlparser",
@@ -5741,7 +5733,7 @@ dependencies = [
  "clap 3.2.23",
  "futures",
  "itertools",
- "libtest-mimic 0.6.0",
+ "libtest-mimic",
  "madsim-tokio",
  "paste",
  "rand 0.8.5",
@@ -6488,9 +6480,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "106fa05954e3259993392880ec1eca5ed2d2c529e3eb20d2466cb5101962ad3f"
+checksum = "ba41e01d229d7725401de371e323851f82d839d68732a06162405362b60852fe"
 dependencies = [
  "async-trait",
  "difference",
@@ -6498,7 +6490,8 @@ dependencies = [
  "glob",
  "humantime",
  "itertools",
- "libtest-mimic 0.5.2",
+ "libtest-mimic",
+ "regex",
  "tempfile",
  "thiserror",
  "tracing",

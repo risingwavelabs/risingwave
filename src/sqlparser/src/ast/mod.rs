@@ -844,7 +844,7 @@ pub enum Statement {
     /// UPDATE
     Update {
         /// TABLE
-        table: TableWithJoins,
+        table_name: ObjectName,
         /// Column assignments
         assignments: Vec<Assignment>,
         /// WHERE
@@ -1099,11 +1099,11 @@ impl fmt::Display for Statement {
                 write!(f, "\n\\.")
             }
             Statement::Update {
-                table,
+                table_name,
                 assignments,
                 selection,
             } => {
-                write!(f, "UPDATE {}", table)?;
+                write!(f, "UPDATE {}", table_name)?;
                 if !assignments.is_empty() {
                     write!(f, " SET {}", display_comma_separated(assignments))?;
                 }

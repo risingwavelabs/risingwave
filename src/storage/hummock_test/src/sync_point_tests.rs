@@ -245,12 +245,14 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
+    let existing_table_id: u32 = 1;
+
     let storage = get_hummock_storage(
         hummock_meta_client.clone(),
         get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+        TableId::from(existing_table_id),
     )
     .await;
-    let existing_table_id: u32 = 1;
     let compact_ctx = Arc::new(
         prepare_compactor_and_filter(
             &storage,
