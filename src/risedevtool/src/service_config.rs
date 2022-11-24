@@ -281,6 +281,17 @@ pub struct RedisConfig {
     pub address: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct ConnectorNodeConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+    pub port: u16,
+    pub address: String,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -298,6 +309,7 @@ pub enum ServiceConfig {
     Redis(RedisConfig),
     ZooKeeper(ZooKeeperConfig),
     RedPanda(RedPandaConfig),
+    ConnectorNode(ConnectorNodeConfig),
 }
 
 impl ServiceConfig {
@@ -317,6 +329,7 @@ impl ServiceConfig {
             Self::Kafka(c) => &c.id,
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
+            Self::ConnectorNode(c) => &c.id,
         }
     }
 }
