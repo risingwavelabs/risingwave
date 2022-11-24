@@ -137,9 +137,9 @@ pub async fn rpc_serve(
 /// `addr`: Address of the current leader, e.g. "127.0.0.1"
 /// `meta_store`: Store that will hold information about the leader
 /// `lease_time_sec`: Time that a lease will be valid for.
-/// If this `lease_time_sec` is large, elections will be less frequent, resulting in less traffic for
-/// the meta store, but node failover may be slow If this `lease_time_sec` is small, elections will be
-/// more frequent, resulting in more traffic for the meta store. Node failover will be fast
+/// If this `lease_time_sec` is large, elections will be less frequent, resulting in less traffic
+/// for the meta store, but node failover may be slow If this `lease_time_sec` is small, elections
+/// will be more frequent, resulting in more traffic for the meta store. Node failover will be fast
 ///
 /// ## Returns
 /// `MetaLeaderInfo` containing the leader who got initially elected
