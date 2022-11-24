@@ -1,6 +1,6 @@
 statement ok
 create materialized view ch_benchmark_q18 as
-select	 c_last, c_id o_id, o_entry_d, o_ol_cnt, sum(ol_amount)
+select	 c_last, c_id o_id, o_entry_d, o_ol_cnt, sum(ol_amount) as sum_ol_amount
 from	 customer, orders, orderline
 where	 c_id = o_c_id
     	 and c_w_id = o_w_id
