@@ -130,7 +130,7 @@ async fn campaign<S: MetaStore>(
                 }
                 Some(ElectionOutcome {
                     meta_leader_info: leader_info,
-                    meta_lease_info: lease_info,
+                    _meta_lease_info: lease_info,
                     is_leader: true,
                 })
             }
@@ -146,7 +146,7 @@ async fn campaign<S: MetaStore>(
 
     Some(ElectionOutcome {
         meta_leader_info: leader_info,
-        meta_lease_info: lease_info,
+        _meta_lease_info: lease_info,
         is_leader,
     })
 }
