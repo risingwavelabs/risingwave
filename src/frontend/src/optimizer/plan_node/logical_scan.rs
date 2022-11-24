@@ -28,7 +28,9 @@ use super::{
     StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{
+    CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
@@ -433,6 +435,25 @@ impl ColPrunable for LogicalScan {
 
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        // If predicate contains correlatedInputRef. We don't push down.
+        struct HasCorrelated {}
+        impl ExprVisitor<bool> for HasCorrelated {
+            fn merge(a: bool, b: bool) -> bool {
+                a | b
+            }
+
+            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> bool {
+                true
+            }
+        }
+        let mut visitor = HasCorrelated {};
+        if predicate.visit_expr(&mut visitor) {
+            return LogicalFilter::create(
+                self.clone_with_predicate(self.predicate().clone()).into(),
+                predicate,
+            );
+        }
+
         let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
         ));

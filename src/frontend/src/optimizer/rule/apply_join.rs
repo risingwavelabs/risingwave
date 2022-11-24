@@ -30,21 +30,54 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// Push `LogicalJoin` down `LogicalApply`
+/// Transpose `LogicalApply` and `LogicalJoin`.
+///
+/// Before:
+///
+///   `LogicalApply`
+///    /            \
+///  Domain      `LogicalJoin`
+///                /      \
+///               T1     T2
 ///
 /// `push_apply_both_side`:
 ///
 /// D Apply (T1 join< p > T2)  ->  (D Apply T1) join< p and natural join D > (D Apply T2)
 ///
+/// After:
+///
+///         `LogicalJoin`
+///         /            \
+/// `LogicalApply`    `LogicalApply`
+///   /      \           /      \
+/// Domain   T1        Domain   T2
+///
 /// `push_apply_left_side`:
 ///
 /// D Apply (T1 join< p > T2)  ->  (D Apply T1) join< p > T2
 ///
+/// After:
+///
+///      `LogicalJoin`
+///      /            \
+/// `LogicalApply`    T2
+///   /      \
+/// Domain   T1
+///
+///
 /// `push_apply_right_side`:
 ///
 /// D Apply (T1 join< p > T2)  ->  T1 join< p > (D Apply T2)
-pub struct ApplyJoinRule {}
-impl Rule for ApplyJoinRule {
+///
+/// After:
+///
+///      `LogicalJoin`
+///      /            \
+///    T1        `LogicalApply`
+///                /      \
+///              Domain   T2
+pub struct ApplyJoinTransposeRule {}
+impl Rule for ApplyJoinTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (
@@ -150,7 +183,7 @@ impl Rule for ApplyJoinRule {
     }
 }
 
-impl ApplyJoinRule {
+impl ApplyJoinTransposeRule {
     fn push_apply_left_side(
         &self,
         apply_left: PlanRef,
@@ -199,7 +232,7 @@ impl ApplyJoinRule {
                 let mut d_t1_bit_set = FixedBitSet::with_capacity(apply_len);
                 d_t1_bit_set.set_range(0..apply_left_len + join_left_len, true);
 
-                let (other, left): (Vec<_>, Vec<_>) = apply_on.into_iter().partition(|expr| {
+                let (left, other): (Vec<_>, Vec<_>) = apply_on.into_iter().partition(|expr| {
                     let mut visitor = CollectInputRef::with_capacity(apply_len);
                     visitor.visit_expr(expr);
                     let collect_bit_set = FixedBitSet::from(visitor);
@@ -288,7 +321,7 @@ impl ApplyJoinRule {
                 d_t2_bit_set.set_range(0..apply_left_len, true);
                 d_t2_bit_set.set_range(apply_left_len + join_left_len..apply_len, true);
 
-                let (other, right): (Vec<_>, Vec<_>) = apply_on.into_iter().partition(|expr| {
+                let (right, other): (Vec<_>, Vec<_>) = apply_on.into_iter().partition(|expr| {
                     let mut visitor = CollectInputRef::with_capacity(apply_len);
                     visitor.visit_expr(expr);
                     let collected = FixedBitSet::from(visitor);
@@ -567,9 +600,9 @@ impl ApplyJoinRule {
     }
 }
 
-impl ApplyJoinRule {
+impl ApplyJoinTransposeRule {
     pub fn create() -> BoxedRule {
-        Box::new(ApplyJoinRule {})
+        Box::new(ApplyJoinTransposeRule {})
     }
 }
 

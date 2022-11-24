@@ -76,11 +76,11 @@ pub use union_to_distinct::*;
 macro_rules! for_all_rules {
     ($macro:ident) => {
         $macro! {
-             {ApplyAggRule}
-            ,{ApplyFilterRule}
-            ,{ApplyProjRule}
+             {ApplyAggTransposeRule}
+            ,{ApplyFilterTransposeRule}
+            ,{ApplyProjectTransposeRule}
             ,{ApplyScanRule}
-            ,{ApplyJoinRule}
+            ,{ApplyJoinTransposeRule}
             ,{ApplyToJoinRule}
             ,{MaxOneRowEliminateRule}
             ,{DistinctAggRule}
