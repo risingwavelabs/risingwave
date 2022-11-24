@@ -24,8 +24,8 @@ mod local_metrics;
 pub use local_metrics::StoreLocalStatistic;
 pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 
-mod trace_local;
-pub use trace_local::*;
+mod traced_local;
+pub use traced_local::*;
 
 #[cfg(hm_trace)]
 mod traced_store;

@@ -166,11 +166,6 @@ impl<S: StateStoreWrite> StateStoreWrite for TracedStateStore<S> {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            // do not trace empty pairs
-            if kv_pairs.is_empty() {
-                return Ok(0);
-            }
-
             let span: TraceSpan = trace!(
                 INGEST,
                 kv_pairs,

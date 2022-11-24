@@ -30,7 +30,7 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::{stream_plan, stream_service};
-use risingwave_storage::monitor::hummock_trace_scope;
+use risingwave_storage::monitor::HummockTraceFuture;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -600,14 +600,16 @@ impl LocalStreamManagerCore {
                 .transpose()
                 .context("failed to decode vnode bitmap")?;
 
-            let (executor, subtasks) = hummock_trace_scope(self.create_nodes(
-                actor.fragment_id,
-                actor.get_nodes()?,
-                env.clone(),
-                &actor_context,
-                vnode_bitmap,
-            ))
-            .await?;
+            let (executor, subtasks) = self
+                .create_nodes(
+                    actor.fragment_id,
+                    actor.get_nodes()?,
+                    env.clone(),
+                    &actor_context,
+                    vnode_bitmap,
+                )
+                .may_trace_hummock()
+                .await?;
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
             let actor = Actor::new(

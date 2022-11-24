@@ -30,6 +30,9 @@ use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_storage::hummock::{HummockStorage, SstableStore, TieredCache};
 use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
 use serde::{Deserialize, Serialize};
+
+const SST_OFFSET: u64 = 2147383647;
+
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(short, long)]
@@ -98,7 +101,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn Replaya
             Arc::new(MockHummockMetaClient::with_sst_offset(
                 hummock_manager_ref,
                 worker_node.id,
-                2147483647,
+                SST_OFFSET,
             )),
             notification_client,
             notifier,

@@ -39,11 +39,11 @@ impl<R: TraceReader> HummockReplay<R> {
 
         while let Ok(r) = self.reader.read() {
             match r.op() {
-                Operation::Result(trace_result) => {
-                    worker_scheduler.send_result(&r, trace_result.to_owned());
+                Operation::Result(_) => {
+                    worker_scheduler.send_result(r);
                 }
                 Operation::Finish => {
-                    worker_scheduler.wait_finish(&r).await;
+                    worker_scheduler.wait_finish(r).await;
                 }
                 _ => {
                     worker_scheduler.schedule(r, self.replay.clone());

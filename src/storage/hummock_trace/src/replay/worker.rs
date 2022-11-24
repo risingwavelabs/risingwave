@@ -56,15 +56,17 @@ impl WorkerScheduler {
         handler.replay(ReplayRequest::Task(record));
     }
 
-    pub(crate) fn send_result(&mut self, record: &Record, trace_result: OperationResult) {
-        let worker_id = self.allocate_worker_id(record);
-        if let Some(handler) = self.workers.get_mut(&worker_id) {
-            handler.send_result(trace_result);
+    pub(crate) fn send_result(&mut self, record: Record) {
+        let worker_id = self.allocate_worker_id(&record);
+        if let Operation::Result(trace_result) = record.2 {
+            if let Some(handler) = self.workers.get_mut(&worker_id) {
+                handler.send_result(trace_result);
+            }
         }
     }
 
-    pub(crate) async fn wait_finish(&mut self, record: &Record) {
-        let worker_id = self.allocate_worker_id(record);
+    pub(crate) async fn wait_finish(&mut self, record: Record) {
+        let worker_id = self.allocate_worker_id(&record);
         if let Some(handler) = self.workers.get_mut(&worker_id) {
             handler.wait().await;
 
