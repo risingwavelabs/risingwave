@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -439,7 +440,7 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
         let prefix_hint = if self.dist_key_indices.is_empty()
-            || self.dist_key_indices != pk_prefix_indices
+            || !is_subset(self.dist_key_indices.clone(), pk_prefix_indices.clone())
         {
             trace!(
                 "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
@@ -493,6 +494,10 @@ impl<S: StateStore> StorageTable<S> {
         self.batch_iter_with_pk_bounds(epoch, row::empty(), ..)
             .await
     }
+}
+
+fn is_subset(vec1: Vec<usize>, vec2: Vec<usize>) -> bool {
+    HashSet::<usize>::from_iter(vec1).is_subset(&vec2.into_iter().collect())
 }
 
 /// [`StorageTableIterInner`] iterates on the storage table.

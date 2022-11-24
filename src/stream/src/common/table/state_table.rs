@@ -14,7 +14,7 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::Bound;
 use std::ops::Bound::*;
@@ -471,9 +471,10 @@ impl<S: StateStore> StateTable<S> {
                     .into_iter()
                     .map(|index| self.pk_indices[index])
                     .collect_vec();
+
                 let read_options = ReadOptions {
                     prefix_hint: None,
-                    check_bloom_filter: self.dist_key_indices == key_indices,
+                    check_bloom_filter: is_subset(self.dist_key_indices.clone(), key_indices),
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,
@@ -514,7 +515,9 @@ impl<S: StateStore> StateTable<S> {
         std::mem::replace(&mut self.vnodes, new_vnodes)
     }
 }
-
+fn is_subset(vec1: Vec<usize>, vec2: Vec<usize>) -> bool {
+    HashSet::<usize>::from_iter(vec1).is_subset(&vec2.into_iter().collect())
+}
 // write
 impl<S: StateStore> StateTable<S> {
     fn handle_mem_table_error(&self, e: MemTableError) {
@@ -1011,7 +1014,9 @@ impl<S: StateStore> StateTable<S> {
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
         let prefix_hint = {
-            if self.dist_key_indices.is_empty() || self.dist_key_indices != pk_prefix_indices {
+            if self.dist_key_indices.is_empty()
+                || !is_subset(self.dist_key_indices.clone(), pk_prefix_indices.to_vec())
+            {
                 None
             } else {
                 Some([&vnode, &encoded_prefix[..]].concat())

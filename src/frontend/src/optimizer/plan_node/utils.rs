@@ -120,7 +120,8 @@ impl TableCatalogBuilder {
                             )
                         })
                 })
-                .collect_vec()[0],
+                .next()
+                .unwrap(),
         };
 
         TableCatalog {
