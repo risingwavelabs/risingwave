@@ -291,7 +291,7 @@ pub async fn run_elections<S: MetaStore>(
 
         // run the initial election
         let election_outcome = campaign(&meta_store, &addr, lease_time_sec, init_lease_id).await;
-        let (leader, is_leader) = match election_outcome {
+        let (initial_leader, is_initial_leader) = match election_outcome {
             Some(infos) => {
                 tracing::info!("initial election finished");
                 (infos.meta_leader_info, infos.is_leader)
@@ -303,17 +303,18 @@ pub async fn run_elections<S: MetaStore>(
         };
         tracing::info!(
             "Initial leader with address '{}' elected. New lease id is {}",
-            leader.node_address,
-            leader.lease_id
+            initial_leader.node_address,
+            initial_leader.lease_id
         );
+
+        let initial_leader_clone = initial_leader.clone();
 
         // define all follow up elections and terms in handle
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let (leader_tx, leader_rx) = tokio::sync::watch::channel(is_leader);
+        let (leader_tx, leader_rx) = tokio::sync::watch::channel(is_initial_leader);
         let handle = tokio::spawn(async move {
-            let mut wait = true;
-
             // runs all follow-up elections
+            let mut wait = true;
             'election: loop {
                 if !wait {
                     tokio::select! {
@@ -326,31 +327,33 @@ pub async fn run_elections<S: MetaStore>(
                 }
                 wait = true;
 
-                // lease id of this node
-                let lease_id = if initial_election {
-                    initial_election = false;
-                    init_lease_id
-                } else {
-                    gen_rand_lease_id()
-                };
+                // Do not elect new leader directly after running the initial election
+                let mut is_leader = is_initial_leader;
+                let mut leader_info = initial_leader.clone();
+                if !initial_election {
+                    let (l_info, is_l) =
+                        match campaign(&meta_store, &addr, lease_time_sec, gen_rand_lease_id())
+                            .await
+                        {
+                            None => {
+                                tracing::info!("election failed. Repeating election");
+                                continue 'election;
+                            }
+                            Some(outcome) => {
+                                tracing::info!("election finished");
+                                (outcome.meta_leader_info, outcome.is_leader)
+                            }
+                        };
 
-                let (leader_info, is_leader) =
-                    match campaign(&meta_store, &addr, lease_time_sec, lease_id).await {
-                        None => {
-                            tracing::info!("election failed. Repeating election");
-                            continue 'election;
-                        }
-                        Some(outcome) => {
-                            tracing::info!("election finished");
-                            (outcome.meta_leader_info, outcome.is_leader)
-                        }
-                    };
-
-                tracing::info!(
-                    "Leader with address '{}' elected. New lease id is {}",
-                    leader_info.node_address,
-                    leader_info.lease_id
-                );
+                    tracing::info!(
+                        "Leader with address '{}' elected. New lease id is {}",
+                        l_info.node_address,
+                        l_info.lease_id
+                    );
+                    leader_info = l_info;
+                    is_leader = is_l;
+                }
+                initial_election = false;
 
                 // signal to observers if this node currently is leader
                 loop {
@@ -386,7 +389,7 @@ pub async fn run_elections<S: MetaStore>(
                 }
             }
         });
-        return Ok((leader, handle, shutdown_tx, leader_rx));
+        return Ok((initial_leader_clone, handle, shutdown_tx, leader_rx));
     }
 }
 
