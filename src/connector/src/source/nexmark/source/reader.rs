@@ -54,7 +54,6 @@ impl SplitReader for NexmarkSplitReader {
     ) -> Result<Self> {
         let mut assigned_split = NexmarkSplit::default();
         let mut split_id = "".into();
-        let mut split_index = 0;
         let mut split_num = 1;
         let mut offset = 0;
 
@@ -65,7 +64,7 @@ impl SplitReader for NexmarkSplitReader {
             split_id = split.id();
             let split = split.into_nexmark().unwrap();
 
-            split_index = split.split_index as u64;
+            let split_index = split.split_index as u64;
             split_num = split.split_num as u64;
             offset = split.start_offset.unwrap_or(split_index);
             assigned_split = split;
