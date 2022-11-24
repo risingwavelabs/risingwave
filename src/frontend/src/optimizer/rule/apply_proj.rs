@@ -25,19 +25,23 @@ use crate::utils::ColIndexMapping;
 ///
 /// Before:
 ///
-///   `LogicalApply`
+/// ```text
+///     LogicalApply
 ///    /            \
-///  Domain      `LogicalProject`
+///  Domain      LogicalProject
 ///                  |
 ///                Input
+/// ```
 ///
 /// After:
 ///
-///   `LogicalProject`
+/// ```text
+///    LogicalProject
 ///          |
-///   `LogicalApply`
+///    LogicalApply
 ///    /            \
 ///  Domain        Input
+/// ```
 pub struct ApplyProjectTransposeRule {}
 impl Rule for ApplyProjectTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {

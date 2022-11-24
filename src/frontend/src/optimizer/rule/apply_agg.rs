@@ -26,19 +26,23 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// Before:
 ///
-///   `LogicalApply`
+/// ```text
+///     LogicalApply
 ///    /            \
-///  Domain      `LogicalAgg`
+///  Domain      LogicalAgg
 ///                  |
 ///                Input
+/// ```
 ///
 /// After:
 ///
-///   `LogicalAgg`
+/// ```text
+///      LogicalAgg
 ///          |
-///   `LogicalApply`
+///     LogicalApply
 ///    /            \
 ///  Domain        Input
+/// ```
 pub struct ApplyAggTransposeRule {}
 impl Rule for ApplyAggTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {

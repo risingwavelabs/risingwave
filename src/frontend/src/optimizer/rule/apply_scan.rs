@@ -27,26 +27,32 @@ use crate::utils::Condition;
 ///
 /// Before:
 ///
-///   `LogicalApply`
+/// ```text
+///    LogicalApply
 ///    /           \
-///  Domain      `LogicalScan`
+///  Domain      LogicalScan
+/// ```
 ///
 /// If it can remove DAG.
 /// After:
 ///
-///  `LogicalProject`
+/// ```text
+///  LogicalProject
 ///        |
-///  `LogicalFilter` (Null reject for equal)
+///  LogicalFilter (Null reject for equal)
 ///        |
-///  `LogicalScan`
+///  LogicalScan
+/// ```
 ///
 ///
 /// If it can't remove DAG.
 /// After:
 ///
-///   `LogicalJoin`
+/// ```text
+///     LogicalJoin
 ///    /           \
-///  Domain   `LogicalScan`
+///  Domain   LogicalScan
+/// ```
 pub struct ApplyScanRule {}
 impl Rule for ApplyScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {

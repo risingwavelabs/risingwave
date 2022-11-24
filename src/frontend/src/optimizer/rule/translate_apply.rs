@@ -25,17 +25,21 @@ use crate::optimizer::PlanRef;
 ///
 /// Before:
 ///
-///   `LogicalApply`
+/// ```text
+///     LogicalApply
 ///    /            \
 ///  LHS           RHS
+/// ```
 ///
 /// After:
 ///
-///    `LogicalJoin`
+/// ```text
+///      LogicalJoin
 ///    /            \
-///  LHS       `LogicalApply`
+///  LHS        LogicalApply
 ///             /           \
 ///          Domain         RHS
+/// ```
 pub struct TranslateApplyRule {}
 impl Rule for TranslateApplyRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {

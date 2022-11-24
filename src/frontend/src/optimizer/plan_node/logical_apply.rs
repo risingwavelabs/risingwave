@@ -178,17 +178,21 @@ impl LogicalApply {
     ///
     /// Before:
     ///
-    ///   `LogicalApply`: <`join_type`>
+    /// ```text
+    ///     LogicalApply
     ///    /            \
     ///  LHS           RHS
+    /// ```
     ///
     /// After:
     ///
-    ///    `LogicalJoin`: <`join_type`>
+    /// ```text
+    ///      LogicalJoin
     ///    /            \
-    ///  LHS       `LogicalApply`: <inner>
+    ///  LHS        LogicalApply
     ///             /           \
     ///          Domain         RHS
+    /// ```
     pub fn translate_apply(self, domain: PlanRef, eq_predicates: Vec<ExprImpl>) -> PlanRef {
         let (
             apply_left,

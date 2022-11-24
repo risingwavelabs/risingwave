@@ -25,19 +25,23 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// Before:
 ///
-///   `LogicalApply`
+/// ```text
+///     LogicalApply
 ///    /            \
-///  Domain      `LogicalFilter`
+///  Domain      LogicalFilter
 ///                  |
 ///                Input
+/// ```
 ///
 /// After:
 ///
-///   `LogicalFilter`
+/// ```text
+///    LogicalFilter
 ///          |
-///   `LogicalApply`
+///     LogicalApply
 ///    /            \
 ///  Domain        Input
+/// ```
 pub struct ApplyFilterTransposeRule {}
 impl Rule for ApplyFilterTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {

@@ -34,11 +34,13 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// Before:
 ///
-///   `LogicalApply`
+/// ```text
+///     LogicalApply
 ///    /            \
-///  Domain      `LogicalJoin`
+///  Domain      LogicalJoin
 ///                /      \
 ///               T1     T2
+/// ```
 ///
 /// `push_apply_both_side`:
 ///
@@ -46,11 +48,13 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// After:
 ///
-///         `LogicalJoin`
+/// ```text
+///           LogicalJoin
 ///         /            \
-/// `LogicalApply`    `LogicalApply`
+///  LogicalApply     LogicalApply
 ///   /      \           /      \
 /// Domain   T1        Domain   T2
+/// ```
 ///
 /// `push_apply_left_side`:
 ///
@@ -58,12 +62,13 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// After:
 ///
-///      `LogicalJoin`
+/// ```text
+///        LogicalJoin
 ///      /            \
-/// `LogicalApply`    T2
+///  LogicalApply    T2
 ///   /      \
 /// Domain   T1
-///
+/// ```
 ///
 /// `push_apply_right_side`:
 ///
@@ -71,11 +76,13 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// After:
 ///
-///      `LogicalJoin`
+/// ```text
+///        LogicalJoin
 ///      /            \
-///    T1        `LogicalApply`
+///    T1         LogicalApply
 ///                /      \
 ///              Domain   T2
+/// ```
 pub struct ApplyJoinTransposeRule {}
 impl Rule for ApplyJoinTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
