@@ -58,7 +58,7 @@
     LogicalFilter { predicate: (min(t.v2) > 1:Int32) AND (t.v1 > min(t.v2)) }
     └─LogicalAgg { group_key: [t.v1], aggs: [min(t.v2)] }
       └─LogicalScan { table: t, output_columns: [t.v1, t.v2], required_columns: [v1, v2], predicate: (t.v1 > 1:Int32) AND (1:Int32 > 0:Int32) }
-- name: filter limit transpose
+- name: filter should not transpose limit
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int);
     with cte as (select * from t limit 10) select * from cte where v1=10 AND v2=20 AND v3=30;
@@ -72,7 +72,7 @@
     LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) }
     └─LogicalLimit { limit: 10, offset: 0 }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4] }
-- name: filter topN transpose
+- name: filter should not transpose TopN
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int);
     with cte as (select * from t order by v1 limit 10 ) select * from cte where v1=10 AND v2=20 AND v3=30;
