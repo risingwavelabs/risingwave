@@ -158,15 +158,15 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                "Row::new([Some(b\"t1\")])".to_string(),
-                "Row::new([Some(b\"t2\")])".to_string()
+                "Row([Some(b\"t1\")])".to_string(),
+                "Row([Some(b\"t2\")])".to_string()
             ]
         );
 
         let rows = frontend
             .query_formatted_result("SHOW MATERIALIZED SOURCES")
             .await;
-        assert_eq!(rows, vec!["Row::new([Some(b\"t2\")])".to_string()]);
+        assert_eq!(rows, vec!["Row([Some(b\"t2\")])".to_string()]);
     }
 
     #[tokio::test]

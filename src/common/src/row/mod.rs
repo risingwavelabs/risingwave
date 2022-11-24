@@ -37,8 +37,7 @@ use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum};
 use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
-// TODO(row trait): rename type `Row::new(Vec<Datum>)` to `OwnedRow` and rename trait `Row2` to
-// `Row`.
+// TODO(row trait): rename type `Row(Vec<Datum>)` to `OwnedRow` and rename trait `Row2` to `Row`.
 pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     type Iter<'a>: Iterator<Item = DatumRef<'a>>
     where
@@ -66,6 +65,8 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Converts the row into an owned [`Row`].
+    ///
+    /// Prefer `into_owned_row` if the row is already owned.
     #[inline]
     fn to_owned_row(&self) -> Row {
         Row::new(self.iter().map(|d| d.to_owned_datum()).collect())
