@@ -145,29 +145,19 @@ impl DataChunkBuilder {
         self.buffered_count += 1;
     }
 
-    /// Append one row from the given iterator of datums or datum refs.
+    /// Append one row from the given [`Row2`].
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
     #[must_use]
-    pub fn append_one_row_from_datums(
-        &mut self,
-        datums: impl IntoIterator<Item = impl ToDatumRef>,
-    ) -> Option<DataChunk> {
+    pub fn append_one_row(&mut self, row: impl Row2) -> Option<DataChunk> {
         assert!(self.buffered_count < self.batch_size);
         self.ensure_builders();
 
-        self.do_append_one_row_from_datums(datums.into_iter());
+        self.do_append_one_row_from_datums(row.iter());
         if self.buffered_count == self.batch_size {
             Some(self.build_data_chunk())
         } else {
             None
         }
-    }
-
-    /// Append one row from the given [`Row2`].
-    /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
-    #[must_use]
-    pub fn append_one_row(&mut self, row: impl Row2) -> Option<DataChunk> {
-        self.append_one_row_from_datums(row.iter())
     }
 
     /// Append one row from the given two arrays.
