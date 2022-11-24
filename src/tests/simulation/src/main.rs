@@ -416,10 +416,6 @@ async fn run_slt_task(glob: &str, host: &str) {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
-        if kill && (path.ends_with("tpch_snapshot.slt") || path.ends_with("tpch_upstream.slt")) {
-            // Simply ignore the tpch test cases when enable kill nodes.
-            continue;
-        }
 
         // XXX: hack for kafka source test
         let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
