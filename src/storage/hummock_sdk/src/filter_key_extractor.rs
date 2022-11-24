@@ -155,7 +155,7 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
         let (_vnode_prefix, pk) = key.split_at(VirtualNode::SIZE);
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
-        // detection
+        // detection.
         let pk_prefix_len = self
             .deserializer
             .deserialize_prefix_len_with_column_indices(
