@@ -26,8 +26,8 @@ use rand::seq::SliceRandom;
 
 use crate::RisingWave;
 
-/// Embed the config file and create a temporary file runtime.
-const CONFIG_FILE: LazyLock<tempfile::TempPath> = LazyLock::new(|| {
+/// Embed the config file and create a temporary file at runtime.
+static CONFIG_PATH: LazyLock<tempfile::TempPath> = LazyLock::new(|| {
     let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
     file.write_all(include_bytes!("risingwave.toml"))
         .expect("failed to write config file");
@@ -74,7 +74,7 @@ impl Cluster {
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
         println!("{:?}", conf);
-        println!("config path = {}", CONFIG_FILE.display());
+        println!("config path = {}", CONFIG_PATH.display());
 
         // wait for the service to be ready
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -91,7 +91,7 @@ impl Cluster {
                 let opts = risingwave_meta::MetaNodeOpts::parse_from([
                     "meta-node",
                     "--config-path",
-                    &CONFIG_FILE.as_os_str().to_string_lossy(),
+                    &CONFIG_PATH.as_os_str().to_string_lossy(),
                     "--listen-addr",
                     "0.0.0.0:5690",
                     "--backend",
@@ -116,7 +116,7 @@ impl Cluster {
                     let opts = risingwave_frontend::FrontendOpts::parse_from([
                         "frontend-node",
                         "--config-path",
-                        &CONFIG_FILE.as_os_str().to_string_lossy(),
+                        &CONFIG_PATH.as_os_str().to_string_lossy(),
                         "--host",
                         "0.0.0.0:4566",
                         "--client-address",
@@ -140,7 +140,7 @@ impl Cluster {
                     let opts = risingwave_compute::ComputeNodeOpts::parse_from([
                         "compute-node",
                         "--config-path",
-                        &CONFIG_FILE.as_os_str().to_string_lossy(),
+                        &CONFIG_PATH.as_os_str().to_string_lossy(),
                         "--host",
                         "0.0.0.0:5688",
                         "--client-address",
@@ -165,7 +165,7 @@ impl Cluster {
                     let opts = risingwave_compactor::CompactorOpts::parse_from([
                         "compactor-node",
                         "--config-path",
-                        &CONFIG_FILE.as_os_str().to_string_lossy(),
+                        &CONFIG_PATH.as_os_str().to_string_lossy(),
                         "--host",
                         "0.0.0.0:6660",
                         "--client-address",
