@@ -608,6 +608,7 @@ impl LocalStreamManagerCore {
                     &actor_context,
                     vnode_bitmap,
                 )
+                // If hummock tracing is not enabled, it directly returns wrapped future.
                 .may_trace_hummock()
                 .await?;
 

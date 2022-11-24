@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::{Operation, Replayable, WorkerScheduler};
+use crate::{Operation, ReplayWorkerScheduler, Replayable, WorkerScheduler};
 
 pub struct HummockReplay<R: TraceReader> {
     reader: R,
@@ -33,8 +33,15 @@ impl<R: TraceReader> HummockReplay<R> {
     }
 
     pub async fn run(&mut self) -> Result<()> {
+        self.run_with_scheduler(WorkerScheduler::new(self.replay.clone()))
+            .await
+    }
+
+    pub async fn run_with_scheduler<S: ReplayWorkerScheduler>(
+        &mut self,
+        mut worker_scheduler: S,
+    ) -> Result<()> {
         let time = Instant::now();
-        let mut worker_scheduler = WorkerScheduler::new();
         let mut total_ops: u64 = 0;
 
         while let Ok(r) = self.reader.read() {
@@ -46,7 +53,7 @@ impl<R: TraceReader> HummockReplay<R> {
                     worker_scheduler.wait_finish(r).await;
                 }
                 _ => {
-                    worker_scheduler.schedule(r, self.replay.clone());
+                    worker_scheduler.schedule(r);
                     total_ops += 1;
                     if total_ops % 10000 == 0 {
                         println!("replayed {} ops", total_ops);
