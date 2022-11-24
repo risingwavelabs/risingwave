@@ -68,7 +68,7 @@ impl PubsubSplitReader {
                 .map(|t| {
                     let mut t = t;
                     t.normalize();
-                    NaiveDateTime::from_timestamp(t.seconds, t.nanos as u32)
+                    NaiveDateTime::from_timestamp_opt(t.seconds, t.nanos as u32).unwrap_or_default()
                 })
                 .unwrap_or_default();
 
@@ -142,7 +142,7 @@ impl SplitReader for PubsubSplitReader {
                     .as_str()
                     .parse::<i64>()
                     .map_err(|e| anyhow!(e))
-                    .map(|nanos| NaiveDateTime::from_timestamp(nanos, 0))?,
+                    .map(|nanos| NaiveDateTime::from_timestamp_opt(nanos, 0).unwrap_or_default())?,
             )
         } else {
             None

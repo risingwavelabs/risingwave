@@ -29,7 +29,11 @@ impl From<TaggedReceivedMessage> for SourceMessage {
         let timestamp = message
             .message
             .publish_time
-            .map(|t| Utc.timestamp(t.seconds, u32::try_from(t.nanos).unwrap_or_default()))
+            .map(|t| {
+                Utc.timestamp_opt(t.seconds, t.nanos as u32)
+                    .single()
+                    .unwrap_or_default()
+            })
             .unwrap_or_default();
 
         Self {
