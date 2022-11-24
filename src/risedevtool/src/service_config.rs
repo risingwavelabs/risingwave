@@ -290,7 +290,6 @@ pub struct ConnectorNodeConfig {
     pub id: String,
     pub port: u16,
     pub address: String,
-    pub user_managed: bool,
 }
 
 /// All service configuration

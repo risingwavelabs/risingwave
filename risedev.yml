@@ -586,7 +586,7 @@ template:
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
 
-    # RPC endpoint for source connector node
+    # RPC endpoint for source connector node (not allow to change for now)
     connector-source-endpoint: "127.0.0.1:60061"
 
     # Minio instances used by this compute node
@@ -766,15 +766,11 @@ template:
     # Connector node advertise address
     address: "127.0.0.1"
 
-    # Connector node listen port
+    # Connector node listen port (not allow to change for now)
     port: 60061
 
     # Id of this instance
     id: connector-${port}
-
-    # If `user-managed` is true, this service will be started by user with the above config
-    user-managed: false
-
 
   grafana:
     # Listen address of Grafana

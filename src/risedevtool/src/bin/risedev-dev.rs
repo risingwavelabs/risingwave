@@ -316,7 +316,7 @@ fn task_main(
                 let mut service = ConnectorNodeService::new(c.clone())?;
                 service.execute(&mut ctx)?;
                 let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("connector grpc://{}:{}", c.address, c.port));

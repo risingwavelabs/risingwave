@@ -15,7 +15,7 @@ description = "Download RisingWave Connector"
 script = '''
 #!/bin/bash
 set -e
-if [ -d "${PREFIX_BIN}/risingwave-connector.jar" ]; then
+if [ -f "${PREFIX_BIN}/risingwave-connector.jar" ]; then
     exit 0
 fi
 echo "RisingWave Connector not found, download ${RW_CONNECTOR_RELEASE}"
