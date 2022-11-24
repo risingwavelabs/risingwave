@@ -127,8 +127,8 @@ async fn campaign<S: MetaStore>(
 
         // Check if new leader was elected in the meantime
         return match renew_lease(&leader_info, lease_time_sec, &meta_store).await {
-            Some(val) => {
-                if !val {
+            Some(is_leader) => {
+                if !is_leader {
                     return None;
                 }
                 Some(ElectionOutcome {
@@ -292,20 +292,22 @@ pub async fn run_elections<S: MetaStore>(
         // run the initial election
         let election_outcome = campaign(&meta_store, &addr, lease_time_sec, init_lease_id).await;
         let (initial_leader, is_initial_leader) = match election_outcome {
-            Some(infos) => {
+            Some(outcome) => {
                 tracing::info!("initial election finished");
-                (infos.meta_leader_info, infos.is_leader)
+                (outcome.meta_leader_info, outcome.is_leader)
             }
             None => {
                 tracing::info!("initial election failed. Repeating election");
                 continue 'initial_election;
             }
         };
-        tracing::info!(
-            "Initial leader with address '{}' elected. New lease id is {}",
-            initial_leader.node_address,
-            initial_leader.lease_id
-        );
+        if is_initial_leader {
+            tracing::info!(
+                "Initial leader with address '{}' elected. New lease id is {}",
+                initial_leader.node_address,
+                initial_leader.lease_id
+            );
+        }
 
         let initial_leader_clone = initial_leader.clone();
 
@@ -316,7 +318,7 @@ pub async fn run_elections<S: MetaStore>(
             // runs all follow-up elections
             let mut wait = true;
             'election: loop {
-                if !wait {
+                if wait {
                     tokio::select! {
                         _ = &mut shutdown_rx => {
                             tracing::info!("Register leader info is stopped");
@@ -345,11 +347,13 @@ pub async fn run_elections<S: MetaStore>(
                             }
                         };
 
-                    tracing::info!(
-                        "Leader with address '{}' elected. New lease id is {}",
-                        l_info.node_address,
-                        l_info.lease_id
-                    );
+                    if is_l {
+                        tracing::info!(
+                            "Leader with address '{}' elected. New lease id is {}",
+                            l_info.node_address,
+                            l_info.lease_id
+                        );
+                    }
                     leader_info = l_info;
                     is_leader = is_l;
                 }
@@ -381,7 +385,7 @@ pub async fn run_elections<S: MetaStore>(
                         manage_term(&leader_info, lease_time_sec, &meta_store).await
                     {
                         if !leader_alive {
-                            // leader failed, we need to elect a new leader
+                            // leader failed. Immediately elect new leader
                             wait = false;
                             continue 'election;
                         }
