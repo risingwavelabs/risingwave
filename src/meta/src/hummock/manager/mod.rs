@@ -2147,6 +2147,13 @@ where
         &self.cluster_manager
     }
 
+    pub async fn report_scale_compactor_info(&self) {
+        let info = self.get_scale_compactor_info().await;
+        self.metrics
+            .scale_compactor_core_num
+            .set(info.scale_cores() as i64);
+    }
+
     #[named]
     pub async fn get_scale_compactor_info(&self) -> ScaleCompactorInfo {
         let total_score_count = self.compactor_manager.max_concurrent_task_number();

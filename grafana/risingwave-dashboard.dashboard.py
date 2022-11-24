@@ -526,6 +526,15 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_kilobytes(
+                    "scale compactor core count",
+                    "compactor core resource need to scale out",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compactor_core_score_count')})",
+                        ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Compaction Success & Failure Count",
                     "num of compactions from each level to next level",

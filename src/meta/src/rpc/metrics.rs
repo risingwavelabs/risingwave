@@ -73,6 +73,9 @@ pub struct MetaMetrics {
 
     /// The number of workers in the cluster.
     pub worker_num: IntGaugeVec,
+
+    /// The number of compactor CPU need to be scale.
+    pub scale_compactor_core_num: IntGauge,
 }
 
 impl MetaMetrics {
@@ -219,6 +222,12 @@ impl MetaMetrics {
             registry,
         )
         .unwrap();
+        let scale_compactor_core_num = register_int_gauge_with_registry!(
+            "storage_compactor_core_score_count",
+            "num of CPU to be scale to meet compaction need",
+            registry
+        )
+        .unwrap();
 
         Self {
             registry,
@@ -246,6 +255,7 @@ impl MetaMetrics {
             time_after_last_observation: AtomicU64::new(0),
 
             worker_num,
+            scale_compactor_core_num,
         }
     }
 
