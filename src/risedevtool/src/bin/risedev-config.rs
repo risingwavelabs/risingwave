@@ -62,6 +62,7 @@ pub enum Components {
     Etcd,
     Kafka,
     Redis,
+    ConnectorNode,
     Tracing,
     RustComponents,
     Dashboard,
@@ -78,6 +79,7 @@ impl Components {
             Self::Etcd => "[Component] Etcd",
             Self::Kafka => "[Component] Kafka",
             Self::Redis => "[Component] Redis",
+            Self::ConnectorNode => "[Component] RisingWave Connector",
             Self::RustComponents => "[Build] Rust components",
             Self::Dashboard => "[Build] Dashboard v2",
             Self::Tracing => "[Component] Tracing: Jaeger",
@@ -147,6 +149,11 @@ a dev cluster.
 Required if you want to sink data to redis.
                 "
             }
+            Self::ConnectorNode => {
+                "
+Required if you want to create CDC source from external Databases.
+                "
+            }
         }
         .into()
     }
@@ -164,6 +171,7 @@ Required if you want to sink data to redis.
             "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
+            "ENABLE_RW_CONNECTOR" => Some(Self::ConnectorNode),
             _ => None,
         }
     }
@@ -181,6 +189,7 @@ Required if you want to sink data to redis.
             Self::Release => "ENABLE_RELEASE_PROFILE",
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
+            Self::ConnectorNode => "ENABLE_RW_CONNECTOR",
         }
         .into()
     }

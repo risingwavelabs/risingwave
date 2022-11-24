@@ -24,8 +24,10 @@ use crate::WithOptions;
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
 
-/// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
+/// This struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
+///
+/// It can be either a table source or a stream source. Use `self.kind()` to distinguish them.
 #[derive(Clone, Debug)]
 pub struct SourceCatalog {
     pub id: SourceId,
@@ -39,13 +41,18 @@ pub struct SourceCatalog {
     pub properties: HashMap<String, String>,
 }
 
-impl SourceCatalog {
-    pub fn is_table(&self) -> bool {
-        matches!(self.info, SourceInfo::TableSource(_))
-    }
+#[derive(PartialEq, Eq)]
+pub enum SourceKind {
+    Table,
+    Stream,
+}
 
-    pub fn is_stream(&self) -> bool {
-        matches!(self.info, SourceInfo::StreamSource(_))
+impl SourceCatalog {
+    pub fn kind(&self) -> SourceKind {
+        match self.info {
+            SourceInfo::StreamSource(_) => SourceKind::Stream,
+            SourceInfo::TableSource(_) => SourceKind::Table,
+        }
     }
 }
 
