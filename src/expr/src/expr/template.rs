@@ -168,7 +168,7 @@ macro_rules! eval_bytes {
         if let ($(Some($arg), )*) = ($($arg, )*) {
             {
                 let writer = $output_array.writer();
-                let _guard = ($self.func)($($arg, )* writer);
+                let _guard = ($self.func)($($arg, )* writer)?;
             }
         } else {
             $output_array.append(None);
