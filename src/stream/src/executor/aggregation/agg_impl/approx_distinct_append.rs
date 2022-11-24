@@ -148,9 +148,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
         state_table: &mut StateTable<S>,
         group_key: Option<&Row>,
     ) -> StreamExecutorResult<()> {
-        let mut current_row = group_key
-            .map(|row| row.values().cloned().collect_vec())
-            .unwrap_or_default();
+        let mut current_row = group_key.map(|row| row.0.clone()).unwrap_or_default();
         current_row.push(Some(ScalarImpl::List(ListValue::new(
             serialize_buckets(
                 &self

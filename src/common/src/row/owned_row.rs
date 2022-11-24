@@ -116,11 +116,6 @@ impl Row {
         serializer.serialize((&self).project(key_indices), &mut bytes);
         bytes
     }
-
-    /// TODO(row trait): use `Row::iter` instead.
-    pub fn values(&self) -> impl Iterator<Item = &Datum> {
-        self.0.iter()
-    }
 }
 
 impl EstimateSize for Row {
