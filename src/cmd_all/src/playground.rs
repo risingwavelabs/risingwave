@@ -228,7 +228,7 @@ pub async fn playground() -> Result<()> {
             console::style(format_args!("{idle}s")).dim()
         );
     } else {
-        eprintln!("");
+        eprintln!();
     }
     eprintln!(
         "* Use {} instead if you want to start a full cluster.",
