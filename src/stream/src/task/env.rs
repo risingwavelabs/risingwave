@@ -70,10 +70,7 @@ impl StreamEnvironment {
         use risingwave_storage::monitor::StateStoreMetrics;
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
-            connector_params: ConnectorParams::new(
-                Some("127.0.0.1:60061".parse().unwrap()),
-                Some("127.0.0.1:50051".parse().unwrap()),
-            ),
+            connector_params: ConnectorParams::new(None, None),
             source_manager: Arc::new(TableSourceManager::default()),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),

@@ -7,7 +7,6 @@ import "data.proto";
 option java_package = "com.risingwave.proto";
 option java_outer_classname = "ConnectorServiceProto";
 
-
 message SinkConfig {
   message TableSchema {
     message Column {
@@ -21,7 +20,6 @@ message SinkConfig {
   map<string, string> properties = 2;
   TableSchema table_schema = 3;
 }
-
 
 message SinkTask {
   message StartSink {

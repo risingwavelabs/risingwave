@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::SourceNode;
@@ -20,7 +19,6 @@ use risingwave_source::SourceDescBuilder;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
-use crate::error::StreamError;
 use crate::executor::state_table_handler::SourceStateTableHandler;
 use crate::executor::SourceExecutor;
 
@@ -52,13 +50,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             node.properties.clone(),
             node.get_info()?.get_source_info()?.clone(),
             params.env.source_manager_ref(),
-            params
-                .env
-                .connector_params()
-                .connector_source_endpoint
-                .ok_or_else(|| {
-                    StreamError::from(anyhow!("connector_source_endpoint is not set"))
-                })?,
+            params.env.connector_params(),
         );
 
         let columns = node.columns.clone();
