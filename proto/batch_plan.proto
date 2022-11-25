@@ -227,7 +227,6 @@ message LocalLookupJoinNode {
   // Null safe means it treats `null = null` as true.
   // Each key pair can be null safe independently. (left_key, right_key, null_safe)
   repeated bool null_safe = 11;
-
 }
 
 // RFC: A new schedule way for distributed lookup join
