@@ -181,7 +181,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             inputs.push(input);
         }
 
-        let real_executor = build_executor! { self, inputs, // do not get this part
+        let real_executor = build_executor! { self, inputs,
             NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
             NodeBody::Insert => InsertExecutor,
             NodeBody::Delete => DeleteExecutor,

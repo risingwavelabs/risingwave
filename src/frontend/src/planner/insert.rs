@@ -32,7 +32,7 @@ impl Planner {
             insert.table_source.name,
             insert.table_source.source_id,
             insert.table_source.associated_mview_id,
-            insert.column_idxs, // [1,2,0]
+            insert.column_idxs,
         )?
         .into();
         // For insert, frontend will only schedule one task so do not need this to be single.

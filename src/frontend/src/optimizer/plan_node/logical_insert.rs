@@ -47,7 +47,7 @@ impl LogicalInsert {
         table_source_name: String,
         source_id: TableId,
         associated_mview_id: TableId,
-        column_idxs: Vec<usize>, // [1,2,0]
+        column_idxs: Vec<usize>,
     ) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
@@ -69,14 +69,14 @@ impl LogicalInsert {
         table_source_name: String,
         source_id: TableId,
         table_id: TableId,
-        column_idxs: Vec<usize>, // value?
+        column_idxs: Vec<usize>,
     ) -> Result<Self> {
         Ok(Self::new(
             input,
             table_source_name,
             source_id,
             table_id,
-            column_idxs, // [1,2,0]
+            column_idxs,
         ))
     }
 
@@ -113,7 +113,7 @@ impl PlanTreeNodeUnary for LogicalInsert {
             self.table_source_name.clone(),
             self.source_id,
             self.associated_mview_id,
-            self.column_idxs.clone(), // [1,2,0]
+            self.column_idxs.clone(),
         )
     }
 }

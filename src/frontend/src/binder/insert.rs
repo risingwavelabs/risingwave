@@ -119,8 +119,7 @@ impl Binder {
             }
         };
 
-        // insert into t (v2, v3, v1) values (2, 3, 1);
-        let mut target_table_col_idxs: Vec<usize> = vec![]; // [1,2,0]. Seems correct
+        let mut target_table_col_idxs: Vec<usize> = vec![];
         'outer: for query_column in &columns {
             let column_name = query_column.real_value();
             '_inner: for (col_idx, table_column) in table_source.columns.iter().enumerate() {
@@ -161,11 +160,10 @@ impl Binder {
         }
 
         let insert = BoundInsert {
-            // column_idxs? value?
             table_source,
             source,
             cast_exprs,
-            column_idxs: target_table_col_idxs, // [1,2,0]
+            column_idxs: target_table_col_idxs,
         };
 
         Ok(insert)
