@@ -27,9 +27,9 @@ import {
   VStack,
 } from "@chakra-ui/react"
 import { ResponsiveContainer, XAxis, AreaChart, Area, YAxis } from 'recharts';
-import { sortBy } from "lodash"
+import { fill, reverse, sortBy } from "lodash"
 import Head from "next/head"
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import Title from "../components/Title"
 import { WorkerNode } from "../proto/gen/common"
 import {
@@ -68,12 +68,38 @@ function WorkerNodeComponent({
 function WorkerNodeMetricsComponent({
   job,
   instance,
-  metrics
+  metrics,
+  isCpuMetrics
 }: {
   job: string
   instance: string
   metrics: MetricsSample[]
+  isCpuMetrics: boolean
 }) {
+  const metricsCallback = useCallback(() => {
+    const filledMetrics: MetricsSample[] = []
+    if (metrics.length === 0) {
+      return []
+    }
+    let lastTs: number = metrics.at(-1)!.timestamp
+    for (let pt of reverse(metrics)) {
+      while (lastTs - pt.timestamp > 0) {
+        lastTs -= 60
+        filledMetrics.push({
+          timestamp: lastTs,
+          value: 0,
+        })
+      }
+      filledMetrics.push(pt)
+      lastTs -= 60
+    }
+    while (filledMetrics.length < 60) {
+      filledMetrics.push({ timestamp: lastTs, value: 0 })
+      lastTs -= 60
+    }
+    console.log(filledMetrics)
+    return reverse(filledMetrics)
+  }, [metrics])
   return (
     <Fragment>
       <VStack alignItems="start" spacing={1}>
@@ -82,8 +108,9 @@ function WorkerNodeMetricsComponent({
         </Text>
 
         <ResponsiveContainer width="100%" height={100}>
-          <AreaChart data={metrics}>
+          <AreaChart data={metricsCallback()}>
             <XAxis dataKey="timestamp" type="number" domain={['dataMin', 'dataMax']} hide={true} />
+            {isCpuMetrics && <YAxis type="number" domain={[0, 1]} hide={true} />}
             <Area isAnimationActive={false} type="monotone" dataKey="value" strokeWidth={1} stroke={theme.colors.teal["500"]} fill={theme.colors.teal["100"]} />
           </AreaChart>
         </ResponsiveContainer>
@@ -212,6 +239,7 @@ export default function Cluster() {
               job={data.metric.job}
               instance={data.metric.instance}
               metrics={data.sample}
+              isCpuMetrics={true}
             />
           </GridItem>
         ))}
@@ -231,6 +259,7 @@ export default function Cluster() {
               job={data.metric.job}
               instance={data.metric.instance}
               metrics={data.sample}
+              isCpuMetrics={false}
             />
           </GridItem>
         ))}
