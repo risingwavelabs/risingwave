@@ -752,19 +752,20 @@ mod tests {
 
         let decimals = [
             "nan",
-            // "-inf",
-            // "-123456789012345678901234",
-            // "-1234567890.1234",
-            // "-233.3",
-            // "-0.001",
-            // "0",
-            // "0.001",
-            // "0.01111",
-            // "50",
-            // "100",
-            // "12345",
-            // "123456789012345678901234",
-            // "inf",
+            "-inf",
+            "-123456789012345678901234",
+            "-1234567890.1234",
+            "-233.3",
+            "-0.001",
+            "0",
+            "0.001",
+            "0.01111",
+            "50",
+            "100",
+            "12345",
+            "41721.900909090909090909090909",
+            "123456789012345678901234",
+            "inf",
         ];
         let mut last_encoding = vec![];
         for s in decimals {
@@ -774,14 +775,6 @@ mod tests {
             assert!(encoding > last_encoding);
             last_encoding = encoding;
         }
-    }
-
-    #[test]
-    #[cfg(feature = "decimal")]
-    fn test_decimal_2() {
-        let d: Decimal = "41721.900909090909090909090909".parse().unwrap();
-        let d0 = deserialize_decimal(&serialize_decimal(d));
-        assert_eq!(d, d0);
     }
 
     #[cfg(feature = "decimal")]
