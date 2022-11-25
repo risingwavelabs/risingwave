@@ -317,13 +317,19 @@ impl ColPrunable for LogicalTopN {
                 })
                 .collect(),
         };
+        let new_group_key = self
+            .group_key()
+            .iter()
+            .map(|group_key| mapping.map(*group_key))
+            .collect();
         let new_input = self.input().prune_col(&input_required_cols);
-        let top_n = Self::new(
+        let top_n = Self::with_group(
             new_input,
             self.limit(),
             self.offset(),
             self.with_ties(),
             new_order,
+            new_group_key,
         )
         .into();
 
