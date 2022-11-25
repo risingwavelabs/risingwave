@@ -2176,7 +2176,7 @@ where
     pub async fn get_scale_compactor_info(&self) -> ScaleCompactorInfo {
         let total_score_count = self.compactor_manager.max_concurrent_task_number();
         // TODO: avoid hold compaction lock too long.
-        let compaction = write_lock!(self, compaction).await;
+        let compaction = read_lock!(self, compaction).await;
         let pending_task_count = compaction.compact_task_assignment.len();
         let version = {
             let guard = read_lock!(self, versioning).await;
