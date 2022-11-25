@@ -14,7 +14,10 @@ async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
 byteorder = "1"
 bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
 clap = { version = "3", features = ["derive"] }
 crc32fast = "1"
 dyn-clone = "1"
@@ -42,6 +45,7 @@ risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
 risingwave_stream = { path = "../stream" }
+risingwave_tracing = { path = "../tracing" }
 serde = { version = "1", features = ["derive"] }
 serde-value = "0.7"
 serde_json = "1"
@@ -72,4 +76,3 @@ workspace-hack = { path = "../workspace-hack" }
 futures-async-stream = "0.2"
 rand = "0.8"
 tempfile = "3"
-
