@@ -17,7 +17,7 @@ macro_rules! trace {
     (GET, $key:ident, $epoch:ident, $opt:ident, $storage_type:expr) => {
         risingwave_hummock_trace::new_global_span!(
             risingwave_hummock_trace::Operation::get(
-                $key.to_vec(),
+                risingwave_hummock_trace::TracedBytes::from($key.to_vec()),
                 $epoch,
                 $opt.prefix_hint.clone(),
                 $opt.check_bloom_filter,
@@ -32,11 +32,19 @@ macro_rules! trace {
         risingwave_hummock_trace::new_global_span!(
             risingwave_hummock_trace::Operation::ingest(
                 $kvs.iter()
-                    .map(|(k, v)| (k.to_vec(), v.user_value.clone().map(|b| b.to_vec())))
+                    .map(|(k, v)| (
+                        risingwave_hummock_trace::TracedBytes::from(k.clone()),
+                        v.user_value
+                            .clone()
+                            .map(|b| risingwave_hummock_trace::TracedBytes::from(b.clone()))
+                    ))
                     .collect(),
                 $delete_range
                     .iter()
-                    .map(|(k, v)| (k.to_vec(), v.to_vec()))
+                    .map(|(k, v)| (
+                        risingwave_hummock_trace::TracedBytes::from(k.clone()),
+                        risingwave_hummock_trace::TracedBytes::from(v.clone())
+                    ))
                     .collect(),
                 $opt.epoch,
                 $opt.table_id.table_id,
@@ -93,9 +101,10 @@ macro_rules! trace_result {
     (GET, $span:ident, $result:ident) => {
         risingwave_hummock_trace::send_result!(
             $span,
-            OperationResult::Get(TraceResult::from(
-                $result.as_ref().map(|o| o.as_ref().map(|b| b.to_vec()))
-            ))
+            OperationResult::Get(TraceResult::from($result.as_ref().map(|o| {
+                o.as_ref()
+                    .map(|b| risingwave_hummock_trace::TracedBytes::from(b.clone()))
+            })))
         )
     };
     (INGEST, $span:ident, $result:ident) => {
@@ -113,11 +122,10 @@ macro_rules! trace_result {
     (ITER_NEXT, $span:expr, $pair:ident) => {
         risingwave_hummock_trace::send_result!(
             $span,
-            OperationResult::IterNext(TraceResult::Ok(
-                $pair
-                    .as_ref()
-                    .map(|(k, v)| (k.user_key.table_key.to_vec(), v.to_vec()))
-            ))
+            OperationResult::IterNext(TraceResult::Ok($pair.as_ref().map(|(k, v)| (
+                risingwave_hummock_trace::TracedBytes::from(k.user_key.table_key.to_vec()),
+                risingwave_hummock_trace::TracedBytes::from(v.clone())
+            ))))
         )
     };
     (SYNC, $span:ident, $result:ident) => {
@@ -148,4 +156,17 @@ macro_rules! send_result {
             $span.send_result($result);
         }
     };
+}
+
+#[macro_export]
+macro_rules! traced_bytes {
+    () => (
+        $crate::TracedBytes::from(vec![])
+    );
+    ($elem:expr; $n:expr) => (
+        $crate::TracedBytes::from(vec![$elem:expr; $n:expr])
+    );
+    ($($x:expr),+ $(,)?) => (
+        $crate::TracedBytes::from(vec![$($x),+])
+    );
 }

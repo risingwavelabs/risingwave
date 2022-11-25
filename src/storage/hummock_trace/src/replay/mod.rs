@@ -24,7 +24,7 @@ pub use runner::*;
 pub(crate) use worker::*;
 
 use crate::error::Result;
-use crate::{Record, TraceReadOptions, TraceWriteOptions};
+use crate::{Record, TraceReadOptions, TracedBytes, TracedWriteOptions};
 
 type ReplayGroup = Record;
 
@@ -46,32 +46,6 @@ pub trait GlobalReplay: ReplayRead + ReplayStateStore + Send + Sync {}
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
-pub trait Replayable: Send + Sync {
-    async fn get(
-        &self,
-        key: Vec<u8>,
-        epoch: u64,
-        read_options: TraceReadOptions,
-    ) -> Result<Option<Vec<u8>>>;
-    async fn ingest(
-        &self,
-        kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-        delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
-        write_options: TraceWriteOptions,
-    ) -> Result<usize>;
-    async fn iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-        read_options: TraceReadOptions,
-    ) -> Result<Box<dyn ReplayIter>>;
-    async fn sync(&self, id: u64) -> Result<usize>;
-    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
-    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
-    async fn new_local(&self, table_id: u32) -> Box<dyn Replayable>;
-}
-#[cfg_attr(test, automock)]
-#[async_trait::async_trait]
 pub trait ReplayRead {
     async fn iter(
         &self,
@@ -81,10 +55,10 @@ pub trait ReplayRead {
     ) -> Result<Box<dyn ReplayIter>>;
     async fn get(
         &self,
-        key: Vec<u8>,
+        key: TracedBytes,
         epoch: u64,
         read_options: TraceReadOptions,
-    ) -> Result<Option<Vec<u8>>>;
+    ) -> Result<Option<TracedBytes>>;
 }
 
 #[cfg_attr(test, automock)]
@@ -92,9 +66,9 @@ pub trait ReplayRead {
 pub trait ReplayWrite {
     async fn ingest(
         &self,
-        kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-        delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
-        write_options: TraceWriteOptions,
+        kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
+        delete_ranges: Vec<(TracedBytes, TracedBytes)>,
+        write_options: TracedWriteOptions,
     ) -> Result<usize>;
 }
 
@@ -110,7 +84,7 @@ pub trait ReplayStateStore {
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
 pub trait ReplayIter: Send + Sync {
-    async fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)>;
+    async fn next(&mut self) -> Option<(TracedBytes, TracedBytes)>;
 }
 
 // define mock trait for replay interfaces
@@ -127,18 +101,18 @@ mock! {
         ) -> Result<Box<dyn ReplayIter>>;
         async fn get(
             &self,
-            key: Vec<u8>,
+            key: TracedBytes,
             epoch: u64,
             read_options: TraceReadOptions,
-        ) -> Result<Option<Vec<u8>>>;
+        ) -> Result<Option<TracedBytes>>;
     }
     #[async_trait::async_trait]
     impl ReplayWrite for GlobalReplayInterface{
         async fn ingest(
             &self,
-            kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-            delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
-            write_options: TraceWriteOptions,
+            kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
+            delete_ranges: Vec<(TracedBytes, TracedBytes)>,
+            write_options: TracedWriteOptions,
         ) -> Result<usize>;
     }
     #[async_trait::async_trait]
@@ -164,18 +138,18 @@ mock! {
         ) -> Result<Box<dyn ReplayIter>>;
         async fn get(
             &self,
-            key: Vec<u8>,
+            key: TracedBytes,
             epoch: u64,
             read_options: TraceReadOptions,
-        ) -> Result<Option<Vec<u8>>>;
+        ) -> Result<Option<TracedBytes>>;
     }
     #[async_trait::async_trait]
     impl ReplayWrite for LocalReplayInterface{
         async fn ingest(
             &self,
-            kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-            delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
-            write_options: TraceWriteOptions,
+            kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
+            delete_ranges: Vec<(TracedBytes, TracedBytes)>,
+            write_options: TracedWriteOptions,
         ) -> Result<usize>;
     }
     impl LocalReplay for LocalReplayInterface{}

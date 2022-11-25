@@ -106,7 +106,7 @@ mod test {
     use bincode::{config, decode_from_slice, encode_to_vec};
 
     use super::*;
-    use crate::Operation;
+    use crate::{Operation, TracedBytes};
 
     mock! {
         Write{}
@@ -118,7 +118,15 @@ mod test {
 
     #[test]
     fn test_bincode_serialize() {
-        let op = Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), 123, false);
+        let op = Operation::get(
+            TracedBytes::from(vec![0, 1, 2, 3]),
+            123,
+            None,
+            true,
+            Some(12),
+            123,
+            false,
+        );
         let expected = Record::new_local_none(0, op);
         let serializer = BincodeSerializer::new();
         let mut buf = Vec::new();
@@ -134,7 +142,9 @@ mod test {
     #[test]
     fn test_writer_impl_write() {
         let mut mock_writer = MockWrite::new();
-        let op = Operation::ingest(vec![(vec![1], Some(vec![5]))], vec![], 0, 0);
+        let key = TracedBytes::from(vec![123]);
+        let value = TracedBytes::from(vec![234]);
+        let op = Operation::ingest(vec![(key, Some(value))], vec![], 0, 0);
         let record = Record::new_local_none(0, op);
         let r_bytes = encode_to_vec(record.clone(), config::standard()).unwrap();
         let r_len = r_bytes.len();

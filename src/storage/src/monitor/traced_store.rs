@@ -165,6 +165,11 @@ impl<S: StateStoreWrite> StateStoreWrite for TracedStateStore<S> {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            // Don't trace empty ingest to save disk space
+            if kv_pairs.is_empty() && delete_ranges.is_empty() {
+                return Ok(0);
+            }
+
             let span: TraceSpan = trace!(
                 INGEST,
                 kv_pairs,

@@ -105,7 +105,7 @@ mod test {
     use super::{TraceReader, TraceReaderImpl};
     use crate::{
         BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record, TraceSubResp,
-        MAGIC_BYTES,
+        TracedBytes, MAGIC_BYTES,
     };
 
     mock! {
@@ -145,7 +145,15 @@ mod test {
     #[test]
     fn test_bincode_deserialize() {
         let deserializer = BincodeDeserializer::new();
-        let op = Operation::get(vec![5, 5, 15, 6], 7564, None, true, Some(5433), 123, false);
+        let op = Operation::get(
+            TracedBytes::from(vec![5, 5, 15, 6]),
+            7564,
+            None,
+            true,
+            Some(5433),
+            123,
+            false,
+        );
         let expected = Record::new_local_none(54433, op);
 
         let mut buf = MemTraceStore::default();
@@ -188,8 +196,8 @@ mod test {
         let mut records = Vec::new();
 
         for i in 0..count {
-            let key = format!("key{}", i).as_bytes().to_vec();
-            let value = format!("value{}", i).as_bytes().to_vec();
+            let key = TracedBytes::from(format!("key{}", i).as_bytes().to_vec());
+            let value = TracedBytes::from(format!("value{}", i).as_bytes().to_vec());
             let op = Operation::ingest(vec![(key, Some(value))], vec![], 0, 0);
             let record = Record::new_local_none(i, op);
             records.push(record.clone());

@@ -285,7 +285,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::MockTraceWriter;
+    use crate::{MockTraceWriter, TracedBytes};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_global_new_span() {
@@ -336,7 +336,15 @@ mod tests {
             let collector = collector.clone();
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
-                let op = Operation::get(vec![i as u8], 123, None, true, Some(12), 123, false);
+                let op = Operation::get(
+                    TracedBytes::from(vec![i as u8]),
+                    123,
+                    None,
+                    true,
+                    Some(12),
+                    123,
+                    false,
+                );
                 let _span =
                     TraceSpan::new_op(collector.tx(), generator.next(), op, StorageType::Global);
             });
@@ -357,7 +365,15 @@ mod tests {
         let collector = Arc::new(GlobalCollector::new());
         let generator = Arc::new(UniqueIdGenerator::new(AtomicU64::new(0)));
 
-        let op = Operation::get(vec![74, 56, 43, 67], 256, None, true, Some(242), 167, false);
+        let op = Operation::get(
+            TracedBytes::from(vec![74, 56, 43, 67]),
+            256,
+            None,
+            true,
+            Some(242),
+            167,
+            false,
+        );
         let mut mock_writer = MockTraceWriter::new();
 
         mock_writer.expect_write_all().returning(|_| Ok(0));

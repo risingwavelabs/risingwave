@@ -62,7 +62,6 @@ impl WorkerScheduler {
 impl ReplayWorkerScheduler for WorkerScheduler {
     fn schedule(&mut self, record: Record) {
         let worker_id = self.allocate_worker_id(&record);
-
         let handler = self
             .workers
             .entry(worker_id)
@@ -84,7 +83,6 @@ impl ReplayWorkerScheduler for WorkerScheduler {
         let worker_id = self.allocate_worker_id(&record);
         if let Some(handler) = self.workers.get_mut(&worker_id) {
             handler.wait().await;
-
             if let WorkerId::OneShot(_) = worker_id {
                 let handler = self.workers.remove(&worker_id).unwrap();
                 handler.finish();
@@ -126,22 +124,20 @@ impl ReplayWorker {
     ) {
         let mut iters_map = HashMap::new();
         let mut local_storages = LocalStorages::new();
-        loop {
-            if let Some(msg) = req_rx.recv().await {
-                match msg {
-                    ReplayRequest::Task(record) => {
-                        Self::handle_record(
-                            record,
-                            &replay,
-                            &mut res_rx,
-                            &mut iters_map,
-                            &mut local_storages,
-                        )
-                        .await;
-                        resp_tx.send(()).expect("failed to done task");
-                    }
-                    ReplayRequest::Fin => return,
+        while let Some(msg) = req_rx.recv().await {
+            match msg {
+                ReplayRequest::Task(record) => {
+                    Self::handle_record(
+                        record,
+                        &replay,
+                        &mut res_rx,
+                        &mut iters_map,
+                        &mut local_storages,
+                    )
+                    .await;
+                    resp_tx.send(()).expect("failed to done task");
                 }
+                ReplayRequest::Fin => return,
             }
         }
     }
@@ -324,8 +320,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        MockGlobalReplayInterface, MockLocalReplayInterface, MockReplayIter, StorageType,
-        TraceReadOptions,
+        traced_bytes, MockGlobalReplayInterface, MockLocalReplayInterface, MockReplayIter,
+        StorageType, TraceReadOptions,
     };
 
     #[tokio::test]
@@ -349,7 +345,7 @@ mod tests {
             ignore_range_tombstone: true,
         };
         let op = Operation::Get {
-            key: vec![123],
+            key: traced_bytes![123],
             epoch: 123,
             read_options: read_options.clone(),
         };
@@ -363,11 +359,11 @@ mod tests {
             mock_local
                 .expect_get()
                 .with(
-                    predicate::eq(vec![123]),
+                    predicate::eq(traced_bytes![123]),
                     predicate::eq(123),
                     predicate::always(),
                 )
-                .returning(|_, _, _| Ok(Some(vec![120])));
+                .returning(|_, _, _| Ok(Some(traced_bytes![120])));
 
             Box::new(mock_local)
         });
@@ -387,7 +383,7 @@ mod tests {
                     mock_iter
                         .expect_next()
                         .times(1)
-                        .returning(|| Some((vec![1], vec![0])));
+                        .returning(|| Some((traced_bytes![1], traced_bytes![0])));
                     Ok(Box::new(mock_iter))
                 });
 
@@ -396,7 +392,9 @@ mod tests {
 
         let replay: Arc<Box<dyn GlobalReplay>> = Arc::new(Box::new(mock_replay));
         res_tx
-            .send(OperationResult::Get(TraceResult::Ok(Some(vec![120]))))
+            .send(OperationResult::Get(TraceResult::Ok(Some(traced_bytes![
+                120
+            ]))))
             .unwrap();
         ReplayWorker::handle_record(
             record,
@@ -436,8 +434,8 @@ mod tests {
         let record = Record::new(StorageType::Local(0), 2, op);
         res_tx
             .send(OperationResult::IterNext(TraceResult::Ok(Some((
-                vec![1],
-                vec![0],
+                traced_bytes![1],
+                traced_bytes![0],
             )))))
             .unwrap();
 
