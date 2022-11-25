@@ -4,8 +4,8 @@ package connector_service;
 
 import "data.proto";
 
-option java_package = "com.risingwave.proto";
 option java_outer_classname = "ConnectorServiceProto";
+option java_package = "com.risingwave.proto";
 
 message SinkConfig {
   message TableSchema {
@@ -35,7 +35,7 @@ message SinkTask {
       repeated RowOp rowOps = 1;
     }
 
-    oneof payload{
+    oneof payload {
       JsonPayload json_payload = 1;
     }
 
@@ -73,7 +73,7 @@ message SinkResponse {
     uint64 batch_id = 2;
   }
 
-  message StartResponse { }
+  message StartResponse {}
 
   oneof response {
     SyncResponse sync = 2;
