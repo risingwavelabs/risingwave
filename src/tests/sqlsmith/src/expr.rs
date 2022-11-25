@@ -252,8 +252,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         if self.is_mview || ret != DataTypeName::Boolean || inside_agg {
             return self.gen_simple_scalar(ret);
         };
-
-        let (subquery, _) = self.gen_correlated_query();
+        // TODO: Correlated Subquery in Having and Select is not implemented yet.
+        // let (subquery, _) = self.gen_correlated_query();
+        // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/2275>
+        let (subquery, _) = self.gen_local_query();
         Expr::Exists(Box::new(subquery))
     }
 
