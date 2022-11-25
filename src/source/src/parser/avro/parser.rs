@@ -17,7 +17,7 @@ use std::fmt::Debug;
 
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Reader, Schema};
-use chrono::{Datelike, NaiveDate};
+use chrono::Datelike;
 use itertools::Itertools;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
@@ -36,7 +36,9 @@ use crate::parser::ParseFuture;
 use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 fn unix_epoch_days() -> i32 {
-    NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()
+    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
+        .0
+        .num_days_from_ce()
 }
 
 #[derive(Debug)]
@@ -326,7 +328,6 @@ mod test {
 
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Days, Duration, Millis, Months, Schema, Writer};
-    use chrono::NaiveDate;
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
@@ -584,20 +585,25 @@ mod test {
                         record.put(field.name.as_str(), true);
                     }
                     Schema::Date => {
-                        let original_date = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
-                        let naive_date = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
-                        let num_days = naive_date.sub(original_date).num_days() as i32;
+                        let original_date =
+                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                        let naive_date =
+                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                        let num_days = naive_date.0.sub(original_date.0).num_days() as i32;
                         record.put(field.name.as_str(), Value::Date(num_days));
                     }
                     Schema::TimestampMillis => {
-                        let datetime = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
-                        let timestamp_mills = Value::TimestampMillis(datetime.timestamp() * 1_000);
+                        let datetime =
+                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                        let timestamp_mills =
+                            Value::TimestampMillis(datetime.0.timestamp() * 1_000);
                         record.put(field.name.as_str(), timestamp_mills);
                     }
                     Schema::TimestampMicros => {
-                        let datetime = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
+                        let datetime =
+                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
                         let timestamp_micros =
-                            Value::TimestampMicros(datetime.timestamp() * 1_000_000);
+                            Value::TimestampMicros(datetime.0.timestamp() * 1_000_000);
                         record.put(field.name.as_str(), timestamp_micros);
                     }
                     Schema::Duration => {

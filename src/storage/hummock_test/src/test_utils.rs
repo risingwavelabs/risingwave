@@ -300,9 +300,9 @@ where
 }
 
 impl<G: StateStore> LocalGlobalStateStoreHolder<G::Local, G> {
-    pub(crate) async fn new(state_store: G) -> Self {
+    pub(crate) async fn new(state_store: G, table_id: TableId) -> Self {
         LocalGlobalStateStoreHolder {
-            local: state_store.new_local(TEST_TABLE_ID).await,
+            local: state_store.new_local(table_id).await,
             global: state_store,
         }
     }
@@ -354,9 +354,8 @@ pub(crate) async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHumm
     (hummock_storage, meta_client)
 }
 
-pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
-
 pub(crate) async fn with_hummock_storage_v2(
+    table_id: TableId,
 ) -> (HummockV2MixedStateStore, Arc<MockHummockMetaClient>) {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
@@ -377,7 +376,7 @@ pub(crate) async fn with_hummock_storage_v2(
     .unwrap();
 
     (
-        HummockV2MixedStateStore::new(hummock_storage).await,
+        HummockV2MixedStateStore::new(hummock_storage, table_id).await,
         meta_client,
     )
 }

@@ -246,7 +246,7 @@ impl Binder {
     /// - a table/source/materialized view
     /// - a reference to a CTE
     /// - a logical view
-    pub(super) fn bind_relation_by_name(
+    pub fn bind_relation_by_name(
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,

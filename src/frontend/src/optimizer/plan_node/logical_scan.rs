@@ -309,7 +309,7 @@ impl LogicalScan {
     }
 
     /// Undo predicate push down when predicate in scan is not supported.
-    fn predicate_pull_up(&self) -> (LogicalScan, Condition, Option<Vec<ExprImpl>>) {
+    pub fn predicate_pull_up(&self) -> (LogicalScan, Condition, Option<Vec<ExprImpl>>) {
         let mut predicate = self.predicate().clone();
         if predicate.always_true() {
             return (self.clone(), Condition::true_cond(), None);
