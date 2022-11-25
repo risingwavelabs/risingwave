@@ -26,7 +26,7 @@ statement ok
 create table st (v1 int, v2 struct<v1 int, v2 struct<v1 varchar, v2 int>>, v3 struct<v1 varchar, v2 struct<v1 int, v2 varchar>>);
 
 statement ok
-select v2 = row(1, row(1, 1)), v2 < row(1, row(1, 1)), v2 <= row(1, row(1, 1)) from st;
+select v2 = row('1', row('1', '1')), v2 < row('1', row('1', '1')), v2 <= row('1', row('1', '1')) from st;
 
 statement ok
 drop table st;

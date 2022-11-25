@@ -528,6 +528,9 @@ pub fn struct_cast(
             .zip_eq(source_elem_type.fields.iter())
             .zip_eq(target_elem_type.fields.iter())
             .map(|((datum_ref, source_elem_type), target_elem_type)| {
+                if source_elem_type == target_elem_type {
+                    return Ok(datum_ref.map(|scalar_ref| scalar_ref.into_scalar_impl()));
+                }
                 datum_ref
                     .map(|scalar_ref| scalar_cast(scalar_ref, source_elem_type, target_elem_type))
                     .transpose()

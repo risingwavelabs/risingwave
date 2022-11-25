@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
-use either::Either;
 use itertools::{iproduct, Itertools as _};
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
@@ -24,7 +23,7 @@ use risingwave_common::types::{DataType, DataTypeName};
 
 use super::{align_types, cast_ok_base, CastContext};
 use crate::expr::type_inference::cast::align_array_and_element;
-use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType};
+use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, FunctionCall};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
@@ -94,160 +93,109 @@ macro_rules! ensure_arity {
     };
 }
 
-type InferExprs = Vec<(Either<DataType, ExprImpl>, Option<String>)>;
+/// An intermediate representation of struct type when resolving the type to cast.
+#[derive(Debug)]
+pub enum NestedType {
+    /// A type that can should inferred (will never be struct).
+    Infer(DataType),
+    /// A concrete data type.
+    Type(DataType),
+    /// A struct type.
+    Struct(Vec<NestedType>),
+}
 
-/// Decompose `row` expression into a list of types, whereas `None` means unknown type.
-fn decompose_row_into_fields(expr: &ExprImpl) -> Result<InferExprs> {
-    if is_row_function(expr) {
+/// Convert struct type to a nested type
+fn extract_struct_nested_type(ty: &StructType) -> Result<NestedType> {
+    let fields = ty
+        .fields
+        .iter()
+        .map(|f| match f {
+            DataType::Struct(s) => extract_struct_nested_type(&s),
+            _ => Ok(NestedType::Type(f.clone())),
+        })
+        .try_collect()?;
+    Ok(NestedType::Struct(fields))
+}
+
+/// Decompose expression into a nested type to be inferred.
+fn extract_expr_nested_type(expr: &ExprImpl) -> Result<NestedType> {
+    if expr.is_unknown() {
+        Ok(NestedType::Infer(expr.return_type()))
+    } else if is_row_function(expr) {
+        // For row function, recursively get the type requirement of each field.
         let func = expr.as_function_call().unwrap();
         let ret = func
             .inputs()
             .iter()
-            .map(|e| {
-                if e.is_unknown() || is_row_function(e) {
-                    (Either::Right(e.clone()), None)
-                } else {
-                    (Either::Left(e.return_type()), None)
-                }
-            })
-            .collect::<Vec<_>>();
-        Ok(ret)
+            .map(|e| extract_expr_nested_type(e))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(NestedType::Struct(ret))
     } else {
-        Err(ErrorCode::BindError("not a row expression".to_string()).into())
-    }
-}
-
-pub enum StructCastSig<'a> {
-    Expr(&'a ExprImpl),
-    StructType(Arc<StructType>),
-}
-
-impl<'a> StructCastSig<'a> {
-    fn extract_struct_fields(&self) -> Result<InferExprs> {
-        match self {
-            Self::Expr(e) => match e.return_type() {
-                DataType::Struct(t) => {
-                    if t.field_names.is_empty() {
-                        decompose_row_into_fields(e)
-                    } else {
-                        Ok(t.fields
-                            .iter()
-                            .zip_eq(t.field_names.iter())
-                            .map(|(x, y)| (Either::Left(x.clone()), Some(y.clone())))
-                            .collect())
-                    }
-                }
-                _ => unreachable!(),
-            },
-            Self::StructType(t) => Ok(t
-                .fields
-                .iter()
-                .zip_eq(t.field_names.iter())
-                .map(|(x, y)| (Either::Left(x.clone()), Some(y.clone())))
-                .collect()),
+        match expr.return_type() {
+            DataType::Struct(ty) => extract_struct_nested_type(&ty),
+            ty => Ok(NestedType::Type(ty)),
         }
     }
 }
 
 /// Handle struct comparisons for [`infer_type_for_special`].
 fn infer_struct_cast_target_type(
-    _func_type: ExprType,
-    lexpr: StructCastSig<'_>,
-    rexpr: StructCastSig<'_>,
+    func_type: ExprType,
+    lexpr: NestedType,
+    rexpr: NestedType,
 ) -> Result<DataType> {
-    // TODO: use _func_type if we want to follow Postgres's approach.
-
-    let lfields = lexpr.extract_struct_fields()?;
-    let rfields = rexpr.extract_struct_fields()?;
-
-    if lfields.len() != rfields.len() {
-        return Err(ErrorCode::BindError(format!(
-            "cannot cast struct with {} fields to struct with {} fields",
-            lfields.len(),
-            rfields.len(),
-        ))
-        .into());
-    }
-
-    let mut fields = vec![];
-
-    for ((lfty, lfname), (rfty, rfname)) in lfields.iter().zip_eq(rfields.iter()) {
-        let field_name = lfname
-            .as_ref()
-            .or(rfname.as_ref())
-            .cloned()
-            .unwrap_or_default();
-        match (lfty, rfty) {
-            (Either::Left(DataType::Struct(lty)), Either::Left(DataType::Struct(rty))) => {
-                // both sides have concrete struct type
-                fields.push((
-                    infer_struct_cast_target_type(
-                        _func_type,
-                        StructCastSig::StructType(lty.clone()),
-                        StructCastSig::StructType(rty.clone()),
-                    )?,
-                    field_name,
-                ));
-            }
-            (Either::Left(DataType::Struct(lrty)), Either::Right(expr))
-            | (Either::Right(expr), Either::Left(DataType::Struct(lrty))) => {
-                // one side is struct, one side is record
-                fields.push((
-                    infer_struct_cast_target_type(
-                        _func_type,
-                        StructCastSig::StructType(lrty.clone()),
-                        StructCastSig::Expr(expr),
-                    )?,
-                    field_name,
-                ));
-            }
-            (Either::Right(lexpr), Either::Right(rexpr)) => {
-                // both sides are records
-                fields.push((
-                    infer_struct_cast_target_type(
-                        _func_type,
-                        StructCastSig::Expr(lexpr),
-                        StructCastSig::Expr(rexpr),
-                    )?,
-                    field_name,
-                ));
-            }
-            (Either::Left(DataType::List { .. }), _) | (_, Either::Left(DataType::List { .. })) => {
-                // TODO(chi): support nested list in struct
-                return Err(ErrorCode::BindError(
-                    "List comparison is not supported for nested struct".to_string(),
-                )
+    match (lexpr, rexpr) {
+        (NestedType::Struct(lty), NestedType::Struct(rty)) => {
+            // If both sides are structs, resolve the final data type recursively.
+            if lty.len() != rty.len() {
+                return Err(ErrorCode::BindError(format!(
+                    "cannot infer type because of different number of fields: left={:?} right={:?}",
+                    lty, rty
+                ))
                 .into());
             }
-            (Either::Left(DataType::Struct { .. }), _)
-            | (_, Either::Left(DataType::Struct { .. })) => {
-                return Err(ErrorCode::BindError("Type mismatch".to_string()).into());
+            let mut tys = vec![];
+            tys.reserve(lty.len());
+            for (lf, rf) in lty.into_iter().zip_eq(rty) {
+                let ty = infer_struct_cast_target_type(func_type, lf, rf)?;
+                tys.push((ty, "".to_string())); // TODO(chi): generate field name
             }
-            (l, r) => {
-                let lf = match l {
-                    Either::Left(l) => l.clone(),
-                    Either::Right(r) => r.return_type(),
-                };
-                let rf = match r {
-                    Either::Left(l) => l.clone(),
-                    Either::Right(r) => r.return_type(),
-                };
-                // We don't infer the return type using `infer_type_name` because it's too
-                // restrictive.
-                if lf == rf || cast_ok(&lf, &rf, CastContext::Assign) {
-                    fields.push((rf.clone(), field_name));
-                } else if cast_ok(&rf, &lf, CastContext::Assign) {
-                    fields.push((lf.clone(), field_name));
-                } else {
-                    return Err(
-                        ErrorCode::BindError(format!("cannot cast {} to {}", lf, rf)).into(),
-                    );
-                }
+            Ok(DataType::Struct(StructType::new(tys).into()))
+        }
+        (l, r @ NestedType::Struct(_)) | (l @ NestedType::Struct(_), r) => {
+            // If only one side is nested type, these two types can never be casted.
+            return Err(ErrorCode::BindError(format!(
+                "cannot infer type because unmatched types: left={:?} right={:?}",
+                l, r
+            ))
+            .into());
+        }
+        (NestedType::Type(l), NestedType::Type(r)) => {
+            // If both sides are concrete types, try cast in either direction.
+            if l == r || cast_ok(&l, &r, CastContext::Implicit) {
+                Ok(r)
+            } else if cast_ok(&r, &l, CastContext::Implicit) {
+                Ok(l)
+            } else {
+                return Err(ErrorCode::BindError(format!(
+                    "cannot cast {} to {} or {} to {}",
+                    l, r, r, l
+                ))
+                .into());
             }
         }
+        (NestedType::Type(ty), NestedType::Infer(_))
+        | (NestedType::Infer(_), NestedType::Type(ty)) => {
+            // If one side is *unknown*, cast to another type.
+            Ok(ty)
+        }
+        (NestedType::Infer(_), NestedType::Infer(_)) => {
+            // Both sides are *unknown*, using the sig_map to infer the return type.
+            let actuals = vec![None, None];
+            let sig = infer_type_name(&FUNC_SIG_MAP, func_type, &actuals)?;
+            Ok(sig.ret_type.into())
+        }
     }
-
-    Ok(DataType::Struct(StructType::new(fields).into()))
 }
 
 /// Special exprs that cannot be handled by [`infer_type_name`] and [`FuncSigMap`] are handled here.
@@ -355,13 +303,16 @@ fn infer_type_for_special(
                 (DataType::Struct(_), DataType::Struct(_)) => {
                     let ret = infer_struct_cast_target_type(
                         func_type,
-                        StructCastSig::Expr(&inputs[0]),
-                        StructCastSig::Expr(&inputs[1]),
+                        extract_expr_nested_type(&inputs[0])?,
+                        extract_expr_nested_type(&inputs[1])?,
                     )?;
                     let owned0 = std::mem::replace(&mut inputs[0], ExprImpl::literal_bool(true));
                     let owned1 = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
-                    inputs[0] = owned0.cast_assign(ret.clone())?;
-                    inputs[1] = owned1.cast_assign(ret)?;
+                    inputs[0] =
+                        FunctionCall::new_unchecked(ExprType::Cast, vec![owned0], ret.clone())
+                            .into();
+                    inputs[1] =
+                        FunctionCall::new_unchecked(ExprType::Cast, vec![owned1], ret).into();
                     true
                 }
                 // Unlike auto-cast in struct, PostgreSQL disallows `int[] = bigint[]` for array.
