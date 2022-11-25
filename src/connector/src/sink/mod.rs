@@ -206,11 +206,7 @@ pub enum SinkError {
 
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
-        match value {
-            RpcError::TransportError(e) => SinkError::Remote(e.to_string()),
-            RpcError::GrpcStatus(e) => SinkError::Remote(e.to_string()),
-            RpcError::Internal(e) => SinkError::Remote(e.to_string()),
-        }
+        SinkError::Remote(format!("{:?}", value))
     }
 }
 
