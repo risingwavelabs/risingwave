@@ -47,7 +47,7 @@ use risingwave_storage::table::streaming_table::mem_table::{
     MemTable, MemTableError, MemTableIter, RowOp,
 };
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
-use risingwave_storage::{StateStore, StateStoreIter};
+use risingwave_storage::StateStore;
 use tracing::trace;
 
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
@@ -1108,7 +1108,7 @@ where
 
 struct StorageIterInner<S: LocalStateStore> {
     /// An iterator that returns raw bytes from storage.
-    iter: S::Iter,
+    iter: S::IterStream,
 
     deserializer: RowDeserializer,
 }
@@ -1129,12 +1129,13 @@ impl<S: LocalStateStore> StorageIterInner<S> {
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StreamExecutorError)]
     async fn into_stream(self) {
-        use risingwave_storage::store::StateStoreIterExt;
+        use futures::TryStreamExt;
 
         // No need for table id and epoch.
-        let mut iter = self.iter.map(|(k, v)| (k.user_key.table_key.0, v));
+        let iter = self.iter.map_ok(|(k, v)| (k.user_key.table_key.0, v));
+        futures::pin_mut!(iter);
         while let Some((key, value)) = iter
-            .next()
+            .try_next()
             .verbose_stack_trace("storage_table_iter_next")
             .await?
         {

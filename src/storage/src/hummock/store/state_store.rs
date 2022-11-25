@@ -141,7 +141,7 @@ impl HummockStorageCore {
 }
 
 impl StateStoreRead for LocalHummockStorage {
-    type Iter = HummockStorageIterator;
+    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
 
     define_state_store_read_associated_type!();
 
@@ -160,13 +160,15 @@ impl StateStoreRead for LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        let iter = self
-            .core
-            .iter_inner(map_table_key_range(key_range), epoch, read_options);
+        let stream = map_iter_stream(self.core.iter_inner(
+            map_table_key_range(key_range),
+            epoch,
+            read_options,
+        ));
         #[cfg(not(madsim))]
-        return iter.in_span(self.tracing.new_tracer("hummock_iter"));
+        return stream.in_span(self.tracing.new_tracer("hummock_iter"));
         #[cfg(madsim)]
-        iter
+        stream
     }
 }
 

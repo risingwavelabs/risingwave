@@ -540,7 +540,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
-    type Iter = RangeKvStateStoreIter<R>;
+    type IterStream = StreamTypeOfIter<RangeKvStateStoreIter<R>>;
 
     define_state_store_read_associated_type!();
 
@@ -576,7 +576,8 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
                     to_full_key_range(read_options.table_id, key_range),
                 ),
                 epoch,
-            ))
+            )
+            .into_stream())
         }
     }
 }

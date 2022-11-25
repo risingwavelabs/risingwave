@@ -413,7 +413,7 @@ impl HummockStorageV1 {
 }
 
 impl StateStoreRead for HummockStorageV1 {
-    type Iter = HummockStateStoreIter;
+    type IterStream = StreamTypeOfIter<HummockStateStoreIter>;
 
     define_state_store_read_associated_type!();
 
@@ -483,12 +483,15 @@ impl StateStoreRead for HummockStorageV1 {
             // not check
         }
 
-        let iter =
-            self.iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options);
+        let stream = map_iter_stream(self.iter_inner::<ForwardIter>(
+            epoch,
+            map_table_key_range(key_range),
+            read_options,
+        ));
         #[cfg(not(madsim))]
-        return iter.in_span(self.tracing.new_tracer("hummock_iter"));
+        return stream.in_span(self.tracing.new_tracer("hummock_iter"));
         #[cfg(madsim)]
-        iter
+        stream
     }
 }
 

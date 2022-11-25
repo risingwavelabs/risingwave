@@ -103,7 +103,7 @@ impl HummockStorage {
 }
 
 impl StateStoreRead for HummockStorage {
-    type Iter = HummockStorageIterator;
+    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
 
     define_state_store_read_associated_type!();
 
@@ -171,7 +171,7 @@ impl StateStoreRead for HummockStorage {
             // not check
         }
 
-        self.iter_inner(map_table_key_range(key_range), epoch, read_options)
+        map_iter_stream(self.iter_inner(map_table_key_range(key_range), epoch, read_options))
     }
 }
 

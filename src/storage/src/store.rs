@@ -16,8 +16,9 @@ use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
 
+use async_stream::try_stream;
 use bytes::Bytes;
-use futures::FutureExt;
+use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::key::FullKey;
@@ -38,10 +39,13 @@ pub trait StateStoreIter: StaticSendSync {
     fn next(&mut self) -> Self::NextFuture<'_>;
 }
 
+pub trait StateStoreIterStreamTrait<Item> = Stream<Item = StorageResult<Item>> + Send + 'static;
 pub trait StateStoreIterExt: StateStoreIter {
     type CollectFuture<'a>: Future<Output = StorageResult<Vec<<Self as StateStoreIter>::Item>>>
         + Send
         + 'a;
+
+    type ItemStream: StateStoreIterStreamTrait<<Self as StateStoreIter>::Item>;
 
     fn map<B, F>(self, f: F) -> StateStoreMapIter<Self, F>
     where
@@ -50,11 +54,14 @@ pub trait StateStoreIterExt: StateStoreIter {
         F: FnMut(Self::Item) -> B;
 
     fn collect(&mut self, limit: Option<usize>) -> Self::CollectFuture<'_>;
+    fn into_stream(self) -> Self::ItemStream;
 }
 
+pub type StreamTypeOfIter<I> = <I as StateStoreIterExt>::ItemStream;
 impl<I: StateStoreIter> StateStoreIterExt for I {
     type CollectFuture<'a> =
         impl Future<Output = StorageResult<Vec<<Self as StateStoreIter>::Item>>> + Send + 'a;
+    type ItemStream = impl Stream<Item = StorageResult<<Self as StateStoreIter>::Item>>;
 
     fn map<B, F>(self, f: F) -> StateStoreMapIter<Self, F>
     where
@@ -79,6 +86,20 @@ impl<I: StateStoreIter> StateStoreIterExt for I {
             Ok(kvs)
         }
     }
+
+    fn into_stream(mut self) -> Self::ItemStream {
+        try_stream! {
+            while let Some(item) = self.next().await? {
+                yield item;
+            }
+        }
+    }
+}
+
+pub(crate) fn map_iter_stream<I: StateStoreIter, F: Future<Output = StorageResult<I>>>(
+    future: F,
+) -> impl Future<Output = StorageResult<StreamTypeOfIter<I>>> {
+    future.map(|result: StorageResult<I>| result.map(|iter| iter.into_stream()))
 }
 
 pub struct StateStoreMapIter<I, F> {
@@ -107,22 +128,25 @@ where
 macro_rules! define_state_store_read_associated_type {
     () => {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
-        type IterFuture<'a> = impl IterFutureTrait<'a, Self::Iter>;
+        type IterFuture<'a> = impl IterFutureTrait<'a, Self::IterStream>;
     };
 }
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
 // TODO: directly return `&[u8]` to user instead of `Bytes` or `Vec<u8>`.
 pub type StateStoreReadIterItem = (FullKey<Vec<u8>>, Bytes);
-pub trait StateStoreReadIterTrait = StateStoreIter<Item = StateStoreReadIterItem>;
 pub trait StateStoreReadIterNextFutureTrait<'a> = NextFutureTrait<'a, StateStoreReadIterItem>;
-pub trait IterFutureTrait<'a, I: StateStoreReadIterTrait> =
+pub trait StateStoreReadIterItemStream =
+    Stream<Item = StorageResult<StateStoreReadIterItem>> + Send;
+pub trait StateStoreReadIterStreamTrait = StateStoreReadIterItemStream + 'static;
+
+pub trait IterFutureTrait<'a, I: StateStoreReadIterStreamTrait> =
     Future<Output = StorageResult<I>> + Send + 'a;
 pub trait StateStoreRead: StaticSendSync {
-    type Iter: StateStoreReadIterTrait;
+    type IterStream: StateStoreReadIterStreamTrait;
 
     type GetFuture<'a>: GetFutureTrait<'a>;
-    type IterFuture<'a>: IterFutureTrait<'a, Self::Iter>;
+    type IterFuture<'a>: IterFutureTrait<'a, Self::IterStream>;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -178,10 +202,12 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> Self::ScanFuture<'_> {
+        let limit = limit.unwrap_or(usize::MAX);
         async move {
             self.iter(key_range, epoch, read_options)
                 .await?
-                .collect(limit)
+                .take(limit)
+                .try_collect()
                 .await
         }
     }

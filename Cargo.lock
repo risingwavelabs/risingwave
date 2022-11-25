@@ -5074,6 +5074,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "clap 3.2.23",
+ "futures",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
@@ -5390,6 +5391,7 @@ dependencies = [
 name = "risingwave_hummock_test"
 version = "0.2.0-alpha"
 dependencies = [
+ "async-stream",
  "async-trait",
  "bytes",
  "fail",
@@ -5760,6 +5762,7 @@ version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "async-stream",
  "async-trait",
  "async_stack_trace",
  "auto_enums",

@@ -328,6 +328,7 @@ async fn test_storage_basic() {
         )
         .await
         .unwrap();
+    futures::pin_mut!(iter);
     assert_eq!(
         Some((
             FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch1),
@@ -394,6 +395,7 @@ async fn test_storage_basic() {
         )
         .await
         .unwrap();
+    futures::pin_mut!(iter);
     assert_eq!(
         Some((
             FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch2),
@@ -432,6 +434,7 @@ async fn test_storage_basic() {
         )
         .await
         .unwrap();
+    futures::pin_mut!(iter);
     assert_eq!(
         Some((
             FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
@@ -658,6 +661,7 @@ async fn test_state_store_sync() {
             )
             .await
             .unwrap();
+        futures::pin_mut!(iter);
 
         let kv_map = [
             (b"aaaa", "1111", epoch1),

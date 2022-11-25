@@ -32,7 +32,7 @@ use crate::{
 pub struct PanicStateStore;
 
 impl StateStoreRead for PanicStateStore {
-    type Iter = PanicStateStoreIter;
+    type IterStream = StreamTypeOfIter<PanicStateStoreIter>;
 
     define_state_store_read_associated_type!();
 

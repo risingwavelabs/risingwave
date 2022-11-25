@@ -18,7 +18,9 @@ use std::future::Future;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use async_stream::try_stream;
 use bytes::Bytes;
+use futures::TryStreamExt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
@@ -44,12 +46,12 @@ use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     EmptyFutureTrait, GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, NextFutureTrait,
-    ReadOptions, StateStoreRead, StateStoreWrite, StaticSendSync, SyncFutureTrait, SyncResult,
-    WriteOptions,
+    ReadOptions, StateStoreRead, StateStoreReadIterStreamTrait, StateStoreWrite, StaticSendSync,
+    SyncFutureTrait, SyncResult, WriteOptions,
 };
 use risingwave_storage::{
     define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore, StateStoreIter,
+    define_state_store_write_associated_type, StateStore,
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
@@ -189,25 +191,37 @@ pub(crate) struct LocalGlobalStateStoreHolder<L, G> {
     pub(crate) global: G,
 }
 
-impl<L: StateStoreIter<Item: PartialEq + Debug>, G: StateStoreIter<Item = L::Item>> StateStoreIter
-    for LocalGlobalStateStoreHolder<L, G>
+impl<L: StateStoreReadIterStreamTrait, G: StateStoreReadIterStreamTrait>
+    LocalGlobalStateStoreHolder<L, G>
 {
-    type Item = L::Item;
-
-    type NextFuture<'a> = impl NextFutureTrait<'a, L::Item>;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async {
-            let local_result = self.local.next().await;
-            let global_result = self.global.next().await;
-            assert_result_eq(&local_result, &global_result);
-            local_result
+    fn into_stream(self) -> impl StateStoreReadIterStreamTrait {
+        try_stream! {
+            let local = self.local;
+            let global = self.global;
+            futures::pin_mut!(local);
+            futures::pin_mut!(global);
+            loop {
+                let local_result = local.try_next().await;
+                let global_result = global.try_next().await;
+                assert_result_eq(&local_result, &global_result);
+                let local_next = local_result?;
+                match local_next {
+                    Some(local_next) => {
+                        yield local_next;
+                    },
+                    None => {
+                        break;
+                    }
+                }
+            }
         }
     }
 }
 
+pub(crate) type LocalGlobalStateStoreIterStream<L: StateStoreRead, G: StateStoreRead> =
+    impl StateStoreReadIterStreamTrait;
 impl<L: StateStoreRead, G: StateStoreRead> StateStoreRead for LocalGlobalStateStoreHolder<L, G> {
-    type Iter = LocalGlobalStateStoreHolder<L::Iter, G::Iter>;
+    type IterStream = LocalGlobalStateStoreIterStream<L, G>;
 
     define_state_store_read_associated_type!();
 
@@ -240,7 +254,8 @@ impl<L: StateStoreRead, G: StateStoreRead> StateStoreRead for LocalGlobalStateSt
             Ok(LocalGlobalStateStoreHolder {
                 local: local_iter,
                 global: global_iter,
-            })
+            }
+            .into_stream())
         }
     }
 }

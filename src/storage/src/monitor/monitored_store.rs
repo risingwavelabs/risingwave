@@ -16,6 +16,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
+use async_stream::try_stream;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_common::catalog::TableId;
@@ -50,22 +51,17 @@ impl<S> MonitoredStateStore<S> {
     }
 }
 
-impl<S> MonitoredStateStore<S>
-where
-    S: StateStoreRead,
-{
-    async fn monitored_iter<'a, I>(
+pub type MonitoredStateStoreIterStream<S: StateStoreRead> = impl StateStoreReadIterStreamTrait;
+impl<S: StateStoreRead> MonitoredStateStore<S> {
+    async fn monitored_iter(
         &self,
-        iter: I,
-    ) -> StorageResult<MonitoredStateStoreIter<S::Iter>>
-    where
-        I: Future<Output = StorageResult<S::Iter>>,
-    {
+        iter_stream_future: impl Future<Output = StorageResult<S::IterStream>>,
+    ) -> StorageResult<MonitoredStateStoreIterStream<S>> {
         // start time takes iterator build time into account
         let start_time = minstant::Instant::now();
 
         // wait for iterator creation (e.g. seek)
-        let iter = iter
+        let iter_stream = iter_stream_future
             .verbose_stack_trace("store_create_iter")
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
@@ -75,14 +71,16 @@ where
 
         // create a monitored iterator to collect metrics
         let monitored = MonitoredStateStoreIter {
-            inner: iter,
-            total_items: 0,
-            total_size: 0,
-            start_time,
-            scan_time: minstant::Instant::now(),
-            stats: self.stats.clone(),
+            inner: iter_stream,
+            stats: MonitoredStateStoreIterStats {
+                total_items: 0,
+                total_size: 0,
+                start_time,
+                scan_time: minstant::Instant::now(),
+                stats: self.stats.clone(),
+            },
         };
-        Ok(monitored)
+        Ok(monitored.into_stream())
     }
 
     pub fn stats(&self) -> Arc<StateStoreMetrics> {
@@ -95,7 +93,7 @@ where
 }
 
 impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
-    type Iter = MonitoredStateStoreIter<S::Iter>;
+    type IterStream = MonitoredStateStoreIterStream<S>;
 
     define_state_store_read_associated_type!();
 
@@ -236,8 +234,12 @@ impl MonitoredStateStore<HummockStorage> {
 }
 
 /// A state store iterator wrapper for monitoring metrics.
-pub struct MonitoredStateStoreIter<I> {
-    inner: I,
+pub struct MonitoredStateStoreIter<S> {
+    inner: S,
+    stats: MonitoredStateStoreIterStats,
+}
+
+struct MonitoredStateStoreIterStats {
     total_items: usize,
     total_size: usize,
     start_time: minstant::Instant,
@@ -245,31 +247,22 @@ pub struct MonitoredStateStoreIter<I> {
     stats: Arc<StateStoreMetrics>,
 }
 
-impl<I: StateStoreReadIterTrait> StateStoreIter for MonitoredStateStoreIter<I> {
-    type Item = StateStoreReadIterItem;
-
-    type NextFuture<'a> = impl StateStoreReadIterNextFutureTrait<'a>;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async move {
-            let pair = self
-                .inner
-                .next()
-                .await
-                .inspect_err(|e| error!("Failed in next: {:?}", e))?;
-
-            self.total_items += 1;
-            self.total_size += pair
-                .as_ref()
-                .map(|(k, v)| k.encoded_len() + v.len())
-                .unwrap_or_default();
-
-            Ok(pair)
+impl<S: StateStoreReadIterItemStream> MonitoredStateStoreIter<S> {
+    fn into_stream(mut self) -> impl StateStoreReadIterItemStream {
+        use futures::TryStreamExt;
+        try_stream! {
+            let inner = self.inner;
+            futures::pin_mut!(inner);
+            while let Some((key, value)) = inner.try_next().await.inspect_err(|e| error!("Failed in next: {:?}", e))? {
+                self.stats.total_items += 1;
+                self.stats.total_size += key.encoded_len() + value.len();
+                yield (key, value);
+            }
         }
     }
 }
 
-impl<I> Drop for MonitoredStateStoreIter<I> {
+impl Drop for MonitoredStateStoreIterStats {
     fn drop(&mut self) {
         self.stats
             .iter_duration
