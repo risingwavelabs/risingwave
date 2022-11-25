@@ -141,55 +141,22 @@ impl<B: Buf> Deserializer<B> {
         }
     }
 
-    /// Read bytes_len without copy, it will consume offset
-    pub fn read_bytes_len(&mut self) -> Result<usize> {
-        use core::cmp;
-        let mut result: usize = 0;
-
+    /// Skip the next bytes. Return the length of bytes.
+    pub fn skip_bytes(&mut self) -> Result<usize> {
         match self.input.get_u8() {
             0 => return Ok(0), // empty slice
             1 => {}            // non-empty slice
             v => return Err(Error::InvalidBytesEncoding(v)),
         }
-
+        let mut total_len = 0;
         loop {
-            {
-                // calc advance
-                let mut offset = 0;
-                while offset < BYTES_CHUNK_SIZE {
-                    let src = self.input.input.chunk();
-                    let cnt = cmp::min(src.len(), BYTES_CHUNK_SIZE - offset);
-                    offset += cnt;
-                    self.advance(cnt);
-                }
-            }
-
-            let chunk_len = if self.input.flip {
-                !self.input.input.chunk()[0]
-            } else {
-                self.input.input.chunk()[0]
-            };
-            self.advance(1);
-
-            match chunk_len {
-                len @ 1..=8 => {
-                    result += len as usize;
-                    // self.advance(len as usize);
-                    return Ok(result);
-                }
-                9 => {
-                    result += 8;
-                }
+            self.advance(BYTES_CHUNK_SIZE);
+            match self.input.get_u8() {
+                len @ 1..=8 => return Ok(total_len + len as usize),
+                9 => total_len += 8,
                 v => return Err(Error::InvalidBytesEncoding(v)),
             }
         }
-    }
-
-    /// Read struct_and_list without copy, it will consume offset
-    pub fn read_struct_and_list_len(&mut self) -> Result<usize> {
-        let len = self.input.get_u32() as usize;
-        self.advance(len);
-        Ok(len)
     }
 }
 

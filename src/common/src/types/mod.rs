@@ -955,13 +955,13 @@ impl ScalarImpl {
                     }
                     // these two types is var-length and should only be determine at runtime.
                     // TODO: need some test for this case (e.g. e2e test)
-                    DataType::List { .. } => deserializer.read_bytes_len()?,
+                    DataType::List { .. } => deserializer.skip_bytes()?,
                     DataType::Struct(t) => t
                         .fields
                         .iter()
                         .map(|field| Self::encoding_data_size(field, deserializer))
                         .try_fold(0, |a, b| b.map(|b| a + b))?,
-                    DataType::Varchar => deserializer.read_bytes_len()?,
+                    DataType::Varchar => deserializer.skip_bytes()?,
                 };
 
                 // consume offset of fixed_type

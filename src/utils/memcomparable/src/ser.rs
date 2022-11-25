@@ -437,7 +437,7 @@ impl<'a, B: BufMut> ser::SerializeStructVariant for &'a mut Serializer<B> {
 impl<B: BufMut> Serializer<B> {
     /// Serialize a decimal value.
     ///
-    /// The encoding format follows SQLite: https://sqlite.org/src4/doc/trunk/www/key_encoding.wiki
+    /// The encoding format follows `SQLite`: <https://sqlite.org/src4/doc/trunk/www/key_encoding.wiki>
     #[cfg(feature = "decimal")]
     pub fn serialize_decimal(&mut self, decimal: Decimal) -> Result<()> {
         let decimal = match decimal {
