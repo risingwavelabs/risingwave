@@ -145,7 +145,7 @@ pub mod queries {
     use std::time::Duration;
 
     const DEFAULT_INITIAL_INTERVAL: Duration = Duration::from_secs(1);
-    const DEFAULT_INITIAL_TIMEOUT: Duration = Duration::from_secs(10);
+    const DEFAULT_INITIAL_TIMEOUT: Duration = Duration::from_secs(20);
 
     pub mod q3 {
         use super::*;
