@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::any::type_name;
-use std::fmt::Write;
 use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
@@ -189,22 +188,73 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
 
 #[inline(always)]
 pub fn str_to_bytea(elem: &str) -> Result<Bytes> {
-    // Valid whether a Hex decimal string.
-    if !REGEX_FOR_HEXADECIMAL.is_match(elem) {
+    // Padded with whitespace str is not allowed.
+    if elem.starts_with(' ') && elem.trim().starts_with("\\x") {
         Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA))
-    } else if elem.starts_with("\\x") {
-        // e.g. \x prefix just return as lowercase.
-        Ok(elem.to_ascii_lowercase().into())
+    } else if let Some(remainder) = elem.strip_prefix(r"\x") {
+        Ok(parse_bytes_hex(remainder)?.into())
+
+        // Ok(hex::decode(remainder).unwrap().into())
     } else {
-        let mut s = String::with_capacity(2 * elem.len());
-        // Postgres requires a \x prefix.
-        write!(s, "\\x").unwrap();
-        for byte in elem.as_bytes() {
-            // Lowercase.
-            write!(s, "{:02x}", byte).unwrap();
-        }
-        Ok(s.into())
+        // use hex::ToHex;
+        // Ok(elem.encode_hex::<String>().into())
+        // Ok(hex::decode(elem).unwrap().into())
+        Ok(parse_bytes_traditional(elem).unwrap().into())
     }
+}
+
+pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
+    // Can't use `hex::decode` here, as it doesn't tolerate whitespace
+    // between encoded bytes.
+
+    let decode_nibble = |b| match b {
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        b'A'..=b'F' => Ok(b - b'A' + 10),
+        b'0'..=b'9' => Ok(b - b'0'),
+        _ => Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+    };
+
+    let mut buf = vec![];
+    let mut nibbles = s.as_bytes().iter().copied();
+    while let Some(n) = nibbles.next() {
+        if let b' ' | b'\n' | b'\t' | b'\r' = n {
+            continue;
+        }
+        let n = decode_nibble(n)?;
+        let n2 = match nibbles.next() {
+            // None => return Err(ParseHexError::OddLength),
+            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            // None => todo!(),
+            Some(n2) => decode_nibble(n2)?,
+        };
+        buf.push((n << 4) | n2);
+    }
+    Ok(buf)
+}
+
+pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
+    // Bytes are interpreted literally, save for the special escape sequences
+    // "\\", which represents a single backslash, and "\NNN", where each N
+    // is an octal digit, which represents the byte whose octal value is NNN.
+    let mut out = Vec::new();
+    let mut bytes = s.as_bytes().iter().fuse();
+    while let Some(&b) = bytes.next() {
+        if b != b'\\' {
+            out.push(b);
+            continue;
+        }
+        match bytes.next() {
+            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            Some(b'\\') => out.push(b'\\'),
+            b => match (b, bytes.next(), bytes.next()) {
+                (Some(d2 @ b'0'..=b'3'), Some(d1 @ b'0'..=b'7'), Some(d0 @ b'0'..=b'7')) => {
+                    out.push(((d2 - b'0') << 6) + ((d1 - b'0') << 3) + (d0 - b'0'));
+                }
+                _ => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            },
+        }
+    }
+    Ok(out)
 }
 
 #[inline(always)]
@@ -622,7 +672,9 @@ fn scalar_cast(
 
 #[cfg(test)]
 mod tests {
+
     use num_traits::FromPrimitive;
+    use risingwave_common::types::to_text::format_bytes;
 
     use super::*;
 
@@ -863,13 +915,42 @@ mod tests {
         assert!(str_to_list("{{1, 2, 3}, 4, 5, 6}}", &DataType::Int32).is_err());
     }
 
+    // pub fn format_bytes(bytes: &[u8]) -> String
+    // {
+    //     let mut s = String::with_capacity(2 * bytes.len());
+    //     write!(s, "\\x{}", hex::encode(bytes)).unwrap();
+    //     s
+    // }
     #[test]
     fn test_bytea() {
-        assert!(str_to_bytea("fgh").is_err());
-        assert_eq!(str_to_bytea("\\xDEADBeef").unwrap(), "\\xdeadbeef");
-        assert_eq!(str_to_bytea("1234").unwrap(), "\\x31323334");
-        assert_eq!(str_to_bytea("12CD").unwrap(), "\\x31324344");
-        assert_eq!(str_to_bytea("\\x12CD").unwrap(), "\\x12cd");
+        assert_eq!(format_bytes(&str_to_bytea("fgo").unwrap()), r"\x66676f");
+        assert_eq!(
+            format_bytes(&str_to_bytea(r"\xDeadBeef").unwrap()),
+            r"\xdeadbeef"
+        );
+        assert_eq!(format_bytes(&str_to_bytea("12CD").unwrap()), r"\x31324344");
+        assert_eq!(format_bytes(&str_to_bytea("1234").unwrap()), r"\x31323334");
+        assert_eq!(format_bytes(&str_to_bytea(r"\x12CD").unwrap()), r"\x12cd");
+        assert_eq!(
+            format_bytes(&str_to_bytea(r"\x De Ad Be Ef ").unwrap()),
+            r"\xdeadbeef"
+        );
+        assert_eq!(
+            format_bytes(&str_to_bytea("x De Ad Be Ef ").unwrap()),
+            r"\x7820446520416420426520456620"
+        );
+        assert_eq!(
+            format_bytes(&str_to_bytea(r"De\\123dBeEf").unwrap()),
+            r"\x44655c3132336442654566"
+        );
+        assert_eq!(
+            format_bytes(&str_to_bytea(r"De\123dBeEf").unwrap()),
+            r"\x4465536442654566"
+        );
+        assert_eq!(
+            format_bytes(&str_to_bytea(r"De\\000dBeEf").unwrap()),
+            r"\x44655c3030306442654566"
+        );
     }
 
     #[test]

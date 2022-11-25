@@ -5133,6 +5133,7 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "hex",
  "humantime",
  "itertools",
  "libc",

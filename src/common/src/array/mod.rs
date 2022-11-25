@@ -627,6 +627,9 @@ impl ArrayImpl {
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
             ProstArrayType::List => ListArray::from_protobuf(array)?,
             ProstArrayType::Unspecified => unreachable!(),
+            ProstArrayType::Bytea => {
+                read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
+            }
         };
         Ok(array)
     }

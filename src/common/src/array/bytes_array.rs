@@ -104,7 +104,7 @@ impl Array for BytesArray {
         ProstArray {
             null_bitmap: Some(null_bitmap),
             values,
-            array_type: ArrayType::Utf8 as i32,
+            array_type: ArrayType::Bytea as i32,
             struct_array_data: None,
             list_array_data: None,
         }

@@ -93,6 +93,7 @@ enum ArrayType {
   INTERVAL = 12;
   STRUCT = 13;
   LIST = 14;
+  BYTEA = 15;
 }
 
 message Array {
