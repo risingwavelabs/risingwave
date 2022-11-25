@@ -5776,6 +5776,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_pb",
+ "tempfile",
  "tokio-postgres",
  "tracing",
  "workspace-hack",
