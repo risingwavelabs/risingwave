@@ -435,6 +435,7 @@ pub mod verify {
 
 impl StateStoreImpl {
     #[cfg_attr(not(target_os = "linux"), expect(unused_variables))]
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         s: &str,
         file_cache_dir: &str,
@@ -443,6 +444,7 @@ impl StateStoreImpl {
         state_store_stats: Arc<StateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
+        tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> StorageResult<Self> {
         #[cfg(not(target_os = "linux"))]
         let tiered_cache = TieredCache::none();
@@ -510,6 +512,7 @@ impl StateStoreImpl {
                         hummock_meta_client.clone(),
                         notification_client,
                         state_store_stats.clone(),
+                        tracing,
                     )
                     .await?;
 
@@ -521,6 +524,7 @@ impl StateStoreImpl {
                         hummock_meta_client.clone(),
                         notification_client,
                         state_store_stats.clone(),
+                        tracing,
                     )
                     .await?;
 

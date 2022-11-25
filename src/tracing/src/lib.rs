@@ -13,36 +13,61 @@
 // limitations under the License.
 
 use std::env;
+use std::net::SocketAddr;
 use std::thread::JoinHandle;
 
-use anyhow::Error;
+use anyhow::{Error, Result};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::StreamExt;
 use minitrace::prelude::*;
+use rand::Rng;
 
 pub struct RwTracingService {
     tx: UnboundedSender<Collector>,
-    _join_handle: JoinHandle<()>,
+    _join_handle: Option<JoinHandle<()>>,
     enabled: bool,
+}
+
+pub struct TracingConfig {
+    pub jaeger_endpoint: Option<String>,
 }
 
 impl RwTracingService {
     /// Create a new tracing service instance. Spawn a background thread to observe slow requests.
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
+    pub fn new(config: TracingConfig) -> Result<Self> {
         let (tx, rx) = unbounded();
         let slow_request_threshold_ms: u64 = env::var("RW_TRACE_SLOW_REQUEST_THRESHOLD_MS")
             .ok()
             .map_or_else(|| 100, |v| v.parse().unwrap());
 
-        let join_handle = Self::start_tracing_listener(rx, slow_request_threshold_ms);
+        let jaeger_addr: Option<SocketAddr> =
+            config.jaeger_endpoint.map(|x| x.parse()).transpose()?;
 
+        let print_to_console = env::var("RW_TRACE_SLOW_REQUEST")
+            .ok()
+            .map_or_else(|| false, |v| v == "true");
+
+        let join_handle = Self::start_tracing_listener(
+            rx,
+            print_to_console,
+            slow_request_threshold_ms,
+            jaeger_addr,
+        );
+
+        let tr = Self {
+            tx,
+            _join_handle: Some(join_handle),
+            enabled: jaeger_addr.is_some(),
+        };
+        Ok(tr)
+    }
+
+    pub fn disabled() -> Self {
+        let (tx, _) = unbounded();
         Self {
             tx,
-            _join_handle: join_handle,
-            enabled: env::var("RW_TRACE_SLOW_REQUEST")
-                .ok()
-                .map_or_else(|| false, |v| v == "true"),
+            _join_handle: None,
+            enabled: false,
         }
     }
 
@@ -59,25 +84,51 @@ impl RwTracingService {
 
     fn start_tracing_listener(
         rx: UnboundedReceiver<Collector>,
+        print_to_console: bool,
         slow_request_threshold_ms: u64,
+        jaeger_addr: Option<SocketAddr>,
     ) -> JoinHandle<()> {
         tracing::info!(
-            "tracing service started with slow_request_threshold_ms={slow_request_threshold_ms}"
+            "tracing service started with slow_request_threshold_ms={slow_request_threshold_ms}, print_to_console={print_to_console}"
         );
+
         std::thread::Builder::new()
             .name("minitrace_listener".to_string())
             .spawn(move || {
                 let func = move || {
-                    let stream = rx.for_each_concurrent(None, |collector| async move {
+                    let rt = tokio::runtime::Builder::new_current_thread().build()?;
+                    let stream = rx.for_each_concurrent(None, |collector| async {
                         let spans = collector.collect().await;
-                        if let Some(span) = spans.first() {
-                            // print requests > 100ms
-                            if span.duration_ns >= slow_request_threshold_ms * 1_000_000 {
-                                tracing::info!("{:?}", spans);
+                        println!("{:?}", spans);
+                        if !spans.is_empty() {
+                            // print slow requests
+                            if print_to_console {
+                                // print requests > 100ms
+                                if spans[0].duration_ns >= slow_request_threshold_ms * 1_000_000 {
+                                    tracing::info!("{:?}", spans);
+                                }
+                            }
+                            // report spans to jaeger
+                            if let Some(ref jaeger_addr) = jaeger_addr {
+                                let trace_id = rand::thread_rng().gen::<u64>();
+                                let span_id = rand::thread_rng().gen::<u32>();
+                                let encoded = minitrace_jaeger::encode(
+                                    "risingwave".to_string(),
+                                    trace_id,
+                                    0,
+                                    span_id,
+                                    &spans,
+                                )
+                                .unwrap();
+                                if let Err(err) =
+                                    minitrace_jaeger::report(*jaeger_addr, &encoded).await
+                                {
+                                    tracing::warn!("failed to report spans to jaeger: {}", err);
+                                }
                             }
                         }
                     });
-                    futures::executor::block_on(stream);
+                    rt.block_on(stream);
                     Ok::<_, Error>(())
                 };
                 if let Err(err) = func() {
