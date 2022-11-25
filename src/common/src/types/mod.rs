@@ -858,14 +858,16 @@ impl ScalarRefImpl<'_> {
             Self::Float64(v) => v.serialize(ser)?,
             Self::Utf8(v) => v.serialize(ser)?,
             Self::Bool(v) => v.serialize(ser)?,
-            Self::Decimal(v) => ser.serialize_decimal(v.clone().into())?,
+            Self::Decimal(v) => ser.serialize_decimal((*v).into())?,
             Self::Interval(v) => v.serialize(ser)?,
-            Self::NaiveDate(v) => ser.serialize_naivedate(v.0.num_days_from_ce())?,
+            Self::NaiveDate(v) => v.0.num_days_from_ce().serialize(ser)?,
             Self::NaiveDateTime(v) => {
-                ser.serialize_naivedatetime(v.0.timestamp(), v.0.timestamp_subsec_nanos())?
+                v.0.timestamp().serialize(&mut *ser)?;
+                v.0.timestamp_subsec_nanos().serialize(ser)?;
             }
             Self::NaiveTime(v) => {
-                ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
+                v.0.num_seconds_from_midnight().serialize(&mut *ser)?;
+                v.0.nanosecond().serialize(ser)?;
             }
             Self::Struct(v) => v.serialize(ser)?,
             Self::List(v) => v.serialize(ser)?,
@@ -900,16 +902,18 @@ impl ScalarImpl {
             Ty::Decimal => Self::Decimal(de.deserialize_decimal()?.into()),
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
             Ty::Time => Self::NaiveTime({
-                let (secs, nano) = de.deserialize_naivetime()?;
+                let secs = u32::deserialize(&mut *de)?;
+                let nano = u32::deserialize(de)?;
                 NaiveTimeWrapper::with_secs_nano(secs, nano)?
             }),
             Ty::Timestamp => Self::NaiveDateTime({
-                let (secs, nsecs) = de.deserialize_naivedatetime()?;
+                let secs = i64::deserialize(&mut *de)?;
+                let nsecs = u32::deserialize(de)?;
                 NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)?
             }),
             Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
             Ty::Date => Self::NaiveDate({
-                let days = de.deserialize_naivedate()?;
+                let days = i32::deserialize(de)?;
                 NaiveDateWrapper::with_days(days)?
             }),
             Ty::Struct(t) => StructValue::deserialize(&t.fields, de)?.to_scalar_value(),

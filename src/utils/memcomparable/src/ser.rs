@@ -76,10 +76,6 @@ impl<B: BufMut> MaybeFlip<B> {
 
     def_method!(put_u64, u64);
 
-    def_method!(put_i32, i32);
-
-    def_method!(put_i64, i64);
-
     fn put_slice(&mut self, src: &[u8]) {
         for &val in src {
             let val = if self.flip { !val } else { val };
@@ -538,7 +534,7 @@ impl<B: BufMut> Serializer<B> {
             10000000000000000000000000000,
             100000000000000000000000000000,
         ];
-        let mut mantissa = decimal.mantissa().abs() as u128;
+        let mut mantissa = decimal.mantissa().unsigned_abs();
         let prec = POW10.as_slice().partition_point(|&p| p <= mantissa);
 
         let e10 = prec as i32 - decimal.scale() as i32;
@@ -576,34 +572,6 @@ impl<B: BufMut> Serializer<B> {
         byte_array.reverse();
 
         (e100 as i8, byte_array)
-    }
-
-    /// Serialize a NaiveDateWrapper value.
-    ///
-    /// - `days`: From `chrono::Datelike::num_days_from_ce()`.
-    pub fn serialize_naivedate(&mut self, days: i32) -> Result<()> {
-        self.output.put_i32(days ^ (1 << 31));
-        Ok(())
-    }
-
-    /// Serialize a NaiveTimeWrapper value.
-    ///
-    /// - `secs`: From `chrono::Timelike::num_seconds_from_midnight()`.
-    /// - `nano`: From `chrono::Timelike::nanosecond()`.
-    pub fn serialize_naivetime(&mut self, secs: u32, nano: u32) -> Result<()> {
-        self.output.put_u32(secs);
-        self.output.put_u32(nano);
-        Ok(())
-    }
-
-    /// Serialize a NaiveDateTimeWrapper value.
-    ///
-    /// - `secs`: From `chrono::naive::NaiveDateTime::timestamp()`.
-    /// - `nsecs`: From `chrono::naive::NaiveDateTime::timestamp_subsec_nanos()`.
-    pub fn serialize_naivedatetime(&mut self, secs: i64, nsecs: u32) -> Result<()> {
-        self.output.put_i64(secs ^ (1 << 63));
-        self.output.put_u32(nsecs);
-        Ok(())
     }
 }
 
@@ -840,49 +808,6 @@ mod tests {
                 "wrong significand for decimal: {decimal}"
             );
         }
-    }
-
-    #[test]
-    fn test_naivedate() {
-        let a = serialize_naivedate(12_3456);
-        let b = serialize_naivedate(0);
-        let c = serialize_naivedate(-12_3456);
-        assert!(a > b && b > c);
-    }
-
-    fn serialize_naivedate(days: i32) -> Vec<u8> {
-        let mut serializer = Serializer::new(vec![]);
-        serializer.serialize_naivedate(days).unwrap();
-        serializer.into_inner()
-    }
-
-    #[test]
-    fn test_naivetime() {
-        let a = serialize_naivetime(23 * 3600 + 59 * 60 + 59, 1234_5678);
-        let b = serialize_naivetime(12 * 3600, 1);
-        let c = serialize_naivetime(12 * 3600, 0);
-        let d = serialize_naivetime(0, 0);
-        assert!(a > b && b > c && c > d);
-    }
-
-    fn serialize_naivetime(secs: u32, nano: u32) -> Vec<u8> {
-        let mut serializer = Serializer::new(vec![]);
-        serializer.serialize_naivetime(secs, nano).unwrap();
-        serializer.into_inner()
-    }
-
-    #[test]
-    fn test_naivedatetime() {
-        let a = serialize_naivedatetime(12_3456_7890_1234, 1234_5678);
-        let b = serialize_naivedatetime(0, 0);
-        let c = serialize_naivedatetime(-12_3456_7890_1234, 1234_5678);
-        assert!(a > b && b > c);
-    }
-
-    fn serialize_naivedatetime(secs: i64, nsecs: u32) -> Vec<u8> {
-        let mut serializer = Serializer::new(vec![]);
-        serializer.serialize_naivedatetime(secs, nsecs).unwrap();
-        serializer.into_inner()
     }
 
     #[test]

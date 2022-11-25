@@ -107,10 +107,6 @@ impl<B: Buf> MaybeFlip<B> {
 
     def_method!(get_u64, u64);
 
-    def_method!(get_i32, i32);
-
-    def_method!(get_i64, i64);
-
     fn copy_to_slice(&mut self, dst: &mut [u8]) {
         self.input.copy_to_slice(dst);
         if self.flip {
@@ -604,34 +600,6 @@ impl<B: Buf> Deserializer<B> {
         }
         Ok(rust_decimal::Decimal::from_i128_with_scale(mantissa, scale as u32).into())
     }
-
-    /// Deserialize a NaiveDateWrapper value. Returns `days`.
-    pub fn deserialize_naivedate(&mut self) -> Result<i32> {
-        let days = self.input.get_i32() ^ (1 << 31);
-        Ok(days)
-    }
-
-    /// Deserialize a NaiveTimeWrapper value. Returns `(secs, nano)`.
-    pub fn deserialize_naivetime(&mut self) -> Result<(u32, u32)> {
-        let secs = self.input.get_u32();
-        let nano = self.input.get_u32();
-        Ok((secs, nano))
-    }
-
-    /// Deserialize a NaiveDateTimeWrapper value. Returns `(secs, nsecs)`.
-    pub fn deserialize_naivedatetime(&mut self) -> Result<(i64, u32)> {
-        let secs = self.input.get_i64() ^ (1 << 63);
-        let nsecs = self.input.get_u32();
-        Ok((secs, nsecs))
-    }
-
-    /// Deserialize struct and list value. Returns `bytes`.
-    pub fn deserialize_struct_or_list(&mut self) -> Result<Vec<u8>> {
-        let len = self.input.get_u32();
-        let mut bytes = vec![0; len as usize];
-        self.input.copy_to_slice(&mut bytes);
-        Ok(bytes)
-    }
 }
 
 #[cfg(test)]
@@ -827,59 +795,5 @@ mod tests {
     fn deserialize_decimal(bytes: &[u8]) -> Decimal {
         let mut deserializer = Deserializer::new(bytes);
         deserializer.deserialize_decimal().unwrap()
-    }
-
-    #[test]
-    fn test_naivedate() {
-        let days = 12_3456;
-        let days0 = deserialize_naivedate(&serialize_naivedate(days));
-        assert_eq!(days, days0);
-    }
-
-    fn serialize_naivedate(days: i32) -> Vec<u8> {
-        let mut serializer = crate::Serializer::new(vec![]);
-        serializer.serialize_naivedate(days).unwrap();
-        serializer.into_inner()
-    }
-
-    fn deserialize_naivedate(bytes: &[u8]) -> i32 {
-        let mut deserializer = Deserializer::new(bytes);
-        deserializer.deserialize_naivedate().unwrap()
-    }
-
-    #[test]
-    fn test_naivetime() {
-        let (secs, nano) = (23 * 3600 + 59 * 60 + 59, 1234_5678);
-        let (secs0, nano0) = deserialize_naivetime(&serialize_naivetime(secs, nano));
-        assert_eq!((secs, nano), (secs0, nano0));
-    }
-
-    fn serialize_naivetime(secs: u32, nano: u32) -> Vec<u8> {
-        let mut serializer = crate::Serializer::new(vec![]);
-        serializer.serialize_naivetime(secs, nano).unwrap();
-        serializer.into_inner()
-    }
-
-    fn deserialize_naivetime(bytes: &[u8]) -> (u32, u32) {
-        let mut deserializer = Deserializer::new(bytes);
-        deserializer.deserialize_naivetime().unwrap()
-    }
-
-    #[test]
-    fn test_naivedatetime() {
-        let (secs, nsecs) = (12_3456_7890_1234, 1234_5678);
-        let (secs0, nsecs0) = deserialize_naivedatetime(&serialize_naivedatetime(secs, nsecs));
-        assert_eq!((secs, nsecs), (secs0, nsecs0));
-    }
-
-    fn serialize_naivedatetime(secs: i64, nsecs: u32) -> Vec<u8> {
-        let mut serializer = crate::Serializer::new(vec![]);
-        serializer.serialize_naivedatetime(secs, nsecs).unwrap();
-        serializer.into_inner()
-    }
-
-    fn deserialize_naivedatetime(bytes: &[u8]) -> (i64, u32) {
-        let mut deserializer = Deserializer::new(bytes);
-        deserializer.deserialize_naivedatetime().unwrap()
     }
 }
