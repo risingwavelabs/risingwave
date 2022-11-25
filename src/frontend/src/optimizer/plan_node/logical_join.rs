@@ -441,8 +441,9 @@ impl LogicalJoin {
             }
         }
 
-        // Extract the predicate from logical scan.
+        // Extract the predicate from logical scan. Only pure scan is supported.
         let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
+        // Construct output column to require column mapping
         let o2r = if let Some(project_expr) = project_expr {
             project_expr
                 .into_iter()
@@ -455,6 +456,7 @@ impl LogicalJoin {
         };
         let left_schema_len = logical_join.left().schema().len();
 
+        // Rewrite the join predicate and all columns referred to the scan side need to rewrite.
         struct JoinPredicateRewriter {
             offset: usize,
             mapping: Vec<usize>,
@@ -481,6 +483,7 @@ impl LogicalJoin {
             .eq_cond()
             .rewrite_expr(&mut join_predicate_rewriter);
 
+        // Rewrite the scan predicate so we can add it to the join predicate.
         struct ScanPredicateRewriter {
             offset: usize,
         }
@@ -505,22 +508,25 @@ impl LogicalJoin {
             new_scan.base.schema().len(),
             new_join_on.clone(),
         );
-        let new_join_output_indices = {
-            logical_join
-                .output_indices()
-                .clone()
-                .into_iter()
-                .map(|x| {
-                    if x < left_schema_len {
-                        x
-                    } else {
-                        o2r[x - left_schema_len] + left_schema_len
-                    }
-                })
-                .collect_vec()
-        };
+
+        // Rewrite the join output indices and all output indices referred to the old scan need to
+        // rewrite.
+        let new_join_output_indices = logical_join
+            .output_indices()
+            .clone()
+            .into_iter()
+            .map(|x| {
+                if x < left_schema_len {
+                    x
+                } else {
+                    o2r[x - left_schema_len] + left_schema_len
+                }
+            })
+            .collect_vec();
 
         let new_scan_output_column_ids = new_scan.output_column_ids();
+
+        // Construct a new logical join, because we have change its RHS.
         let new_logical_join = LogicalJoin::with_output_indices(
             logical_join.left(),
             new_scan.into(),
