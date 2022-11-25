@@ -56,7 +56,7 @@ async fn nexmark_source() -> Result<()> {
     sleep(Duration::from_secs(5)).await;
     reschedule!();
 
-    sleep(Duration::from_secs(20)).await;
+    sleep(Duration::from_secs(30)).await;
     cluster
         .run(
             "select count_person + count_auction + count_bid from count_person, count_auction, count_bid;",

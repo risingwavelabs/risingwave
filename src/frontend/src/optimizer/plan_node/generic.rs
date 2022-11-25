@@ -465,7 +465,16 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         (self.agg_calls, self.group_key, self.input)
     }
 
-    pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let mut builder = f.debug_struct(name);
+        if !self.group_key.is_empty() {
+            builder.field("group_key", &self.group_key_display());
+        }
+        builder.field("aggs", &self.agg_calls_display());
+        builder.finish()
+    }
+
+    fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
         self.agg_calls
             .iter()
             .map(|plan_agg_call| PlanAggCallDisplay {
@@ -475,7 +484,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect_vec()
     }
 
-    pub fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
+    fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
         self.group_key
             .iter()
             .copied()
