@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
+use parking_lot::Mutex;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::HummockSnapshot;
 use tokio::sync::mpsc::UnboundedSender;
@@ -36,7 +37,7 @@ pub type PinnedHummockSnapshot = HummockSnapshotGuard;
 
 type SnapshotRef = Arc<ArcSwap<QueryHummockSnapshot>>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct QueryHummockSnapshot {
     pub committed_epoch: u64,
 
@@ -69,8 +70,9 @@ pub struct HummockSnapshotManager {
 
     align_epoch: RwLock<u64>,
 
-    align_epoch_snapshot_map: RwLock<BTreeMap<u64, QueryHummockSnapshot>>,
+    align_epoch_snapshot_map: Mutex<AlignEpochSnapshotMap>,
 }
+type AlignEpochSnapshotMap = BTreeMap<u64, (QueryHummockSnapshot, Vec<Callback<()>>)>;
 
 #[derive(Debug)]
 enum EpochOperation {
@@ -124,7 +126,7 @@ impl HummockSnapshotManager {
                 current_epoch: INVALID_EPOCH,
             })),
             align_epoch: RwLock::new(INVALID_EPOCH),
-            align_epoch_snapshot_map: RwLock::new(BTreeMap::default()),
+            align_epoch_snapshot_map: Mutex::new(BTreeMap::default()),
         }
     }
 
@@ -194,7 +196,7 @@ impl HummockSnapshotManager {
             sender: Some(sender),
             latest_snapshot,
             align_epoch: RwLock::new(INVALID_EPOCH),
-            align_epoch_snapshot_map: RwLock::new(BTreeMap::default()),
+            align_epoch_snapshot_map: Mutex::new(BTreeMap::default()),
         }
     }
 
@@ -225,8 +227,8 @@ impl HummockSnapshotManager {
         let need_align = snapshot.need_align;
         let query_hummock_snapshot = QueryHummockSnapshot::from(snapshot);
         if !need_align {
-            match self.align_epoch_snapshot_map.write().unwrap().last_entry() {
-                Some(mut entry) => *entry.get_mut() = query_hummock_snapshot,
+            match self.align_epoch_snapshot_map.lock().last_entry() {
+                Some(mut entry) => entry.get_mut().0 = query_hummock_snapshot,
                 None => self.update_snapshot_epoch(query_hummock_snapshot),
             }
         } else if self
@@ -237,11 +239,42 @@ impl HummockSnapshotManager {
         {
             self.update_snapshot_epoch(query_hummock_snapshot);
         } else {
-            self.align_epoch_snapshot_map.write().unwrap().insert(
-                query_hummock_snapshot.committed_epoch,
-                query_hummock_snapshot,
-            );
+            self.align_epoch_snapshot_map
+                .lock()
+                .entry(query_hummock_snapshot.committed_epoch)
+                .or_default()
+                .0 = query_hummock_snapshot.clone();
         }
+    }
+
+    pub async fn wait_and_update_epoch(&self, snapshot: HummockSnapshot) {
+        self.wait_update_align_epoch(&snapshot).await;
+        self.update_snapshot(snapshot);
+    }
+
+    pub async fn wait_update_align_epoch(&self, snapshot: &HummockSnapshot) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if !snapshot.need_align {
+            match self.align_epoch_snapshot_map.lock().last_entry() {
+                Some(mut entry) => entry.get_mut().1.push(tx),
+                None => return,
+            }
+        } else if self
+            .align_epoch
+            .read()
+            .unwrap()
+            .ge(&snapshot.committed_epoch)
+        {
+            return;
+        } else {
+            self.align_epoch_snapshot_map
+                .lock()
+                .entry(snapshot.committed_epoch)
+                .or_default()
+                .1
+                .push(tx);
+        }
+        rx.await.unwrap()
     }
 
     pub fn update_snapshot_epoch(&self, snapshot: QueryHummockSnapshot) {
@@ -258,19 +291,25 @@ impl HummockSnapshotManager {
         *align_epoch = epoch;
         let mut evens: BTreeMap<_, _> = self
             .align_epoch_snapshot_map
-            .write()
-            .unwrap()
+            .lock()
             .drain_filter(|key, _| key <= &align_epoch)
             .collect();
 
         let query_hummock_snapshot = match evens.pop_last() {
-            Some((_, snapshot)) => snapshot,
-            None => QueryHummockSnapshot {
-                committed_epoch: epoch,
-                current_epoch: epoch,
-            },
+            Some((_, values)) => values,
+            None => (
+                QueryHummockSnapshot {
+                    committed_epoch: epoch,
+                    current_epoch: epoch,
+                },
+                vec![],
+            ),
         };
-        self.update_snapshot_epoch(query_hummock_snapshot);
+        self.update_snapshot_epoch(query_hummock_snapshot.0);
+        query_hummock_snapshot
+            .1
+            .into_iter()
+            .for_each(|tx| tx.send(()).unwrap());
     }
 }
 

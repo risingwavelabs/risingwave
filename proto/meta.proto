@@ -233,7 +233,7 @@ message SubscribeResponse {
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
     MetaSnapshot snapshot = 16;
   }
-  AlignEpoch align_epoch = 17 ;
+  AlignEpoch align_epoch = 17;
 }
 message AlignEpoch {
   uint64 align_epoch = 1;

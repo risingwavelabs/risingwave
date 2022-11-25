@@ -290,7 +290,6 @@ impl NotificationManagerCore {
             SubscribeType::Compactor => &mut self.compactor_senders,
             SubscribeType::Unspecified => unreachable!(),
         };
-
         senders.retain(|worker_key, sender| {
             sender
                 .send(Ok(response.clone()))
