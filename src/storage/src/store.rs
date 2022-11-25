@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use async_stream::try_stream;
 use bytes::Bytes;
-use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::key::FullKey;
@@ -99,7 +99,7 @@ impl<I: StateStoreIter> StateStoreIterExt for I {
 pub(crate) fn map_iter_stream<I: StateStoreIter, F: Future<Output = StorageResult<I>>>(
     future: F,
 ) -> impl Future<Output = StorageResult<StreamTypeOfIter<I>>> {
-    future.map(|result: StorageResult<I>| result.map(|iter| iter.into_stream()))
+    future.map_ok(|iter| iter.into_stream())
 }
 
 pub struct StateStoreMapIter<I, F> {
@@ -118,9 +118,7 @@ where
     type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
-        self.iter
-            .next()
-            .map(|result| result.map(|o| o.map(|item| (self.f)(item))))
+        self.iter.next().map_ok(|o| o.map(|item| (self.f)(item)))
     }
 }
 

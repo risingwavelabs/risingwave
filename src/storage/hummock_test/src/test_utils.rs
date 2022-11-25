@@ -44,14 +44,10 @@ use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{
-    EmptyFutureTrait, GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, NextFutureTrait,
-    ReadOptions, StateStoreRead, StateStoreReadIterStreamTrait, StateStoreWrite, StaticSendSync,
-    SyncFutureTrait, SyncResult, WriteOptions,
-};
+use risingwave_storage::store::*;
 use risingwave_storage::{
     define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore,
+    define_state_store_write_associated_type,
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 

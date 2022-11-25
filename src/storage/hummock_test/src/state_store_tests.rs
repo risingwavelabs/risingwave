@@ -1509,7 +1509,7 @@ async fn test_table_id_filter() {
                 .is_none());
 
             // Assert iter.
-            let mut iter = hummock_storage
+            let iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     read_epoch,
