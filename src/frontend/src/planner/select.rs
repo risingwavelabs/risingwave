@@ -16,19 +16,20 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::JoinType;
 
 use crate::binder::{BoundDistinct, BoundSelect};
 use crate::expr::{
-    AggCall, CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, OrderBy,
-    Subquery, SubqueryKind,
+    CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Subquery,
+    SubqueryKind,
 };
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalOverAgg, LogicalProject, LogicalProjectSet, LogicalValues,
-    PlanAggCall, PlanRef,
+    LogicalAgg, LogicalApply, LogicalOverAgg, LogicalProject, LogicalProjectBuilder,
+    LogicalProjectSet, LogicalTopN, LogicalValues, PlanAggCall, PlanRef,
 };
+use crate::optimizer::property::{FieldOrder, Order};
 use crate::planner::Planner;
 use crate::utils::Condition;
 
@@ -45,6 +46,7 @@ impl Planner {
             ..
         }: BoundSelect,
         extra_order_exprs: Vec<ExprImpl>,
+        order: &[FieldOrder],
     ) -> Result<PlanRef> {
         // Append expressions in ORDER BY.
         if distinct.is_distinct() && !extra_order_exprs.is_empty() {
@@ -96,15 +98,69 @@ impl Planner {
             (root, select_items) = LogicalOverAgg::create(root, select_items)?;
         }
 
+        let original_select_items_len = select_items.len();
+
+        // variable `distinct_list_index_to_select_items_index` is meaningful iff
+        // `matches!(&distinct, BoundDistinct::DistinctOn(_))`
+        let mut distinct_list_index_to_select_items_index = vec![];
         if let BoundDistinct::DistinctOn(distinct_list) = &distinct {
-            (root, select_items) =
-                self.plan_distinct_on(root, select_items, distinct_list.clone())?;
+            distinct_list_index_to_select_items_index.reserve(distinct_list.len());
+            let mut builder_index_to_select_items_index =
+                Vec::with_capacity(original_select_items_len);
+            let mut input_proj_builder = LogicalProjectBuilder::default();
+            for (select_item_index, select_item) in select_items.iter().enumerate() {
+                let builder_index = input_proj_builder
+                    .add_expr(select_item)
+                    .map_err(|msg| ExprError::UnsupportedFunction(String::from(msg)))?;
+                if builder_index >= builder_index_to_select_items_index.len() {
+                    debug_assert_eq!(builder_index, builder_index_to_select_items_index.len());
+                    builder_index_to_select_items_index.push(select_item_index);
+                }
+            }
+            for distinct_expr in distinct_list {
+                let builder_index = input_proj_builder
+                    .add_expr(distinct_expr)
+                    .map_err(|msg| ExprError::UnsupportedFunction(String::from(msg)))?;
+                if builder_index >= builder_index_to_select_items_index.len() {
+                    debug_assert_eq!(builder_index, builder_index_to_select_items_index.len());
+                    select_items.push(distinct_expr.clone());
+                    builder_index_to_select_items_index.push(select_items.len() - 1);
+                }
+                distinct_list_index_to_select_items_index
+                    .push(builder_index_to_select_items_index[builder_index]);
+            }
         }
+
+        let need_restore_select_items = select_items.len() > original_select_items_len;
 
         if select_items.iter().any(|e| e.has_table_function()) {
             root = LogicalProjectSet::create(root, select_items)
         } else {
             root = LogicalProject::create(root, select_items);
+        }
+
+        if matches!(&distinct, BoundDistinct::DistinctOn(_)) {
+            root = LogicalTopN::with_group(
+                root,
+                1,
+                0,
+                false,
+                Order::new(order.to_vec()),
+                distinct_list_index_to_select_items_index,
+            )
+            .into();
+        }
+
+        if need_restore_select_items {
+            let mut input_proj_builder = LogicalProjectBuilder::default();
+            let mut data_types = root.schema().data_types();
+            data_types.truncate(original_select_items_len);
+            for (input_idx, input_type) in data_types.into_iter().enumerate() {
+                input_proj_builder
+                    .add_expr(&ExprImpl::from(InputRef::new(input_idx, input_type)))
+                    .map_err(|msg| ExprError::UnsupportedFunction(String::from(msg)))?;
+            }
+            root = input_proj_builder.build(root).into();
         }
 
         if let BoundDistinct::Distinct = distinct {
@@ -330,34 +386,5 @@ impl Planner {
             correlated_indices,
             max_one_row,
         )
-    }
-
-    fn plan_distinct_on(
-        &self,
-        root: PlanRef,
-        select_items: Vec<ExprImpl>,
-        distinct_list: Vec<ExprImpl>,
-    ) -> Result<(PlanRef, Vec<ExprImpl>)> {
-        // apply a `first_value()` to the select items which are not in the DISTINCT ON clause.
-        let mut first_aggs = vec![];
-        for expr in select_items {
-            let expr = if distinct_list.contains(&expr) {
-                expr
-            } else {
-                ExprImpl::AggCall(
-                    AggCall::new(
-                        AggKind::FirstValue,
-                        vec![expr],
-                        false,
-                        OrderBy::any(),
-                        Condition::true_cond(),
-                    )?
-                    .into(),
-                )
-            };
-            first_aggs.push(expr);
-        }
-        let (root, select_items, _) = LogicalAgg::create(first_aggs, distinct_list, None, root)?;
-        Ok((root, select_items))
     }
 }
