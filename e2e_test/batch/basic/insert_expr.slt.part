@@ -142,6 +142,28 @@ select * from t;
 statement ok
 drop table t;
 
+# Bug https://github.com/risingwavelabs/risingwave/issues/6542
+
+statement ok
+create table t (v1 int, v2 int, v3 int);
+
+statement ok
+insert into t (v1, v2, v3) values (1, 2, 3);
+
+statement ok
+insert into t (v2, v3, v1) values (2, 3, 1);
+
+query I rowsort
+select * from t;
+----
+1 2 3
+1 2 3
+
+statement ok
+drop table t;
+
+
+
 statement ok
 create table t (v1 int, v2 int, v3 int);
 
