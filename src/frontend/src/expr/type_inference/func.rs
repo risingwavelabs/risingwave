@@ -143,7 +143,7 @@ fn infer_struct_cast_target_type(
     func_type: ExprType,
     lexpr: NestedType,
     rexpr: NestedType,
-) -> Result<DataType> {
+) -> Result<(bool, bool, DataType)> {
     match (lexpr, rexpr) {
         (NestedType::Struct(lty), NestedType::Struct(rty)) => {
             // If both sides are structs, resolve the final data type recursively.
@@ -155,12 +155,20 @@ fn infer_struct_cast_target_type(
                 .into());
             }
             let mut tys = vec![];
+            let mut lcasts = false;
+            let mut rcasts = false;
             tys.reserve(lty.len());
             for (lf, rf) in lty.into_iter().zip_eq(rty) {
-                let ty = infer_struct_cast_target_type(func_type, lf, rf)?;
+                let (lcast, rcast, ty) = infer_struct_cast_target_type(func_type, lf, rf)?;
+                lcasts |= lcast;
+                rcasts |= rcast;
                 tys.push((ty, "".to_string())); // TODO(chi): generate field name
             }
-            Ok(DataType::Struct(StructType::new(tys).into()))
+            Ok((
+                lcasts,
+                rcasts,
+                DataType::Struct(StructType::new(tys).into()),
+            ))
         }
         (l, r @ NestedType::Struct(_)) | (l @ NestedType::Struct(_), r) => {
             // If only one side is nested type, these two types can never be casted.
@@ -172,10 +180,12 @@ fn infer_struct_cast_target_type(
         }
         (NestedType::Type(l), NestedType::Type(r)) => {
             // If both sides are concrete types, try cast in either direction.
-            if l == r || cast_ok(&l, &r, CastContext::Implicit) {
-                Ok(r)
+            if l == r {
+                Ok((false, false, r))
+            } else if cast_ok(&l, &r, CastContext::Implicit) {
+                Ok((true, false, r))
             } else if cast_ok(&r, &l, CastContext::Implicit) {
-                Ok(l)
+                Ok((false, true, l))
             } else {
                 return Err(ErrorCode::BindError(format!(
                     "cannot cast {} to {} or {} to {}",
@@ -184,16 +194,23 @@ fn infer_struct_cast_target_type(
                 .into());
             }
         }
-        (NestedType::Type(ty), NestedType::Infer(_))
-        | (NestedType::Infer(_), NestedType::Type(ty)) => {
+        (NestedType::Type(ty), NestedType::Infer(ity)) => {
             // If one side is *unknown*, cast to another type.
-            Ok(ty)
+            Ok((false, ity != ty, ty))
         }
-        (NestedType::Infer(_), NestedType::Infer(_)) => {
+        (NestedType::Infer(ity), NestedType::Type(ty)) => {
+            // If one side is *unknown*, cast to another type.
+            Ok((ity != ty, false, ty))
+        }
+        (NestedType::Infer(l), NestedType::Infer(r)) => {
             // Both sides are *unknown*, using the sig_map to infer the return type.
             let actuals = vec![None, None];
             let sig = infer_type_name(&FUNC_SIG_MAP, func_type, &actuals)?;
-            Ok(sig.ret_type.into())
+            Ok((
+                sig.ret_type != l.into(),
+                sig.ret_type != r.into(),
+                sig.ret_type.into(),
+            ))
         }
     }
 }
@@ -301,18 +318,24 @@ fn infer_type_for_special(
             let ok = match (inputs[0].return_type(), inputs[1].return_type()) {
                 // Cast each field of the struct to their corresponding field in the other struct.
                 (DataType::Struct(_), DataType::Struct(_)) => {
-                    let ret = infer_struct_cast_target_type(
+                    let (lcast, rcast, ret) = infer_struct_cast_target_type(
                         func_type,
                         extract_expr_nested_type(&inputs[0])?,
                         extract_expr_nested_type(&inputs[1])?,
                     )?;
-                    let owned0 = std::mem::replace(&mut inputs[0], ExprImpl::literal_bool(true));
-                    let owned1 = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
-                    inputs[0] =
-                        FunctionCall::new_unchecked(ExprType::Cast, vec![owned0], ret.clone())
-                            .into();
-                    inputs[1] =
-                        FunctionCall::new_unchecked(ExprType::Cast, vec![owned1], ret).into();
+                    if lcast {
+                        let owned0 =
+                            std::mem::replace(&mut inputs[0], ExprImpl::literal_bool(true));
+                        inputs[0] =
+                            FunctionCall::new_unchecked(ExprType::Cast, vec![owned0], ret.clone())
+                                .into();
+                    }
+                    if rcast {
+                        let owned1 =
+                            std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
+                        inputs[1] =
+                            FunctionCall::new_unchecked(ExprType::Cast, vec![owned1], ret).into();
+                    }
                     true
                 }
                 // Unlike auto-cast in struct, PostgreSQL disallows `int[] = bigint[]` for array.
