@@ -57,6 +57,20 @@ impl MetaNodeService {
             config.listen_address, config.exporter_port
         ));
 
+        match config.provide_prometheus.as_ref().map(|v| &v[..]) {
+            Some([]) => {}
+            Some([prometheus]) => {
+                cmd.arg("--prometheus-endpoint")
+                    .arg(format!("http://{}:{}", prometheus.address, prometheus.port));
+            }
+            _ => {
+                return Err(anyhow!(
+                    "unexpected prometheus config {:?}, only 1 instance is supported",
+                    config.provide_prometheus
+                ))
+            }
+        }
+
         match config.provide_etcd_backend.as_ref().map(|v| &v[..]) {
             Some([]) => {
                 cmd.arg("--backend").arg("mem");
