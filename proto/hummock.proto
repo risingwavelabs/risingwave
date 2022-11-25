@@ -583,8 +583,7 @@ message HummockVersionStats {
   map<uint32, TableStats> table_stats = 2;
 }
 
-message GetScaleCompactorRequest {
-}
+message GetScaleCompactorRequest {}
 
 message GetScaleCompactorResponse {
   uint64 suggest_cores = 1;
