@@ -95,6 +95,8 @@ risedev:
       persist-data: true
     - use: kafka
       persist-data: true
+    - use: pubsub
+      persist-data: true
 
   full-compaction-test:
     - use: aws-s3
@@ -445,6 +447,19 @@ risedev:
       exporter-port: 2224
       health-check-port: 6788
 
+  ci-pubsub:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+      enable-tiered-cache: true
+    - use: frontend
+    - use: compactor
+    - use: pubsub
+      persist-data: true
+
   ci-kafka:
     - use: minio
     - use: etcd
@@ -458,6 +473,23 @@ risedev:
     - use: zookeeper
       persist-data: true
     - use: kafka
+      persist-data: true
+
+  ci-kafka-plus-pubsub:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+      enable-tiered-cache: true
+    - use: frontend
+    - use: compactor
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
+    - use: pubsub
       persist-data: true
 
   ci-redis:
@@ -810,6 +842,16 @@ template:
 
     # Kafka broker id. If there are multiple instances of Kafka, we will need to set.
     broker-id: 0
+  
+  # Google pubsub emulator service
+  pubsub:
+    id: pubsub-${port}
+
+    address: "127.0.0.1"
+
+    port: 5980
+
+    persist-data: true
 
   # Apache ZooKeeper service
   zookeeper:

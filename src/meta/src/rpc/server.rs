@@ -562,7 +562,7 @@ mod tests {
             info,
             Duration::from_secs(10),
             2,
-            MetaOpts::default(),
+            MetaOpts::test(false),
         )
         .await
         .unwrap();
@@ -576,7 +576,7 @@ mod tests {
             info2.clone(),
             Duration::from_secs(10),
             2,
-            MetaOpts::default(),
+            MetaOpts::test(false),
         )
         .await;
         assert!(ret.is_err());
@@ -588,7 +588,7 @@ mod tests {
             info2,
             Duration::from_secs(10),
             2,
-            MetaOpts::default(),
+            MetaOpts::test(false),
         )
         .await
         .unwrap();
