@@ -110,7 +110,7 @@ fn extract_struct_nested_type(ty: &StructType) -> Result<NestedType> {
         .fields
         .iter()
         .map(|f| match f {
-            DataType::Struct(s) => extract_struct_nested_type(&s),
+            DataType::Struct(s) => extract_struct_nested_type(s),
             _ => Ok(NestedType::Type(f.clone())),
         })
         .try_collect()?;
@@ -127,7 +127,7 @@ fn extract_expr_nested_type(expr: &ExprImpl) -> Result<NestedType> {
         let ret = func
             .inputs()
             .iter()
-            .map(|e| extract_expr_nested_type(e))
+            .map(extract_expr_nested_type)
             .collect::<Result<Vec<_>>>()?;
         Ok(NestedType::Struct(ret))
     } else {
