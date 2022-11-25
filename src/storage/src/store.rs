@@ -17,6 +17,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::FutureExt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::key::FullKey;
@@ -96,7 +97,9 @@ where
     type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
-        async move { Ok(self.iter.next().await?.map(&mut self.f)) }
+        self.iter
+            .next()
+            .map(|result| result.map(|o| o.map(|item| (self.f)(item))))
     }
 }
 
@@ -109,10 +112,14 @@ macro_rules! define_state_store_read_associated_type {
 }
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
-pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> =
+// TODO: directly return `&[u8]` to user instead of `Bytes` or `Vec<u8>`.
+pub type StateStoreReadIterItem = (FullKey<Vec<u8>>, Bytes);
+pub trait StateStoreReadIterTrait = StateStoreIter<Item = StateStoreReadIterItem>;
+pub trait StateStoreReadIterNextFutureTrait<'a> = NextFutureTrait<'a, StateStoreReadIterItem>;
+pub trait IterFutureTrait<'a, I: StateStoreReadIterTrait> =
     Future<Output = StorageResult<I>> + Send + 'a;
 pub trait StateStoreRead: StaticSendSync {
-    type Iter: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + 'static;
+    type Iter: StateStoreReadIterTrait;
 
     type GetFuture<'a>: GetFutureTrait<'a>;
     type IterFuture<'a>: IterFutureTrait<'a, Self::Iter>;
@@ -140,7 +147,7 @@ pub trait StateStoreRead: StaticSendSync {
 }
 
 pub trait ScanFutureTrait<'a> =
-    Future<Output = StorageResult<Vec<(FullKey<Vec<u8>>, Bytes)>>> + Send + 'a;
+    Future<Output = StorageResult<Vec<StateStoreReadIterItem>>> + Send + 'a;
 
 pub trait StateStoreReadExt: StaticSendSync {
     type ScanFuture<'a>: ScanFutureTrait<'a>;

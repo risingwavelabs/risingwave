@@ -402,16 +402,11 @@ pub mod boxed_state_store {
 
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::key::FullKey;
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
     use crate::storage_value::StorageValue;
-    use crate::store::{
-        EmptyFutureTrait, GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, LocalStateStore,
-        NextFutureTrait, ReadOptions, StateStoreRead, StateStoreWrite, StaticSendSync,
-        SyncFutureTrait, SyncResult, WriteOptions,
-    };
+    use crate::store::*;
     use crate::store_impl::{AsHummockTrait, HummockTrait};
     use crate::{StateStore, StateStoreIter};
 
@@ -419,20 +414,20 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreIter: StaticSendSync {
-        async fn next(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Bytes)>>;
+        async fn next(&mut self) -> StorageResult<Option<StateStoreReadIterItem>>;
     }
 
     #[async_trait::async_trait]
-    impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> DynamicDispatchedStateStoreIter for I {
-        async fn next(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Bytes)>> {
+    impl<I: StateStoreIter<Item = StateStoreReadIterItem>> DynamicDispatchedStateStoreIter for I {
+        async fn next(&mut self) -> StorageResult<Option<StateStoreReadIterItem>> {
             self.next().await
         }
     }
 
     impl StateStoreIter for Box<dyn DynamicDispatchedStateStoreIter> {
-        type Item = (FullKey<Vec<u8>>, Bytes);
+        type Item = StateStoreReadIterItem;
 
-        type NextFuture<'a> = impl NextFutureTrait<'a, Self::Item>;
+        type NextFuture<'a> = impl StateStoreReadIterNextFutureTrait<'a>;
 
         fn next(&mut self) -> Self::NextFuture<'_> {
             async { self.deref_mut().next().await }
@@ -441,6 +436,7 @@ pub mod boxed_state_store {
 
     // For StateStoreRead
 
+    pub type BoxDynamicDispatchedStateStoreReadIter = Box<dyn DynamicDispatchedStateStoreIter>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
         async fn get<'a>(
@@ -455,7 +451,7 @@ pub mod boxed_state_store {
             key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<Box<dyn DynamicDispatchedStateStoreIter>>;
+        ) -> StorageResult<BoxDynamicDispatchedStateStoreReadIter>;
     }
 
     #[async_trait::async_trait]
@@ -474,7 +470,7 @@ pub mod boxed_state_store {
             key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<Box<dyn DynamicDispatchedStateStoreIter>> {
+        ) -> StorageResult<BoxDynamicDispatchedStateStoreReadIter> {
             Ok(Box::new(self.iter(key_range, epoch, read_options).await?))
         }
     }
@@ -482,7 +478,7 @@ pub mod boxed_state_store {
     macro_rules! impl_state_store_read_for_box {
         ($box_type_name:ident) => {
             impl StateStoreRead for $box_type_name {
-                type Iter = Box<dyn DynamicDispatchedStateStoreIter>;
+                type Iter = BoxDynamicDispatchedStateStoreReadIter;
 
                 define_state_store_read_associated_type!();
 

@@ -61,7 +61,7 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore, StateStoreIter,
+    define_state_store_write_associated_type,
 };
 
 impl HummockStorageV1 {
@@ -659,11 +659,9 @@ impl HummockStateStoreIter {
 }
 
 impl StateStoreIter for HummockStateStoreIter {
-    // TODO: directly return `&[u8]` to user instead of `Bytes`.
-    type Item = (FullKey<Vec<u8>>, Bytes);
+    type Item = StateStoreReadIterItem;
 
-    type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
+    type NextFuture<'a> = impl StateStoreReadIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {

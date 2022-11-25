@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -20,7 +19,7 @@ use bytes::Bytes;
 #[cfg(not(madsim))]
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::key::{map_table_key_range, FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use tokio::sync::mpsc;
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
@@ -39,10 +38,7 @@ use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader
 use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
-use crate::store::{
-    GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, LocalStateStore, ReadOptions,
-    StateStoreRead, StateStoreWrite, WriteOptions,
-};
+use crate::store::*;
 use crate::{
     define_state_store_read_associated_type, define_state_store_write_associated_type,
     StateStoreIter,
@@ -282,9 +278,9 @@ pub struct HummockStorageIterator {
 }
 
 impl StateStoreIter for HummockStorageIterator {
-    type Item = (FullKey<Vec<u8>>, Bytes);
+    type Item = StateStoreReadIterItem;
 
-    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
+    type NextFuture<'a> = impl StateStoreReadIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {

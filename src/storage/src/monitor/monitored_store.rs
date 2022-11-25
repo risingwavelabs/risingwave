@@ -19,7 +19,6 @@ use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 
@@ -31,7 +30,7 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore, StateStoreIter,
+    define_state_store_write_associated_type,
 };
 
 /// A state store wrapper for monitoring metrics.
@@ -246,13 +245,10 @@ pub struct MonitoredStateStoreIter<I> {
     stats: Arc<StateStoreMetrics>,
 }
 
-impl<I> StateStoreIter for MonitoredStateStoreIter<I>
-where
-    I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>,
-{
-    type Item = (FullKey<Vec<u8>>, Bytes);
+impl<I: StateStoreReadIterTrait> StateStoreIter for MonitoredStateStoreIter<I> {
+    type Item = StateStoreReadIterItem;
 
-    type NextFuture<'a> = impl NextFutureTrait<'a, Self::Item>;
+    type NextFuture<'a> = impl StateStoreReadIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
