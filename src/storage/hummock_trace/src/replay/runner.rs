@@ -17,15 +17,15 @@ use std::time::Instant;
 
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::{Operation, ReplayWorkerScheduler, Replayable, WorkerScheduler};
+use crate::{GlobalReplay, Operation, ReplayWorkerScheduler, WorkerScheduler};
 
 pub struct HummockReplay<R: TraceReader> {
     reader: R,
-    replay: Arc<Box<dyn Replayable>>,
+    replay: Arc<Box<dyn GlobalReplay>>,
 }
 
 impl<R: TraceReader> HummockReplay<R> {
-    pub fn new(reader: R, replay: Box<dyn Replayable>) -> Self {
+    pub fn new(reader: R, replay: Box<dyn GlobalReplay>) -> Self {
         Self {
             reader,
             replay: Arc::new(replay),
@@ -79,8 +79,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        MockReplayable, MockTraceReader, OperationResult, Record, StorageType, TraceError,
-        TraceResult,
+        MockGlobalReplayInterface, MockLocalReplayInterface, MockTraceReader, OperationResult,
+        Record, StorageType, TraceError, TraceResult,
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -230,10 +230,10 @@ mod tests {
 
         mock_reader.expect_read().times(records_len).returning(f);
 
-        let mut mock_replay = MockReplayable::new();
+        let mut mock_replay = MockGlobalReplayInterface::new();
 
         mock_replay.expect_new_local().times(3).returning(move |_| {
-            let mut mock_local = MockReplayable::new();
+            let mut mock_local = MockLocalReplayInterface::new();
 
             mock_local
                 .expect_get()

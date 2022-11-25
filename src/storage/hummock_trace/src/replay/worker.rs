@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+  
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,7 +21,7 @@ use tokio::task::JoinHandle;
 
 use super::{ReplayRequest, WorkerId, WorkerResponse};
 use crate::{
-    dispatch_replay, Operation, OperationResult, Record, RecordId, ReplayIter, Replayable,
+    GlobalReplay, LocalReplay, Operation, OperationResult, Record, RecordId, ReplayIter,
     StorageType, TraceResult,
 };
 
@@ -39,11 +39,11 @@ pub trait ReplayWorkerScheduler {
 
 pub(crate) struct WorkerScheduler {
     workers: HashMap<WorkerId, WorkerHandler>,
-    replay: Arc<Box<dyn Replayable>>,
+    replay: Arc<Box<dyn GlobalReplay>>,
 }
 
 impl WorkerScheduler {
-    pub(crate) fn new(replay: Arc<Box<dyn Replayable>>) -> Self {
+    pub(crate) fn new(replay: Arc<Box<dyn GlobalReplay>>) -> Self {
         WorkerScheduler {
             workers: HashMap::new(),
             replay,
@@ -103,7 +103,7 @@ impl ReplayWorkerScheduler for WorkerScheduler {
 struct ReplayWorker {}
 
 impl ReplayWorker {
-    fn spawn(replay: Arc<Box<dyn Replayable>>) -> WorkerHandler {
+    fn spawn(replay: Arc<Box<dyn GlobalReplay>>) -> WorkerHandler {
         let (req_tx, req_rx) = unbounded_channel();
         let (resp_tx, resp_rx) = unbounded_channel();
         let (res_tx, res_rx) = unbounded_channel();
@@ -122,10 +122,10 @@ impl ReplayWorker {
         mut req_rx: UnboundedReceiver<ReplayRequest>,
         mut res_rx: UnboundedReceiver<OperationResult>,
         resp_tx: UnboundedSender<WorkerResponse>,
-        replay: Arc<Box<dyn Replayable>>,
+        replay: Arc<Box<dyn GlobalReplay>>,
     ) {
         let mut iters_map = HashMap::new();
-        let mut local_storages = HashMap::new();
+        let mut local_storages = LocalStorages::new();
         loop {
             if let Some(msg) = req_rx.recv().await {
                 match msg {
@@ -148,10 +148,10 @@ impl ReplayWorker {
 
     async fn handle_record(
         record: Record,
-        replay: &Arc<Box<dyn Replayable>>,
+        replay: &Arc<Box<dyn GlobalReplay>>,
         res_rx: &mut UnboundedReceiver<OperationResult>,
         iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
-        local_storages: &mut HashMap<u32, Box<dyn Replayable>>,
+        local_storages: &mut LocalStorages,
     ) {
         let Record(storage_type, record_id, op) = record;
         match op {
@@ -160,9 +160,15 @@ impl ReplayWorker {
                 epoch,
                 read_options,
             } => {
-                let storage =
-                    dispatch_replay!(storage_type, replay, local_storages, read_options.table_id);
-                let actual = storage.get(key, epoch, read_options).await;
+                let actual = match storage_type {
+                    StorageType::Global => replay.get(key, epoch, read_options).await,
+                    StorageType::Local(_) => {
+                        let s = local_storages
+                            .get_or_insert(read_options.table_id, replay)
+                            .await;
+                        s.get(key, epoch, read_options).await
+                    }
+                };
                 let res = res_rx.recv().await.expect("recv result failed");
                 if let OperationResult::Get(expected) = res {
                     assert_eq!(TraceResult::from(actual), expected, "get result wrong");
@@ -173,9 +179,10 @@ impl ReplayWorker {
                 delete_ranges,
                 write_options,
             } => {
-                let storage =
-                    dispatch_replay!(storage_type, replay, local_storages, write_options.table_id);
-                let actual = storage.ingest(kv_pairs, delete_ranges, write_options).await;
+                let s = local_storages
+                    .get_or_insert(write_options.table_id, replay)
+                    .await;
+                let actual = s.ingest(kv_pairs, delete_ranges, write_options).await;
 
                 let res = res_rx.recv().await.expect("recv result failed");
                 if let OperationResult::Ingest(expected) = res {
@@ -187,9 +194,15 @@ impl ReplayWorker {
                 epoch,
                 read_options,
             } => {
-                let storage =
-                    dispatch_replay!(storage_type, replay, local_storages, read_options.table_id);
-                let iter = storage.iter(key_range, epoch, read_options).await;
+                let iter = match storage_type {
+                    StorageType::Global => replay.iter(key_range, epoch, read_options).await,
+                    StorageType::Local(_) => {
+                        let s = local_storages
+                            .get_or_insert(read_options.table_id, replay)
+                            .await;
+                        s.iter(key_range, epoch, read_options).await
+                    }
+                };
                 let res = res_rx.recv().await.expect("recv result failed");
                 if let OperationResult::Iter(expected) = res {
                     if expected.is_ok() {
@@ -274,20 +287,51 @@ impl WorkerHandler {
     }
 }
 
+struct LocalStorages {
+    storages: HashMap<u32, Box<dyn LocalReplay>>,
+}
+impl LocalStorages {
+    fn new() -> Self {
+        Self {
+            storages: HashMap::new(),
+        }
+    }
+
+    async fn get_or_insert(
+        &mut self,
+        table_id: u32,
+        replay: &Arc<Box<dyn GlobalReplay>>,
+    ) -> &mut Box<dyn LocalReplay> {
+        match self.storages.entry(table_id) {
+            Entry::Occupied(s) => s.into_mut(),
+            Entry::Vacant(e) => e.insert(replay.new_local(table_id).await),
+        }
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.storages.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
     use std::ops::Bound;
 
     use mockall::predicate;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
-    use crate::{MockReplayIter, MockReplayable, Replayable, StorageType, TraceReadOptions};
+    use crate::{
+        MockGlobalReplayInterface, MockLocalReplayInterface, MockReplayIter, StorageType,
+        TraceReadOptions,
+    };
 
     #[tokio::test]
     async fn test_handle_record() {
         let mut iters_map = HashMap::new();
-        let mut local_storages = HashMap::new();
+        let mut local_storages = LocalStorages::new();
         let (res_tx, mut res_rx) = unbounded_channel();
 
         let read_options = TraceReadOptions {
@@ -311,10 +355,10 @@ mod tests {
         };
 
         let record = Record::new(StorageType::Local(0), 0, op);
-        let mut mock_replay = MockReplayable::new();
+        let mut mock_replay = MockGlobalReplayInterface::new();
 
         mock_replay.expect_new_local().times(1).returning(move |_| {
-            let mut mock_local = MockReplayable::new();
+            let mut mock_local = MockLocalReplayInterface::new();
 
             mock_local
                 .expect_get()
@@ -329,7 +373,7 @@ mod tests {
         });
 
         mock_replay.expect_new_local().times(1).returning(move |_| {
-            let mut mock_local = MockReplayable::new();
+            let mut mock_local = MockLocalReplayInterface::new();
 
             mock_local
                 .expect_iter()
@@ -350,7 +394,7 @@ mod tests {
             Box::new(mock_local)
         });
 
-        let replay: Arc<Box<dyn Replayable>> = Arc::new(Box::new(mock_replay));
+        let replay: Arc<Box<dyn GlobalReplay>> = Arc::new(Box::new(mock_replay));
         res_tx
             .send(OperationResult::Get(TraceResult::Ok(Some(vec![120]))))
             .unwrap();
