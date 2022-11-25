@@ -98,8 +98,7 @@ impl DynamicLevelSelector {
     ) -> u64 {
         let total_level_size = l0.total_file_size - handlers[0].get_pending_file_size();
         let mut overlap_info = self.inner.overlap_strategy.create_overlap_info();
-        let next_level_files =
-            handlers[base_level.level_idx as usize].get_pending_next_level_file();
+        let next_level_files = handlers[0].get_pending_next_level_file();
 
         for sub_level in &l0.sub_levels {
             for table_info in &sub_level.table_infos {
