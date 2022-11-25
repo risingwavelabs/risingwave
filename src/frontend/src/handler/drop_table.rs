@@ -22,6 +22,8 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::source_catalog::SourceKind;
+use crate::catalog::table_catalog::TableKind;
 use crate::session::OptimizerContext;
 
 pub fn check_source(
@@ -33,10 +35,13 @@ pub fn check_source(
     if let Ok((s, _)) =
         reader.get_source_by_name(db_name, SchemaPath::Name(schema_name), table_name)
     {
-        if s.is_stream() {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP SOURCE` to drop a source.".to_owned(),
-            )));
+        match s.kind() {
+            SourceKind::Stream => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP SOURCE` to drop a source.".to_owned(),
+                )))
+            }
+            SourceKind::Table => {}
         }
     }
     Ok(())
@@ -83,24 +88,23 @@ pub async fn handle_drop_table(
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
 
-        // If return value is `Err`, it's actually a materialized source.
-        check_source(&reader, db_name, schema_name, &table_name)?;
-
-        if table.is_index {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP INDEX` to drop an index.".to_owned(),
-            )));
-        }
-
-        // If associated source is `None`, then it is a normal mview.
-        match table.associated_source_id() {
-            Some(source_id) => (source_id, table.id()),
-            None => {
+        match table.kind() {
+            TableKind::TableOrSource => {
+                check_source(&reader, db_name, schema_name, &table_name)?;
+            }
+            TableKind::Index => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP INDEX` to drop an index.".to_owned(),
+                )));
+            }
+            TableKind::MView => {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
-                )))
+                )));
             }
         }
+
+        (table.associated_source_id().unwrap(), table.id())
     };
 
     let catalog_writer = session.env().catalog_writer();

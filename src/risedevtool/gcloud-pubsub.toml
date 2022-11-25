@@ -1,0 +1,40 @@
+extend = "common.toml"
+
+[env]
+GCLOUD_DOWNLOAD_PATH = "${PREFIX_TMP}/gcloud.tgz"
+GCLOUD_VERSION = "406.0.0"
+GCLOUD_RELEASE = "google-cloud-cli-${GCLOUD_VERSION}-linux-x86_64.tar.gz"
+GCLOUD_DOWNLOAD_TGZ = "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/${GCLOUD_RELEASE}"
+GCLOUD_SDK_DIR = "google-cloud-sdk"
+
+[tasks.download-pubsub]
+category = "RiseDev - Components"
+dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_PUBSUB" ] }
+description = "Download and enable Google Pubsub Emulator"
+script = '''
+#!/bin/bash
+set -e
+if [ -d "${PREFIX_BIN}/gcloud" ]; then
+    exit 0
+fi
+echo "gcloud not found, download ${GCLOUD_RELEASE}"
+curl -fL -o "${GCLOUD_DOWNLOAD_PATH}" "${GCLOUD_DOWNLOAD_TGZ}"
+tar -xf "${GCLOUD_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
+echo "install the pubsub-emulator"
+"${PREFIX_TMP}/${GCLOUD_SDK_DIR}/bin/gcloud" components install beta pubsub-emulator --quiet
+mv "${PREFIX_TMP}/${GCLOUD_SDK_DIR}" "${PREFIX_BIN}/gcloud"
+# startup script for the emulator. bypasses gcloud because it detaches the java process from the runner
+cat <<EOF > "${PREFIX_BIN}/gcloud/start-pubsub-emulator.sh"
+#!/bin/bash
+set -e
+if [ \$# -lt 1 ]; then
+    echo "Usage: start-pubsub-emulator.sh <port>"
+    exit 1
+fi
+base_dir=\$(dirname "\$0")
+exec "\${base_dir}/platform/pubsub-emulator/bin/cloud-pubsub-emulator" --host=127.0.0.1 --port="\$1"
+EOF
+chmod +x "${PREFIX_BIN}/gcloud/start-pubsub-emulator.sh"
+rm ${GCLOUD_DOWNLOAD_PATH}
+'''
