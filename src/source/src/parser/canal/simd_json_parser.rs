@@ -23,6 +23,7 @@ use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp, str_to_timestampz};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
+use super::util::at_least_one_ok;
 use crate::parser::canal::operators::*;
 use crate::{
     ensure_rust_type, ensure_str, ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard,
@@ -62,33 +63,9 @@ impl CanalJsonParser {
             RwError::from(ProtocolError("op field not found in canal json".to_owned()))
         })?;
 
-        let at_least_one_ok = |results: Vec<Result<WriteGuard>>| -> Result<WriteGuard> {
-            match results.iter().all(Result::is_err) {
-                true => {
-                    let err_message = results
-                        .into_iter()
-                        .map(|r| r.unwrap_err().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    Err(RwError::from(InternalError(format!(
-                        "failed to parse all columns: {}",
-                        err_message
-                    ))))
-                }
-                false => {
-                    for result in results {
-                        if result.is_ok() {
-                            return result;
-                        }
-                    }
-                    unreachable!()
-                }
-            }
-        };
-
         match op {
             CANAL_INSERT_EVENT => {
-                let after = event
+                let inserted = event
                     .get(AFTER)
                     .and_then(|v| match v {
                         BorrowedValue::Array(array) => Some(array.iter()),
@@ -99,7 +76,7 @@ impl CanalJsonParser {
                             "data is missing for creating event".to_string(),
                         ))
                     })?;
-                let results = after
+                let results = inserted
                     .into_iter()
                     .map(|v| {
                         writer.insert(|column| {
@@ -161,7 +138,7 @@ impl CanalJsonParser {
                 at_least_one_ok(results)
             }
             CANAL_DELETE_EVENT => {
-                let before = event
+                let deleted = event
                     .get(AFTER)
                     .and_then(|v| match v {
                         BorrowedValue::Array(array) => Some(array.iter()),
@@ -171,7 +148,7 @@ impl CanalJsonParser {
                         RwError::from(ProtocolError("old is missing for delete event".to_string()))
                     })?;
 
-                let results = before
+                let results = deleted
                     .into_iter()
                     .map(|v| {
                         writer.delete(|column| {

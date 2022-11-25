@@ -18,6 +18,7 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use futures::future::ready;
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
@@ -25,6 +26,7 @@ use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp, str_to_tim
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::util::at_least_one_ok;
 use crate::parser::canal::operators::*;
 use crate::{
     ensure_rust_type, ensure_str, ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard,
@@ -61,40 +63,32 @@ impl CanalJsonParser {
             )));
         }
         match event.op.as_str() {
-            CANAL_DELETE_EVENT => {
-                let before = event
-                    .before
-                    .as_ref()
-                    .and_then(|l| l.first())
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError("old is missing for delete event".to_string()))
-                    })?;
-                writer.delete(|columns| {
-                    canal_json_parse_value(&columns.data_type, before.get(&columns.name))
-                        .map_err(Into::into)
-                })
-            }
             CANAL_INSERT_EVENT => {
-                let after = event
+                let inserted = event
                     .after
                     .as_ref()
-                    .and_then(|l| l.first())
+                    .and_then(|l| Some(l.iter()))
                     .ok_or_else(|| {
                         RwError::from(ProtocolError(
                             "data is missing for delete event".to_string(),
                         ))
                     })?;
 
-                writer.insert(|columns| {
-                    canal_json_parse_value(&columns.data_type, after.get(&columns.name))
-                        .map_err(Into::into)
-                })
+                let results = inserted
+                    .map(|v| {
+                        writer.insert(|columns| {
+                            canal_json_parse_value(&columns.data_type, v.get(&columns.name))
+                                .map_err(Into::into)
+                        })
+                    })
+                    .collect_vec();
+                at_least_one_ok(results)
             }
             CANAL_UPDATE_EVENT => {
                 let before = event
                     .before
                     .as_ref()
-                    .and_then(|l| l.first())
+                    .and_then(|l| Some(l.iter()))
                     .ok_or_else(|| {
                         RwError::from(ProtocolError("old is missing for delete event".to_string()))
                     })?;
@@ -102,25 +96,50 @@ impl CanalJsonParser {
                 let after = event
                     .after
                     .as_ref()
-                    .and_then(|l| l.first())
+                    .and_then(|l| Some(l.iter()))
                     .ok_or_else(|| {
                         RwError::from(ProtocolError(
                             "data is missing for delete event".to_string(),
                         ))
                     })?;
 
-                writer.update(|column| {
-                    // in origin canal, old only contains the changed columns but data contains all
-                    // columns.
-                    // in ticdc, old contains all fields
-                    let before_value = before
-                        .get(column.name.as_str())
-                        .or_else(|| after.get(column.name.as_str()));
-                    let old = canal_json_parse_value(&column.data_type, before_value)?;
-                    let new = canal_json_parse_value(&column.data_type, after.get(&column.name))?;
+                let results = before
+                    .zip(after)
+                    .map(|(before, after)| {
+                        writer.update(|column| {
+                            // in origin canal, old only contains the changed columns but data
+                            // contains all columns.
+                            // in ticdc, old contains all fields
+                            let before_value = before
+                                .get(column.name.as_str())
+                                .or_else(|| after.get(column.name.as_str()));
+                            let old = canal_json_parse_value(&column.data_type, before_value)?;
+                            let new =
+                                canal_json_parse_value(&column.data_type, after.get(&column.name))?;
 
-                    Ok((old, new))
-                })
+                            Ok((old, new))
+                        })
+                    })
+                    .collect_vec();
+                at_least_one_ok(results)
+            }
+            CANAL_DELETE_EVENT => {
+                let deleted = event
+                    .after
+                    .as_ref()
+                    .and_then(|l| Some(l.iter()))
+                    .ok_or_else(|| {
+                        RwError::from(ProtocolError("old is missing for delete event".to_string()))
+                    })?;
+                let results = deleted
+                    .map(|v| {
+                        writer.delete(|columns| {
+                            canal_json_parse_value(&columns.data_type, v.get(&columns.name))
+                                .map_err(Into::into)
+                        })
+                    })
+                    .collect_vec();
+                at_least_one_ok(results)
             }
             other => Err(RwError::from(ProtocolError(format!(
                 "unknown canal json op: {}",
