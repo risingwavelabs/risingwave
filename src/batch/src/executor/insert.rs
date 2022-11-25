@@ -47,7 +47,7 @@ impl InsertExecutor {
         source_manager: TableSourceManagerRef,
         child: BoxedExecutor,
         identity: String,
-        column_idxs: Vec<usize>,
+        column_idxs: Vec<usize>, // [1,2,0] seems fine
     ) -> Self {
         Self {
             table_id,
@@ -94,14 +94,17 @@ impl InsertExecutor {
 
             let (mut columns, _) = data_chunk.into_parts();
 
+            // THIS PART IS THE BUG
+            // columns is [2, 3, 1]
             // No need to check for duplicate columns. This is already validated in binder
             if !&self.column_idxs.is_sorted() {
+                // column_idxs = [1, 2, 0]
                 let mut ordered_cols: Vec<Column> = Vec::with_capacity(len);
                 for idx in &self.column_idxs {
                     ordered_cols.push(columns[*idx].clone());
                 }
                 columns = ordered_cols
-            }
+            } // columns is [3, 1, 2]
 
             // if user did not specify primary ID then we need to add a col it
             if let Some(row_id_index) = row_id_index {
@@ -152,7 +155,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
         )?;
 
         let table_id = TableId::new(insert_node.table_source_id);
-        let column_idxs = insert_node
+        let column_idxs = insert_node // [1,2,0] Seems correct
             .column_idxs
             .iter()
             .map(|&i| i as usize)
