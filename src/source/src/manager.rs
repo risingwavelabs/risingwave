@@ -366,7 +366,7 @@ pub mod test_utils {
             info,
             source_manager,
             connector_params: ConnectorParams {
-                connector_source_endpoint: Some("127.0.0.1:60061".to_string()),
+                connector_source_endpoint: None,
                 connector_sink_endpoint: None,
             },
         }
