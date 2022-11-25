@@ -28,12 +28,12 @@ use risingwave_common::types::{DatumRef, ScalarRefImpl};
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::sink_config::table_schema::Column;
 use risingwave_pb::connector_service::sink_config::TableSchema;
-use risingwave_pb::connector_service::sink_task::write_batch::json_payload::RowOp;
-use risingwave_pb::connector_service::sink_task::write_batch::{JsonPayload, Payload};
-use risingwave_pb::connector_service::sink_task::{
+use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
+use risingwave_pb::connector_service::sink_stream_request::write_batch::{JsonPayload, Payload};
+use risingwave_pb::connector_service::sink_stream_request::{
     Request as SinkRequest, StartEpoch, StartSink, SyncBatch, WriteBatch,
 };
-use risingwave_pb::connector_service::{SinkConfig, SinkResponse, SinkTask};
+use risingwave_pb::connector_service::{SinkConfig, SinkResponse, SinkStreamRequest};
 use serde_json::Value;
 use serde_json::Value::Number;
 use tokio::sync::mpsc;
@@ -107,7 +107,7 @@ pub struct RemoteSink {
     batch_id: u64,
     schema: Schema,
     _client: Option<ConnectorServiceClient<Channel>>,
-    request_sender: Option<UnboundedSender<SinkTask>>,
+    request_sender: Option<UnboundedSender<SinkStreamRequest>>,
     response_stream: ResponseStreamImpl,
 }
 
@@ -136,11 +136,11 @@ impl RemoteSink {
         .map_err(|e| SinkError::Remote(format!("failed to connect channel: {:?}", e)))?; // create client and start sink
         let mut client = ConnectorServiceClient::new(channel);
 
-        let (request_sender, request_receiver) = mpsc::unbounded_channel::<SinkTask>();
+        let (request_sender, request_receiver) = mpsc::unbounded_channel::<SinkStreamRequest>();
 
         // send initial request in case of the blocking receive call from creating streaming request
         request_sender
-            .send(SinkTask {
+            .send(SinkStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
                     sink_config: Some(SinkConfig {
                         sink_type: config.sink_type.clone(),
@@ -183,7 +183,7 @@ impl RemoteSink {
         })
     }
 
-    fn on_sender_alive(&mut self) -> Result<&UnboundedSender<SinkTask>> {
+    fn on_sender_alive(&mut self) -> Result<&UnboundedSender<SinkStreamRequest>> {
         self.request_sender
             .as_ref()
             .ok_or_else(|| SinkError::Remote("sink has been dropped".to_string()))
@@ -192,7 +192,7 @@ impl RemoteSink {
     #[cfg(test)]
     fn for_test(
         response_receiver: UnboundedReceiver<SinkResponse>,
-        request_sender: UnboundedSender<SinkTask>,
+        request_sender: UnboundedSender<SinkStreamRequest>,
     ) -> Self {
         let properties = HashMap::from([("output_path".to_string(), "/tmp/rw".to_string())]);
 
@@ -250,7 +250,7 @@ impl Sink for RemoteSink {
         })?;
         let batch_id = self.batch_id;
         self.on_sender_alive()?
-            .send(SinkTask {
+            .send(SinkStreamRequest {
                 request: Some(SinkRequest::Write(WriteBatch {
                     epoch,
                     batch_id,
@@ -266,7 +266,7 @@ impl Sink for RemoteSink {
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.on_sender_alive()?
-            .send(SinkTask {
+            .send(SinkStreamRequest {
                 request: Some(SinkRequest::StartEpoch(StartEpoch { epoch })),
             })
             .map_err(|e| SinkError::Remote(e.to_string()))?;
@@ -281,7 +281,7 @@ impl Sink for RemoteSink {
             SinkError::Remote("epoch has not been initialize, call `begin_epoch`".to_string())
         })?;
         self.on_sender_alive()?
-            .send(SinkTask {
+            .send(SinkStreamRequest {
                 request: Some(SinkRequest::Sync(SyncBatch { epoch })),
             })
             .map_err(|e| SinkError::Remote(e.to_string()))?;
@@ -334,9 +334,9 @@ mod test {
     use risingwave_pb::connector_service::sink_response::{
         Response, StartEpochResponse, SyncResponse, WriteResponse,
     };
-    use risingwave_pb::connector_service::sink_task::write_batch::Payload;
-    use risingwave_pb::connector_service::sink_task::Request;
-    use risingwave_pb::connector_service::{SinkResponse, SinkTask};
+    use risingwave_pb::connector_service::sink_stream_request::write_batch::Payload;
+    use risingwave_pb::connector_service::sink_stream_request::Request;
+    use risingwave_pb::connector_service::{SinkResponse, SinkStreamRequest};
     use risingwave_pb::data;
     use tokio::sync::mpsc;
 
@@ -449,7 +449,7 @@ mod test {
         assert_eq!(sink.epoch, Some(2022));
         assert_eq!(sink.batch_id, 1);
         match request_receiver.recv().await {
-            Some(SinkTask {
+            Some(SinkStreamRequest {
                 request: Some(Request::Write(write)),
             }) => {
                 assert_eq!(write.epoch, 2022);
@@ -510,7 +510,7 @@ mod test {
         assert_eq!(sink.epoch, Some(2023));
         assert_eq!(sink.batch_id, 2);
         match request_receiver.recv().await {
-            Some(SinkTask {
+            Some(SinkStreamRequest {
                 request: Some(Request::Write(write)),
             }) => {
                 assert_eq!(write.epoch, 2023);

@@ -53,7 +53,7 @@ message SinkStreamRequest {
 
   oneof request {
     StartSink start = 1;
-    StartEpoch startEpoch = 2;
+    StartEpoch start_epoch = 2;
     WriteBatch write = 3;
     SyncBatch sync = 4;
   }
