@@ -71,7 +71,7 @@ impl ToDistributedBatch for BatchInsert {
 
 impl ToBatchProst for BatchInsert {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let c_idxs = self // [1,2,0]
+        let c_idxs = self
             .logical
             .column_idxs()
             .iter()

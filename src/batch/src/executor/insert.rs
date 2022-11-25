@@ -98,7 +98,7 @@ impl InsertExecutor {
             if !&self.column_idxs.is_sorted() {
                 let mut ordered_cols: Vec<Column> = columns.clone();
                 for (i, idx) in self.column_idxs.iter().enumerate() {
-                    ordered_cols[*idx] = columns[i].clone() // now
+                    ordered_cols[*idx] = columns[i].clone()
                 }
                 columns = ordered_cols
             }
