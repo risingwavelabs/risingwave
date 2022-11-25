@@ -372,8 +372,8 @@ mod tests {
                     let encoding_data_size =
                         ScalarImpl::encoding_data_size(&DataType::Decimal, &mut deserializer)
                             .unwrap();
-                    // [nulltag, flag, decimal_chunk, 0]
-                    assert_eq!(18, encoding_data_size);
+                    // [nulltag, flag, decimal_chunk]
+                    assert_eq!(17, encoding_data_size);
                 }
 
                 {
@@ -385,8 +385,8 @@ mod tests {
                     let encoding_data_size =
                         ScalarImpl::encoding_data_size(&DataType::Decimal, &mut deserializer)
                             .unwrap();
-                    // [nulltag, flag, decimal_chunk, 0]
-                    assert_eq!(4, encoding_data_size);
+                    // [nulltag, flag, decimal_chunk]
+                    assert_eq!(3, encoding_data_size);
                 }
 
                 {
@@ -399,7 +399,7 @@ mod tests {
                         ScalarImpl::encoding_data_size(&DataType::Decimal, &mut deserializer)
                             .unwrap();
 
-                    assert_eq!(3, encoding_data_size); // [1, 35, 0]
+                    assert_eq!(2, encoding_data_size); // [1, 35]
                 }
 
                 {
@@ -411,7 +411,7 @@ mod tests {
                     let encoding_data_size =
                         ScalarImpl::encoding_data_size(&DataType::Decimal, &mut deserializer)
                             .unwrap();
-                    assert_eq!(3, encoding_data_size); // [1, 6, 0]
+                    assert_eq!(2, encoding_data_size); // [1, 6]
                 }
 
                 {

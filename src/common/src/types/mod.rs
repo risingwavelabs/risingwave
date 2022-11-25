@@ -858,10 +858,7 @@ impl ScalarRefImpl<'_> {
             Self::Float64(v) => v.serialize(ser)?,
             Self::Utf8(v) => v.serialize(ser)?,
             Self::Bool(v) => v.serialize(ser)?,
-            Self::Decimal(v) => {
-                let (mantissa, scale) = v.mantissa_scale_for_serialization();
-                ser.serialize_decimal(mantissa, scale)?;
-            }
+            Self::Decimal(v) => ser.serialize_decimal(v.clone().into())?,
             Self::Interval(v) => v.serialize(ser)?,
             Self::NaiveDate(v) => ser.serialize_naivedate(v.0.num_days_from_ce())?,
             Self::NaiveDateTime(v) => {
@@ -900,15 +897,7 @@ impl ScalarImpl {
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
             Ty::Varchar => Self::Utf8(String::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
-            Ty::Decimal => Self::Decimal({
-                let (mantissa, scale) = de.deserialize_decimal()?;
-                match scale {
-                    29 => Decimal::NegativeInf,
-                    30 => Decimal::PositiveInf,
-                    31 => Decimal::NaN,
-                    _ => Decimal::from_i128_with_scale(mantissa, scale as u32),
-                }
-            }),
+            Ty::Decimal => Self::Decimal(de.deserialize_decimal()?.into()),
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
             Ty::Time => Self::NaiveTime({
                 let (secs, nano) = de.deserialize_naivetime()?;
@@ -956,7 +945,10 @@ impl ScalarImpl {
                     DataType::Boolean => size_of::<u8>(),
                     // IntervalUnit is serialized as (i32, i32, i64)
                     DataType::Interval => size_of::<(i32, i32, i64)>(),
-                    DataType::Decimal => deserializer.read_decimal_len()?,
+                    DataType::Decimal => {
+                        deserializer.deserialize_decimal()?;
+                        0 // the len is not used since decimal is not a fixed length type
+                    }
                     // these two types is var-length and should only be determine at runtime.
                     // TODO: need some test for this case (e.g. e2e test)
                     DataType::List { .. } => deserializer.read_bytes_len()?,
