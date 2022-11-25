@@ -74,19 +74,19 @@ impl Expression for ConcatWsExpression {
             let mut string_columns = string_columns_ref.iter();
             for string_column in string_columns.by_ref() {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    writer.write_ref(string)?;
+                    writer.write_ref(string);
                     break;
                 }
             }
 
             for string_column in string_columns {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    writer.write_ref(sep)?;
-                    writer.write_ref(string)?;
+                    writer.write_ref(sep);
+                    writer.write_ref(string);
                 }
             }
 
-            builder = writer.finish()?.into_inner();
+            writer.finish();
         }
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }

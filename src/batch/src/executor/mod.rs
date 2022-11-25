@@ -166,12 +166,10 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
 impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
     pub async fn build(&self) -> Result<BoxedExecutor> {
         self.try_build().await.map_err(|e| {
-            anyhow!(format!(
-                "[PlanNode: {:?}] Failed to build executor: {}",
-                self.plan_node.get_node_body(),
-                e,
-            ))
-            .into()
+            let err_msg = format!("Failed to build executor: {e}");
+            let plan_node_body = self.plan_node.get_node_body();
+            error!("{err_msg}, plan node is: \n {plan_node_body:?}");
+            anyhow!(err_msg).into()
         })
     }
 

@@ -205,52 +205,72 @@ impl HummockReadVersion {
     }
 
     /// Updates the read version with `VersionUpdate`.
-    /// A `OrderIdx` that can uniquely identify the newly added entry will be returned.
+    /// There will be three data types to be processed
+    /// `VersionUpdate::Staging`
+    ///     - `StagingData::ImmMem` -> Insert into memory's `staging_imm`
+    ///     - `StagingData::Sst` -> Update the sst to memory's `staging_sst` and remove the
+    ///       corresponding `staging_imms` according to the `batch_id`
+    /// `VersionUpdate::CommittedDelta` -> Unimplemented yet
+    /// `VersionUpdate::CommittedSnapshot` -> Update `committed_version` , and clean up related
+    /// `staging_sst` and `staging_imm` in memory according to epoch
     pub fn update(&mut self, info: VersionUpdate) {
         match info {
             VersionUpdate::Staging(staging) => match staging {
                 // TODO: add a check to ensure that the added batch id of added imm is greater than
                 // the batch id of imm at the front
-                StagingData::ImmMem(imm) => self.staging.imm.push_front(imm),
+                StagingData::ImmMem(imm) => {
+                    if let Some(item) = self.staging.imm.front() {
+                        // check batch_id order from newest to old
+                        debug_assert!(item.batch_id() < imm.batch_id());
+                    }
+
+                    self.staging.imm.push_front(imm)
+                }
                 StagingData::Sst(staging_sst) => {
-                    // TODO: enable this stricter check after each streaming table owns a read
-                    // version. assert!(self.staging.imm.len() >=
-                    // staging_sst.imm_ids.len()); assert!(staging_sst
-                    //     .imm_ids
-                    //     .is_sorted_by(|batch_id1, batch_id2| batch_id2.partial_cmp(batch_id1)));
-                    // assert!(
-                    //     check_subset_preserve_order(
-                    //         staging_sst.imm_ids.iter().cloned(),
-                    //         self.staging.imm.iter().map(|imm| imm.batch_id()),
-                    //     ),
-                    //     "the imm id of staging sstable info not preserve the imm order. staging
-                    // sst imm ids: {:?}, current imm ids: {:?}",
-                    //     staging_sst.imm_ids.iter().collect_vec(),
-                    //     self.staging.imm.iter().map(|imm| imm.batch_id()).collect_vec()
-                    // );
-                    // for clear_imm_id in staging_sst.imm_ids.iter().rev() {
-                    //     let item = self.staging.imm.back().unwrap();
-                    //     assert_eq!(*clear_imm_id, item.batch_id());
-                    //     self.staging.imm.pop_back();
-                    // }
+                    // The following properties must be ensured:
+                    // 1) self.staging.imm is sorted by imm id descendingly
+                    // 2) staging_sst.imm_ids preserves the imm id partial
+                    //    ordering of the participating read version imms. Example:
+                    //    If staging_sst contains two read versions r1: [i1, i3] and  r2: [i2, i4],
+                    //    then [i2, i1, i3, i4] is valid while [i3, i1, i2, i4] is invalid.
+                    // 3) The intersection between staging_sst.imm_ids and self.staging.imm
+                    //    are always the suffix of self.staging.imm
 
-                    debug_assert!(
-                        check_subset_preserve_order(
-                            staging_sst.imm_ids.iter().cloned().sorted(),
-                            self.staging.imm.iter().map(|imm| imm.batch_id()).sorted()
-                        ),
-                        "the set of imm ids in the staging_sst {:?} is not a subset of current staging imms {:?}",
-                        staging_sst.imm_ids.iter().cloned().sorted().collect_vec(),
-                        self.staging.imm.iter().map(|imm| imm.batch_id()).sorted().collect_vec(),
-                    );
-
-                    let imm_id_set: HashSet<ImmId> =
-                        HashSet::from_iter(staging_sst.imm_ids.iter().cloned());
-                    self.staging
+                    // Check 1)
+                    debug_assert!(self
+                        .staging
                         .imm
-                        .retain(|imm| !imm_id_set.contains(&imm.batch_id()));
+                        .iter()
+                        .rev()
+                        .is_sorted_by_key(|imm| imm.batch_id()));
 
-                    self.staging.sst.push_front(staging_sst);
+                    // Calculate intersection
+                    let staging_imm_ids_from_imms: HashSet<u64> =
+                        self.staging.imm.iter().map(|imm| imm.batch_id()).collect();
+
+                    // batch_id order from newest to old
+                    let intersect_imm_ids = staging_sst
+                        .imm_ids
+                        .iter()
+                        .copied()
+                        .filter(|id| staging_imm_ids_from_imms.contains(id))
+                        .collect_vec();
+
+                    if !intersect_imm_ids.is_empty() {
+                        // Check 2)
+                        debug_assert!(check_subset_preserve_order(
+                            intersect_imm_ids.iter().copied(),
+                            self.staging.imm.iter().map(|imm| imm.batch_id()),
+                        ));
+
+                        // Check 3) and replace imms with a staging sst
+                        for clear_imm_id in intersect_imm_ids.into_iter().rev() {
+                            let item = self.staging.imm.back().unwrap();
+                            assert_eq!(clear_imm_id, item.batch_id());
+                            self.staging.imm.pop_back();
+                        }
+                        self.staging.sst.push_front(staging_sst);
+                    }
                 }
             },
 

@@ -576,7 +576,6 @@ message TableStats {
   int64 total_key_size = 1;
   int64 total_value_size = 2;
   int64 total_key_count = 3;
-  int64 stale_key_count = 4;
 }
 
 message HummockVersionStats {
