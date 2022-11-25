@@ -69,7 +69,7 @@ pub async fn list_prometheus_cluster<S: MetaStore>(
     if let Some(ref client) = srv.prometheus_client {
         // assume job_name is one of compute, meta, frontend
         let now = SystemTime::now();
-        let cpu_query = "sum(rate(process_cpu_seconds_total{job=~\"compute|meta|frontend\"}[1m])) by (job,instance)";
+        let cpu_query = "sum(rate(process_cpu_seconds_total{job=~\"compute|meta|frontend\"}[60s])) by (job,instance)";
         let result = client
             .query_range(
                 cpu_query,
@@ -80,7 +80,7 @@ pub async fn list_prometheus_cluster<S: MetaStore>(
                 now.duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_secs() as i64,
-                60.0,
+                15.0,
             )
             .get()
             .await

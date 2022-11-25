@@ -27,7 +27,7 @@ import {
   VStack,
 } from "@chakra-ui/react"
 import { ResponsiveContainer, XAxis, AreaChart, Area, YAxis } from 'recharts';
-import { fill, reverse, sortBy } from "lodash"
+import { clone, fill, reverse, sortBy } from "lodash"
 import Head from "next/head"
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import Title from "../components/Title"
@@ -82,7 +82,7 @@ function WorkerNodeMetricsComponent({
       return []
     }
     let lastTs: number = metrics.at(-1)!.timestamp
-    for (let pt of reverse(metrics)) {
+    for (let pt of reverse(clone(metrics))) {
       while (lastTs - pt.timestamp > 0) {
         lastTs -= 60
         filledMetrics.push({
@@ -97,7 +97,6 @@ function WorkerNodeMetricsComponent({
       filledMetrics.push({ timestamp: lastTs, value: 0 })
       lastTs -= 60
     }
-    console.log(filledMetrics)
     return reverse(filledMetrics)
   }, [metrics])
   return (
@@ -111,7 +110,7 @@ function WorkerNodeMetricsComponent({
           <AreaChart data={metricsCallback()}>
             <XAxis dataKey="timestamp" type="number" domain={['dataMin', 'dataMax']} hide={true} />
             {isCpuMetrics && <YAxis type="number" domain={[0, 1]} hide={true} />}
-            <Area isAnimationActive={false} type="monotone" dataKey="value" strokeWidth={1} stroke={theme.colors.teal["500"]} fill={theme.colors.teal["100"]} />
+            <Area isAnimationActive={false} type="linear" dataKey="value" strokeWidth={1} stroke={theme.colors.teal["500"]} fill={theme.colors.teal["100"]} />
           </AreaChart>
         </ResponsiveContainer>
       </VStack>
