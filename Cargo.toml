@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "scripts/source/prepare_ci_pubsub",
   "src/batch",
   "src/bench",
   "src/cmd",

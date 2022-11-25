@@ -61,6 +61,7 @@ pub enum Components {
     PrometheusAndGrafana,
     Etcd,
     Kafka,
+    Pubsub,
     Redis,
     ConnectorNode,
     Tracing,
@@ -78,6 +79,7 @@ impl Components {
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
             Self::Kafka => "[Component] Kafka",
+            Self::Pubsub => "[Component] Google Pubsub",
             Self::Redis => "[Component] Redis",
             Self::ConnectorNode => "[Component] RisingWave Connector",
             Self::RustComponents => "[Build] Rust components",
@@ -108,6 +110,11 @@ Required if you want to persistent meta-node data.
             Self::Kafka => {
                 "
 Required if you want to create source from Kafka.
+                "
+            }
+            Self::Pubsub => {
+                "
+Required if you want to create source from Emulated Google Pub/sub.
                 "
             }
             Self::RustComponents => {
@@ -164,6 +171,7 @@ Required if you want to create CDC source from external Databases.
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_ETCD" => Some(Self::Etcd),
             "ENABLE_KAFKA" => Some(Self::Kafka),
+            "ENABLE_PUBSUB" => Some(Self::Pubsub),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
             "ENABLE_BUILD_DASHBOARD_V2" => Some(Self::Dashboard),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
@@ -182,6 +190,7 @@ Required if you want to create CDC source from external Databases.
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
             Self::Kafka => "ENABLE_KAFKA",
+            Self::Pubsub => "ENABLE_PUBSUB_EMU",
             Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",
