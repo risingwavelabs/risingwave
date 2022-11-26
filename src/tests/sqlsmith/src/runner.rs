@@ -130,6 +130,7 @@ async fn create_tables(
     for stmt in &statements {
         let create_sql = stmt.to_string();
         setup_sql.push_str(&format!("{};", &create_sql));
+        tracing::info!("Executing Table Setup: {}", &create_sql);
         client.execute(&create_sql, &[]).await.unwrap();
     }
 
@@ -138,6 +139,7 @@ async fn create_tables(
     for i in 0..10 {
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         setup_sql.push_str(&format!("{};", &create_sql));
+        tracing::info!("Executing MView Setup: {}", &create_sql);
         client.execute(&create_sql, &[]).await.unwrap();
         tables.push(table.clone());
         mviews.push(table);
