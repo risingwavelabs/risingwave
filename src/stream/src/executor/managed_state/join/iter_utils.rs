@@ -63,7 +63,7 @@ mod tests {
     fn gen_row_with_pk(i: i64) -> (Cow<'static, Vec<u8>>, Cow<'static, Row>) {
         (
             Cow::Owned(i.to_be_bytes().to_vec()),
-            Cow::Owned(Row(vec![Some(ScalarImpl::Int64(i))])),
+            Cow::Owned(Row::new(vec![Some(ScalarImpl::Int64(i))])),
         )
     }
 

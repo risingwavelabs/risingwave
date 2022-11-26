@@ -489,7 +489,7 @@ mod tests {
         let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
         let schema = vec![DataType::Int64, DataType::Varchar];
         let serializer = OrderedRowSerde::new(schema, order_types);
-        let row = Row(vec![
+        let row = Row::new(vec![
             Some(ScalarImpl::Int64(100)),
             Some(ScalarImpl::Utf8("abc".to_string())),
         ]);
@@ -527,7 +527,7 @@ mod tests {
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
-            let row = Row(vec![
+            let row = Row::new(vec![
                 Some(ScalarImpl::Int64(100)),
                 Some(ScalarImpl::Utf8("abc".to_string())),
             ]);
@@ -570,7 +570,7 @@ mod tests {
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
-            let row = Row(vec![
+            let row = Row::new(vec![
                 Some(ScalarImpl::Int64(100)),
                 Some(ScalarImpl::Utf8("abc".to_string())),
             ]);

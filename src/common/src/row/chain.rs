@@ -93,11 +93,11 @@ mod tests {
 
     #[test]
     fn test_chain_row() {
-        let r1 = || Row((1..=3).map(|i| Some(ScalarImpl::Int64(i))).collect());
-        let r2 = || Row((4..=6).map(|i| Some(ScalarImpl::Int64(i))).collect());
-        let r3 = || Row((7..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r1 = || Row::new((1..=3).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r2 = || Row::new((4..=6).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r3 = || Row::new((7..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
 
-        let r_expected = Row((1..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r_expected = Row::new((1..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
 
         macro_rules! test {
             ($r:expr) => {
