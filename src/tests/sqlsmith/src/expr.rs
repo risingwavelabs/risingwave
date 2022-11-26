@@ -253,9 +253,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             return self.gen_simple_scalar(ret);
         };
         // TODO: Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-        let (subquery, _) = self._gen_correlated_query();
+        // let (subquery, _) = self.gen_correlated_query();
         // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/2275>
-        // let (subquery, _) = self.gen_local_query();
+        let (subquery, _) = self.gen_local_query();
         Expr::Exists(Box::new(subquery))
     }
 
