@@ -317,13 +317,19 @@ impl ColPrunable for LogicalTopN {
                 })
                 .collect(),
         };
+        let new_group_key = self
+            .group_key()
+            .iter()
+            .map(|group_key| mapping.map(*group_key))
+            .collect();
         let new_input = self.input().prune_col(&input_required_cols);
-        let top_n = Self::new(
+        let top_n = Self::with_group(
             new_input,
             self.limit(),
             self.offset(),
             self.with_ties(),
             new_order,
+            new_group_key,
         )
         .into();
 
@@ -389,5 +395,40 @@ impl ToStream for LogicalTopN {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((top_n.into(), out_col_change))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::LogicalTopN;
+    use crate::optimizer::plan_node::{ColPrunable, LogicalValues};
+    use crate::optimizer::property::Order;
+    use crate::session::OptimizerContext;
+
+    #[tokio::test]
+    async fn test_prune_col() {
+        let ty = DataType::Int32;
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
+        ];
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let input = Rc::new(values);
+
+        let original_logical =
+            LogicalTopN::with_group(input, 1, 0, false, Order::default(), vec![1]);
+        assert_eq!(original_logical.group_key(), &[1]);
+
+        let pruned_node = original_logical.prune_col(&[0, 1, 2]);
+
+        let pruned_logical = pruned_node.as_logical_top_n().unwrap();
+        assert_eq!(pruned_logical.group_key(), &[1]);
     }
 }
