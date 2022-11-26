@@ -23,6 +23,7 @@ use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::field_generator::FieldGeneratorImpl;
+use risingwave_common::row::Row2;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
@@ -326,7 +327,7 @@ impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
             let probe_row = base_data_chunk.row_at_unchecked_vis(idx);
             for datum in &self.datums {
                 if datum[0] == probe_row.value_at(0).to_owned_datum() {
-                    let owned_row = probe_row.to_owned_row();
+                    let owned_row = probe_row.into_owned_row();
                     let chunk =
                         DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32]);
                     mock_executor.add(chunk);
