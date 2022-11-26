@@ -512,7 +512,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
         if self.is_middle_cache_full() && &cache_key >= self.middle.last_key_value().unwrap().0 {
             return Ok(());
         }
-        managed_state.insert(row_ref.clone());
+        managed_state.insert(row_ref);
 
         // Then insert input row to corresponding cache range according to its order key
         if !self.is_low_cache_full() {
@@ -579,7 +579,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
         let elem_to_compare_with_middle = (cache_key, row_ref);
 
         if !self.is_middle_cache_full() {
-            let row: CompactedRow = elem_to_compare_with_middle.1.clone().into();
+            let row: CompactedRow = elem_to_compare_with_middle.1.into();
             managed_state.insert(elem_to_compare_with_middle.1);
             self.middle
                 .insert(elem_to_compare_with_middle.0.clone(), row.clone());
@@ -616,7 +616,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
                     }
                 }
 
-                managed_state.insert(elem_to_compare_with_middle.1.clone());
+                managed_state.insert(elem_to_compare_with_middle.1);
                 res_ops.push(Op::Insert);
                 res_rows.push((&elem_to_compare_with_middle.1).into());
                 self.middle.insert(
@@ -626,7 +626,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
             }
             Ordering::Equal => {
                 // The row is in middle and is a tie with the last row.
-                managed_state.insert(elem_to_compare_with_middle.1.clone());
+                managed_state.insert(elem_to_compare_with_middle.1);
                 res_ops.push(Op::Insert);
                 res_rows.push((&elem_to_compare_with_middle.1).into());
                 self.middle.insert(
