@@ -27,18 +27,15 @@ use super::*;
 use crate::ExprError;
 
 #[derive(Debug)]
-pub struct GenerateSeries<T: Array, S: Array> {
+pub struct GenerateSeries<T: Array, S: Array, const STOP_INCLUSIVE: bool> {
     start: BoxedExpression,
     stop: BoxedExpression,
     step: BoxedExpression,
     chunk_size: usize,
-    /// `_stop_inclusive` is required to be `true` for `GenerateSeries`, while `false` for `Range`.
-    /// This is guaranteed by the only pub entry point `new_range` and `new_generate_series`.
-    _stop_inclusive: bool,
     _phantom: std::marker::PhantomData<(T, S)>,
 }
 
-impl<T: Array, S: Array> GenerateSeries<T, S>
+impl<T: Array, S: Array, const STOP_INCLUSIVE: bool> GenerateSeries<T, S, STOP_INCLUSIVE>
 where
     T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
@@ -49,14 +46,12 @@ where
         stop: BoxedExpression,
         step: BoxedExpression,
         chunk_size: usize,
-        _stop_inclusive: bool,
     ) -> Self {
         Self {
             start,
             stop,
             step,
             chunk_size,
-            _stop_inclusive,
             _phantom: Default::default(),
         }
     }
@@ -79,12 +74,12 @@ where
         let mut cur: T::OwnedItem = start.to_owned_scalar();
 
         while if step.is_negative() {
-            if self._stop_inclusive {
+            if STOP_INCLUSIVE {
                 cur >= stop
             } else {
                 cur > stop
             }
-        } else if self._stop_inclusive {
+        } else if STOP_INCLUSIVE {
             cur <= stop
         } else {
             cur < stop
@@ -97,7 +92,8 @@ where
     }
 }
 
-impl<T: Array, S: Array> TableFunction for GenerateSeries<T, S>
+impl<T: Array, S: Array, const STOP_INCLUSIVE: bool> TableFunction
+    for GenerateSeries<T, S, STOP_INCLUSIVE>
 where
     T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
@@ -164,12 +160,14 @@ pub fn new_generate_series(
     let [start, stop, step]: [_; 3] = args.try_into().unwrap();
 
     match return_type {
-        DataType::Timestamp => Ok(GenerateSeries::<NaiveDateTimeArray, IntervalArray>::new(
-            start, stop, step, chunk_size, true,
-        )
-        .boxed()),
-        DataType::Int32 => Ok(GenerateSeries::<I32Array, I32Array>::new(
-            start, stop, step, chunk_size, true,
+        DataType::Timestamp => Ok(
+            GenerateSeries::<NaiveDateTimeArray, IntervalArray, true>::new(
+                start, stop, step, chunk_size,
+            )
+            .boxed(),
+        ),
+        DataType::Int32 => Ok(GenerateSeries::<I32Array, I32Array, true>::new(
+            start, stop, step, chunk_size,
         )
         .boxed()),
         _ => Err(ExprError::Internal(anyhow!(
@@ -201,12 +199,11 @@ mod tests {
             LiteralExpression::new(DataType::Int32, Some(v.into())).boxed()
         }
 
-        let function = GenerateSeries::<I32Array, I32Array>::new(
+        let function = GenerateSeries::<I32Array, I32Array, true>::new(
             to_lit_expr(start),
             to_lit_expr(stop),
             to_lit_expr(step),
             CHUNK_SIZE,
-            true,
         )
         .boxed();
         let expect_cnt = ((stop - start) / step + 1) as usize;
@@ -241,12 +238,11 @@ mod tests {
             LiteralExpression::new(ty, Some(v)).boxed()
         }
 
-        let function = GenerateSeries::<NaiveDateTimeArray, IntervalArray>::new(
+        let function = GenerateSeries::<NaiveDateTimeArray, IntervalArray, true>::new(
             to_lit_expr(DataType::Timestamp, start.into()),
             to_lit_expr(DataType::Timestamp, stop.into()),
             to_lit_expr(DataType::Interval, step.into()),
             CHUNK_SIZE,
-            true,
         );
 
         let dummy_chunk = DataChunk::new_dummy(1);

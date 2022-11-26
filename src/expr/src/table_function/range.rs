@@ -15,7 +15,7 @@
 use anyhow::anyhow;
 use risingwave_common::array::{I32Array, IntervalArray, NaiveDateTimeArray};
 
-type Range<T, S> = GenerateSeries<T, S>;
+type Range<T, S, const STOP_INCLUSIVE: bool> = GenerateSeries<T, S, STOP_INCLUSIVE>;
 
 use super::*;
 use crate::ExprError;
@@ -26,12 +26,12 @@ pub fn new_range(prost: &TableFunctionProst, chunk_size: usize) -> Result<BoxedT
     let [start, stop, step]: [_; 3] = args.try_into().unwrap();
 
     match return_type {
-        DataType::Timestamp => Ok(Range::<NaiveDateTimeArray, IntervalArray>::new(
-            start, stop, step, chunk_size, false,
+        DataType::Timestamp => Ok(Range::<NaiveDateTimeArray, IntervalArray, false>::new(
+            start, stop, step, chunk_size,
         )
         .boxed()),
         DataType::Int32 => {
-            Ok(Range::<I32Array, I32Array>::new(start, stop, step, chunk_size, false).boxed())
+            Ok(Range::<I32Array, I32Array, false>::new(start, stop, step, chunk_size).boxed())
         }
         _ => Err(ExprError::Internal(anyhow!(
             "the return type of Range Function is incorrect".to_string(),
@@ -62,12 +62,11 @@ mod tests {
             LiteralExpression::new(DataType::Int32, Some(v.into())).boxed()
         }
 
-        let function = Range::<I32Array, I32Array>::new(
+        let function = Range::<I32Array, I32Array, false>::new(
             to_lit_expr(start),
             to_lit_expr(stop),
             to_lit_expr(step),
             CHUNK_SIZE,
-            false,
         )
         .boxed();
         let expect_cnt = ((stop - start - step.signum()) / step + 1) as usize;
@@ -102,12 +101,11 @@ mod tests {
             LiteralExpression::new(ty, Some(v)).boxed()
         }
 
-        let function = Range::<NaiveDateTimeArray, IntervalArray>::new(
+        let function = Range::<NaiveDateTimeArray, IntervalArray, false>::new(
             to_lit_expr(DataType::Timestamp, start.into()),
             to_lit_expr(DataType::Timestamp, stop.into()),
             to_lit_expr(DataType::Interval, step.into()),
             CHUNK_SIZE,
-            false,
         );
 
         let dummy_chunk = DataChunk::new_dummy(1);
