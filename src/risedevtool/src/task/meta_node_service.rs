@@ -57,9 +57,9 @@ impl MetaNodeService {
             config.listen_address, config.exporter_port
         ));
 
-        match config.provide_prometheus.as_ref().map(|v| &v[..]) {
-            Some([]) => {}
-            Some([prometheus]) => {
+        match config.provide_prometheus.as_ref().unwrap().as_slice() {
+            [] => {}
+            [prometheus] => {
                 cmd.arg("--prometheus-endpoint")
                     .arg(format!("http://{}:{}", prometheus.address, prometheus.port));
             }
@@ -71,11 +71,11 @@ impl MetaNodeService {
             }
         }
 
-        match config.provide_etcd_backend.as_ref().map(|v| &v[..]) {
-            Some([]) => {
+        match config.provide_etcd_backend.as_ref().unwrap().as_slice() {
+            [] => {
                 cmd.arg("--backend").arg("mem");
             }
-            Some(etcds) => {
+            etcds => {
                 cmd.arg("--backend")
                     .arg("etcd")
                     .arg("--etcd-endpoints")
@@ -83,12 +83,6 @@ impl MetaNodeService {
                 if etcds.len() > 1 {
                     eprintln!("WARN: more than 1 etcd instance is detected, only using the first one for meta node.");
                 }
-            }
-            _ => {
-                return Err(anyhow!(
-                    "unexpected etcd config {:?}",
-                    config.provide_etcd_backend
-                ))
             }
         }
 

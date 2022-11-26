@@ -26,10 +26,10 @@ import {
   useToast,
   VStack,
 } from "@chakra-ui/react"
-import { ResponsiveContainer, XAxis, AreaChart, Area, YAxis } from 'recharts';
-import { clone, fill, reverse, sortBy } from "lodash"
+import { clone, reverse, sortBy } from "lodash"
 import Head from "next/head"
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
+import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
 import Title from "../components/Title"
 import { WorkerNode } from "../proto/gen/common"
 import {
@@ -69,7 +69,7 @@ function WorkerNodeMetricsComponent({
   job,
   instance,
   metrics,
-  isCpuMetrics
+  isCpuMetrics,
 }: {
   job: string
   instance: string
@@ -108,30 +108,43 @@ function WorkerNodeMetricsComponent({
 
         <ResponsiveContainer width="100%" height={100}>
           <AreaChart data={metricsCallback()}>
-            <XAxis dataKey="timestamp" type="number" domain={['dataMin', 'dataMax']} hide={true} />
-            {isCpuMetrics && <YAxis type="number" domain={[0, 1]} hide={true} />}
-            <Area isAnimationActive={false} type="linear" dataKey="value" strokeWidth={1} stroke={theme.colors.teal["500"]} fill={theme.colors.teal["100"]} />
+            <XAxis
+              dataKey="timestamp"
+              type="number"
+              domain={["dataMin", "dataMax"]}
+              hide={true}
+            />
+            {isCpuMetrics && (
+              <YAxis type="number" domain={[0, 1]} hide={true} />
+            )}
+            <Area
+              isAnimationActive={false}
+              type="linear"
+              dataKey="value"
+              strokeWidth={1}
+              stroke={theme.colors.teal["500"]}
+              fill={theme.colors.teal["100"]}
+            />
           </AreaChart>
         </ResponsiveContainer>
       </VStack>
-    </Fragment >
+    </Fragment>
   )
 }
 
-
 interface MetricsSample {
-  timestamp: number;
-  value: number;
+  timestamp: number
+  value: number
 }
 
 interface NodeMetrics {
-  metric: { [key: string]: string };
-  sample: MetricsSample[];
+  metric: { [key: string]: string }
+  sample: MetricsSample[]
 }
 
 interface ClusterNodeMetrics {
-  cpuData: NodeMetrics[];
-  memoryData: NodeMetrics[];
+  cpuData: NodeMetrics[]
+  memoryData: NodeMetrics[]
 }
 
 export default function Cluster() {
@@ -157,7 +170,7 @@ export default function Cluster() {
       }
     }
     doFetch()
-    return () => { }
+    return () => {}
   }, [toast])
 
   useEffect(() => {
@@ -166,7 +179,10 @@ export default function Cluster() {
         try {
           let metrics: ClusterNodeMetrics = await getClusterMetrics()
           metrics.cpuData = sortBy(metrics.cpuData, (m) => m.metric.instance)
-          metrics.memoryData = sortBy(metrics.memoryData, (m) => m.metric.instance)
+          metrics.memoryData = sortBy(
+            metrics.memoryData,
+            (m) => m.metric.instance
+          )
           setMetrics(metrics)
           await new Promise((resolve) => setTimeout(resolve, 5000)) // refresh every 5 secs
         } catch (e: any) {
@@ -183,7 +199,7 @@ export default function Cluster() {
       }
     }
     doFetch()
-    return () => { }
+    return () => {}
   }, [toast])
 
   const retVal = (
@@ -225,43 +241,45 @@ export default function Cluster() {
       </Grid>
       <Title>CPU Usage</Title>
       <SimpleGrid my={3} columns={3} spacing={6} width="full">
-        {metrics && metrics.cpuData.map((data) => (
-          <GridItem
-            w="full"
-            rounded="xl"
-            bg="white"
-            shadow="md"
-            borderWidth={1}
-            key={data.metric.instance}
-          >
-            <WorkerNodeMetricsComponent
-              job={data.metric.job}
-              instance={data.metric.instance}
-              metrics={data.sample}
-              isCpuMetrics={true}
-            />
-          </GridItem>
-        ))}
+        {metrics &&
+          metrics.cpuData.map((data) => (
+            <GridItem
+              w="full"
+              rounded="xl"
+              bg="white"
+              shadow="md"
+              borderWidth={1}
+              key={data.metric.instance}
+            >
+              <WorkerNodeMetricsComponent
+                job={data.metric.job}
+                instance={data.metric.instance}
+                metrics={data.sample}
+                isCpuMetrics={true}
+              />
+            </GridItem>
+          ))}
       </SimpleGrid>
       <Title>Memory Usage</Title>
       <SimpleGrid my={3} columns={3} spacing={6} width="full">
-        {metrics && metrics.memoryData.map((data) => (
-          <GridItem
-            w="full"
-            rounded="xl"
-            bg="white"
-            shadow="md"
-            borderWidth={1}
-            key={data.metric.instance}
-          >
-            <WorkerNodeMetricsComponent
-              job={data.metric.job}
-              instance={data.metric.instance}
-              metrics={data.sample}
-              isCpuMetrics={false}
-            />
-          </GridItem>
-        ))}
+        {metrics &&
+          metrics.memoryData.map((data) => (
+            <GridItem
+              w="full"
+              rounded="xl"
+              bg="white"
+              shadow="md"
+              borderWidth={1}
+              key={data.metric.instance}
+            >
+              <WorkerNodeMetricsComponent
+                job={data.metric.job}
+                instance={data.metric.instance}
+                metrics={data.sample}
+                isCpuMetrics={false}
+              />
+            </GridItem>
+          ))}
       </SimpleGrid>
     </Box>
   )
