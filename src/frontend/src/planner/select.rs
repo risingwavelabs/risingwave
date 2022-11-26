@@ -56,10 +56,15 @@ impl Planner {
             )
             .into());
         }
+        select_items.extend(extra_order_exprs);
         // The DISTINCT ON expression(s) must match the leftmost ORDER BY expression(s).
         if let BoundDistinct::DistinctOn(exprs) = &distinct {
             #[allow(clippy::disallowed_methods)]
-            for (expr, order_expr) in exprs.iter().zip(extra_order_exprs.iter()) {
+            for (expr, order_expr) in exprs.iter().zip(
+                order
+                    .iter()
+                    .map(|FieldOrder { index, .. }| &select_items[*index]),
+            ) {
                 if expr != order_expr {
                     return Err(ErrorCode::InvalidInputSyntax(
                         "the SELECT DISTINCT ON expressions must match the leftmost SELECT DISTINCT ON expressions"
@@ -69,7 +74,6 @@ impl Planner {
                 }
             }
         }
-        select_items.extend(extra_order_exprs);
 
         // Plan the FROM clause.
         let mut root = match from {
