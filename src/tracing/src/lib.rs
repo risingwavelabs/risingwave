@@ -18,9 +18,7 @@ use std::thread::JoinHandle;
 
 use anyhow::{Error, Result};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
-use futures::StreamExt;
 use minitrace::prelude::*;
-use rand::Rng;
 
 pub struct RwTracingService {
     tx: UnboundedSender<Collector>,
@@ -47,16 +45,20 @@ impl RwTracingService {
             .ok()
             .map_or_else(|| false, |v| v == "true");
 
-        let join_handle = Self::start_tracing_listener(
-            rx,
-            print_to_console,
-            slow_request_threshold_ms,
-            jaeger_addr,
-        );
+        let join_handle = if cfg!(madsim) {
+            Some(Self::start_tracing_listener(
+                rx,
+                print_to_console,
+                slow_request_threshold_ms,
+                jaeger_addr,
+            ))
+        } else {
+            None
+        };
 
         let tr = Self {
             tx,
-            _join_handle: Some(join_handle),
+            _join_handle: join_handle,
             enabled: jaeger_addr.is_some(),
         };
         Ok(tr)
@@ -82,12 +84,26 @@ impl RwTracingService {
         }
     }
 
+    #[cfg(madsim)]
+    fn start_tracing_listener(
+        _rx: UnboundedReceiver<Collector>,
+        _print_to_console: bool,
+        _slow_request_threshold_ms: u64,
+        _jaeger_addr: Option<SocketAddr>,
+    ) -> JoinHandle<()> {
+        unreachable!()
+    }
+
+    #[cfg(not(madsim))]
     fn start_tracing_listener(
         rx: UnboundedReceiver<Collector>,
         print_to_console: bool,
         slow_request_threshold_ms: u64,
         jaeger_addr: Option<SocketAddr>,
     ) -> JoinHandle<()> {
+        use futures::StreamExt;
+        use rand::Rng;
+
         tracing::info!(
             "tracing service started with slow_request_threshold_ms={slow_request_threshold_ms}, print_to_console={print_to_console}"
         );
