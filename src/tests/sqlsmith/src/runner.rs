@@ -186,7 +186,7 @@ fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
 /// Is it just be cause subquery is too deeply nested?
 /// If so a fix could be to reduce recursion depth.
 fn is_subquery_cannot_be_unnested_err(db_error: &DbError) -> bool {
-    db_error.message().contains("Subquery cannot be unnested")
+    db_error.message().contains("Subquery can not be unnested")
 }
 
 /// Workaround to permit runtime errors not being propagated through channels.

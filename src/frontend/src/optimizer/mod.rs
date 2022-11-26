@@ -221,7 +221,7 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
         if has_logical_apply(plan.clone()) {
-            return Err(ErrorCode::InternalError("Subquery cannot be unnested.".into()).into());
+            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
         }
 
         // Predicate Push-down
