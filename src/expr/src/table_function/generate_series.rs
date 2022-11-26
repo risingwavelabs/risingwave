@@ -32,6 +32,7 @@ pub struct GenerateSeries<T: Array, S: Array> {
     stop: BoxedExpression,
     step: BoxedExpression,
     chunk_size: usize,
+    _stop_inclusive: bool,
     _phantom: std::marker::PhantomData<(T, S)>,
 }
 
@@ -41,17 +42,19 @@ where
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
     for<'a> S::RefItem<'a>: IsNegative,
 {
-    fn new(
+    pub(super) fn new(
         start: BoxedExpression,
         stop: BoxedExpression,
         step: BoxedExpression,
         chunk_size: usize,
+        _stop_inclusive: bool,
     ) -> Self {
         Self {
             start,
             stop,
             step,
             chunk_size,
+            _stop_inclusive,
             _phantom: Default::default(),
         }
     }
@@ -74,9 +77,15 @@ where
         let mut cur: T::OwnedItem = start.to_owned_scalar();
 
         while if step.is_negative() {
-            cur >= stop
-        } else {
+            if self._stop_inclusive {
+                cur >= stop
+            } else {
+                cur > stop
+            }
+        } else if self._stop_inclusive {
             cur <= stop
+        } else {
+            cur < stop
         } {
             builder.append(Some(cur.as_scalar_ref()));
             cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
@@ -154,12 +163,13 @@ pub fn new_generate_series(
 
     match return_type {
         DataType::Timestamp => Ok(GenerateSeries::<NaiveDateTimeArray, IntervalArray>::new(
-            start, stop, step, chunk_size,
+            start, stop, step, chunk_size, true,
         )
         .boxed()),
-        DataType::Int32 => {
-            Ok(GenerateSeries::<I32Array, I32Array>::new(start, stop, step, chunk_size).boxed())
-        }
+        DataType::Int32 => Ok(GenerateSeries::<I32Array, I32Array>::new(
+            start, stop, step, chunk_size, true,
+        )
+        .boxed()),
         _ => Err(ExprError::Internal(anyhow!(
             "the return type of Generate Series Function is incorrect".to_string(),
         ))),
@@ -189,13 +199,13 @@ mod tests {
             LiteralExpression::new(DataType::Int32, Some(v.into())).boxed()
         }
 
-        let function = GenerateSeries::<I32Array, I32Array> {
-            start: to_lit_expr(start),
-            stop: to_lit_expr(stop),
-            step: to_lit_expr(step),
-            chunk_size: CHUNK_SIZE,
-            _phantom: Default::default(),
-        }
+        let function = GenerateSeries::<I32Array, I32Array>::new(
+            to_lit_expr(start),
+            to_lit_expr(stop),
+            to_lit_expr(step),
+            CHUNK_SIZE,
+            true,
+        )
         .boxed();
         let expect_cnt = ((stop - start) / step + 1) as usize;
 
@@ -229,13 +239,13 @@ mod tests {
             LiteralExpression::new(ty, Some(v)).boxed()
         }
 
-        let function = GenerateSeries::<NaiveDateTimeArray, IntervalArray> {
-            start: to_lit_expr(DataType::Timestamp, start.into()),
-            stop: to_lit_expr(DataType::Timestamp, stop.into()),
-            step: to_lit_expr(DataType::Interval, step.into()),
-            chunk_size: CHUNK_SIZE,
-            _phantom: Default::default(),
-        };
+        let function = GenerateSeries::<NaiveDateTimeArray, IntervalArray>::new(
+            to_lit_expr(DataType::Timestamp, start.into()),
+            to_lit_expr(DataType::Timestamp, stop.into()),
+            to_lit_expr(DataType::Interval, step.into()),
+            CHUNK_SIZE,
+            true,
+        );
 
         let dummy_chunk = DataChunk::new_dummy(1);
         let arrays = function.eval(&dummy_chunk).unwrap();
