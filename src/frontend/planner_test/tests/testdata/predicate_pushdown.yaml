@@ -79,29 +79,31 @@
 - name: filter project transpose
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int, ts date);
-    with cte as (select v1,v2,v3,v4,v1+v2 as expr_a from t) select * from cte where expr_a>10 AND v1=10 AND v2=20 AND v3=30;
+    with cte as (select v1,v2,v3,v4,v1+v2 as expr_a, v3*v4 as expr_b from t) select * from cte where expr_a>10 AND v1=10 AND v2=20 AND v3=30 AND expr_a > expr_b AND expr_a > v1;
   logical_plan: |
-    LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2)] }
-    └─LogicalFilter { predicate: ((t.v1 + t.v2) > 10:Int32) AND (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) }
-      └─LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2)] }
+    LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2), (t.v3 * t.v4)] }
+    └─LogicalFilter { predicate: ((t.v1 + t.v2) > 10:Int32) AND (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND ((t.v1 + t.v2) > (t.v3 * t.v4)) AND ((t.v1 + t.v2) > t.v1) }
+      └─LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2), (t.v3 * t.v4)] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts, t._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2)] }
-    └─LogicalScan { table: t, output_columns: [t.v1, t.v2, t.v3, t.v4], required_columns: [v1, v2, v3, v4], predicate: ((t.v1 + t.v2) > 10:Int32) AND (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) }
+    LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2), (t.v3 * t.v4)] }
+    └─LogicalScan { table: t, output_columns: [t.v1, t.v2, t.v3, t.v4], required_columns: [v1, v2, v3, v4], predicate: ((t.v1 + t.v2) > 10:Int32) AND (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND ((t.v1 + t.v2) > (t.v3 * t.v4)) AND ((t.v1 + t.v2) > t.v1) }
 - name: filter agg transpose
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int, ts date);
-    with cte as (select v1, v2, v3, count(*) from t group by v1, v2, v3) select * from cte where v1=10 AND v2=20 AND v3=30;
+    with cte as (select v1, v2, v3, count(*) as cnt, count(1) as cnt2 from t group by v1, v2, v3) select * from cte where v1=10 AND v2=20 AND v3=30 AND cnt > v1 AND v2 > v3 AND cnt > cnt2;
   logical_plan: |
-    LogicalProject { exprs: [t.v1, t.v2, t.v3, count] }
-    └─LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) }
-      └─LogicalProject { exprs: [t.v1, t.v2, t.v3, count] }
-        └─LogicalAgg { group_key: [t.v1, t.v2, t.v3], aggs: [count] }
-          └─LogicalProject { exprs: [t.v1, t.v2, t.v3] }
+    LogicalProject { exprs: [t.v1, t.v2, t.v3, count, count(1:Int32)] }
+    └─LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (count > t.v1) AND (t.v2 > t.v3) AND (count > count(1:Int32)) }
+      └─LogicalProject { exprs: [t.v1, t.v2, t.v3, count, count(1:Int32)] }
+        └─LogicalAgg { group_key: [t.v1, t.v2, t.v3], aggs: [count, count(1:Int32)] }
+          └─LogicalProject { exprs: [t.v1, t.v2, t.v3, 1:Int32] }
             └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts, t._row_id] }
   optimized_logical_plan: |
-    LogicalAgg { group_key: [t.v1, t.v2, t.v3], aggs: [count] }
-    └─LogicalScan { table: t, output_columns: [t.v1, t.v2, t.v3], required_columns: [v1, v2, v3], predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) }
+    LogicalFilter { predicate: (count > t.v1) AND (count > count(1:Int32)) }
+    └─LogicalAgg { group_key: [t.v1, t.v2, t.v3], aggs: [count, count(1:Int32)] }
+      └─LogicalProject { exprs: [t.v1, t.v2, t.v3, 1:Int32] }
+        └─LogicalScan { table: t, output_columns: [t.v1, t.v2, t.v3], required_columns: [v1, v2, v3], predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (t.v2 > t.v3) }
 - name: filter project set transpose
   sql: |
     create table t(v1 int, v2 int, v3 int, arr int[]);
