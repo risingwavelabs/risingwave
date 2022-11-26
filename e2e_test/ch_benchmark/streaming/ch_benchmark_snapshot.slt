@@ -28,10 +28,6 @@ include ../../tpch/insert_supplier.slt.part
 # Create materialized sources from tpcc tables
 include ../create_sources.slt.part
 
-# Ensure that the upstream data is fully consumed
-statement ok
-flush;
-
 # Then, create materialized views based on the historical data (snapshot)
 include ./create_views.slt.part
 

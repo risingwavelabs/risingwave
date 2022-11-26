@@ -1,10 +1,11 @@
 statement ok
+# Todo: The precision is different from PostgresSql, Same issue in TPCH
 create materialized view ch_benchmark_q1 as
 select   ol_number,
          sum(ol_quantity) as sum_qty,
-         sum(ol_amount) as sum_amount,
+         round(sum(ol_amount), 4) as sum_amount,
          avg(ol_quantity) as avg_qty,
-         avg(ol_amount) as avg_amount,
+         round(avg(ol_amount), 4) as avg_amount,
          count(*) as count_order
 from     orderline
 where    ol_delivery_d > '2007-01-02 00:00:00.000000'
