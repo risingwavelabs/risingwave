@@ -1,5 +1,5 @@
-statement ok
 # Todo: The precision is different from PostgresSql, Same issue in TPCH
+statement ok
 create materialized view ch_benchmark_q1 as
 select   ol_number,
          sum(ol_quantity) as sum_qty,
