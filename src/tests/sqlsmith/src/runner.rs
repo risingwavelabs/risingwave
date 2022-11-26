@@ -78,8 +78,10 @@ pub async fn test_sqlsmith<R: Rng>(
     }
     let skipped_percentage = batch_skipped as f64 / batch_sample_size as f64;
     if skipped_percentage > threshold {
-        panic!("percentage of skipped batch queries = {}, threshold: {}",
-               skipped_percentage, threshold);
+        panic!(
+            "percentage of skipped batch queries = {}, threshold: {}",
+            skipped_percentage, threshold
+        );
     }
 
     let mut stream_skipped = 0;
@@ -95,8 +97,10 @@ pub async fn test_sqlsmith<R: Rng>(
 
     let skipped_percentage = stream_skipped as f64 / stream_sample_size as f64;
     if skipped_percentage > threshold {
-        panic!("percentage of skipped batch queries = {}, threshold: {}",
-               skipped_percentage, threshold);
+        panic!(
+            "percentage of skipped batch queries = {}, threshold: {}",
+            skipped_percentage, threshold
+        );
     }
 }
 
@@ -182,9 +186,7 @@ fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
 /// Is it just be cause subquery is too deeply nested?
 /// If so a fix could be to reduce recursion depth.
 fn is_subquery_cannot_be_unnested_err(db_error: &DbError) -> bool {
-    db_error
-        .message()
-        .contains("Subquery cannot be unnested")
+    db_error.message().contains("Subquery cannot be unnested")
 }
 
 /// Workaround to permit runtime errors not being propagated through channels.
