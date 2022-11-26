@@ -41,7 +41,7 @@ use risingwave_storage::hummock::{SstableIdManager, SstableStore};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    ReadOptions, StateStoreIterExt, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
+    ReadOptions, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
 };
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -1347,7 +1347,7 @@ async fn test_hummock_version_reader() {
                 )
                 .unwrap();
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch1,
@@ -1363,7 +1363,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
             }
 
@@ -1376,7 +1376,7 @@ async fn test_hummock_version_reader() {
                 )
                 .unwrap();
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1392,7 +1392,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(20, result.len());
             }
 
@@ -1405,7 +1405,7 @@ async fn test_hummock_version_reader() {
                 )
                 .unwrap();
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1421,7 +1421,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
             }
         }
@@ -1472,7 +1472,7 @@ async fn test_hummock_version_reader() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch1,
@@ -1488,7 +1488,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
             }
 
@@ -1510,7 +1510,7 @@ async fn test_hummock_version_reader() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1526,7 +1526,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(20, result.len());
             }
 
@@ -1548,7 +1548,7 @@ async fn test_hummock_version_reader() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1564,7 +1564,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
             }
 
@@ -1586,7 +1586,7 @@ async fn test_hummock_version_reader() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch3,
@@ -1602,7 +1602,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(30, result.len());
             }
 
@@ -1630,7 +1630,7 @@ async fn test_hummock_version_reader() {
                         read_snapshot.2.max_committed_epoch()
                     );
 
-                    let mut iter = hummock_version_reader
+                    let iter = hummock_version_reader
                         .iter(
                             key_range.clone(),
                             epoch2,
@@ -1646,7 +1646,7 @@ async fn test_hummock_version_reader() {
                         .await
                         .unwrap();
 
-                    let result = iter.collect(None).await.unwrap();
+                    let result: Vec<_> = iter.try_collect().await.unwrap();
                     assert_eq!(8, result.len());
                 }
 
@@ -1668,7 +1668,7 @@ async fn test_hummock_version_reader() {
                         read_snapshot.2.max_committed_epoch()
                     );
 
-                    let mut iter = hummock_version_reader
+                    let iter = hummock_version_reader
                         .iter(
                             key_range.clone(),
                             epoch3,
@@ -1684,7 +1684,7 @@ async fn test_hummock_version_reader() {
                         .await
                         .unwrap();
 
-                    let result = iter.collect(None).await.unwrap();
+                    let result: Vec<_> = iter.try_collect().await.unwrap();
                     assert_eq!(18, result.len());
                 }
             }

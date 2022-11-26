@@ -126,7 +126,7 @@ impl HummockStorageCore {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<HummockStorageIterator> {
+    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
         let read_snapshot = read_filter_for_local(
             epoch,
             read_options.table_id,
@@ -160,11 +160,9 @@ impl StateStoreRead for LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        let stream = map_iter_stream(self.core.iter_inner(
-            map_table_key_range(key_range),
-            epoch,
-            read_options,
-        ));
+        let stream = self
+            .core
+            .iter_inner(map_table_key_range(key_range), epoch, read_options);
         #[cfg(not(madsim))]
         return stream.in_span(self.tracing.new_tracer("hummock_iter"));
         #[cfg(madsim)]

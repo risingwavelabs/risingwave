@@ -81,7 +81,7 @@ impl HummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<HummockStorageIterator> {
+    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
         let pinned_version = self.pinned_version.load();
         let table_id = read_options.table_id;
         validate_epoch(pinned_version.safe_epoch(), epoch)?;
@@ -171,7 +171,7 @@ impl StateStoreRead for HummockStorage {
             // not check
         }
 
-        map_iter_stream(self.iter_inner(map_table_key_range(key_range), epoch, read_options))
+        self.iter_inner(map_table_key_range(key_range), epoch, read_options)
     }
 }
 

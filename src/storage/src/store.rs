@@ -41,51 +41,14 @@ pub trait StateStoreIter: StaticSendSync {
 
 pub trait StateStoreIterStreamTrait<Item> = Stream<Item = StorageResult<Item>> + Send + 'static;
 pub trait StateStoreIterExt: StateStoreIter {
-    type CollectFuture<'a>: Future<Output = StorageResult<Vec<<Self as StateStoreIter>::Item>>>
-        + Send
-        + 'a;
-
     type ItemStream: StateStoreIterStreamTrait<<Self as StateStoreIter>::Item>;
 
-    fn map<B, F>(self, f: F) -> StateStoreMapIter<Self, F>
-    where
-        Self: Sized,
-        B: Send,
-        F: FnMut(Self::Item) -> B;
-
-    fn collect(&mut self, limit: Option<usize>) -> Self::CollectFuture<'_>;
     fn into_stream(self) -> Self::ItemStream;
 }
 
 pub type StreamTypeOfIter<I> = <I as StateStoreIterExt>::ItemStream;
 impl<I: StateStoreIter> StateStoreIterExt for I {
-    type CollectFuture<'a> =
-        impl Future<Output = StorageResult<Vec<<Self as StateStoreIter>::Item>>> + Send + 'a;
     type ItemStream = impl Stream<Item = StorageResult<<Self as StateStoreIter>::Item>>;
-
-    fn map<B, F>(self, f: F) -> StateStoreMapIter<Self, F>
-    where
-        Self: Sized,
-        B: Send,
-        F: FnMut(Self::Item) -> B,
-    {
-        StateStoreMapIter { iter: self, f }
-    }
-
-    fn collect(&mut self, limit: Option<usize>) -> Self::CollectFuture<'_> {
-        async move {
-            let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
-
-            for _ in 0..limit.unwrap_or(usize::MAX) {
-                match self.next().await? {
-                    Some(kv) => kvs.push(kv),
-                    None => break,
-                }
-            }
-
-            Ok(kvs)
-        }
-    }
 
     fn into_stream(mut self) -> Self::ItemStream {
         try_stream! {
@@ -100,26 +63,6 @@ pub(crate) fn map_iter_stream<I: StateStoreIter, F: Future<Output = StorageResul
     future: F,
 ) -> impl Future<Output = StorageResult<StreamTypeOfIter<I>>> {
     future.map_ok(|iter| iter.into_stream())
-}
-
-pub struct StateStoreMapIter<I, F> {
-    iter: I,
-    f: F,
-}
-
-impl<B, I, F> StateStoreIter for StateStoreMapIter<I, F>
-where
-    B: Send,
-    I: StateStoreIter,
-    F: FnMut(I::Item) -> B + StaticSendSync,
-{
-    type Item = B;
-
-    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        self.iter.next().map_ok(|o| o.map(|item| (self.f)(item)))
-    }
 }
 
 #[macro_export]
