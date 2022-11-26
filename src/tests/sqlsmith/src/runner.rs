@@ -19,9 +19,14 @@ use tokio_postgres::error::{DbError, Error as PgError, SqlState};
 
 use crate::{create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table};
 
+/// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {
     let mut rng = rand::rngs::SmallRng::from_entropy();
     let (tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
+
+    // Test sqlsmith first
+    run_sqlsmith_tests(client, &mut rng, tables.clone(), &setup_sql).await;
+    tracing::info!("Passed sqlsmith tests");
 
     // Test batch
     // Queries we generate are complex, can cause overflow in
@@ -47,6 +52,48 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) 
     }
 
     drop_tables(&mviews, testdata, client).await;
+}
+
+/// Sanity checks for sqlsmith
+pub async fn run_sqlsmith_tests<R: Rng>(
+    client: &tokio_postgres::Client,
+    rng: &mut R,
+    tables: Vec<Table>,
+    setup_sql: &str,
+) {
+    // Test skipped queries <=5%
+    let mut batch_skipped = 0;
+    let batch_sample_size = 100;
+    client
+        .query("SET query_mode TO distributed;", &[])
+        .await
+        .unwrap();
+    for _ in 0..batch_sample_size {
+        let sql = sql_gen(rng, tables.clone());
+        tracing::info!("Executing: {}", sql);
+        let response = client.query(sql.as_str(), &[]).await;
+        batch_skipped +=
+            validate_response_with_skip_count(setup_sql, &format!("{};", sql), response);
+    }
+    if batch_skipped > 5 {
+        panic!("skipped >5% batch queries");
+    }
+
+    let mut stream_skipped = 0;
+    let stream_sample_size = 100;
+    // Test stream
+    for _ in 0..stream_sample_size {
+        let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
+        tracing::info!("Executing: {}", sql);
+        let response = client.execute(&sql, &[]).await;
+        stream_skipped +=
+            validate_response_with_skip_count(setup_sql, &format!("{};", sql), response);
+        drop_mview_table(&table, client).await;
+    }
+
+    if stream_skipped > 5 {
+        panic!("skipped >5% stream queries");
+    }
 }
 
 fn get_seed_table_sql(testdata: &str) -> String {
@@ -143,16 +190,24 @@ fn is_permissible_error(db_error: &DbError) -> bool {
         || is_division_by_zero_err(db_error)
 }
 
-/// Validate client responses
 fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, PgError>) {
+    validate_response_with_skip_count(setup_sql, query, response);
+}
+
+/// Validate client responses
+fn validate_response_with_skip_count<_Row>(
+    setup_sql: &str,
+    query: &str,
+    response: Result<_Row, PgError>,
+) -> i64 {
     match response {
-        Ok(_) => {}
+        Ok(_) => 0,
         Err(e) => {
             // Permit runtime errors conservatively.
             if let Some(e) = e.as_db_error()
                 && is_permissible_error(e)
             {
-                return;
+                return 1;
             }
             panic!(
                 "
