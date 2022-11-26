@@ -32,6 +32,8 @@ pub struct GenerateSeries<T: Array, S: Array> {
     stop: BoxedExpression,
     step: BoxedExpression,
     chunk_size: usize,
+    /// `_stop_inclusive` is required to be `true` for `GenerateSeries`, while `false` for `Range`.
+    /// This is guaranteed by the only pub entry point `new_range` and `new_generate_series`.
     _stop_inclusive: bool,
     _phantom: std::marker::PhantomData<(T, S)>,
 }
