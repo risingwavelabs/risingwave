@@ -260,7 +260,7 @@ mod tests {
 
     use super::{compare_rows, OrderPair, OrderType};
     use crate::array::{DataChunk, ListValue, StructValue};
-    use crate::row::Row;
+    use crate::row::{Row, Row2};
     use crate::types::{DataType, ScalarImpl};
     use crate::util::sort_util::compare_rows_in_chunk;
 
@@ -367,7 +367,7 @@ mod tests {
             ]))),
         ]);
 
-        let order_pairs = (0..row1.size())
+        let order_pairs = (0..row1.len())
             .map(|i| OrderPair::new(i, OrderType::Ascending))
             .collect_vec();
         assert_eq!(
