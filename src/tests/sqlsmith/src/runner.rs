@@ -62,6 +62,7 @@ pub async fn test_sqlsmith<R: Rng>(
     setup_sql: &str,
 ) {
     // Test percentage of skipped queries <=5% of sample size.
+    let threshold = 0.20; // permit at most 20% of queries to be skipped.
     let mut batch_skipped = 0;
     let batch_sample_size = 100;
     client
@@ -75,8 +76,10 @@ pub async fn test_sqlsmith<R: Rng>(
         batch_skipped +=
             validate_response_with_skip_count(setup_sql, &format!("{};", sql), response);
     }
-    if batch_skipped > 5 {
-        panic!("skipped >5% batch queries");
+    let skipped_percentage = batch_skipped as f64 / batch_sample_size as f64;
+    if skipped_percentage > threshold {
+        panic!("percentage of skipped batch queries = {}, threshold: {}",
+               skipped_percentage, threshold);
     }
 
     let mut stream_skipped = 0;
@@ -90,8 +93,10 @@ pub async fn test_sqlsmith<R: Rng>(
         drop_mview_table(&table, client).await;
     }
 
-    if stream_skipped > 5 {
-        panic!("skipped >5% stream queries");
+    let skipped_percentage = stream_skipped as f64 / stream_sample_size as f64;
+    if skipped_percentage > threshold {
+        panic!("percentage of skipped batch queries = {}, threshold: {}",
+               skipped_percentage, threshold);
     }
 }
 
@@ -173,6 +178,15 @@ fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
         .contains(&ExprError::NumericOutOfRange.to_string())
 }
 
+/// FIXME(noel): What is root cause of this?
+/// Is it just be cause subquery is too deeply nested?
+/// If so a fix could be to reduce recursion depth.
+fn is_subquery_cannot_be_unnested_err(db_error: &DbError) -> bool {
+    db_error
+        .message()
+        .contains("Subquery cannot be unnested")
+}
+
 /// Workaround to permit runtime errors not being propagated through channels.
 /// FIXME: This also means some internal system errors won't be caught.
 /// Tracked by: <https://github.com/risingwavelabs/risingwave/issues/3908#issuecomment-1186782810>
@@ -180,6 +194,13 @@ fn is_broken_chan_err(db_error: &DbError) -> bool {
     db_error
         .message()
         .contains("internal error: broken fifo_channel")
+}
+
+/// Skip queries with unimplemented features
+fn is_unimplemented_error(db_error: &DbError) -> bool {
+    db_error
+        .message()
+        .contains("Feature is not yet implemented")
 }
 
 /// Certain errors are permitted to occur. This is because:
@@ -190,6 +211,8 @@ fn is_permissible_error(db_error: &DbError) -> bool {
     (is_internal_error && is_broken_chan_err(db_error))
         || is_numeric_out_of_range_err(db_error)
         || is_division_by_zero_err(db_error)
+        || is_unimplemented_error(db_error)
+        || is_subquery_cannot_be_unnested_err(db_error)
 }
 
 /// Validate client responses
