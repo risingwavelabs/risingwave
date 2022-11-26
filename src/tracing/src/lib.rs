@@ -46,14 +46,14 @@ impl RwTracingService {
             .map_or_else(|| false, |v| v == "true");
 
         let join_handle = if cfg!(madsim) {
+            None
+        } else {
             Some(Self::start_tracing_listener(
                 rx,
                 print_to_console,
                 slow_request_threshold_ms,
                 jaeger_addr,
             ))
-        } else {
-            None
         };
 
         let tr = Self {
