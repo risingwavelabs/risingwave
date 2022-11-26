@@ -256,9 +256,9 @@ pub use to_prost::*;
 mod predicate_pushdown;
 pub use predicate_pushdown::*;
 
+pub mod explain;
 pub mod generic;
 pub mod generic_derive;
-pub mod explain;
 pub mod stream;
 pub mod stream_derive;
 
