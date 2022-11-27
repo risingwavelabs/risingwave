@@ -64,7 +64,7 @@ pub async fn test_sqlsmith<R: Rng>(
     // Test percentage of skipped queries <=5% of sample size.
     let threshold = 0.20; // permit at most 20% of queries to be skipped.
     let mut batch_skipped = 0;
-    let batch_sample_size = 100;
+    let batch_sample_size = 50;
     client
         .query("SET query_mode TO distributed;", &[])
         .await
@@ -85,7 +85,7 @@ pub async fn test_sqlsmith<R: Rng>(
     }
 
     let mut stream_skipped = 0;
-    let stream_sample_size = 100;
+    let stream_sample_size = 50;
     for _ in 0..stream_sample_size {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("Executing: {}", sql);
