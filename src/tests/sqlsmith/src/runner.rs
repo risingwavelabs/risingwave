@@ -130,7 +130,6 @@ async fn create_tables(
     for stmt in &statements {
         let create_sql = stmt.to_string();
         setup_sql.push_str(&format!("{};", &create_sql));
-        tracing::info!("Executing Table Setup: {}", &create_sql);
         client.execute(&create_sql, &[]).await.unwrap();
     }
 
