@@ -59,9 +59,18 @@ implement_using_itoa! {
 impl ToText for crate::types::OrderedF32 {
     fn to_text(&self) -> String {
         match self.to_f32() {
-            Some(f32::INFINITY) => "Infinity".to_owned(),
-            Some(f32::NEG_INFINITY) => "-Infinity".to_owned(),
-            Some(v) => ryu::Buffer::new().format(v).to_owned(),
+            Some(v) => {
+                if v.is_infinite() {
+                    if v.is_sign_positive() {
+                        "Infinity".to_owned()
+                    } else {
+                        "-Infinity".to_owned()
+                    }
+                } else {
+                    let mut buffer = ryu::Buffer::new();
+                    buffer.format(v).to_owned()
+                }
+            }
             None => "NaN".to_owned(),
         }
     }
@@ -70,9 +79,18 @@ impl ToText for crate::types::OrderedF32 {
 impl ToText for crate::types::OrderedF64 {
     fn to_text(&self) -> String {
         match self.to_f64() {
-            Some(f64::INFINITY) => "Infinity".to_owned(),
-            Some(f64::NEG_INFINITY) => "-Infinity".to_owned(),
-            Some(v) => ryu::Buffer::new().format(v).to_owned(),
+            Some(v) => {
+                if v.is_infinite() {
+                    if v.is_sign_positive() {
+                        "Infinity".to_owned()
+                    } else {
+                        "-Infinity".to_owned()
+                    }
+                } else {
+                    let mut buffer = ryu::Buffer::new();
+                    buffer.format(v).to_owned()
+                }
+            }
             None => "NaN".to_owned(),
         }
     }
