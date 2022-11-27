@@ -41,7 +41,7 @@ where
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
     for<'a> S::RefItem<'a>: IsNegative,
 {
-    pub(super) fn new(
+    fn new(
         start: BoxedExpression,
         stop: BoxedExpression,
         step: BoxedExpression,
