@@ -33,14 +33,49 @@ macro_rules! implement_using_to_string {
     };
 }
 
+macro_rules! implement_using_itoa {
+    ($({ $scalar_type:ty } ),*) => {
+        $(
+            impl ToText for $scalar_type {
+                fn to_text(&self) -> String {
+                    itoa::Buffer::new().format(*self).to_owned()
+                }
+            }
+        )*
+    };
+}
+
 implement_using_to_string! {
+    { String },
+    { &str }
+}
+
+implement_using_itoa! {
     { i16 },
     { i32 },
-    { i64 },
-    { String },
-    { &str },
-    { crate::types::OrderedF32 },
-    { crate::types::OrderedF64 }
+    { i64 }
+}
+
+impl ToText for crate::types::OrderedF32 {
+    fn to_text(&self) -> String {
+        match self.to_f32() {
+            Some(f32::INFINITY) => "Infinity".to_owned(),
+            Some(f32::NEG_INFINITY) => "-Infinity".to_owned(),
+            Some(v) => ryu::Buffer::new().format(v).to_owned(),
+            None => "NaN".to_owned(),
+        }
+    }
+}
+
+impl ToText for crate::types::OrderedF64 {
+    fn to_text(&self) -> String {
+        match self.to_f64() {
+            Some(f64::INFINITY) => "Infinity".to_owned(),
+            Some(f64::NEG_INFINITY) => "-Infinity".to_owned(),
+            Some(v) => ryu::Buffer::new().format(v).to_owned(),
+            None => "NaN".to_owned(),
+        }
+    }
 }
 
 impl ToText for bool {
@@ -88,5 +123,22 @@ impl ToText for DatumRef<'_> {
             Some(data) => data.to_text(),
             None => "NULL".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::types::ordered_float::OrderedFloat;
+    use crate::types::to_text::ToText;
+
+    #[test]
+    fn test_float_to_text() {
+        // f64 -> text.
+        let ret: OrderedFloat<f64> = OrderedFloat::<f64>::from(1.234567890123456);
+        assert_eq!("1.234567890123456".to_text(), ret.to_text());
+
+        // f32 -> text.
+        let ret: OrderedFloat<f32> = OrderedFloat::<f32>::from(1.234567);
+        assert_eq!("1.234567".to_string(), ret.to_text());
     }
 }
