@@ -59,9 +59,10 @@ pub fn build_from_prost(
     use risingwave_pb::expr::table_function::Type::*;
 
     match prost.get_function_type().unwrap() {
-        Generate => new_generate_series(prost, chunk_size),
+        Generate => new_generate_series::<true>(prost, chunk_size),
         Unnest => new_unnest(prost, chunk_size),
         RegexpMatches => new_regexp_matches(prost, chunk_size),
+        Range => new_generate_series::<false>(prost, chunk_size),
         Unspecified => unreachable!(),
     }
 }
