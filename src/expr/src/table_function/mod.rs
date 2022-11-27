@@ -28,8 +28,6 @@ use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 
 mod generate_series;
 use generate_series::*;
-mod range;
-use range::*;
 mod unnest;
 use unnest::*;
 mod regexp_matches;
@@ -61,10 +59,10 @@ pub fn build_from_prost(
     use risingwave_pb::expr::table_function::Type::*;
 
     match prost.get_function_type().unwrap() {
-        Generate => new_generate_series(prost, chunk_size),
+        Generate => new_generate_series::<true>(prost, chunk_size),
         Unnest => new_unnest(prost, chunk_size),
         RegexpMatches => new_regexp_matches(prost, chunk_size),
-        Range => new_range(prost, chunk_size),
+        Range => new_generate_series::<false>(prost, chunk_size),
         Unspecified => unreachable!(),
     }
 }
