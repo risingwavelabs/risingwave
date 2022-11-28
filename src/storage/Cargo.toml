@@ -58,6 +58,7 @@ scopeguard = "1"
 #     "static_libcpp",
 # ], optional = true }
 serde = { version = "1", features = ["derive"] }
+sled = "0.34.7"
 smallvec = "1"
 spin = "0.9"
 sync-point = { path = "../utils/sync-point" }

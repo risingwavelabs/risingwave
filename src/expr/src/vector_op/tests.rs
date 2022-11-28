@@ -15,7 +15,7 @@
 use std::assert_matches::assert_matches;
 use std::str::FromStr;
 
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::NaiveDateTime;
 use risingwave_common::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
 };
@@ -110,7 +110,7 @@ fn test_arithmetic() {
     );
     assert_eq!(
         date_interval_add::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(
-            NaiveDateWrapper::new(NaiveDate::from_ymd(1994, 1, 1)),
+            NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1),
             IntervalUnit::from_month(12)
         )
         .unwrap(),
@@ -121,7 +121,7 @@ fn test_arithmetic() {
     assert_eq!(
         interval_date_add::<IntervalUnit, NaiveDateWrapper, NaiveDateTimeWrapper>(
             IntervalUnit::from_month(12),
-            NaiveDateWrapper::new(NaiveDate::from_ymd(1994, 1, 1))
+            NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1)
         )
         .unwrap(),
         NaiveDateTimeWrapper::new(
@@ -130,7 +130,7 @@ fn test_arithmetic() {
     );
     assert_eq!(
         date_interval_sub::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(
-            NaiveDateWrapper::new(NaiveDate::from_ymd(1994, 1, 1)),
+            NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1),
             IntervalUnit::from_month(12)
         )
         .unwrap(),
@@ -257,10 +257,8 @@ fn test_conjunction() {
 #[test]
 fn test_cast() {
     assert_eq!(
-        general_cast::<_, NaiveDateTimeWrapper>(NaiveDateWrapper::new(NaiveDate::from_ymd(
-            1994, 1, 1
-        )))
-        .unwrap(),
+        general_cast::<_, NaiveDateTimeWrapper>(NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1))
+            .unwrap(),
         NaiveDateTimeWrapper::new(
             NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
         )

@@ -24,8 +24,8 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, Row, Row2, RowDeserializer, RowExt};
-use risingwave_common::types::VirtualNode;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
@@ -313,7 +313,7 @@ impl<S: StateStore> StorageTable<S> {
                 .iter()
                 .enumerate()
                 .filter(|&(_, set)| set)
-                .map(|(i, _)| i as VirtualNode),
+                .map(|(i, _)| VirtualNode::from_index(i)),
         };
 
         // For each vnode, construct an iterator.
@@ -379,7 +379,7 @@ impl<S: StateStore> StorageTable<S> {
         ) -> Bound<Vec<u8>> {
             match range_bound {
                 Included(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.0.len());
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.len());
                     let key = pk_prefix.chain(k);
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
@@ -391,7 +391,7 @@ impl<S: StateStore> StorageTable<S> {
                     }
                 }
                 Excluded(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.0.len());
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.len());
                     let key = pk_prefix.chain(k);
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {

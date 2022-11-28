@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 
 use risingwave_pb::catalog::source::Info;
+use risingwave_pb::catalog::source_info::SourceInfo;
 use risingwave_pb::catalog::Source as ProstSource;
-use risingwave_pb::stream_plan::source_node::Info as StreamPlanInfo;
 
 use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, SourceId};
@@ -24,8 +24,10 @@ use crate::WithOptions;
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
 
-/// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
+/// This struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
+///
+/// It can be either a table source or a stream source. Use `self.kind()` to distinguish them.
 #[derive(Clone, Debug)]
 pub struct SourceCatalog {
     pub id: SourceId,
@@ -34,18 +36,23 @@ pub struct SourceCatalog {
     pub pk_col_ids: Vec<ColumnId>,
     pub append_only: bool,
     pub owner: u32,
-    pub info: StreamPlanInfo,
+    pub info: SourceInfo,
     pub row_id_index: Option<usize>,
     pub properties: HashMap<String, String>,
 }
 
-impl SourceCatalog {
-    pub fn is_table(&self) -> bool {
-        matches!(self.info, StreamPlanInfo::TableSource(_))
-    }
+#[derive(PartialEq, Eq)]
+pub enum SourceKind {
+    Table,
+    Stream,
+}
 
-    pub fn is_stream(&self) -> bool {
-        matches!(self.info, StreamPlanInfo::StreamSource(_))
+impl SourceCatalog {
+    pub fn kind(&self) -> SourceKind {
+        match self.info {
+            SourceInfo::StreamSource(_) => SourceKind::Stream,
+            SourceInfo::TableSource(_) => SourceKind::Table,
+        }
     }
 }
 
@@ -62,10 +69,8 @@ impl From<&ProstSource> for SourceCatalog {
             .collect();
         let with_options = WithOptions::new(prost.properties.clone());
         let info = match &prost.info {
-            Some(Info::StreamSource(info_inner)) => {
-                StreamPlanInfo::StreamSource(info_inner.clone())
-            }
-            Some(Info::TableSource(info_inner)) => StreamPlanInfo::TableSource(info_inner.clone()),
+            Some(Info::StreamSource(info_inner)) => SourceInfo::StreamSource(info_inner.clone()),
+            Some(Info::TableSource(info_inner)) => SourceInfo::TableSource(info_inner.clone()),
             None => unreachable!(),
         };
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();

@@ -199,7 +199,7 @@ impl ApplyJoinRule {
                 let mut d_t1_bit_set = FixedBitSet::with_capacity(apply_len);
                 d_t1_bit_set.set_range(0..apply_left_len + join_left_len, true);
 
-                let (other, left): (Vec<_>, Vec<_>) = apply_on.into_iter().partition(|expr| {
+                let (left, other): (Vec<_>, Vec<_>) = apply_on.into_iter().partition(|expr| {
                     let mut visitor = CollectInputRef::with_capacity(apply_len);
                     visitor.visit_expr(expr);
                     let collect_bit_set = FixedBitSet::from(visitor);
@@ -288,7 +288,7 @@ impl ApplyJoinRule {
                 d_t2_bit_set.set_range(0..apply_left_len, true);
                 d_t2_bit_set.set_range(apply_left_len + join_left_len..apply_len, true);
 
-                let (other, right): (Vec<_>, Vec<_>) = apply_on.into_iter().partition(|expr| {
+                let (right, other): (Vec<_>, Vec<_>) = apply_on.into_iter().partition(|expr| {
                     let mut visitor = CollectInputRef::with_capacity(apply_len);
                     visitor.visit_expr(expr);
                     let collected = FixedBitSet::from(visitor);

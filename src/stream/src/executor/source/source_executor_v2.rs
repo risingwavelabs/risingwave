@@ -38,6 +38,7 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 /// external connector.
 pub struct StreamSourceCore<S: StateStore> {
     table_id: TableId,
+    source_name: String,
 
     column_ids: Vec<ColumnId>,
 
@@ -396,12 +397,18 @@ impl<S: StateStore> SourceExecutorV2<S> {
 
                     self.metrics
                         .source_output_row_count
-                        .with_label_values(&[self
-                            .stream_source_core
-                            .as_ref()
-                            .unwrap()
-                            .source_identify
-                            .as_str()])
+                        .with_label_values(&[
+                            self.stream_source_core
+                                .as_ref()
+                                .unwrap()
+                                .source_identify
+                                .as_str(),
+                            self.stream_source_core
+                                .as_ref()
+                                .unwrap()
+                                .source_name
+                                .as_ref(),
+                        ])
                         .inc_by(chunk.cardinality() as u64);
                     yield Message::Chunk(chunk);
                 }
@@ -489,6 +496,8 @@ mod tests {
     use super::*;
     use crate::executor::ActorContext;
 
+    const MOCK_SOURCE_NAME: &str = "mock_source";
+
     #[tokio::test]
     async fn test_source_executor() {
         let table_id = TableId::default();
@@ -536,6 +545,7 @@ mod tests {
             stream_source_splits: vec![],
             split_state_store,
             state_cache: HashMap::new(),
+            source_name: MOCK_SOURCE_NAME.to_string(),
         };
 
         let executor = SourceExecutorV2::new(
@@ -627,6 +637,7 @@ mod tests {
             stream_source_splits: vec![],
             split_state_store,
             state_cache: HashMap::new(),
+            source_name: MOCK_SOURCE_NAME.to_string(),
         };
 
         let executor = SourceExecutorV2::new(

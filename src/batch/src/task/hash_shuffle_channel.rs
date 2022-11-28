@@ -51,7 +51,7 @@ pub struct HashShuffleReceiver {
 fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> BatchResult<Vec<usize>> {
     let output_count = hash_info.output_count as usize;
 
-    let hasher_builder = Crc32FastBuilder {};
+    let hasher_builder = Crc32FastBuilder;
 
     let hash_values = chunk
         .get_hash_values(

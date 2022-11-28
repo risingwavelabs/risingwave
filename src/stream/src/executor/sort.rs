@@ -15,14 +15,14 @@
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
-use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{self, Row};
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::row::{self, Row, Row2, RowExt};
+use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
@@ -153,9 +153,7 @@ impl<S: StateStore> SortExecutor<S> {
                                 // Add the record to stream chunk data. Note that we retrieve the
                                 // record from a BTreeMap, so data in this chunk should be ordered
                                 // by timestamp and pk.
-                                if let Some(data_chunk) =
-                                    data_chunk_builder.append_one_row_from_datums(row.values())
-                                {
+                                if let Some(data_chunk) = data_chunk_builder.append_one_row(row) {
                                     // When the chunk size reaches its maximum, we construct a
                                     // stream chunk and send it to downstream.
                                     let ops = vec![Op::Insert; data_chunk.capacity()];
@@ -189,18 +187,12 @@ impl<S: StateStore> SortExecutor<S> {
                         match op {
                             Op::Insert => {
                                 // For insert operation, we buffer the record in memory.
-                                let row = row_ref.to_owned_row();
-                                let timestamp_datum = row.0.get(self.sort_column_index).ok_or_else(|| {
-                                    anyhow!(
-                                        "column index {} out of range in row {:?}",
-                                        self.sort_column_index,
-                                        row
-                                    )
-                                })?;
-                                let pk = row.by_indices(&self.pk_indices);
+                                let timestamp_datum = row_ref.datum_at(self.sort_column_index).to_owned_datum().unwrap();
+                                let pk = row_ref.project(&self.pk_indices).into_owned_row();
+                                let row = row_ref.into_owned_row();
                                 // Null event time should not exist in the row since the `WatermarkFilter`
                                 // before the `Sort` will filter out the Null event time.
-                                self.buffer.insert((timestamp_datum.clone().unwrap(), pk), (row, false));
+                                self.buffer.insert((timestamp_datum, pk), (row, false));
                             },
                             // Other operations are not supported currently.
                             _ => unimplemented!("operations other than insert currently are not supported by sort executor")
@@ -261,7 +253,7 @@ impl<S: StateStore> SortExecutor<S> {
                 Bitmap::bit_saturate_subtract(prev_vnode_bitmap, curr_vnode_bitmap);
             self.buffer.retain(|(_, pk), _| {
                 let vnode = self.state_table.compute_vnode(pk);
-                !no_longer_owned_vnodes.is_set(vnode as _)
+                !no_longer_owned_vnodes.is_set(vnode.to_index())
             });
         }
 
@@ -285,7 +277,7 @@ impl<S: StateStore> SortExecutor<S> {
                         Bound::<row::Empty>::Unbounded,
                         Bound::<row::Empty>::Unbounded,
                     ),
-                    owned_vnode as _,
+                    VirtualNode::from_index(owned_vnode),
                 )
                 .await?;
             let value_iter = Box::pin(value_iter);
@@ -295,19 +287,15 @@ impl<S: StateStore> SortExecutor<S> {
             let mut stream = select_all(values_per_vnode);
             while let Some(storage_result) = stream.next().await {
                 // Insert the data into buffer.
-                let row = storage_result?.into_owned();
-                let timestamp_datum = row.0.get(self.sort_column_index).ok_or_else(|| {
-                    anyhow!(
-                        "column index {} out of range in row {:?}",
-                        self.sort_column_index,
-                        row
-                    )
-                })?;
-                let pk = row.by_indices(&self.pk_indices);
+                let row: Row = storage_result?.into_owned();
+                let timestamp_datum = row
+                    .datum_at(self.sort_column_index)
+                    .to_owned_datum()
+                    .unwrap();
+                let pk = (&row).project(&self.pk_indices).into_owned_row();
                 // Null event time should not exist in the row since the `WatermarkFilter` before
                 // the `Sort` will filter out the Null event time.
-                self.buffer
-                    .insert((timestamp_datum.clone().unwrap(), pk), (row, true));
+                self.buffer.insert((timestamp_datum, pk), (row, true));
             }
         }
         Ok(())

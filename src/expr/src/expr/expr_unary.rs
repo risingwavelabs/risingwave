@@ -324,7 +324,6 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> Boxed
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
     use itertools::Itertools;
     use risingwave_common::array::*;
     use risingwave_common::types::{NaiveDateWrapper, Scalar};
@@ -535,7 +534,7 @@ mod tests {
         let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
         for i in 0..100 {
             if i % 2 == 0 {
-                let date = NaiveDateWrapper::new(NaiveDate::from_num_days_from_ce(i));
+                let date = NaiveDateWrapper::from_num_days_from_ce_uncheck(i);
                 input.push(Some(date));
                 target.push(Some(f(date)));
             } else {
