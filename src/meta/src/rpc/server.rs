@@ -192,8 +192,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // interceptor pattern
         // GRPC pattern Rust?
 
-        tracing::info!("Node is leader. Preparing services...");
-
+        let prometheus_endpoint = opts.prometheus_endpoint.clone();
         let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
         let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
         let meta_metrics = Arc::new(MetaMetrics::new());
@@ -205,6 +204,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 .unwrap(),
         );
 
+        tracing::info!("Node is leader. Preparing services...");
+
         let cluster_manager = Arc::new(
             ClusterManager::new(env.clone(), max_heartbeat_interval)
                 .await
@@ -212,18 +213,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         );
         // If node is not leader it should not start other services
         // probably this panic is caused because some other meta node does something
-
-        let new_hm = hummock::HummockManager::new(
-            env.clone(),
-            cluster_manager.clone(),
-            meta_metrics.clone(),
-            compactor_manager.clone(),
-        )
-        .await;
-
-        if new_hm.is_err() {
-            tracing::error!("found error {}", new_hm.err().unwrap());
-        }
 
         let hummock_manager = Arc::new(
             hummock::HummockManager::new(
@@ -243,6 +232,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 cluster_manager: cluster_manager.clone(),
                 fragment_manager: fragment_manager.clone(),
                 meta_store: env.meta_store_ref(),
+                prometheus_endpoint: prometheus_endpoint.clone(),
+                prometheus_client: prometheus_endpoint.as_ref().map(|x| {
+                    use std::str::FromStr;
+                    prometheus_http_query::Client::from_str(x).unwrap()
+                }),
             };
             // TODO: join dashboard service back to local thread.
             tokio::spawn(dashboard_service.serve(address_info.ui_path));
@@ -470,7 +464,7 @@ mod tests {
             info,
             Duration::from_secs(10),
             2,
-            MetaOpts::default(),
+            MetaOpts::test(false),
         )
         .await
         .unwrap();
@@ -484,7 +478,7 @@ mod tests {
             info2.clone(),
             Duration::from_secs(10),
             2,
-            MetaOpts::default(),
+            MetaOpts::test(false),
         )
         .await;
         assert!(ret.is_err());
@@ -496,7 +490,7 @@ mod tests {
             info2,
             Duration::from_secs(10),
             2,
-            MetaOpts::default(),
+            MetaOpts::test(false),
         )
         .await
         .unwrap();
