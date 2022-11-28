@@ -95,7 +95,7 @@ mod tests {
         let mut fields_map = HashMap::new();
         fields_map.insert(
             "v1".to_string(),
-            FieldGeneratorImpl::with_sequence(
+            FieldGeneratorImpl::with_number_sequence(
                 risingwave_common::types::DataType::Int32,
                 Some("1".to_string()),
                 Some("10".to_string()),
@@ -107,7 +107,7 @@ mod tests {
 
         fields_map.insert(
             "v2".to_string(),
-            FieldGeneratorImpl::with_sequence(
+            FieldGeneratorImpl::with_number_sequence(
                 risingwave_common::types::DataType::Float32,
                 Some("1".to_string()),
                 Some("10".to_string()),

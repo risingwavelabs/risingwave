@@ -389,7 +389,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         swap(&mut new_row_list, &mut self.row_list);
 
         for row in new_row_list {
-            if let Some(chunk) = data_chunk_builder.append_one_row_from_datums(row.values()) {
+            if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                 chunk_list.push(chunk);
             }
         }

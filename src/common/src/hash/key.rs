@@ -151,7 +151,7 @@ pub trait HashKey:
             .into_iter()
             .map(|builder| Ok::<_, ArrayError>(builder.finish().value_at(0).to_owned_datum()))
             .try_collect()
-            .map(Row)
+            .map(Row::new)
     }
 
     fn deserialize_to_builders(
