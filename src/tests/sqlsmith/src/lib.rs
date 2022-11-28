@@ -30,6 +30,8 @@ use risingwave_sqlparser::parser::Parser;
 
 mod expr;
 pub use expr::print_function_table;
+use risingwave_expr::ExprError;
+
 mod relation;
 pub mod runner;
 mod scalar;
@@ -460,4 +462,26 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
         },
         _ => panic!("Unexpected statement: {}", statement),
     }
+}
+
+fn is_division_by_zero_err(db_error: &str) -> bool {
+    db_error.contains(&ExprError::DivisionByZero.to_string())
+}
+
+fn is_numeric_out_of_range_err(db_error: &str) -> bool {
+    db_error.contains(&ExprError::NumericOutOfRange.to_string())
+}
+
+/// Skip queries with unimplemented features
+fn is_unimplemented_error(db_error: &str) -> bool {
+    db_error.contains("Feature is not yet implemented")
+}
+
+/// Certain errors are permitted to occur. This is because:
+/// 1. It is more complex to generate queries without these errors.
+/// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
+pub fn is_permissible_error(db_error: &str) -> bool {
+    is_numeric_out_of_range_err(db_error)
+        || is_division_by_zero_err(db_error)
+        || is_unimplemented_error(db_error)
 }
