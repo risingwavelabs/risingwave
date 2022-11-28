@@ -18,7 +18,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
-use lazy_static::lazy_static;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
@@ -34,6 +33,7 @@ use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch::Receiver;
 use tokio::task::JoinHandle;
+use tonic::service::Interceptor;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
@@ -409,40 +409,48 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             }
         };
 
+        let intercept = InterceptorWrapper { leader_rx };
+
         // Start services.
         tokio::spawn(async move {
-            //  let counter = Arc::new(Mutex::new(0));
-            //  let inter = |mut req: Request<()>| {
-            //      let mut counter_lock = counter.lock().unwrap();
-            //      *counter_lock = *counter_lock + 1;
-            //      println!("Count: {}. Intercepting request: {:?}", *counter_lock, req);
-            //      Ok(req)
-            //  };
             tonic::transport::Server::builder()
                 .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
                 .add_service(HeartbeatServiceServer::with_interceptor(
                     heartbeat_srv,
-                    intercept,
+                    intercept.clone(),
                 ))
                 .add_service(ClusterServiceServer::with_interceptor(
                     cluster_srv,
-                    intercept,
+                    intercept.clone(),
                 ))
                 .add_service(StreamManagerServiceServer::with_interceptor(
-                    stream_srv, intercept,
+                    stream_srv,
+                    intercept.clone(),
                 ))
                 .add_service(HummockManagerServiceServer::with_interceptor(
                     hummock_srv,
-                    intercept,
+                    intercept.clone(),
                 ))
                 .add_service(NotificationServiceServer::with_interceptor(
                     notification_srv,
-                    intercept,
+                    intercept.clone(),
                 ))
-                .add_service(DdlServiceServer::with_interceptor(ddl_srv, intercept))
-                .add_service(UserServiceServer::with_interceptor(user_srv, intercept))
-                .add_service(ScaleServiceServer::with_interceptor(scale_srv, intercept))
-                .add_service(HealthServer::with_interceptor(health_srv, intercept))
+                .add_service(DdlServiceServer::with_interceptor(
+                    ddl_srv,
+                    intercept.clone(),
+                ))
+                .add_service(UserServiceServer::with_interceptor(
+                    user_srv,
+                    intercept.clone(),
+                ))
+                .add_service(ScaleServiceServer::with_interceptor(
+                    scale_srv,
+                    intercept.clone(),
+                ))
+                .add_service(HealthServer::with_interceptor(
+                    health_srv,
+                    intercept.clone(),
+                ))
                 .serve(address_info.listen_addr)
                 .await
                 .unwrap();
@@ -467,23 +475,21 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     }
 }
 
-lazy_static! {
-    static ref COUNT: Mutex<i32> = Mutex::new(0);
+#[derive(Clone)]
+struct InterceptorWrapper {
+    leader_rx: Receiver<bool>, // TODO: Can I clone this?
 }
 
-pub fn intercept(mut req: Request<()>) -> Result<Request<()>, Status> {
-    println!(
-        "Count: {}. Intercepting request: {:?}",
-        *COUNT.lock().unwrap(),
-        req
-    );
-    *COUNT.lock().unwrap() = *COUNT.lock().unwrap() + 1;
-    // Set an extension that can be retrieved by `say_hello`
-    // req.extensions_mut().insert(MyExtension {
-    //     some_piece_of_data: "foo".to_string(),
-    // });
-
-    Ok(req)
+impl Interceptor for InterceptorWrapper {
+    fn call(&mut self, req: Request<()>) -> std::result::Result<Request<()>, Status> {
+        if !*self.leader_rx.borrow() {
+            tracing::info!("Blocking, request because this is not a leader");
+            return Err(Status::aborted(
+                "Blocking request, because node is not leader",
+            ));
+        }
+        Ok(req)
+    }
 }
 
 #[cfg(test)]
