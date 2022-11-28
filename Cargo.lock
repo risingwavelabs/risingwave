@@ -3316,11 +3316,11 @@ name = "memcomparable"
 version = "0.2.0-alpha"
 dependencies = [
  "bytes",
+ "criterion",
  "rand 0.8.5",
  "rust_decimal",
  "serde",
  "thiserror",
- "workspace-hack",
 ]
 
 [[package]]
@@ -6077,6 +6077,7 @@ dependencies = [
  "bytes",
  "num-traits",
  "postgres",
+ "rand 0.8.5",
  "serde",
  "tokio-postgres",
 ]

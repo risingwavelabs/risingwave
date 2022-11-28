@@ -16,13 +16,15 @@
 //! compared with memcmp.
 
 #![deny(missing_docs)]
-#![feature(lint_reasons)]
-#![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 mod de;
+#[cfg(feature = "decimal")]
+mod decimal;
 mod error;
 mod ser;
 
 pub use de::{from_slice, Deserializer};
+#[cfg(feature = "decimal")]
+pub use decimal::Decimal;
 pub use error::{Error, Result};
 pub use ser::{to_vec, Serializer};
