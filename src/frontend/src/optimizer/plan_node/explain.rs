@@ -55,10 +55,7 @@ pub fn field_doc_display<'a>(field: &'a str, value: &impl Display) -> RcDoc<'a, 
     field_doc_str(field, value.to_string())
 }
 
-pub fn field_doc_iter(
-    field: &str,
-    value: impl Iterator<Item = impl Display>,
-) -> RcDoc<()> {
+pub fn field_doc_iter(field: &str, value: impl Iterator<Item = impl Display>) -> RcDoc<()> {
     field_doc(
         field,
         RcDoc::concat([
