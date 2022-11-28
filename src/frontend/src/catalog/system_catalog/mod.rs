@@ -190,6 +190,7 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_AM, vec![0], read_am_info },
     { PG_CATALOG, PG_OPERATOR, vec![0], read_operator_info },
     { PG_CATALOG, PG_VIEWS, vec![], read_views_info },
+    { PG_CATALOG, PG_ATTRIBUTE, vec![0, 4], read_pg_attribute },
     { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
     { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
 }

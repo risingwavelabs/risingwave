@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod pg_am;
+pub mod pg_attribute;
 pub mod pg_cast;
 pub mod pg_class;
 pub mod pg_collation;
@@ -29,6 +30,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 pub use pg_am::*;
+pub use pg_attribute::*;
 pub use pg_cast::*;
 pub use pg_class::*;
 pub use pg_collation::*;
@@ -373,6 +375,49 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(view.sql.clone())),
                     ])
                 })
+            })
+            .collect_vec())
+    }
+
+    pub(super) fn read_pg_attribute(&self) -> Result<Vec<Row>> {
+        let reader = self.catalog_reader.read_guard();
+        let schemas = reader.iter_schemas(&self.auth_context.database)?;
+
+        Ok(schemas
+            .flat_map(|schema| {
+                let view_rows = schema.iter_view().flat_map(|view| {
+                    view.columns.iter().enumerate().map(|(index, column)| {
+                        Row::new(vec![
+                            Some(ScalarImpl::Int32(view.id as i32)),
+                            Some(ScalarImpl::Utf8(column.name.clone())),
+                            Some(ScalarImpl::Int32(column.data_type().to_oid())),
+                            Some(ScalarImpl::Int16(column.data_type().type_len())),
+                            Some(ScalarImpl::Int32(index as i32 + 1)),
+                            Some(ScalarImpl::Bool(false)),
+                        ])
+                    })
+                });
+
+                schema
+                    .iter_valid_table()
+                    .flat_map(|table| {
+                        table
+                            .columns()
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, column)| !column.is_hidden())
+                            .map(|(index, column)| {
+                                Row::new(vec![
+                                    Some(ScalarImpl::Int32(table.id.table_id() as i32)),
+                                    Some(ScalarImpl::Utf8(column.name().to_string())),
+                                    Some(ScalarImpl::Int32(column.data_type().to_oid())),
+                                    Some(ScalarImpl::Int16(column.data_type().type_len())),
+                                    Some(ScalarImpl::Int32(index as i32 + 1)),
+                                    Some(ScalarImpl::Bool(false)),
+                                ])
+                            })
+                    })
+                    .chain(view_rows)
             })
             .collect_vec())
     }
