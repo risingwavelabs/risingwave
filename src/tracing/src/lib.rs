@@ -28,30 +28,42 @@ pub struct RwTracingService {
 
 pub struct TracingConfig {
     pub jaeger_endpoint: Option<String>,
+    pub print_to_console: bool,
+    pub slow_request_threshold_ms: u64,
+}
+
+impl TracingConfig {
+    pub fn new(jaeger_endpoint: String) -> Self {
+        let slow_request_threshold_ms: u64 = env::var("RW_TRACE_SLOW_REQUEST_THRESHOLD_MS")
+            .ok()
+            .map_or_else(|| 100, |v| v.parse().unwrap());
+        let print_to_console = env::var("RW_TRACE_SLOW_REQUEST")
+            .ok()
+            .map_or_else(|| false, |v| v == "true");
+
+        Self {
+            jaeger_endpoint: Some(jaeger_endpoint),
+            print_to_console,
+            slow_request_threshold_ms,
+        }
+    }
 }
 
 impl RwTracingService {
     /// Create a new tracing service instance. Spawn a background thread to observe slow requests.
     pub fn new(config: TracingConfig) -> Result<Self> {
         let (tx, rx) = unbounded();
-        let slow_request_threshold_ms: u64 = env::var("RW_TRACE_SLOW_REQUEST_THRESHOLD_MS")
-            .ok()
-            .map_or_else(|| 100, |v| v.parse().unwrap());
 
         let jaeger_addr: Option<SocketAddr> =
             config.jaeger_endpoint.map(|x| x.parse()).transpose()?;
-
-        let print_to_console = env::var("RW_TRACE_SLOW_REQUEST")
-            .ok()
-            .map_or_else(|| false, |v| v == "true");
 
         let join_handle = if cfg!(madsim) {
             None
         } else {
             Some(Self::start_tracing_listener(
                 rx,
-                print_to_console,
-                slow_request_threshold_ms,
+                config.print_to_console,
+                config.slow_request_threshold_ms,
                 jaeger_addr,
             ))
         };
@@ -115,7 +127,6 @@ impl RwTracingService {
                     let rt = tokio::runtime::Builder::new_current_thread().build()?;
                     let stream = rx.for_each_concurrent(None, |collector| async {
                         let spans = collector.collect().await;
-                        println!("{:?}", spans);
                         if !spans.is_empty() {
                             // print slow requests
                             if print_to_console {

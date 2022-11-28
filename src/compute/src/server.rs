@@ -48,7 +48,6 @@ use risingwave_storage::monitor::{
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
-use risingwave_tracing::TracingConfig;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
@@ -121,16 +120,16 @@ pub async fn compute_node_serve(
         state_store_metrics.clone(),
         object_store_metrics,
         TieredCacheMetricsBuilder::new(registry.clone()),
-        Arc::new(
-            risingwave_tracing::RwTracingService::new(TracingConfig {
-                jaeger_endpoint: if opts.enable_jaeger_tracing {
-                    Some("127.0.0.1:6831".to_string())
-                } else {
-                    None
-                },
-            })
-            .unwrap(),
-        ),
+        if opts.enable_jaeger_tracing {
+            Arc::new(
+                risingwave_tracing::RwTracingService::new(risingwave_tracing::TracingConfig::new(
+                    "127.0.0.1:6831".to_string(),
+                ))
+                .unwrap(),
+            )
+        } else {
+            Arc::new(risingwave_tracing::RwTracingService::disabled())
+        },
     )
     .await
     .unwrap();
