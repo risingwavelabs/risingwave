@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use risingwave_expr::error::ExprError;
-use tokio_postgres::error::{DbError, Error as PgError, SqlState};
+use tokio_postgres::error::Error as PgError;
 
 use crate::{create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table};
 
@@ -171,41 +171,24 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
     }
 }
 
-fn is_division_by_zero_err(db_error: &DbError) -> bool {
-    db_error
-        .message()
-        .contains(&ExprError::DivisionByZero.to_string())
+fn is_division_by_zero_err(db_error: &str) -> bool {
+    db_error.contains(&ExprError::DivisionByZero.to_string())
 }
 
-fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
-    db_error
-        .message()
-        .contains(&ExprError::NumericOutOfRange.to_string())
-}
-
-/// Workaround to permit runtime errors not being propagated through channels.
-/// FIXME: This also means some internal system errors won't be caught.
-/// Tracked by: <https://github.com/risingwavelabs/risingwave/issues/3908#issuecomment-1186782810>
-fn is_broken_chan_err(db_error: &DbError) -> bool {
-    db_error
-        .message()
-        .contains("internal error: broken fifo_channel")
+fn is_numeric_out_of_range_err(db_error: &str) -> bool {
+    db_error.contains(&ExprError::NumericOutOfRange.to_string())
 }
 
 /// Skip queries with unimplemented features
-fn is_unimplemented_error(db_error: &DbError) -> bool {
-    db_error
-        .message()
-        .contains("Feature is not yet implemented")
+fn is_unimplemented_error(db_error: &str) -> bool {
+    db_error.contains("Feature is not yet implemented")
 }
 
 /// Certain errors are permitted to occur. This is because:
 /// 1. It is more complex to generate queries without these errors.
 /// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
-fn is_permissible_error(db_error: &DbError) -> bool {
-    let is_internal_error = *db_error.code() == SqlState::INTERNAL_ERROR;
-    (is_internal_error && is_broken_chan_err(db_error))
-        || is_numeric_out_of_range_err(db_error)
+fn is_permissible_error(db_error: &str) -> bool {
+    is_numeric_out_of_range_err(db_error)
         || is_division_by_zero_err(db_error)
         || is_unimplemented_error(db_error)
 }
@@ -226,7 +209,7 @@ fn validate_response_with_skip_count<_Row>(
         Err(e) => {
             // Permit runtime errors conservatively.
             if let Some(e) = e.as_db_error()
-                && is_permissible_error(e)
+                && is_permissible_error(&e.to_string())
             {
                 return 1;
             }
