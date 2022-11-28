@@ -78,7 +78,7 @@ impl fmt::Display for BatchNestedLoopJoin {
                 .copied()
                 .eq(0..self.logical.internal_column_num())
             {
-                builder.field("output", &format_args!("all"));
+                builder.field("output", &"all");
             } else {
                 builder.field(
                     "output",
