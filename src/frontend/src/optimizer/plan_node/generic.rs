@@ -464,32 +464,24 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {
         (self.agg_calls, self.group_key, self.input)
     }
+}
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
+impl<'a, PlanRef: stream::StreamPlanRef> NodeExplain<'a> for Agg<PlanRef> {
+    fn distill_fields(&self) -> RcDoc<'a, ()> {
+        let mut fields = Vec::with_capacity(2);
         if !self.group_key.is_empty() {
-            builder.field("group_key", &self.group_key_display());
-        }
-        builder.field("aggs", &self.agg_calls_display());
-        builder.finish()
-    }
-
-    fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
-        self.agg_calls
-            .iter()
-            .map(|plan_agg_call| PlanAggCallDisplay {
+            let ok = |plan_agg_call| PlanAggCallDisplay {
                 plan_agg_call,
                 input_schema: self.input.schema(),
-            })
-            .collect()
-    }
-
-    fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
-        self.group_key
-            .iter()
-            .copied()
-            .map(|i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-            .collect()
+            };
+            fields.push(field_doc_iter("group_key", self.agg_calls.iter().map(ok)));
+        }
+        let ok = |i| FieldDisplay(self.input.schema().fields.get(i).unwrap());
+        fields.push(field_doc_iter(
+            "aggs",
+            self.group_key.iter().copied().map(ok),
+        ));
+        RcDoc::intersperse(fields, RcDoc::softline())
     }
 }
 
@@ -691,7 +683,7 @@ pub struct PlanAggCallDisplay<'a> {
     pub input_schema: &'a Schema,
 }
 
-impl fmt::Debug for PlanAggCallDisplay<'_> {
+impl fmt::Display for PlanAggCallDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let that = self.plan_agg_call;
         write!(f, "{}", that.agg_kind)?;

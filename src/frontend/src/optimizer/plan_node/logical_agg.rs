@@ -20,6 +20,7 @@ use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
+use super::explain::NodeExplain;
 use super::generic::{
     self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
 };
@@ -718,6 +719,7 @@ impl LogicalAgg {
         Self::new(agg_calls, group_key, input)
     }
 
+    #[allow(deprecated)]
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         self.core.fmt_with_name(f, name)
     }

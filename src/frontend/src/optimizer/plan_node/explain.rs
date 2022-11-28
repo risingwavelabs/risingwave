@@ -65,7 +65,7 @@ pub fn field_doc_iter<'a>(
             RcDoc::text("["),
             RcDoc::intersperse(
                 value.map(|x| RcDoc::text(x.to_string())),
-                RcDoc::concat([RcDoc::text(","), RcDoc::space()]),
+                RcDoc::concat([RcDoc::text(","), RcDoc::softline()]),
             ),
             RcDoc::text("]"),
         ]),
