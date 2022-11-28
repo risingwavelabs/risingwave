@@ -286,6 +286,15 @@
       └─LogicalAgg { group_key: [t.v1, t.v3], aggs: [first_value(t.v2)] }
         └─LogicalProject { exprs: [t.v1, t.v3, t.v2] }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+  batch_plan: |
+    BatchProject { exprs: [t.v1, first_value(t.v2)] }
+    └─BatchExchange { order: [t.v1 ASC, t.v3 ASC], dist: Single }
+      └─BatchProject { exprs: [t.v1, first_value(t.v2), t.v3] }
+        └─BatchSortAgg { group_key: [t.v1, t.v3], aggs: [first_value(t.v2)] }
+          └─BatchExchange { order: [t.v1 ASC, t.v3 ASC], dist: HashShard(t.v1, t.v3) }
+            └─BatchProject { exprs: [t.v1, t.v3, t.v2] }
+              └─BatchSort { order: [t.v1 ASC, t.v3 ASC] }
+                └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - name: distinct on
   sql: |
     create table t (v1 int, v2 int);
