@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -59,18 +61,27 @@ impl Planner {
         select_items.extend(extra_order_exprs);
         // The DISTINCT ON expression(s) must match the leftmost ORDER BY expression(s).
         if let BoundDistinct::DistinctOn(exprs) = &distinct {
-            #[allow(clippy::disallowed_methods)]
-            for (expr, order_expr) in exprs.iter().zip(
-                order
-                    .iter()
-                    .map(|FieldOrder { index, .. }| &select_items[*index]),
-            ) {
-                if expr != order_expr {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "the SELECT DISTINCT ON expressions must match the leftmost SELECT DISTINCT ON expressions"
-                            .into(),
-                    )
-                    .into());
+            let mut distinct_on_exprs: HashMap<ExprImpl, bool> =
+                exprs.iter().map(|expr| (expr.clone(), false)).collect();
+            let mut uncovered_distinct_on_exprs_cnt = distinct_on_exprs.len();
+            let mut order_iter = order
+                .iter()
+                .map(|FieldOrder { index, .. }| &select_items[*index]);
+            while uncovered_distinct_on_exprs_cnt > 0 && let Some(order_expr) = order_iter.next() {
+                match distinct_on_exprs.get_mut(order_expr) {
+                    Some(has_been_covered) => {
+                        if !*has_been_covered {
+                            *has_been_covered = true;
+                            uncovered_distinct_on_exprs_cnt -= 1;
+                        }
+                    }
+                    None => {
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "the SELECT DISTINCT ON expressions must match the leftmost SELECT DISTINCT ON expressions"
+                                .into(),
+                        )
+                        .into());
+                    }
                 }
             }
         }
