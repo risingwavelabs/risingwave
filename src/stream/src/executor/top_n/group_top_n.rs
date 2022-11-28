@@ -242,12 +242,12 @@ where
             // apply the chunk to state table
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.managed_state.insert(row_ref.clone());
+                    self.managed_state.insert(row_ref);
                     cache.insert(cache_key, row_ref, &mut res_ops, &mut res_rows);
                 }
 
                 Op::Delete | Op::UpdateDelete => {
-                    self.managed_state.delete(row_ref.clone());
+                    self.managed_state.delete(row_ref);
                     cache
                         .delete(
                             Some(&group_key),

@@ -41,6 +41,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .register_sender(params.actor_context.id, sender);
 
         let source_id = TableId::new(node.source_id);
+        let source_name = node.source_name.clone();
 
         let source_builder = SourceDescBuilder::new(
             source_id,
@@ -81,6 +82,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             params.actor_context,
             source_builder,
             source_id,
+            source_name,
             vnodes,
             state_table_handler,
             column_ids,
