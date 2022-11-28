@@ -14,7 +14,11 @@
 
 use std::collections::HashSet;
 
-use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit, LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeBinary, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{
+    LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit,
+    LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeBinary,
+    PlanTreeNodeUnary,
+};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 pub struct MaxOneRowVisitor;
