@@ -53,7 +53,7 @@ async fn test_failpoints_state_store_read_upload() {
     .await
     .unwrap();
 
-    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage).await;
+    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage, Default::default()).await;
 
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![

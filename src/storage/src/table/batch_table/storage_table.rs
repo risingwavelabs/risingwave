@@ -379,7 +379,7 @@ impl<S: StateStore> StorageTable<S> {
         ) -> Bound<Vec<u8>> {
             match range_bound {
                 Included(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.0.len());
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.len());
                     let key = pk_prefix.chain(k);
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
@@ -391,7 +391,7 @@ impl<S: StateStore> StorageTable<S> {
                     }
                 }
                 Excluded(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.0.len());
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.len());
                     let key = pk_prefix.chain(k);
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {

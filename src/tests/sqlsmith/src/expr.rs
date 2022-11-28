@@ -84,7 +84,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let range = if can_agg & !inside_agg { 99 } else { 90 };
 
         match self.rng.gen_range(0..=range) {
-            0..=80 => self.gen_func(typ, can_agg, inside_agg),
+            0..=70 => self.gen_func(typ, can_agg, inside_agg),
+            71..=80 => self.gen_exists(typ, inside_agg),
             81..=90 => self.gen_cast(typ, can_agg, inside_agg),
             91..=99 => self.gen_agg(typ),
             // TODO: There are more that are not in the functions table, e.g. CAST.
@@ -242,6 +243,22 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
+    fn gen_exists(&mut self, ret: DataTypeName, inside_agg: bool) -> Expr {
+        // TODO: Streaming nested loop join is not implemented yet.
+        // Tracked by: <https://github.com/singularity-data/risingwave/issues/2655>.
+
+        // Generation of subquery inside aggregation is now workaround.
+        // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/3896>.
+        if self.is_mview || ret != DataTypeName::Boolean || inside_agg {
+            return self.gen_simple_scalar(ret);
+        };
+        // TODO: Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+        // let (subquery, _) = self.gen_correlated_query();
+        // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/2275>
+        let (subquery, _) = self.gen_local_query();
+        Expr::Exists(Box::new(subquery))
+    }
+
     fn gen_agg(&mut self, ret: DataTypeName) -> Expr {
         // TODO: workaround for <https://github.com/risingwavelabs/risingwave/issues/4508>
         if ret == DataTypeName::Interval {
@@ -277,10 +294,18 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             A::Max => Some(Expr::Function(make_agg_func("max", exprs, distinct))),
             A::Count => Some(Expr::Function(make_agg_func("count", exprs, distinct))),
             A::Avg => Some(Expr::Function(make_agg_func("avg", exprs, distinct))),
-            A::StringAgg => Some(Expr::Function(make_agg_func("string_agg", exprs, distinct))),
+            A::StringAgg => {
+                // distinct and non_distinct_string_agg are incompatible according to
+                // https://github.com/risingwavelabs/risingwave/blob/a703dc7d725aa995fecbaedc4e9569bc9f6ca5ba/src/frontend/src/optimizer/plan_node/logical_agg.rs#L394
+                if self.is_distinct_allowed && !distinct {
+                    None
+                } else {
+                    Some(Expr::Function(make_agg_func("string_agg", exprs, distinct)))
+                }
+            }
             A::FirstValue => None,
             A::ApproxCountDistinct => {
-                if distinct {
+                if self.is_distinct_allowed {
                     None
                 } else {
                     Some(Expr::Function(make_agg_func(

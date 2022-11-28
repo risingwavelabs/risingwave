@@ -54,7 +54,7 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
 
     for idx in 0..row_count {
         let idx = idx as i32;
-        state.insert(Row(vec![
+        state.insert(Row::new(vec![
             Some(idx.into()),
             Some(idx.into()),
             Some(idx.into()),

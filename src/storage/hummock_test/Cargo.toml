@@ -26,13 +26,17 @@ risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_storage = { path = "..", features = ["test"] }
+risingwave_tracing = { path = "../../tracing" }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
-futures = { version = "0.3", default-features = false, features = ["alloc", "executor"] }
+futures = { version = "0.3", default-features = false, features = [
+    "alloc",
+    "executor",
+] }
 risingwave_test_runner = { path = "../../test_runner" }
 serial_test = "0.9"
 sync-point = { path = "../../utils/sync-point" }

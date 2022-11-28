@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, Row2};
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::Expression;
 use risingwave_expr::ExprError;
@@ -32,7 +32,7 @@ pub trait InfallibleExpression: Expression {
             let mut array_builder = self.return_type().create_array_builder(input.cardinality());
             for row in input.rows_with_holes() {
                 if let Some(row) = row {
-                    let datum = self.eval_row_infallible(&row.to_owned_row(), &on_err);
+                    let datum = self.eval_row_infallible(&row.into_owned_row(), &on_err);
                     array_builder.append_datum(&datum);
                 } else {
                     array_builder.append_null();
