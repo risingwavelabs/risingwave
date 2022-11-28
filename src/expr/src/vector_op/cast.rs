@@ -18,10 +18,8 @@ use std::str::FromStr;
 use bytes::{Bytes, BytesMut};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use num_traits::ToPrimitive;
 use postgres_types::ToSql;
-use regex::Regex;
 use risingwave_common::array::{Array, ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
@@ -46,12 +44,7 @@ const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expe
 const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
 const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
-const PARSE_ERROR_STR_TO_BYTEA: &str =
-    "Can't cast string to bytea (expected format is \\x[0-9]|[a-fA-F] as hexadecimal)";
-lazy_static! {
-    static ref REGEX_FOR_HEXADECIMAL: Regex =
-        Regex::new(r"\\?\b(([x])?([0-9a-fA-F]+|[0-9]+))\b").unwrap();
-}
+const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
 
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
@@ -193,12 +186,7 @@ pub fn str_to_bytea(elem: &str) -> Result<Bytes> {
         Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA))
     } else if let Some(remainder) = elem.strip_prefix(r"\x") {
         Ok(parse_bytes_hex(remainder)?.into())
-
-        // Ok(hex::decode(remainder).unwrap().into())
     } else {
-        // use hex::ToHex;
-        // Ok(elem.encode_hex::<String>().into())
-        // Ok(hex::decode(elem).unwrap().into())
         Ok(parse_bytes_traditional(elem).unwrap().into())
     }
 }
@@ -222,9 +210,7 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
         }
         let n = decode_nibble(n)?;
         let n2 = match nibbles.next() {
-            // None => return Err(ParseHexError::OddLength),
             None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
-            // None => todo!(),
             Some(n2) => decode_nibble(n2)?,
         };
         buf.push((n << 4) | n2);
@@ -915,12 +901,6 @@ mod tests {
         assert!(str_to_list("{{1, 2, 3}, 4, 5, 6}}", &DataType::Int32).is_err());
     }
 
-    // pub fn format_bytes(bytes: &[u8]) -> String
-    // {
-    //     let mut s = String::with_capacity(2 * bytes.len());
-    //     write!(s, "\\x{}", hex::encode(bytes)).unwrap();
-    //     s
-    // }
     #[test]
     fn test_bytea() {
         assert_eq!(format_bytes(&str_to_bytea("fgo").unwrap()), r"\x66676f");

@@ -53,6 +53,7 @@ impl ToText for bool {
     }
 }
 
+/// Convert bytes in `Bytea` type to String.
 pub fn format_bytes(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(2 * bytes.len());
     write!(s, "\\x{}", hex::encode(bytes)).unwrap();

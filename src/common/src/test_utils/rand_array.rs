@@ -19,7 +19,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use chrono::{Datelike, NaiveTime};
+use chrono::Datelike;
 use num_traits::FromPrimitive;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;

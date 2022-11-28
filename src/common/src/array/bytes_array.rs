@@ -138,7 +138,7 @@ impl BytesArray {
     }
 }
 
-/// `Utf8ArrayBuilder` use `&str` to build an `Utf8Array`.
+/// `BytesArrayBuilder` use `&[u8]` to build an `BytesArray`.
 #[derive(Debug)]
 pub struct BytesArrayBuilder {
     offset: Vec<usize>,
@@ -201,24 +201,5 @@ impl ArrayBuilder for BytesArrayBuilder {
             data: self.data,
             offset: self.offset,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn test_utf8_builder() {
-        let mut builder = BytesArrayBuilder::new(0);
-        for i in 0..100 {
-            if i % 2 == 0 {
-                builder.append(Some(format!("{}", i).as_bytes()));
-            } else {
-                builder.append(None);
-            }
-        }
-        builder.finish();
     }
 }

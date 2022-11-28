@@ -47,7 +47,7 @@ message DataType {
     TIMESTAMPZ = 13;
     STRUCT = 15;
     LIST = 16;
-    Bytea = 17;
+    BYTEA = 17;
   }
   TypeName type_name = 1;
   // Data length for char.

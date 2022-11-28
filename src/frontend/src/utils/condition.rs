@@ -304,6 +304,8 @@ impl Condition {
     }
 
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
+    // This is a False Positive listed in https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type.
+    #[allow(clippy::mutable_key_type)]
     pub fn split_to_scan_ranges(
         self,
         table_desc: Rc<TableDesc>,

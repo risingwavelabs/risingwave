@@ -950,7 +950,7 @@ impl ScalarImpl {
                         .map(|field| Self::encoding_data_size(field, deserializer))
                         .try_fold(0, |a, b| b.map(|b| a + b))?,
                     DataType::Varchar => deserializer.skip_bytes()?,
-                    DataType::Bytea => deserializer.read_bytes_len()?,
+                    DataType::Bytea => deserializer.skip_bytes()?,
                 };
 
                 // consume offset of fixed_type

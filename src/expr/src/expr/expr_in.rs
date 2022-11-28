@@ -34,6 +34,8 @@ pub(crate) struct InExpression {
     return_type: DataType,
 }
 
+// This is a False Positive listed in https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type.
+#[allow(clippy::mutable_key_type)]
 impl InExpression {
     pub fn new(
         left: BoxedExpression,
