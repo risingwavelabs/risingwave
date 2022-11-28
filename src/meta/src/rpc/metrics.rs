@@ -223,7 +223,7 @@ impl MetaMetrics {
         )
         .unwrap();
         let scale_compactor_core_num = register_int_gauge_with_registry!(
-            "storage_compactor_core_score_count",
+            "storage_compactor_suggest_core_count",
             "num of CPU to be scale to meet compaction need",
             registry
         )

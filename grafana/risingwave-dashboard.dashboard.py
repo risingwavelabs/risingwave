@@ -526,12 +526,13 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_kilobytes(
+                panels.timeseries_count(
                     "scale compactor core count",
                     "compactor core resource need to scale out",
                     [
                         panels.target(
-                            f"sum({metric('storage_compactor_core_score_count')})",
+                            f"sum({metric('storage_compactor_suggest_core_count')})",
+                            "suggest-core-count"
                         ),
                     ],
                 ),
