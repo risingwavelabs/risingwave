@@ -66,5 +66,3 @@ message ParallelUnitMapping {
   repeated uint64 original_indices = 2;
   repeated uint32 data = 3;
 }
-
-message Dummy {}
