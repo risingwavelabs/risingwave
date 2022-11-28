@@ -24,7 +24,7 @@ use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_frontend::{handler, Binder, FrontendOpts, Planner, WithOptions};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
-    create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
+    create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
 };
 use tokio::runtime::Runtime;
 
@@ -225,10 +225,18 @@ pub fn run() {
                     tables,
                     setup_sql,
                 } = &*env;
-                test_batch_query(session.clone(), tables.clone(), i, setup_sql)?;
+                if let Err(e) = test_batch_query(session.clone(), tables.clone(), i, setup_sql) {
+                    if let Some(s) = e.message() && !is_permissible_error(s) {
+                        return Err(e);
+                    }
+                }
                 let test_stream_query =
                     test_stream_query(session.clone(), tables.clone(), i, setup_sql);
-                build_runtime().block_on(test_stream_query)?;
+                if let Err(e) = build_runtime().block_on(test_stream_query) {
+                    if let Some(s) = e.message()  && !is_permissible_error(s) {
+                        return Err(e);
+                    }
+                }
                 Ok(())
             })
         })
