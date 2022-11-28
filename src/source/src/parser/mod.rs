@@ -105,7 +105,7 @@ trait OpAction {
 
     fn rollback(builder: &mut ArrayBuilderImpl);
 
-    fn finish(writer: SourceStreamChunkRowWriter<'_>);
+    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>);
 }
 
 struct OpActionInsert;
@@ -126,7 +126,7 @@ impl OpAction for OpActionInsert {
     }
 
     #[inline(always)]
-    fn finish(writer: SourceStreamChunkRowWriter<'_>) {
+    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::Insert)
     }
 }
@@ -149,7 +149,7 @@ impl OpAction for OpActionDelete {
     }
 
     #[inline(always)]
-    fn finish(writer: SourceStreamChunkRowWriter<'_>) {
+    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::Delete)
     }
 }
@@ -174,7 +174,7 @@ impl OpAction for OpActionUpdate {
     }
 
     #[inline(always)]
-    fn finish(writer: SourceStreamChunkRowWriter<'_>) {
+    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::UpdateDelete);
         writer.op_builder.push(Op::UpdateInsert);
     }
@@ -182,7 +182,7 @@ impl OpAction for OpActionUpdate {
 
 impl SourceStreamChunkRowWriter<'_> {
     fn do_action<A: OpAction>(
-        self,
+        &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
     ) -> Result<WriteGuard> {
         // The closure `f` may fail so that a part of builders were appended incompletely.
@@ -205,7 +205,8 @@ impl SourceStreamChunkRowWriter<'_> {
 
                 Ok(())
             })
-            .inspect_err(|_e| {
+            .inspect_err(|e| {
+                tracing::warn!("failed to parse source data: {}", e);
                 self.builders[..appended_idx]
                     .iter_mut()
                     .for_each(A::rollback);
@@ -222,7 +223,10 @@ impl SourceStreamChunkRowWriter<'_> {
     ///
     /// * `self`: Ownership is consumed so only one record can be written.
     /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
-    pub fn insert(self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<WriteGuard> {
+    pub fn insert(
+        &mut self,
+        f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
+    ) -> Result<WriteGuard> {
         self.do_action::<OpActionInsert>(f)
     }
 
@@ -232,7 +236,10 @@ impl SourceStreamChunkRowWriter<'_> {
     ///
     /// * `self`: Ownership is consumed so only one record can be written.
     /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
-    pub fn delete(self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<WriteGuard> {
+    pub fn delete(
+        &mut self,
+        f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
+    ) -> Result<WriteGuard> {
         self.do_action::<OpActionDelete>(f)
     }
 
@@ -244,7 +251,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// * `f`: A failable closure that produced two [`Datum`]s as old and new value by corresponding
     ///   [`SourceColumnDesc`].
     pub fn update(
-        self,
+        &mut self,
         f: impl FnMut(&SourceColumnDesc) -> Result<(Datum, Datum)>,
     ) -> Result<WriteGuard> {
         self.do_action::<OpActionUpdate>(f)

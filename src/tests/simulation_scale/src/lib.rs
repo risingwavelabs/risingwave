@@ -15,6 +15,7 @@
 #![cfg(madsim)]
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
+#![feature(once_cell)]
 
 use std::time::Duration;
 

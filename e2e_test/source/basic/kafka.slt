@@ -209,6 +209,17 @@ create materialized source s14 (
 ) row format CANAL_JSON;
 
 statement ok
+create materialized source s15 (
+  v1 int,
+  v2 int,
+  PRIMARY KEY (v1)
+) with (
+  connector = 'kafka',
+  topic = 'canal_json_double_field',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format CANAL_JSON;
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
@@ -364,6 +375,11 @@ select * from s14;
 ----
 1 mike f 2018-01-01 00:00:01 1500.62 0.65
 
+query I
+select count(*) from s15
+----
+0
+
 statement ok
 drop materialized view source_mv1
 
@@ -393,3 +409,6 @@ drop source s13
 
 statement ok
 drop source s14
+
+statement ok
+drop source s15
