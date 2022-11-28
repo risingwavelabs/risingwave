@@ -20,13 +20,14 @@ use std::sync::Arc;
 
 use fixedbitset::FixedBitSet;
 use futures_async_stream::try_stream;
-use itertools::{repeat_n, Itertools};
+use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
-use risingwave_common::types::DataType;
+use risingwave_common::row::{repeat_n, RowExt};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -1376,11 +1377,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         probe_row_ref: RowRef<'_>,
         build_column_count: usize,
     ) -> Option<DataChunk> {
-        chunk_builder.append_one_row_from_datum_refs(
-            probe_row_ref
-                .values()
-                .chain(repeat_n(None, build_column_count)),
-        )
+        chunk_builder.append_one_row(probe_row_ref.chain(repeat_n(Datum::None, build_column_count)))
     }
 
     fn append_one_row_with_null_probe_side(
@@ -1388,9 +1385,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         build_row_ref: RowRef<'_>,
         probe_column_count: usize,
     ) -> Option<DataChunk> {
-        chunk_builder.append_one_row_from_datum_refs(
-            repeat_n(None, probe_column_count).chain(build_row_ref.values()),
-        )
+        chunk_builder.append_one_row(repeat_n(Datum::None, probe_column_count).chain(build_row_ref))
     }
 }
 

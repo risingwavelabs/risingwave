@@ -106,6 +106,7 @@ impl DeleteRangeAggregatorBuilder {
     }
 }
 
+#[cfg(debug_assertions)]
 fn check_sorted_tombstone(sorted_tombstones: &[DeleteRangeTombstone]) {
     for idx in 1..sorted_tombstones.len() {
         assert!(sorted_tombstones[idx]

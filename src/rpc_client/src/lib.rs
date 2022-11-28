@@ -46,6 +46,7 @@ mod cdc_client;
 mod compute_client;
 mod hummock_meta_client;
 mod meta_client;
+// mod sink_client;
 mod stream_client;
 
 pub use cdc_client::CdcClient;

@@ -29,7 +29,7 @@ impl Unnest {
     fn eval_row(&self, list: ListRef<'_>) -> Result<ArrayRef> {
         let mut builder = self.return_type.create_array_builder(self.chunk_size);
         for d in &list.flatten() {
-            builder.append_datum_ref(*d);
+            builder.append_datum(*d);
         }
         Ok(Arc::new(builder.finish()))
     }
