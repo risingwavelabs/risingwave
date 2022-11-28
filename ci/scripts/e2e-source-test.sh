@@ -5,6 +5,9 @@ set -euo pipefail
 
 source ci/scripts/common.env.sh
 
+# prepare environment
+export CONNECTOR_SOURCE_ENDPOINT="localhost:60061"
+
 while getopts 'p:' opt; do
     case ${opt} in
         p )
