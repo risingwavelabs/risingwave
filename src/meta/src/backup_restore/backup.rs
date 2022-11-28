@@ -202,14 +202,12 @@ impl<S: MetaStore> BackupWorker<S> {
             let mut db_snapshot_builder =
                 DbSnapshotBuilder::new(self.backup_manager.env.meta_store_ref().clone());
             // Reuse job id as db snapshot id.
-            db_snapshot_builder.set_id(job_id);
-            db_snapshot_builder.build().await?;
+            db_snapshot_builder.build(job_id).await?;
             let db_snapshot = db_snapshot_builder.finish()?;
             let job_status = BackupJobResult::Finished(db_snapshot);
             self.backup_manager
                 .finish_backup_job(job_id, job_status.clone())
-                .await
-                .map_err(|e| BackupError::Other(anyhow::anyhow!(e)))?;
+                .await?;
             Ok::<BackupJobResult, BackupError>(job_status)
         };
         tokio::spawn(async move {

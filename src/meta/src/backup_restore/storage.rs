@@ -104,7 +104,7 @@ impl BackupStorage for ObjectStoreBackupStorage {
 
 impl From<ObjectError> for BackupError {
     fn from(e: ObjectError) -> Self {
-        BackupError::Storage(e.into())
+        BackupError::BackupStorage(e.into())
     }
 }
 

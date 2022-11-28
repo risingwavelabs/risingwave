@@ -15,14 +15,22 @@
 use risingwave_common::error::BoxedError;
 use thiserror::Error;
 
+use crate::model::MetadataModelError;
+use crate::storage::MetaStoreError;
 use crate::MetaError;
 
 pub type BackupResult<T> = Result<T, BackupError>;
 
 #[derive(Error, Debug)]
 pub enum BackupError {
-    #[error("Storage error: {0}")]
-    Storage(
+    #[error("BackupStorage error: {0}")]
+    BackupStorage(
+        #[backtrace]
+        #[source]
+        BoxedError,
+    ),
+    #[error("MetaStorage error: {0}")]
+    MetaStorage(
         #[backtrace]
         #[source]
         BoxedError,
@@ -42,5 +50,23 @@ pub enum BackupError {
 impl From<BackupError> for MetaError {
     fn from(e: BackupError) -> Self {
         anyhow::anyhow!(e).into()
+    }
+}
+
+impl From<MetaStoreError> for BackupError {
+    fn from(e: MetaStoreError) -> Self {
+        BackupError::MetaStorage(e.into())
+    }
+}
+
+impl From<MetaError> for BackupError {
+    fn from(e: MetaError) -> Self {
+        BackupError::Other(anyhow::anyhow!(e))
+    }
+}
+
+impl From<MetadataModelError> for BackupError {
+    fn from(e: MetadataModelError) -> Self {
+        BackupError::Decoding(e.into())
     }
 }
