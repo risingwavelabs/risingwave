@@ -55,23 +55,6 @@ struct ElectionOutcome {
 /// `addr`: Address of the node that runs for election
 /// `lease_time_sec`: Amount of seconds that this lease will be valid
 /// `next_lease_id`: If the node wins, the lease used until the next election will have this id
-///
-/// ## Example
-/// ```
-/// let mut this_node_is_leader = false;
-/// loop {
-///     let outcome = campaign(&meta_store, &addr_clone, lease_time, init_lease_id).await;
-///     if outcome.is_some() {
-///         this_node_is_leader = outcome.unwrap().is_leader;
-///         break;
-///     }
-/// }
-/// if this_node_is_leader {
-///     // start services of leader node
-/// } else {
-///     // start services of follower node
-/// }
-/// ```
 async fn campaign<S: MetaStore>(
     meta_store: &Arc<S>,
     addr: &String,
