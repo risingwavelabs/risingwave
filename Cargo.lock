@@ -3316,11 +3316,11 @@ name = "memcomparable"
 version = "0.2.0-alpha"
 dependencies = [
  "bytes",
+ "criterion",
  "rand 0.8.5",
  "rust_decimal",
  "serde",
  "thiserror",
- "workspace-hack",
 ]
 
 [[package]]
@@ -4480,6 +4480,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus-http-query"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "544213c26792ce82b2d01e5b0aca35cd70761a0eb4d635ca3f86f6ad372ecd4a"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "time 0.3.15",
+ "url",
+]
+
+[[package]]
 name = "prost"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5579,6 +5592,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
+ "prometheus-http-query",
  "prost 0.11.2",
  "rand 0.8.5",
  "reqwest",
@@ -5776,6 +5790,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_pb",
+ "tempfile",
  "tokio-postgres",
  "tracing",
  "workspace-hack",
@@ -6062,6 +6077,7 @@ dependencies = [
  "bytes",
  "num-traits",
  "postgres",
+ "rand 0.8.5",
  "serde",
  "tokio-postgres",
 ]
@@ -6783,9 +6799,9 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "symbolic-common"
-version = "10.1.2"
+version = "10.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "492875918a6bcbae753a5fc6f39bc87566fc3c25182e76d7f128ef1c8a2375c6"
+checksum = "56de97fb15cc5db0100c22aed51cee31b013234bc43e00e4035cad048a4c7cd8"
 dependencies = [
  "debugid",
  "memmap2",
@@ -6795,9 +6811,9 @@ dependencies = [
 
 [[package]]
 name = "symbolic-demangle"
-version = "10.1.2"
+version = "10.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "214d3a420108471222e55268ef502ba0fc89cfd4de876ff26105c560729127af"
+checksum = "0fe238e66ada3122c2efe810ba17459df9f7573b45dd523a8057e4c0f515e860"
 dependencies = [
  "cpp_demangle",
  "rustc-demangle",
@@ -7058,9 +7074,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.21.2"
+version = "1.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9e03c497dc955702ba729190dc4aac6f2a0ce97f913e5b1b5912fc5039d9099"
+checksum = "d76ce4a75fb488c605c54bf610f221cea8b0dafb53333c1a67e8ee199dcd2ae3"
 dependencies = [
  "autocfg",
  "bytes",

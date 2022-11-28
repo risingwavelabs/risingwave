@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, Row2};
 
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 
@@ -43,10 +43,10 @@ impl LookupCache {
                 // the item is in cache, update it
                 match op {
                     Op::Insert | Op::UpdateInsert => {
-                        values.insert(row.into());
+                        values.insert(row.into_owned_row());
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        values.remove(&row.into());
+                        values.remove(&row.into_owned_row());
                     }
                 }
             }
