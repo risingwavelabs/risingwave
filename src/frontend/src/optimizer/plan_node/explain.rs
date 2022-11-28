@@ -28,24 +28,46 @@ pub trait NodeExplain<'a> {
         RcDoc::concat([
             RcDoc::text(name),
             RcDoc::space(),
+            self.distill_fields_braced(),
+        ])
+    }
+
+    fn distill_fields_braced(&self) -> RcDoc<'a, ()> {
+        RcDoc::concat([
             RcDoc::text("{"),
-            RcDoc::line(),
-            self.distill_fields().nest(2),
-            RcDoc::line(),
+            RcDoc::space(),
+            self.distill_fields(),
+            RcDoc::space(),
             RcDoc::text("}"),
         ])
     }
 }
 
 pub fn field_doc_str<'a>(field: &'a str, value: impl Into<Cow<'a, str>>) -> RcDoc<'a, ()> {
-    RcDoc::concat([
-        RcDoc::text(field),
-        RcDoc::text(":"),
-        RcDoc::space(),
-        RcDoc::text(value),
-    ])
+    field_doc(field, RcDoc::text(value))
+}
+
+pub fn field_doc<'a>(field: &'a str, value: RcDoc<'a, ()>) -> RcDoc<'a, ()> {
+    RcDoc::concat([RcDoc::text(field), RcDoc::text(":"), RcDoc::space(), value])
 }
 
 pub fn field_doc_display<'a>(field: &'a str, value: &impl Display) -> RcDoc<'a, ()> {
     field_doc_str(field, value.to_string())
+}
+
+pub fn field_doc_iter<'a>(
+    field: &'a str,
+    value: impl Iterator<Item = impl Display>,
+) -> RcDoc<'a, ()> {
+    field_doc(
+        field,
+        RcDoc::concat([
+            RcDoc::text("["),
+            RcDoc::intersperse(
+                value.map(|x| RcDoc::text(x.to_string())),
+                RcDoc::concat([RcDoc::text(","), RcDoc::space()]),
+            ),
+            RcDoc::text("]"),
+        ]),
+    )
 }

@@ -27,7 +27,7 @@ use risingwave_pb::expr::AggCall as ProstAggCall;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
-use super::explain::{field_doc_display, field_doc_str, NodeExplain};
+use super::explain::{field_doc_display, field_doc_iter, field_doc_str, NodeExplain};
 use super::stream;
 use super::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::catalog::source_catalog::SourceCatalog;
@@ -1076,6 +1076,20 @@ pub struct Project<PlanRef> {
     pub input: PlanRef,
 }
 
+impl<'a, PlanRef: GenericPlanRef> NodeExplain<'a> for Project<PlanRef> {
+    fn distill_fields(&self) -> RcDoc<'a, ()> {
+        RcDoc::intersperse(
+            [field_doc_iter(
+                "exprs",
+                self.exprs.iter().map(|expr| ExprDisplay {
+                    expr,
+                    input_schema: self.input.schema(),
+                }),
+            )],
+            RcDoc::line(),
+        )
+    }
+}
 impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     pub fn new(exprs: Vec<ExprImpl>, input: PlanRef) -> Self {
         Project { exprs, input }
@@ -1083,22 +1097,6 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
 
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
         (self.exprs, self.input)
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field(
-            "exprs",
-            &self
-                .exprs
-                .iter()
-                .map(|expr| ExprDisplay {
-                    expr,
-                    input_schema: self.input.schema(),
-                })
-                .collect_vec(),
-        );
-        builder.finish()
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
@@ -1131,4 +1129,10 @@ pub struct Union<PlanRef> {
     /// from which source input.
     /// We add it as a logical property, because we need to derive the logical pk based on it.
     pub source_col: Option<usize>,
+}
+
+impl<'a, PlanRef> NodeExplain<'a> for Union<PlanRef> {
+    fn distill_fields(&self) -> pretty::RcDoc<'a, ()> {
+        field_doc_display("all", &self.all)
+    }
 }
