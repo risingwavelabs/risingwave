@@ -352,6 +352,7 @@ impl ColPrunable for LogicalTopN {
 
 impl PredicatePushdown for LogicalTopN {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        // filter can not transpose topN
         gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
