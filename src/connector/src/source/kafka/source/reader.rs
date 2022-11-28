@@ -45,7 +45,7 @@ impl SplitReader for KafkaSplitReader {
         let mut config = ClientConfig::new();
 
         // disable partition eof
-        config.set("enable.partition.eof", "false");
+        config.set("enable.partition.eof", "true");
         config.set("enable.auto.commit", "false");
         config.set("auto.offset.reset", "smallest");
         config.set("bootstrap.servers", bootstrap_servers);
