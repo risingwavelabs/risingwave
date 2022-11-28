@@ -138,6 +138,32 @@ impl OrderedRowSerde {
 
         Ok(len)
     }
+
+    pub fn deserialize_dist_key_range_indices(
+        &self,
+        key: &[u8],
+        column_indices: impl Iterator<Item = usize>,
+        dist_key_start_index: usize,
+    ) -> memcomparable::Result<(usize, usize)> {
+        use crate::types::ScalarImpl;
+        let mut start_index: usize = 0;
+        let mut len: usize = 0;
+
+        for index in column_indices {
+            let data_type = &self.schema[index];
+            let order_type = &self.order_types[index];
+            let data = &key[len..];
+            let mut deserializer = memcomparable::Deserializer::new(data);
+            deserializer.set_reverse(*order_type == OrderType::Descending);
+
+            len += ScalarImpl::encoding_data_size(data_type, &mut deserializer)?;
+            if index < dist_key_start_index {
+                start_index += ScalarImpl::encoding_data_size(data_type, &mut deserializer)?;
+            }
+        }
+
+        Ok((start_index, (len - start_index)))
+    }
 }
 
 #[cfg(test)]

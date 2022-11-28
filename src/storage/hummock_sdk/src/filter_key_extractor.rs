@@ -186,16 +186,17 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
-        let pk_prefix_len = self
+        let (dist_key_start_index, dist_ken_len) = self
             .deserializer
-            .deserialize_prefix_len_with_column_indices(
+            .deserialize_dist_key_range_indices(
                 pk,
-                self.distribution_key_start_index_in_pk..self.read_pattern_prefix_column,
+                0..self.read_pattern_prefix_column + self.distribution_key_start_index_in_pk,
+                self.distribution_key_start_index_in_pk,
             )
             .unwrap();
 
-        let prefix_len = TABLE_PREFIX_LEN + VirtualNode::SIZE + pk_prefix_len;
-        &full_key[self.distribution_key_start_index_in_pk..prefix_len]
+        let prefix_len = TABLE_PREFIX_LEN + VirtualNode::SIZE + dist_ken_len;
+        &full_key[dist_key_start_index..prefix_len]
     }
 
     fn start_index(&self) -> usize {
