@@ -74,17 +74,16 @@ macro_rules! define_state_store_read_associated_type {
 }
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
-// TODO: directly return `&[u8]` to user instead of `Bytes` or `Vec<u8>`.
-pub type StateStoreReadIterItem = (FullKey<Vec<u8>>, Bytes);
-pub trait StateStoreReadIterNextFutureTrait<'a> = NextFutureTrait<'a, StateStoreReadIterItem>;
-pub trait StateStoreReadIterItemStream =
-    Stream<Item = StorageResult<StateStoreReadIterItem>> + Send;
-pub trait StateStoreReadIterStreamTrait = StateStoreReadIterItemStream + 'static;
+// TODO: directly return `&[u8]` or `Bytes` to user instead of `Vec<u8>`.
+pub type StateStoreIterItem = (FullKey<Vec<u8>>, Bytes);
+pub trait StateStoreIterNextFutureTrait<'a> = NextFutureTrait<'a, StateStoreIterItem>;
+pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
+pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
 
-pub trait IterFutureTrait<'a, I: StateStoreReadIterStreamTrait> =
+pub trait IterFutureTrait<'a, I: StateStoreReadIterStream> =
     Future<Output = StorageResult<I>> + Send + 'a;
 pub trait StateStoreRead: StaticSendSync {
-    type IterStream: StateStoreReadIterStreamTrait;
+    type IterStream: StateStoreReadIterStream;
 
     type GetFuture<'a>: GetFutureTrait<'a>;
     type IterFuture<'a>: IterFutureTrait<'a, Self::IterStream>;
@@ -111,8 +110,7 @@ pub trait StateStoreRead: StaticSendSync {
     ) -> Self::IterFuture<'_>;
 }
 
-pub trait ScanFutureTrait<'a> =
-    Future<Output = StorageResult<Vec<StateStoreReadIterItem>>> + Send + 'a;
+pub trait ScanFutureTrait<'a> = Future<Output = StorageResult<Vec<StateStoreIterItem>>> + Send + 'a;
 
 pub trait StateStoreReadExt: StaticSendSync {
     type ScanFuture<'a>: ScanFutureTrait<'a>;

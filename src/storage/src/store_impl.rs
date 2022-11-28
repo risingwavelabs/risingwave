@@ -299,7 +299,7 @@ pub mod verify {
     }
 
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
-        type IterStream = impl StateStoreReadIterStreamTrait;
+        type IterStream = impl StateStoreReadIterStream;
 
         define_state_store_read_associated_type!();
 
@@ -668,8 +668,7 @@ pub mod boxed_state_store {
 
     // For StateStoreRead
 
-    pub type BoxStateStoreReadIterStream =
-        BoxStream<'static, StorageResult<StateStoreReadIterItem>>;
+    pub type BoxStateStoreReadIterStream = BoxStream<'static, StorageResult<StateStoreIterItem>>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
         async fn get<'a>(

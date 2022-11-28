@@ -662,9 +662,9 @@ impl HummockStateStoreIter {
 }
 
 impl StateStoreIter for HummockStateStoreIter {
-    type Item = StateStoreReadIterItem;
+    type Item = StateStoreIterItem;
 
-    type NextFuture<'a> = impl StateStoreReadIterNextFutureTrait<'a>;
+    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {

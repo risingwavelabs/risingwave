@@ -187,10 +187,8 @@ pub(crate) struct LocalGlobalStateStoreHolder<L, G> {
     pub(crate) global: G,
 }
 
-impl<L: StateStoreReadIterStreamTrait, G: StateStoreReadIterStreamTrait>
-    LocalGlobalStateStoreHolder<L, G>
-{
-    fn into_stream(self) -> impl StateStoreReadIterStreamTrait {
+impl<L: StateStoreReadIterStream, G: StateStoreReadIterStream> LocalGlobalStateStoreHolder<L, G> {
+    fn into_stream(self) -> impl StateStoreReadIterStream {
         try_stream! {
             let local = self.local;
             let global = self.global;
@@ -215,7 +213,7 @@ impl<L: StateStoreReadIterStreamTrait, G: StateStoreReadIterStreamTrait>
 }
 
 pub(crate) type LocalGlobalStateStoreIterStream<L: StateStoreRead, G: StateStoreRead> =
-    impl StateStoreReadIterStreamTrait;
+    impl StateStoreReadIterStream;
 impl<L: StateStoreRead, G: StateStoreRead> StateStoreRead for LocalGlobalStateStoreHolder<L, G> {
     type IterStream = LocalGlobalStateStoreIterStream<L, G>;
 

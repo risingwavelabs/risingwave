@@ -667,9 +667,9 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
 }
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
-    type Item = StateStoreReadIterItem;
+    type Item = StateStoreIterItem;
 
-    type NextFuture<'a> = impl StateStoreReadIterNextFutureTrait<'a>;
+    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
@@ -691,7 +691,7 @@ impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
-    fn next_inner(&mut self) -> StorageResult<Option<StateStoreReadIterItem>> {
+    fn next_inner(&mut self) -> StorageResult<Option<StateStoreIterItem>> {
         while let Some((key, value)) = self.inner.next()? {
             if key.epoch > self.epoch {
                 continue;

@@ -51,7 +51,7 @@ impl<S> MonitoredStateStore<S> {
     }
 }
 
-pub type MonitoredStateStoreIterStream<S: StateStoreRead> = impl StateStoreReadIterStreamTrait;
+pub type MonitoredStateStoreIterStream<S: StateStoreRead> = impl StateStoreReadIterStream;
 impl<S: StateStoreRead> MonitoredStateStore<S> {
     async fn monitored_iter(
         &self,
@@ -247,8 +247,8 @@ struct MonitoredStateStoreIterStats {
     stats: Arc<StateStoreMetrics>,
 }
 
-impl<S: StateStoreReadIterItemStream> MonitoredStateStoreIter<S> {
-    fn into_stream(mut self) -> impl StateStoreReadIterItemStream {
+impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
+    fn into_stream(mut self) -> impl StateStoreIterItemStream {
         use futures::TryStreamExt;
         try_stream! {
             let inner = self.inner;

@@ -115,9 +115,9 @@ impl StateStore for PanicStateStore {
 pub struct PanicStateStoreIter {}
 
 impl StateStoreIter for PanicStateStoreIter {
-    type Item = StateStoreReadIterItem;
+    type Item = StateStoreIterItem;
 
-    type NextFuture<'a> = impl StateStoreReadIterNextFutureTrait<'a>;
+    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
 
     fn next(&'_ mut self) -> Self::NextFuture<'_> {
         async move { unreachable!() }
