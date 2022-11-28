@@ -57,13 +57,10 @@ impl fmt::Display for LogicalApply {
         let concat_schema = Schema::new(concat_schema);
         builder.field(
             "on",
-            &format_args!(
-                "{}",
-                ConditionDisplay {
-                    condition: &self.on,
-                    input_schema: &concat_schema
-                }
-            ),
+            &ConditionDisplay {
+                condition: &self.on,
+                input_schema: &concat_schema
+            },
         );
 
         builder.field("correlated_id", &self.correlated_id);
