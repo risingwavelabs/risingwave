@@ -209,8 +209,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 .await
                 .unwrap(),
         );
-        // If node is not leader it should not start other services
-        // probably this panic is caused because some other meta node does something
 
         let hummock_manager = Arc::new(
             hummock::HummockManager::new(
