@@ -137,6 +137,7 @@ impl Rule for IndexDeltaJoinRule {
 }
 
 impl IndexDeltaJoinRule {
+    #[expect(dead_code)]
     pub fn create() -> BoxedRule {
         Box::new(Self {})
     }

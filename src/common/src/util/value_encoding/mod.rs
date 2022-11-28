@@ -22,8 +22,8 @@ use itertools::Itertools;
 use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::types::struct_type::StructType;
 use crate::types::{
-    to_datum_ref, DataType, Datum, DatumRef, Decimal, IntervalUnit, NaiveDateTimeWrapper,
-    NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl,
+    DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
+    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl, ToDatumRef,
 };
 
 pub mod error;
@@ -34,20 +34,15 @@ pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 /// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
 pub fn serialize_datum_to_bytes(cell: Option<&ScalarImpl>) -> Vec<u8> {
     let mut buf: Vec<u8> = vec![];
-    serialize_datum_ref(&cell.map(|scala| scala.as_scalar_ref_impl()), &mut buf);
+    serialize_datum(cell.map(|scala| scala.as_scalar_ref_impl()), &mut buf);
     buf
 }
 
 /// Serialize a datum into bytes (Not order guarantee, used in value encoding).
-pub fn serialize_datum(cell: &Datum, mut buf: impl BufMut) {
-    serialize_datum_ref(&to_datum_ref(cell), &mut buf);
-}
-
-/// Serialize a datum into bytes (Not order guarantee, used in value encoding).
-pub fn serialize_datum_ref(datum_ref: &DatumRef<'_>, buf: &mut impl BufMut) {
-    if let Some(d) = datum_ref {
+pub fn serialize_datum(datum_ref: impl ToDatumRef, buf: &mut impl BufMut) {
+    if let Some(d) = datum_ref.to_datum_ref() {
         buf.put_u8(1);
-        serialize_value(*d, buf)
+        serialize_value(d, buf)
     } else {
         buf.put_u8(0);
     }
@@ -97,7 +92,7 @@ fn serialize_struct(value: StructRef<'_>, buf: &mut impl BufMut) {
         .fields_ref()
         .iter()
         .map(|field_value| {
-            serialize_datum_ref(field_value, buf);
+            serialize_datum(*field_value, buf);
         })
         .collect_vec();
 }
@@ -109,7 +104,7 @@ fn serialize_list(value: ListRef<'_>, buf: &mut impl BufMut) {
     values_ref
         .iter()
         .map(|field_value| {
-            serialize_datum_ref(field_value, buf);
+            serialize_datum(*field_value, buf);
         })
         .collect_vec();
 }

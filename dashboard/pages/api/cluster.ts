@@ -17,6 +17,11 @@
 import { WorkerNode } from "../../proto/gen/common"
 import api from "./api"
 
+export async function getClusterMetrics() {
+  const res = await api.get("/api/metrics/cluster")
+  return res
+}
+
 export async function getClusterInfoFrontend() {
   const res = (await api.get("/api/clusters/1")).map(WorkerNode.fromJSON)
   return res

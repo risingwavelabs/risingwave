@@ -23,6 +23,7 @@ use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::field_generator::FieldGeneratorImpl;
+use risingwave_common::row::Row2;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
@@ -44,7 +45,7 @@ pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) ->
         let mut columns = Vec::new();
         for data_type in data_types {
             let mut data_gen =
-                FieldGeneratorImpl::with_random(data_type.clone(), None, None, None, None, SEED)
+                FieldGeneratorImpl::with_number_random(data_type.clone(), None, None, SEED)
                     .unwrap();
             let mut array_builder = data_type.create_array_builder(batch_size);
             for j in 0..batch_size {
@@ -65,7 +66,7 @@ pub fn gen_sorted_data(
     start: String,
     step: u64,
 ) -> Vec<DataChunk> {
-    let mut data_gen = FieldGeneratorImpl::with_sequence(
+    let mut data_gen = FieldGeneratorImpl::with_number_sequence(
         DataType::Int64,
         Some(start),
         Some(i64::MAX.to_string()),
@@ -99,7 +100,7 @@ pub fn gen_projected_data(
     expr: BoxedExpression,
 ) -> Vec<DataChunk> {
     let mut data_gen =
-        FieldGeneratorImpl::with_random(DataType::Int64, None, None, None, None, SEED).unwrap();
+        FieldGeneratorImpl::with_number_random(DataType::Int64, None, None, SEED).unwrap();
     let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
 
     for i in 0..batch_num {
@@ -326,7 +327,7 @@ impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
             let probe_row = base_data_chunk.row_at_unchecked_vis(idx);
             for datum in &self.datums {
                 if datum[0] == probe_row.value_at(0).to_owned_datum() {
-                    let owned_row = probe_row.to_owned_row();
+                    let owned_row = probe_row.into_owned_row();
                     let chunk =
                         DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32]);
                     mock_executor.add(chunk);

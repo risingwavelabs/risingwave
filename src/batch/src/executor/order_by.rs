@@ -103,7 +103,7 @@ impl SortExecutor {
         encoded_rows.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
 
         for (row, _) in encoded_rows {
-            if let Some(spilled) = chunk_builder.append_one_row_ref(row) {
+            if let Some(spilled) = chunk_builder.append_one_row(row) {
                 yield spilled
             }
         }
