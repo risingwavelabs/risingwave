@@ -1007,9 +1007,7 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: impl Row2,
         epoch: u64,
     ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
-        let prefix_serializer = self
-            .pk_serde
-            .dist_key_serde(self.distribution_key_start_index_in_pk, pk_prefix.len());
+        let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);
 
@@ -1027,7 +1025,15 @@ impl<S: StateStore> StateTable<S> {
             {
                 None
             } else {
-                Some([&vnode, &encoded_prefix[..]].concat())
+                let dist_key_end_index_in_pk =
+                    self.distribution_key_start_index_in_pk + self.dist_key_indices.len();
+                let dist_key = (&pk_prefix).project(&self.dist_key_in_pk_indices);
+                let dist_key_serializer = self.pk_serde.dist_key_serde(
+                    self.distribution_key_start_index_in_pk,
+                    dist_key_end_index_in_pk,
+                );
+                let serialized_dist_key = serialize_pk(dist_key, &dist_key_serializer);
+                Some([&vnode, &serialized_dist_key[..]].concat())
             }
         };
 

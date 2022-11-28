@@ -52,13 +52,13 @@ impl OrderedRowSerde {
         }
     }
 
-    pub fn dist_key_serde(&self, start_index: usize, len: usize) -> Cow<'_, Self> {
-        if len == self.order_types.len() {
+    pub fn dist_key_serde(&self, start_index: usize, end_index: usize) -> Cow<'_, Self> {
+        if end_index - start_index == self.order_types.len() {
             Cow::Borrowed(self)
         } else {
             Cow::Owned(Self {
-                schema: self.schema[start_index..start_index + len].to_vec(),
-                order_types: self.order_types[start_index..start_index + len].to_vec(),
+                schema: self.schema[start_index..end_index].to_vec(),
+                order_types: self.order_types[start_index..end_index].to_vec(),
             })
         }
     }
