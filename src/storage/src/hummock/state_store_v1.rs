@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures::TryFutureExt;
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
@@ -483,11 +484,9 @@ impl StateStoreRead for HummockStorageV1 {
             // not check
         }
 
-        let stream = map_iter_stream(self.iter_inner::<ForwardIter>(
-            epoch,
-            map_table_key_range(key_range),
-            read_options,
-        ));
+        let stream = self
+            .iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options)
+            .map_ok(|iter| iter.into_stream());
         #[cfg(not(madsim))]
         return stream.in_span(self.tracing.new_tracer("hummock_iter"));
         #[cfg(madsim)]
