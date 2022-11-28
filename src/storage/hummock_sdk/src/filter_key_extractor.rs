@@ -243,12 +243,14 @@ impl SchemaFilterKeyExtractor {
 #[derive(Default)]
 pub struct MultiFilterKeyExtractor {
     id_to_filter_key_extractor: HashMap<u32, Arc<FilterKeyExtractorImpl>>,
+    distribution_key_start_index_in_pk: usize,
     // cached state
     // last_filter_key_extractor_state: Mutex<Option<(u32, Arc<FilterKeyExtractorImpl>)>>,
 }
 
 impl MultiFilterKeyExtractor {
     pub fn register(&mut self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
+        self.distribution_key_start_index_in_pk = filter_key_extractor.start_index();
         self.id_to_filter_key_extractor
             .insert(table_id, filter_key_extractor);
     }
@@ -278,7 +280,7 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
     }
 
     fn start_index(&self) -> usize {
-        0
+        self.distribution_key_start_index_in_pk
     }
 }
 
