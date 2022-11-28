@@ -45,7 +45,8 @@ pub struct StreamChunkBuilder {
 
 impl Drop for StreamChunkBuilder {
     fn drop(&mut self) {
-        assert_eq!(self.size, 0, "dropping non-empty stream chunk builder");
+        // Possible to fail in some corner cases but should not in unit tests
+        debug_assert_eq!(self.size, 0, "dropping non-empty stream chunk builder");
     }
 }
 
