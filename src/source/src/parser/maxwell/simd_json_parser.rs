@@ -34,7 +34,7 @@ impl MaxwellParser {
     fn parse_inner(
         &self,
         payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         let mut payload_mut = payload.to_vec();
         let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)

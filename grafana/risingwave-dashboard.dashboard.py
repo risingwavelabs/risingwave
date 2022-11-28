@@ -1862,6 +1862,9 @@ def section_hummock_tiered_cache(outer_panels):
 
 def section_hummock_manager(outer_panels):
     panels = outer_panels.sub_panel()
+    total_key_size_filter = "metric='total_key_size'"
+    total_value_size_filter = "metric='total_value_size'"
+    total_key_count_filter = "metric='total_key_count'"
     return [
         outer_panels.row_collapsed(
             "Hummock Manager",
@@ -1924,6 +1927,24 @@ def section_hummock_manager(outer_panels):
                             f"{metric('storage_safe_epoch')}", "safe epoch"),
                         panels.target(f"{metric('storage_min_pinned_epoch')}",
                                       "min pinned epoch"),
+                    ],
+                ),
+                panels.timeseries_kilobytes(
+                    "table KV size",
+                    "",
+                    [
+                        panels.target(f"{metric('storage_version_stats', total_key_size_filter)}/1024",
+                                      "table{{table_id}} {{metric}}"),
+                        panels.target(f"{metric('storage_version_stats', total_value_size_filter)}/1024",
+                                      "table{{table_id}} {{metric}}"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "table KV count",
+                    "",
+                    [
+                        panels.target(f"{metric('storage_version_stats', total_key_count_filter)}",
+                                      "table{{table_id}} {{metric}}"),
                     ],
                 ),
             ],

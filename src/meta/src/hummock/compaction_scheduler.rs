@@ -139,6 +139,10 @@ where
                     }
                 },
                 _ = min_trigger_interval.tick() => {
+                    // Disable periodic trigger for compaction_deterministic_test.
+                    if self.env.opts.compaction_deterministic_test {
+                        continue;
+                    }
                     // Periodically trigger compaction for all compaction groups.
                     for cg_id in self.hummock_manager.compaction_group_ids().await {
                         if let Err(e) = sched_channel.try_sched_compaction(cg_id) {

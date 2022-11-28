@@ -5,7 +5,9 @@ extend = [
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/jaeger.toml" },
   { path = "src/risedevtool/kafka.toml" },
+  { path = "src/risedevtool/gcloud-pubsub.toml"},
   { path = "src/risedevtool/redis.toml" },
+  { path = "src/risedevtool/connector.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
@@ -362,7 +364,9 @@ dependencies = [
   "download-prometheus",
   "download-jaeger",
   "download-kafka",
+  "download-pubsub",
   "download-redis",
+  "download-connector",
   "build-risingwave",
   "post-build-risingwave",
   "extract-dashboard-artifact",
@@ -392,10 +396,6 @@ category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
 script = '''
 #!/bin/bash
-
-set -e
-
-echo "Use \`./risedev d\` instead if you want to start a full cluster."
 
 set -ex
 

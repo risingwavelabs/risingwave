@@ -3300,7 +3300,8 @@ impl Parser {
     }
 
     pub fn parse_update(&mut self) -> Result<Statement, ParserError> {
-        let table = self.parse_table_and_joins()?;
+        let table_name = self.parse_object_name()?;
+
         self.expect_keyword(Keyword::SET)?;
         let assignments = self.parse_comma_separated(Parser::parse_assignment)?;
         let selection = if self.parse_keyword(Keyword::WHERE) {
@@ -3309,7 +3310,7 @@ impl Parser {
             None
         };
         Ok(Statement::Update {
-            table,
+            table_name,
             assignments,
             selection,
         })

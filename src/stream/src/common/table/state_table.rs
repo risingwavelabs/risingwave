@@ -29,6 +29,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, CompactedRow, Row, Row2, RowDeserializer, RowExt};
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -51,6 +52,9 @@ use risingwave_storage::{StateStore, StateStoreIter};
 use tracing::trace;
 
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
+
+/// This num is arbitrary and we may want to improve this choice in the future.
+const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
@@ -106,6 +110,15 @@ pub struct StateTable<S: StateStore> {
 
     /// The epoch flush to the state store last time.
     epoch: Option<EpochPair>,
+
+    /// last watermark that is used to construct delete ranges in `ingest`
+    last_watermark: Option<ScalarImpl>,
+
+    /// latest watermark
+    cur_watermark: Option<ScalarImpl>,
+
+    /// number of commits with watermark since the last time we did state cleaning by watermark
+    num_wmked_commits_since_last_clean: usize,
 }
 
 // initialize
@@ -219,6 +232,9 @@ impl<S: StateStore> StateTable<S> {
             vnode_col_idx_in_pk,
             value_indices,
             epoch: None,
+            last_watermark: None,
+            cur_watermark: None,
+            num_wmked_commits_since_last_clean: 0,
         }
     }
 
@@ -321,6 +337,9 @@ impl<S: StateStore> StateTable<S> {
             vnode_col_idx_in_pk: None,
             value_indices,
             epoch: None,
+            last_watermark: None,
+            cur_watermark: None,
+            num_wmked_commits_since_last_clean: 0,
         }
     }
 
@@ -489,6 +508,9 @@ impl<S: StateStore> StateTable<S> {
         }
         assert_eq!(self.vnodes.len(), new_vnodes.len());
 
+        self.cur_watermark = None;
+        self.last_watermark = None;
+
         std::mem::replace(&mut self.vnodes, new_vnodes)
     }
 }
@@ -590,7 +612,7 @@ impl<S: StateStore> StateTable<S> {
             .zip_eq(vnode_and_pks.iter_mut())
             .for_each(|(r, vnode_and_pk)| {
                 if let Some(r) = r {
-                    self.pk_serde.serialize_ref(r, vnode_and_pk);
+                    self.pk_serde.serialize(r, vnode_and_pk);
                 }
             });
 
@@ -630,6 +652,10 @@ impl<S: StateStore> StateTable<S> {
         self.epoch = Some(new_epoch);
     }
 
+    pub fn update_watermark(&mut self, watermark: ScalarImpl) {
+        self.cur_watermark = Some(watermark);
+    }
+
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
@@ -652,6 +678,9 @@ impl<S: StateStore> StateTable<S> {
     pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
         assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
+        if self.cur_watermark.is_some() {
+            self.num_wmked_commits_since_last_clean += 1;
+        }
         self.update_epoch(new_epoch);
     }
 
@@ -661,11 +690,36 @@ impl<S: StateStore> StateTable<S> {
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StreamExecutorResult<()> {
+        let watermark = self.cur_watermark.as_ref().and_then(|cur_watermark_ref| {
+            self.num_wmked_commits_since_last_clean += 1;
+
+            if self.num_wmked_commits_since_last_clean >= STATE_CLEANING_PERIOD_EPOCH {
+                Some(cur_watermark_ref)
+            } else {
+                None
+            }
+        });
+
         let mut write_batch = self.local_store.start_write_batch(WriteOptions {
             epoch,
             table_id: self.table_id(),
         });
+
+        let prefix_serializer = if self.pk_indices().is_empty() {
+            None
+        } else {
+            Some(self.pk_serde.prefix(1))
+        };
+        let range_end_suffix = watermark.map(|watermark| {
+            serialize_pk(
+                &Row::new(vec![Some(watermark.clone())]),
+                prefix_serializer.as_ref().unwrap(),
+            )
+        });
         for (pk, row_op) in buffer {
+            if let Some(ref range_end) = range_end_suffix && &pk[VirtualNode::SIZE..] < range_end.as_slice() {
+                continue;
+            }
             match row_op {
                 // Currently, some executors do not strictly comply with these semantics. As a
                 // workaround you may call disable the check by calling `.disable_sanity_check()` on
@@ -691,7 +745,28 @@ impl<S: StateStore> StateTable<S> {
                 }
             }
         }
+        if let Some(range_end_suffix) = range_end_suffix {
+            let range_begin_suffix = if let Some(ref last_watermark) = self.last_watermark {
+                serialize_pk(
+                    &Row::new(vec![Some(last_watermark.clone())]),
+                    prefix_serializer.as_ref().unwrap(),
+                )
+            } else {
+                vec![]
+            };
+            for vnode in self.vnodes.ones() {
+                let mut range_begin = vnode.to_be_bytes().to_vec();
+                let mut range_end = range_begin.clone();
+                range_begin.extend(&range_begin_suffix);
+                range_end.extend(&range_end_suffix);
+                write_batch.delete_range(range_begin, range_end);
+            }
+        }
         write_batch.ingest().await?;
+        if watermark.is_some() {
+            self.last_watermark = self.cur_watermark.take();
+            self.num_wmked_commits_since_last_clean = 0;
+        }
         Ok(())
     }
 
