@@ -79,6 +79,7 @@ pub struct StorageTable<S: StateStore> {
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
+    distribution_key_start_index_in_pk: usize,
 
     /// Virtual nodes that the table is partitioned into.
     ///
@@ -198,7 +199,24 @@ impl<S: StateStore> StorageTable<S> {
                     })
             })
             .collect_vec();
-
+        let distribution_key_start_index_in_pk = match dist_key_indices.is_empty() {
+            true => 0,
+            false => dist_key_indices
+                .iter()
+                .map(|&di| {
+                    pk_indices
+                        .iter()
+                        .position(|&pi| di == pi)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "distribution key {:?} must be a subset of primary key {:?}",
+                                dist_key_indices, pk_indices
+                            )
+                        })
+                })
+                .next()
+                .unwrap(),
+        };
         Self {
             table_id,
             store,
@@ -209,6 +227,7 @@ impl<S: StateStore> StorageTable<S> {
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
+            distribution_key_start_index_in_pk,
             vnodes,
             table_option,
         }
@@ -368,19 +387,24 @@ impl<S: StateStore> StorageTable<S> {
     async fn iter_with_pk_bounds(
         &self,
         epoch: HummockReadEpoch,
+        dist_key_start_index: usize,
         pk_prefix: impl Row2,
         range_bounds: impl RangeBounds<Row>,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerde,
+            dist_key_start_index: usize,
             pk_prefix: impl Row2,
             range_bound: Bound<&Row>,
             is_start_bound: bool,
         ) -> Bound<Vec<u8>> {
             match range_bound {
                 Included(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.0.len());
+                    let pk_prefix_serializer = pk_serializer.dist_key_serde(
+                        dist_key_start_index,
+                        dist_key_start_index + pk_prefix.len() + k.0.len(),
+                    );
                     let key = pk_prefix.chain(k);
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
@@ -392,7 +416,8 @@ impl<S: StateStore> StorageTable<S> {
                     }
                 }
                 Excluded(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.0.len());
+                    let pk_prefix_serializer = pk_serializer
+                        .dist_key_serde(dist_key_start_index, pk_prefix.len() + k.0.len());
                     let key = pk_prefix.chain(k);
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
@@ -408,7 +433,8 @@ impl<S: StateStore> StorageTable<S> {
                     }
                 }
                 Unbounded => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len());
+                    let pk_prefix_serializer =
+                        pk_serializer.dist_key_serde(dist_key_start_index, pk_prefix.len());
                     let serialized_pk_prefix = serialize_pk(&pk_prefix, &pk_prefix_serializer);
                     if pk_prefix.is_empty() {
                         Unbounded
@@ -423,12 +449,14 @@ impl<S: StateStore> StorageTable<S> {
 
         let start_key = serialize_pk_bound(
             &self.pk_serializer,
+            dist_key_start_index,
             &pk_prefix,
             range_bounds.start_bound(),
             true,
         );
         let end_key = serialize_pk_bound(
             &self.pk_serializer,
+            dist_key_start_index,
             &pk_prefix,
             range_bounds.end_bound(),
             false,
@@ -451,7 +479,9 @@ impl<S: StateStore> StorageTable<S> {
             );
             None
         } else {
-            let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.len());
+            let pk_prefix_serializer = self
+                .pk_serializer
+                .dist_key_serde(self.dist_key_in_pk_indices[0], pk_prefix.len());
             let serialized_pk_prefix = serialize_pk(&pk_prefix, &pk_prefix_serializer);
             Some(serialized_pk_prefix)
         };
@@ -485,8 +515,14 @@ impl<S: StateStore> StorageTable<S> {
         pk_prefix: impl Row2,
         range_bounds: impl RangeBounds<Row>,
     ) -> StorageResult<StorageTableIter<S>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, true)
-            .await
+        self.iter_with_pk_bounds(
+            epoch,
+            self.distribution_key_start_index_in_pk,
+            pk_prefix,
+            range_bounds,
+            true,
+        )
+        .await
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.

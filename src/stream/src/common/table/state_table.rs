@@ -89,6 +89,8 @@ pub struct StateTable<S: StateStore> {
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
 
+    distribution_key_start_index_in_pk: usize,
+
     /// Virtual nodes that the table is partitioned into.
     ///
     /// Only the rows whose vnode of the primary key is in this set will be visible to the
@@ -190,6 +192,8 @@ impl<S: StateStore> StateTable<S> {
             None => Distribution::fallback(),
         };
 
+        let distribution_key_start_index_in_pk =
+            table_catalog.distribution_key_start_index_in_pk as usize;
         let vnode_col_idx_in_pk = table_catalog
             .vnode_col_idx
             .as_ref()
@@ -226,6 +230,7 @@ impl<S: StateStore> StateTable<S> {
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
             dist_key_in_pk_indices,
+            distribution_key_start_index_in_pk,
             vnodes,
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
             disable_sanity_check: false,
@@ -331,6 +336,7 @@ impl<S: StateStore> StateTable<S> {
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
+            distribution_key_start_index_in_pk: 0,
             vnodes,
             table_option: Default::default(),
             disable_sanity_check: false,
@@ -1001,7 +1007,9 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: impl Row2,
         epoch: u64,
     ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
-        let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
+        let prefix_serializer = self
+            .pk_serde
+            .dist_key_serde(self.distribution_key_start_index_in_pk, pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);
 

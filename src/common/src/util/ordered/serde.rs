@@ -52,6 +52,17 @@ impl OrderedRowSerde {
         }
     }
 
+    pub fn dist_key_serde(&self, start_index: usize, len: usize) -> Cow<'_, Self> {
+        if len == self.order_types.len() {
+            Cow::Borrowed(self)
+        } else {
+            Cow::Owned(Self {
+                schema: self.schema[start_index..start_index + len].to_vec(),
+                order_types: self.order_types[start_index..start_index + len].to_vec(),
+            })
+        }
+    }
+
     pub fn serialize(&self, row: impl Row2, append_to: &mut Vec<u8>) {
         self.serialize_datum_refs(row.iter(), append_to)
     }
