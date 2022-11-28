@@ -203,7 +203,7 @@ impl Binder {
                 true => field.name.to_string(),
                 false => alias_iter
                     .next()
-                    .map(|t| t.value)
+                    .map(|t| t.real_value())
                     .unwrap_or_else(|| field.name.to_string()),
             };
             field.name = name.clone();
@@ -246,7 +246,7 @@ impl Binder {
     /// - a table/source/materialized view
     /// - a reference to a CTE
     /// - a logical view
-    pub(super) fn bind_relation_by_name(
+    pub fn bind_relation_by_name(
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
@@ -318,7 +318,7 @@ impl Binder {
         match table_factor {
             TableFactor::Table { name, alias } => self.bind_relation_by_name(name, alias),
             TableFactor::TableFunction { name, alias, args } => {
-                let func_name = &name.0[0].value;
+                let func_name = &name.0[0].real_value();
                 if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
                     return self.bind_internal_table(args, alias);
                 }
@@ -350,7 +350,7 @@ impl Binder {
                 }
                 let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
                     ErrorCode::NotImplemented(
-                        format!("unknown table function kind: {}", name.0[0].value),
+                        format!("unknown table function kind: {}", func_name),
                         1191.into(),
                     )
                 })?;

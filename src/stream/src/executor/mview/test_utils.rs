@@ -19,7 +19,8 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+
+use crate::common::table::state_table::StateTable;
 
 pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore> {
     let state_store = MemoryStateStore::new();
@@ -53,7 +54,7 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
 
     for idx in 0..row_count {
         let idx = idx as i32;
-        state.insert(Row(vec![
+        state.insert(Row::new(vec![
             Some(idx.into()),
             Some(idx.into()),
             Some(idx.into()),

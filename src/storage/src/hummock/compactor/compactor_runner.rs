@@ -34,7 +34,6 @@ use crate::hummock::{
 };
 use crate::monitor::StoreLocalStatistic;
 
-#[derive(Clone)]
 pub struct CompactorRunner {
     compact_task: CompactTask,
     compactor: Compactor,
@@ -66,7 +65,18 @@ impl CompactorRunner {
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
             right: Bytes::copy_from_slice(task.splits[split_index].get_right()),
+            right_exclusive: true,
         };
+        let stats_target_table_ids = task
+            .input_ssts
+            .iter()
+            .flat_map(|i| {
+                i.table_infos
+                    .iter()
+                    .flat_map(|t| t.table_ids.clone())
+                    .collect_vec()
+            })
+            .collect();
         let compactor = Compactor::new(
             context.context.clone(),
             options,
@@ -74,6 +84,7 @@ impl CompactorRunner {
             CachePolicy::NotFill,
             task.gc_delete_keys,
             task.watermark,
+            Some(stats_target_table_ids),
         );
 
         Self {
@@ -93,7 +104,7 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
-        let ssts = self
+        let (ssts, table_stats_map) = self
             .compactor
             .compact_key_range(
                 iter,
@@ -103,7 +114,7 @@ impl CompactorRunner {
                 Some(task_progress),
             )
             .await?;
-        Ok((self.split_index, ssts))
+        Ok((self.split_index, ssts, table_stats_map))
     }
 
     pub async fn build_delete_range_iter(

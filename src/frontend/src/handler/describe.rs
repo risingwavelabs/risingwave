@@ -25,45 +25,27 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use super::RwPgResponse;
-use crate::binder::Binder;
-use crate::catalog::root_catalog::SchemaPath;
+use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::handler::util::col_descs_to_rows;
 use crate::session::OptimizerContext;
 
 pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = context.session_ctx;
-    let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
-    let search_path = session.config().get_search_path();
-    let user_name = &session.auth_context().user_name;
-    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
-
-    let catalog_reader = session.env().catalog_reader().read_guard();
-
+    let mut binder = Binder::new(&session);
+    let relation = binder.bind_relation_by_name(table_name.clone(), None)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
     let (columns, indices): (Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
-        let (catalogs, indices) =
-            match catalog_reader.get_table_by_name(db_name, schema_path, &table_name) {
-                Ok((table, schema_name)) => (
-                    &table.columns,
-                    catalog_reader
-                        .get_schema_by_name(session.database(), schema_name)?
-                        .get_indexes_by_table_id(&table.id),
-                ),
-                Err(_) => {
-                    match catalog_reader.get_source_by_name(db_name, schema_path, &table_name) {
-                        Ok((source, _)) => (&source.columns, vec![]),
-                        Err(_) => {
-                            return Err(CatalogError::NotFound(
-                                "table or source",
-                                table_name.to_string(),
-                            )
-                            .into());
-                        }
-                    }
-                }
-            };
+        let (catalogs, indices) = match relation {
+            Relation::Source(s) => (s.catalog.columns, vec![]),
+            Relation::BaseTable(t) => (t.table_catalog.columns, t.table_indexes),
+            Relation::SystemTable(t) => (t.sys_table_catalog.columns, vec![]),
+            _ => {
+                return Err(
+                    CatalogError::NotFound("table or source", table_name.to_string()).into(),
+                );
+            }
+        };
         (
             catalogs
                 .iter()

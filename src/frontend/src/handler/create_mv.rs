@@ -39,7 +39,7 @@ pub(super) fn get_column_names(
     let col_names: Option<Vec<String>> = if columns.is_empty() {
         None
     } else {
-        Some(columns.iter().map(|v| v.value.clone()).collect())
+        Some(columns.iter().map(|v| v.real_value()).collect())
     };
 
     if let BoundSetExpr::Select(select) = &bound.body {

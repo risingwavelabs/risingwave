@@ -29,11 +29,18 @@ use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
+use crate::source::cdc::{
+    CdcProperties, CdcSplit, CdcSplitEnumerator, CdcSplitReader, CDC_CONNECTOR,
+};
 use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
 };
 use crate::source::dummy_connector::DummySplitReader;
 use crate::source::filesystem::s3::{S3Properties, S3_CONNECTOR};
+use crate::source::google_pubsub::{
+    PubsubProperties, PubsubSplit, PubsubSplitEnumerator, PubsubSplitReader,
+    GOOGLE_PUBSUB_CONNECTOR,
+};
 use crate::source::kafka::enumerator::KafkaSplitEnumerator;
 use crate::source::kafka::source::KafkaSplitReader;
 use crate::source::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
@@ -91,6 +98,8 @@ pub enum SplitImpl {
     Kinesis(KinesisSplit),
     Nexmark(NexmarkSplit),
     Datagen(DatagenSplit),
+    Cdc(CdcSplit),
+    GooglePubsub(PubsubSplit),
 }
 
 pub enum SplitReaderImpl {
@@ -100,6 +109,8 @@ pub enum SplitReaderImpl {
     Nexmark(Box<NexmarkSplitReader>),
     Pulsar(Box<PulsarSplitReader>),
     Datagen(Box<DatagenSplitReader>),
+    Cdc(Box<CdcSplitReader>),
+    GooglePubsub(Box<PubsubSplitReader>),
 }
 
 pub enum SplitEnumeratorImpl {
@@ -108,6 +119,8 @@ pub enum SplitEnumeratorImpl {
     Kinesis(KinesisSplitEnumerator),
     Nexmark(NexmarkSplitEnumerator),
     Datagen(DatagenSplitEnumerator),
+    Cdc(CdcSplitEnumerator),
+    GooglePubsub(PubsubSplitEnumerator),
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -118,7 +131,9 @@ pub enum ConnectorProperties {
     Nexmark(Box<NexmarkProperties>),
     Datagen(Box<DatagenProperties>),
     S3(Box<S3Properties>),
+    Cdc(Box<CdcProperties>),
     Dummy(Box<()>),
+    GooglePubsub(Box<PubsubProperties>),
 }
 
 impl_connector_properties! {
@@ -127,7 +142,9 @@ impl_connector_properties! {
     { Kinesis, KINESIS_CONNECTOR },
     { Nexmark, NEXMARK_CONNECTOR },
     { Datagen, DATAGEN_CONNECTOR },
-    { S3, S3_CONNECTOR }
+    { S3, S3_CONNECTOR },
+    { Cdc, CDC_CONNECTOR },
+    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR}
 }
 
 impl_split_enumerator! {
@@ -135,7 +152,9 @@ impl_split_enumerator! {
     { Pulsar, PulsarSplitEnumerator },
     { Kinesis, KinesisSplitEnumerator },
     { Nexmark, NexmarkSplitEnumerator },
-    { Datagen, DatagenSplitEnumerator }
+    { Datagen, DatagenSplitEnumerator },
+    { Cdc, CdcSplitEnumerator },
+    { GooglePubsub, PubsubSplitEnumerator}
 }
 
 impl_split! {
@@ -143,7 +162,9 @@ impl_split! {
     { Pulsar, PULSAR_CONNECTOR, PulsarSplit },
     { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
     { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
-    { Datagen, DATAGEN_CONNECTOR, DatagenSplit }
+    { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
+    { Cdc, CDC_CONNECTOR, CdcSplit },
+    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit }
 }
 
 impl_split_reader! {
@@ -152,6 +173,8 @@ impl_split_reader! {
     { Kinesis, KinesisSplitReader },
     { Nexmark, NexmarkSplitReader },
     { Datagen, DatagenSplitReader },
+    { Cdc, CdcSplitReader},
+    { GooglePubsub, PubsubSplitReader },
     { Dummy, DummySplitReader }
 }
 
@@ -220,6 +243,7 @@ pub fn spawn_data_generation_stream<T: Send + 'static>(
 #[cfg(test)]
 mod tests {
     use maplit::*;
+    use nexmark::event::EventType;
 
     use super::*;
 
@@ -245,8 +269,34 @@ mod tests {
         let props = ConnectorProperties::extract(props).unwrap();
 
         if let ConnectorProperties::Nexmark(props) = props {
-            assert_eq!(props.table_type, "Person");
+            assert_eq!(props.table_type, EventType::Person);
             assert_eq!(props.split_num, 1);
+        } else {
+            panic!("extract nexmark config failed");
+        }
+    }
+
+    #[test]
+    fn test_extract_cdc_properties() {
+        let props: HashMap<String, String> = convert_args!(hashmap!(
+            "connector" => "cdc",
+            "database.name" => "mydb",
+            "database.hostname" => "127.0.0.1",
+            "database.port" => "3306",
+            "database.user" => "root",
+            "database.password" => "123456",
+            "table.name" => "products",
+        ));
+
+        let props = ConnectorProperties::extract(props).unwrap();
+
+        if let ConnectorProperties::Cdc(props) = props {
+            assert_eq!(props.source_id, 0);
+            assert_eq!(props.start_offset, "");
+            assert_eq!(props.database_name, "mydb");
+            assert_eq!(props.table_name, "products");
+            assert_eq!(props.database_host, "127.0.0.1");
+            assert_eq!(props.database_password, "123456");
         } else {
             panic!("extract nexmark config failed");
         }

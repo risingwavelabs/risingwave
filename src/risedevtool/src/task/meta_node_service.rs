@@ -61,11 +61,14 @@ impl MetaNodeService {
             Some([]) => {
                 cmd.arg("--backend").arg("mem");
             }
-            Some([etcd]) => {
+            Some(etcds) => {
                 cmd.arg("--backend")
                     .arg("etcd")
                     .arg("--etcd-endpoints")
-                    .arg(format!("{}:{}", etcd.address, etcd.port));
+                    .arg(format!("{}:{}", etcds[0].address, etcds[0].port));
+                if etcds.len() > 1 {
+                    eprintln!("WARN: more than 1 etcd instance is detected, only using the first one for meta node.");
+                }
             }
             _ => {
                 return Err(anyhow!(
@@ -85,16 +88,8 @@ impl MetaNodeService {
             }
         }
 
-        cmd.arg("--vacuum-interval-sec")
-            .arg(format!("{}", config.vacuum_interval_sec))
-            .arg("--max-heartbeat-interval-secs")
-            .arg(format!("{}", config.max_heartbeat_interval_secs))
-            .arg("--collect-gc-watermark-spin-interval-sec")
-            .arg(format!("{}", config.collect_gc_watermark_spin_interval_sec))
-            .arg("--min-sst-retention-time-sec")
-            .arg(format!("{}", config.min_sst_retention_time_sec))
-            .arg("--periodic-compaction-interval-sec")
-            .arg(format!("{}", config.periodic_compaction_interval_sec));
+        cmd.arg("--max-heartbeat-interval-secs")
+            .arg(format!("{}", config.max_heartbeat_interval_secs));
 
         if config.enable_compaction_deterministic {
             cmd.arg("--enable-compaction-deterministic");

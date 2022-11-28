@@ -1006,7 +1006,7 @@ impl ActorGraphBuilder {
         } else if let Some(upstream_table_id) = upstream_table_id {
             // set fragment parallelism to the parallelism of its dependent table.
             let upstream_actors = ctx
-                .table_sink_map
+                .table_mview_map
                 .get(&upstream_table_id)
                 .expect("upstream actor should exist");
             upstream_actors.len() as u32

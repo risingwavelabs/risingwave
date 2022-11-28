@@ -8,14 +8,11 @@ risedev:
     # If you want to use the local s3 storage, enable the following line
     # - use: minio
 
-   # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
+    # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
     # - use: aws-s3
-      
-      # bucket: test-bucket
-      
-      # If you want to use other s3 compatible object store, open this flag:
-      # s3-compatible: false
-      
+    #   bucket: test-bucket
+    # If you want to use other s3 compatible object store, open this flag:
+    #   s3-compatible: false
 
     # if you want to enable etcd backend, uncomment the following lines.
     # - use: etcd
@@ -25,6 +22,9 @@ risedev:
       unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend
+
+    # If you want to create CDC source, uncomment the following line
+    # - use: connector-node
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
     # - use: compactor
@@ -95,13 +95,14 @@ risedev:
       persist-data: true
     - use: kafka
       persist-data: true
+    - use: pubsub
+      persist-data: true
 
   full-compaction-test:
     - use: aws-s3
       bucket: some-bucket # configure a valid bucket name
     - use: etcd
     - use: meta-node
-      periodic-compaction-interval-sec: 99999
       enable-compaction-deterministic: true
     - use: compute-node
     - use: frontend
@@ -130,6 +131,40 @@ risedev:
     - use: kafka
       persist-data: true
 
+  3etcd-3meta-1cn-1fe:
+    - use: etcd
+      unsafe-no-fsync: true
+      port: 2388
+      peer-port: 2389
+      exporter-port: 2379
+    - use: etcd
+      unsafe-no-fsync: true
+      port: 12388
+      peer-port: 12389
+      exporter-port: 12379
+    - use: etcd
+      unsafe-no-fsync: true
+      port: 22388
+      peer-port: 22389
+      exporter-port: 22379
+    - use: meta-node
+      unsafe-disable-recovery: true
+      port: 5690
+      dashboard-port: 5691
+      exporter-port: 1250
+    - use: meta-node
+      unsafe-disable-recovery: true
+      port: 15690
+      dashboard-port: 15691
+      exporter-port: 11250
+    - use: meta-node
+      unsafe-disable-recovery: true
+      port: 25690
+      dashboard-port: 25691
+      exporter-port: 21250
+    - use: compute-node
+    - use: frontend
+
   ##########################################
   ### Configuration used for ./risedev p ###
   ##########################################
@@ -140,17 +175,6 @@ risedev:
       max-idle-secs-to-exit: 1800
     - use: compute-node
     - use: frontend
-
-  playground-test:
-    - use: meta-node
-      unsafe-disable-recovery: true
-      max-idle-secs-to-exit: 1800
-      vacuum-interval-sec: 1
-      collect-gc-watermark-spin-interval-sec: 1
-      min-sst-retention-time-sec: 0
-    - use: compute-node
-    - use: frontend
-    - use: compactor
 
   playground-3cn:
     - use: meta-node
@@ -382,12 +406,15 @@ risedev:
     - use: frontend
       port: 4565
       exporter-port: 2222
+      health-check-port: 6786
     - use: frontend
       port: 4566
       exporter-port: 2223
+      health-check-port: 6787
     - use: frontend
       port: 4567
       exporter-port: 2224
+      health-check-port: 6788
     - use: compactor
 
   ci-3cn-3fe-in-memory:
@@ -410,12 +437,28 @@ risedev:
     - use: frontend
       port: 4565
       exporter-port: 2222
+      health-check-port: 6786
     - use: frontend
       port: 4566
       exporter-port: 2223
+      health-check-port: 6787
     - use: frontend
       port: 4567
       exporter-port: 2224
+      health-check-port: 6788
+
+  ci-pubsub:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+      enable-tiered-cache: true
+    - use: frontend
+    - use: compactor
+    - use: pubsub
+      persist-data: true
 
   ci-kafka:
     - use: minio
@@ -430,6 +473,23 @@ risedev:
     - use: zookeeper
       persist-data: true
     - use: kafka
+      persist-data: true
+
+  ci-kafka-plus-pubsub:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+      enable-tiered-cache: true
+    - use: frontend
+    - use: compactor
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
+    - use: pubsub
       persist-data: true
 
   ci-redis:
@@ -450,7 +510,6 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
-      periodic-compaction-interval-sec: 99999
       enable-compaction-deterministic: true
     - use: compute-node
       enable-tiered-cache: true
@@ -500,7 +559,7 @@ template:
 
   etcd:
     # Id of this instance
-    id: "etcd"
+    id: etcd-${port}
 
     # Advertise address of the single-node etcd.
     address: "127.0.0.1"
@@ -519,6 +578,9 @@ template:
 
     # Whether to enable fsync (NEVER SET TO TRUE IN PRODUCTION ENVIRONMENT!)
     unsafe-no-fsync: false
+
+    # Other etcd nodes
+    provide-etcd: "etcd*"
 
   compute-node:
     # Compute-node advertise address
@@ -542,6 +604,9 @@ template:
 
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
+
+    # RPC endpoint for source connector node (not allow to change for now)
+    connector-source-endpoint: "127.0.0.1:60061"
 
     # Minio instances used by this compute node
     provide-minio: "minio*"
@@ -598,21 +663,8 @@ template:
     # Whether to disable recovery mode
     unsafe-disable-recovery: false
 
-    # Interval of GC stale metadata and SST
-    vacuum-interval-sec: 30
-
-    # Interval of periodical compaction
-    periodic-compaction-interval-sec: 60
-
     # Whether run in compaction deterministic test mode
     enable-compaction-deterministic: false
-
-    # The spin interval when collecting global GC watermark in hummock
-    collect-gc-watermark-spin-interval-sec: 5
-
-    # Threshold used by worker node to filter out new SSTs when scanning object store, during full SST GC.
-    # 7 days by default.
-    min-sst-retention-time-sec: 604800
 
     # Enable sanity check when SSTs are committed. Disabled by default.
     enable-committed-sst-sanity-check: false
@@ -673,6 +725,9 @@ template:
     # Prometheus exporter listen port
     exporter-port: 2222
 
+    # Health check listen port
+    health-check-port: 6786
+
     # Id of this instance
     id: frontend-${port}
 
@@ -713,6 +768,16 @@ template:
     # Hint used by meta node
     max-concurrent-task-number: 15
 
+  connector-node:
+    # Connector node advertise address
+    address: "127.0.0.1"
+
+    # Connector node listen port (not allow to change for now)
+    port: 60061
+
+    # Id of this instance
+    id: connector-${port}
+
   grafana:
     # Listen address of Grafana
     listen-address: ${address}
@@ -752,7 +817,7 @@ template:
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
 
-    # used to support other s3 compatible object store. 
+    # used to support other s3 compatible object store.
     s3-compatible: false
 
   # Apache Kafka service
@@ -777,6 +842,16 @@ template:
 
     # Kafka broker id. If there are multiple instances of Kafka, we will need to set.
     broker-id: 0
+  
+  # Google pubsub emulator service
+  pubsub:
+    id: pubsub-${port}
+
+    address: "127.0.0.1"
+
+    port: 5980
+
+    persist-data: true
 
   # Apache ZooKeeper service
   zookeeper:

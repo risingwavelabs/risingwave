@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package batch_plan;
 
+import "catalog.proto";
 import "common.proto";
 import "data.proto";
 import "expr.proto";
@@ -48,11 +49,12 @@ message ScanRange {
   Bound upper_bound = 3;
 }
 
-message SourceScanNode {
-  uint32 table_id = 1;
-  // timestamp_ms is used for offset synchronization of high level consumer groups, this field will be deprecated if a more elegant approach is available in the future
-  int64 timestamp_ms = 2;
-  repeated int32 column_ids = 3;
+message SourceNode {
+  uint32 source_id = 1;
+  repeated plan_common.ColumnCatalog columns = 2;
+  map<string, string> properties = 3;
+  bytes split = 4;
+  catalog.SourceInfo info = 5;
 }
 
 message ProjectNode {
@@ -99,6 +101,7 @@ message TopNNode {
   repeated plan_common.ColumnOrder column_orders = 1;
   uint64 limit = 2;
   uint64 offset = 3;
+  bool with_ties = 4;
 }
 
 message GroupTopNNode {
@@ -106,6 +109,7 @@ message GroupTopNNode {
   uint64 limit = 2;
   uint64 offset = 3;
   repeated uint32 group_key = 4;
+  bool with_ties = 5;
 }
 
 message LimitNode {
@@ -268,6 +272,7 @@ message PlanNode {
     UnionNode union = 31;
     GroupTopNNode group_top_n = 32;
     DistributedLookupJoinNode distributed_lookup_join = 33;
+    SourceNode source = 34;
   }
   string identity = 24;
 }

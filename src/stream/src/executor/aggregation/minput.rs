@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::marker::PhantomData;
 
 use futures::{pin_mut, StreamExt};
@@ -21,12 +22,11 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{Datum, DatumRef, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 use smallvec::SmallVec;
 
@@ -35,6 +35,7 @@ use super::state_cache::extreme::ExtremeAgg;
 use super::state_cache::string_agg::StringAgg;
 use super::state_cache::{CacheKey, GenericStateCache, StateCache};
 use super::AggCall;
+use crate::common::table::state_table::StateTable;
 use crate::common::{iter_state_table, StateTableColumnMapping};
 use crate::executor::{PkIndices, StreamExecutorResult};
 
@@ -189,13 +190,13 @@ impl<S: StateStore> MaterializedInputState<S> {
             let mut cache_filler = self.cache.begin_syncing();
             #[for_await]
             for state_row in all_data_iter.take(cache_filler.capacity()) {
-                let state_row = state_row?;
+                let state_row: Cow<'_, Row> = state_row?;
                 let cache_key = {
                     let mut cache_key = Vec::new();
-                    self.cache_key_serializer.serialize_datums(
-                        self.state_table_order_col_indices
-                            .iter()
-                            .map(|col_idx| &(state_row.0)[*col_idx]),
+                    self.cache_key_serializer.serialize(
+                        state_row
+                            .as_ref()
+                            .project(&self.state_table_order_col_indices),
                         &mut cache_key,
                     );
                     cache_key
@@ -257,7 +258,7 @@ impl<'a> Iterator for StateCacheInputBatch<'a> {
             let op = self.ops[self.idx];
             let key = {
                 let mut key = Vec::new();
-                self.cache_key_serializer.serialize_datum_refs(
+                self.cache_key_serializer.serialize_datums(
                     self.order_col_indices
                         .iter()
                         .map(|col_idx| self.columns[*col_idx].value_at(self.idx)),
@@ -294,10 +295,10 @@ mod tests {
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
     use risingwave_storage::StateStore;
 
     use super::MaterializedInputState;
+    use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::StreamExecutorResult;

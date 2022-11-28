@@ -22,7 +22,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, Row2};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
@@ -76,14 +76,16 @@ impl ScanRange {
         scan_range: ProstScanRange,
         mut pk_types: impl Iterator<Item = DataType>,
     ) -> Result<Self> {
-        let pk_prefix = Row(scan_range
-            .eq_conds
-            .iter()
-            .map(|v| {
-                let ty = pk_types.next().unwrap();
-                deserialize_datum(v.as_slice(), &ty)
-            })
-            .try_collect()?);
+        let pk_prefix = Row::new(
+            scan_range
+                .eq_conds
+                .iter()
+                .map(|v| {
+                    let ty = pk_types.next().unwrap();
+                    deserialize_datum(v.as_slice(), &ty)
+                })
+                .try_collect()?,
+        );
         if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
             return Ok(Self {
                 pk_prefix,
@@ -307,7 +309,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 
         let (point_gets, range_scans): (Vec<ScanRange>, Vec<ScanRange>) = scan_ranges
             .into_iter()
-            .partition(|x| x.pk_prefix.size() == table.pk_indices().len());
+            .partition(|x| x.pk_prefix.len() == table.pk_indices().len());
 
         let mut data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
         // Point Get
@@ -315,7 +317,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             let table = table.clone();
             let histogram = histogram.clone();
             if let Some(row) = Self::execute_point_get(table, point_get, epoch, histogram).await? {
-                if let Some(chunk) = data_chunk_builder.append_one_row_from_datums(row.values()) {
+                if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     yield chunk;
                 }
             }
@@ -345,7 +347,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         histogram: Option<Histogram>,
     ) -> Result<Option<Row>> {
         let pk_prefix = scan_range.pk_prefix;
-        assert!(pk_prefix.size() == table.pk_indices().len());
+        assert!(pk_prefix.len() == table.pk_indices().len());
 
         let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
@@ -375,12 +377,15 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         } = scan_range;
 
         // Range Scan.
-        assert!(pk_prefix.size() < table.pk_indices().len());
+        assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
             .batch_iter_with_pk_bounds(
                 HummockReadEpoch::Committed(epoch),
                 &pk_prefix,
-                next_col_bounds,
+                (
+                    next_col_bounds.0.map(|x| Row::new(vec![x])),
+                    next_col_bounds.1.map(|x| Row::new(vec![x])),
+                ),
             )
             .await?;
 
@@ -403,138 +408,5 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 break;
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::Bound::Unbounded;
-
-    use futures::StreamExt;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
-    use risingwave_common::row::Row;
-    use risingwave_common::types::DataType;
-    use risingwave_common::util::epoch::EpochPair;
-    use risingwave_common::util::sort_util::OrderType;
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::batch_table::storage_table::StorageTable;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
-    use risingwave_storage::table::Distribution;
-
-    use crate::executor::{Executor, RowSeqScanExecutor, ScanRange};
-
-    #[tokio::test]
-    async fn test_row_seq_scan() {
-        let state_store = MemoryStateStore::new();
-        let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
-        let column_descs = vec![
-            ColumnDesc::unnamed(column_ids[0], DataType::Int32),
-            ColumnDesc::unnamed(column_ids[1], DataType::Int32),
-            ColumnDesc::unnamed(column_ids[2], DataType::Int32),
-        ];
-        let pk_indices = vec![0_usize, 1_usize];
-        let order_types = vec![OrderType::Ascending, OrderType::Descending];
-        let mut state = StateTable::new_without_distribution(
-            state_store.clone(),
-            TableId::from(0x42),
-            column_descs.clone(),
-            order_types.clone(),
-            pk_indices.clone(),
-        )
-        .await;
-        let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
-        let value_indices: Vec<usize> = vec![0, 1, 2];
-        let table = StorageTable::new_partial(
-            state_store.clone(),
-            TableId::from(0x42),
-            column_descs.clone(),
-            column_ids_partial,
-            order_types.clone(),
-            pk_indices,
-            Distribution::fallback(),
-            TableOption::default(),
-            value_indices,
-        );
-        let epoch = EpochPair::new_test_epoch(1);
-        state.init_epoch(epoch);
-        epoch.inc();
-
-        state.insert(Row(vec![
-            Some(1_i32.into()),
-            Some(11_i32.into()),
-            Some(111_i32.into()),
-        ]));
-        state.insert(Row(vec![
-            Some(2_i32.into()),
-            Some(22_i32.into()),
-            Some(222_i32.into()),
-        ]));
-        state.insert(Row(vec![
-            Some(3_i32.into()),
-            Some(33_i32.into()),
-            Some(333_i32.into()),
-        ]));
-
-        state.commit_for_test(epoch).await.unwrap();
-
-        let scan_range1 = ScanRange {
-            pk_prefix: Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            next_col_bounds: (Unbounded, Unbounded),
-        };
-
-        let scan_range2 = ScanRange {
-            pk_prefix: Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            next_col_bounds: (Unbounded, Unbounded),
-        };
-
-        let row_seq_scan_exec = RowSeqScanExecutor::new(
-            table.clone(),
-            vec![scan_range1, scan_range2],
-            epoch.curr,
-            1024,
-            "row_seq_scan_exec".to_string(),
-            None,
-        );
-
-        let point_get_row_seq_scan_exec = Box::new(row_seq_scan_exec);
-
-        let mut stream = point_get_row_seq_scan_exec.execute();
-        let chunk = stream.next().await.unwrap().unwrap();
-
-        assert_eq!(
-            chunk.row_at(0).0.to_owned_row(),
-            Row(vec![Some(11_i32.into()), Some(111_i32.into())])
-        );
-        assert_eq!(
-            chunk.row_at(1).0.to_owned_row(),
-            Row(vec![Some(22_i32.into()), Some(222_i32.into())])
-        );
-
-        let full_row_seq_scan_exec = RowSeqScanExecutor::new(
-            table,
-            vec![ScanRange::full()],
-            epoch.curr,
-            1024,
-            "row_seq_scan_exec".to_string(),
-            None,
-        );
-
-        let row_seq_scan_exec = Box::new(full_row_seq_scan_exec);
-
-        let mut stream = row_seq_scan_exec.execute();
-        let chunk = stream.next().await.unwrap().unwrap();
-
-        assert_eq!(
-            chunk.row_at(0).0.to_owned_row(),
-            Row(vec![Some(11_i32.into()), Some(111_i32.into())])
-        );
-        assert_eq!(
-            chunk.row_at(1).0.to_owned_row(),
-            Row(vec![Some(22_i32.into()), Some(222_i32.into())])
-        );
-        assert_eq!(
-            chunk.row_at(2).0.to_owned_row(),
-            Row(vec![Some(33_i32.into()), Some(333_i32.into())])
-        );
     }
 }

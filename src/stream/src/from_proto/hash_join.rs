@@ -18,10 +18,11 @@ use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::*;
 use crate::cache::LruManagerRef;
+use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, PkIndices};
@@ -30,13 +31,14 @@ pub struct HashJoinExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for HashJoinExecutorBuilder {
+    type Node = HashJoinNode;
+
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let is_append_only = node.is_append_only;
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
 

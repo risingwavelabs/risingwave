@@ -21,6 +21,7 @@ use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
+use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
     SstIdRange,
@@ -697,10 +698,15 @@ impl HummockMetaClient for MetaClient {
         Ok(SstIdRange::new(resp.start_id, resp.end_id))
     }
 
-    async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
+    async fn report_compaction_task(
+        &self,
+        compact_task: CompactTask,
+        table_stats_change: HashMap<u32, risingwave_hummock_sdk::table_stats::TableStats>,
+    ) -> Result<()> {
         let req = ReportCompactionTasksRequest {
             context_id: self.worker_id(),
             compact_task: Some(compact_task),
+            table_stats_change: to_prost_table_stats_map(table_stats_change),
         };
         self.inner.report_compaction_tasks(req).await?;
         Ok(())

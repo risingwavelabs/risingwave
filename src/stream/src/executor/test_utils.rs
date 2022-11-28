@@ -15,7 +15,7 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
@@ -49,10 +49,19 @@ impl MessageSender {
     }
 
     #[allow(dead_code)]
-    pub fn push_watermark(&mut self, col_idx: usize, val: ScalarImpl) {
+    pub fn push_watermark(&mut self, col_idx: usize, data_type: DataType, val: ScalarImpl) {
         self.0
-            .send(Message::Watermark(Watermark { col_idx, val }))
+            .send(Message::Watermark(Watermark {
+                col_idx,
+                data_type,
+                val,
+            }))
             .unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_int64_watermark(&mut self, col_idx: usize, val: i64) {
+        self.push_watermark(col_idx, DataType::Int64, ScalarImpl::Int64(val));
     }
 }
 
@@ -145,7 +154,7 @@ macro_rules! row_nonnull {
         {
             use risingwave_common::types::Scalar;
             use risingwave_common::array::Row;
-            Row(vec![$(Some($value.to_scalar_value()), )*])
+            Row::new(vec![$(Some($value.to_scalar_value()), )*])
         }
     };
 }
@@ -155,9 +164,9 @@ pub mod agg_executor {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::AggKind;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
     use risingwave_storage::StateStore;
 
+    use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::{AggCall, AggStateStorage};
     use crate::executor::{
@@ -326,8 +335,8 @@ pub mod top_n_executor {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
 
+    use crate::common::table::state_table::StateTable;
     pub async fn create_in_memory_state_table(
         data_types: &[DataType],
         order_types: &[OrderType],

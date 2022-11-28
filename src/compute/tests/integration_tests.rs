@@ -39,7 +39,7 @@ use risingwave_source::table_test_utils::create_table_source_desc_builder;
 use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::state_table_handler::SourceStateTableHandler;
@@ -47,6 +47,8 @@ use risingwave_stream::executor::{
     ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
+
+const MOCK_SOURCE_NAME: &str = "mock_source";
 
 struct SingleChunkExecutor {
     chunk: Option<DataChunk>,
@@ -138,6 +140,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         ActorContext::create(0x3f3f3f),
         source_builder,
         source_table_id,
+        MOCK_SOURCE_NAME.to_string(),
         vnodes,
         state_table,
         all_column_ids.clone(),
@@ -403,12 +406,12 @@ async fn test_row_seq_scan() -> Result<()> {
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
     epoch.inc();
-    state.insert(Row(vec![
+    state.insert(Row::new(vec![
         Some(1_i32.into()),
         Some(4_i32.into()),
         Some(7_i64.into()),
     ]));
-    state.insert(Row(vec![
+    state.insert(Row::new(vec![
         Some(2_i32.into()),
         Some(5_i32.into()),
         Some(8_i64.into()),

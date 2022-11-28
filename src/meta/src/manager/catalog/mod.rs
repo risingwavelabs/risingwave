@@ -21,7 +21,7 @@ use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use database::*;
+pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
 use risingwave_common::catalog::{
@@ -199,8 +199,6 @@ where
             .await;
         for schema in schemas_added {
             version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Add, Info::Schema(schema))
                 .await;
         }
@@ -1427,8 +1425,6 @@ where
         commit_meta!(self, users)?;
 
         let version = self
-            .env
-            .notification_manager()
             .notify_frontend(Operation::Add, Info::User(user.to_owned()))
             .await;
         Ok(version)
@@ -1470,8 +1466,6 @@ where
         commit_meta!(self, users)?;
 
         let version = self
-            .env
-            .notification_manager()
             .notify_frontend(Operation::Update, Info::User(new_user))
             .await;
         Ok(version)
@@ -1528,8 +1522,6 @@ where
         commit_meta!(self, users)?;
 
         let version = self
-            .env
-            .notification_manager()
             .notify_frontend(Operation::Delete, Info::User(user))
             .await;
         Ok(version)
@@ -1665,8 +1657,6 @@ where
         let mut version = 0;
         for user in user_updated {
             version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Update, Info::User(user))
                 .await;
         }
@@ -1825,8 +1815,6 @@ where
         let mut version = 0;
         for (_, user_info) in user_updated {
             version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Update, Info::User(user_info))
                 .await;
         }

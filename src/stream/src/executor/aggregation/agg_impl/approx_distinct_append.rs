@@ -16,16 +16,17 @@ use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
-use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::row::{Row2, RowExt};
 use risingwave_common::types::{Datum, ScalarImpl};
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_common::{bail, row};
 use risingwave_storage::StateStore;
 
 use super::approx_distinct_utils::{
     deserialize_buckets_from_list, serialize_buckets, RegisterBucket, StreamingApproxCountDistinct,
 };
 use crate::common::iter_state_table;
+use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::table::TableStateImpl;
 use crate::executor::StreamExecutorResult;
 
@@ -125,7 +126,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
         };
         if let Some(state_row) = state_row {
             if let ScalarImpl::List(list) = state_row
-                [group_key.map(|row| row.size()).unwrap_or_default()]
+                [group_key.map(|row| row.len()).unwrap_or_default()]
             .as_ref()
             .unwrap()
             {
@@ -147,10 +148,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
         state_table: &mut StateTable<S>,
         group_key: Option<&Row>,
     ) -> StreamExecutorResult<()> {
-        let mut current_row = group_key
-            .map(|row| row.values().cloned().collect_vec())
-            .unwrap_or_default();
-        current_row.push(Some(ScalarImpl::List(ListValue::new(
+        let list = Some(ScalarImpl::List(ListValue::new(
             serialize_buckets(
                 &self
                     .registers()
@@ -161,8 +159,8 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
             .into_iter()
             .map(|x| Some(ScalarImpl::Int64(x as i64)))
             .collect_vec(),
-        ))));
-        let current_row = Row::new(current_row);
+        )));
+        let current_row = group_key.unwrap_or_else(Row::empty).chain(row::once(list));
 
         let state_row = {
             let data_iter = iter_state_table(state_table, group_key).await?;

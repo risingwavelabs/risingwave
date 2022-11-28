@@ -42,9 +42,9 @@
 #![feature(provide_any)]
 #![feature(let_chains)]
 #![expect(clippy::result_large_err, reason = "FIXME: HummockError is large")]
+#![feature(associated_type_bounds)]
 
 pub mod hummock;
-pub mod keyspace;
 pub mod memory;
 pub mod monitor;
 pub mod panic_store;
@@ -61,7 +61,6 @@ pub mod write_batch;
 #[cfg(feature = "failpoints")]
 mod storage_failpoints;
 
-pub use keyspace::Keyspace;
 pub use store::{StateStore, StateStoreIter};
 pub use store_impl::StateStoreImpl;
 

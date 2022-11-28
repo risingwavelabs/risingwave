@@ -20,6 +20,13 @@ export interface ColumnIndex {
   index: number;
 }
 
+export interface SourceInfo {
+  sourceInfo?: { $case: "streamSource"; streamSource: StreamSourceInfo } | {
+    $case: "tableSource";
+    tableSource: TableSourceInfo;
+  };
+}
+
 export interface StreamSourceInfo {
   rowFormat: RowFormatType;
   rowSchemaLocation: string;
@@ -182,6 +189,58 @@ export const ColumnIndex = {
   fromPartial<I extends Exact<DeepPartial<ColumnIndex>, I>>(object: I): ColumnIndex {
     const message = createBaseColumnIndex();
     message.index = object.index ?? 0;
+    return message;
+  },
+};
+
+function createBaseSourceInfo(): SourceInfo {
+  return { sourceInfo: undefined };
+}
+
+export const SourceInfo = {
+  fromJSON(object: any): SourceInfo {
+    return {
+      sourceInfo: isSet(object.streamSource)
+        ? { $case: "streamSource", streamSource: StreamSourceInfo.fromJSON(object.streamSource) }
+        : isSet(object.tableSource)
+        ? { $case: "tableSource", tableSource: TableSourceInfo.fromJSON(object.tableSource) }
+        : undefined,
+    };
+  },
+
+  toJSON(message: SourceInfo): unknown {
+    const obj: any = {};
+    message.sourceInfo?.$case === "streamSource" && (obj.streamSource = message.sourceInfo?.streamSource
+      ? StreamSourceInfo.toJSON(message.sourceInfo?.streamSource)
+      : undefined);
+    message.sourceInfo?.$case === "tableSource" && (obj.tableSource = message.sourceInfo?.tableSource
+      ? TableSourceInfo.toJSON(message.sourceInfo?.tableSource)
+      : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SourceInfo>, I>>(object: I): SourceInfo {
+    const message = createBaseSourceInfo();
+    if (
+      object.sourceInfo?.$case === "streamSource" &&
+      object.sourceInfo?.streamSource !== undefined &&
+      object.sourceInfo?.streamSource !== null
+    ) {
+      message.sourceInfo = {
+        $case: "streamSource",
+        streamSource: StreamSourceInfo.fromPartial(object.sourceInfo.streamSource),
+      };
+    }
+    if (
+      object.sourceInfo?.$case === "tableSource" &&
+      object.sourceInfo?.tableSource !== undefined &&
+      object.sourceInfo?.tableSource !== null
+    ) {
+      message.sourceInfo = {
+        $case: "tableSource",
+        tableSource: TableSourceInfo.fromPartial(object.sourceInfo.tableSource),
+      };
+    }
     return message;
   },
 };

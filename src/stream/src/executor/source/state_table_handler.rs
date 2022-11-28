@@ -17,17 +17,17 @@ use std::ops::Deref;
 use bytes::Bytes;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
-use risingwave_common::row::Row;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::row::{Row, Row2};
+use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder};
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
@@ -102,8 +102,8 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     ) -> StreamExecutorResult<Option<SplitImpl>> {
         Ok(match self.get(stream_source_split.id()).await? {
             None => None,
-            Some(row) => match row.0.get(1).unwrap() {
-                Some(ScalarImpl::Utf8(s)) => Some(SplitImpl::restore_from_bytes(s.as_bytes())?),
+            Some(row) => match row.datum_at(1) {
+                Some(ScalarRefImpl::Utf8(s)) => Some(SplitImpl::restore_from_bytes(s.as_bytes())?),
                 _ => unreachable!(),
             },
         })

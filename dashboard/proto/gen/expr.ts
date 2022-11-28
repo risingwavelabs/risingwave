@@ -546,6 +546,7 @@ export const TableFunction_Type = {
   GENERATE: "GENERATE",
   UNNEST: "UNNEST",
   REGEXP_MATCHES: "REGEXP_MATCHES",
+  RANGE: "RANGE",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -565,6 +566,9 @@ export function tableFunction_TypeFromJSON(object: any): TableFunction_Type {
     case 3:
     case "REGEXP_MATCHES":
       return TableFunction_Type.REGEXP_MATCHES;
+    case 4:
+    case "RANGE":
+      return TableFunction_Type.RANGE;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -582,6 +586,8 @@ export function tableFunction_TypeToJSON(object: TableFunction_Type): string {
       return "UNNEST";
     case TableFunction_Type.REGEXP_MATCHES:
       return "REGEXP_MATCHES";
+    case TableFunction_Type.RANGE:
+      return "RANGE";
     case TableFunction_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
