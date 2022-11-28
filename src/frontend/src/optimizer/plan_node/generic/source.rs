@@ -1,0 +1,89 @@
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fmt;
+use std::rc::Rc;
+
+use itertools::Itertools;
+use risingwave_common::catalog::{ColumnDesc, Field, FieldDisplay, Schema, TableDesc};
+use risingwave_common::types::{DataType, IntervalUnit};
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_expr::expr::AggKind;
+use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
+use risingwave_pb::expr::AggCall as ProstAggCall;
+use risingwave_pb::plan_common::JoinType;
+use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
+
+use super::super::utils::{IndicesDisplay, TableCatalogBuilder};
+use super::{stream, EqJoinPredicate, GenericPlanNode, GenericPlanRef};
+use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::{ColumnId, IndexCatalog};
+use crate::expr::{Expr, ExprDisplay, ExprImpl, InputRef, InputRefDisplay};
+use crate::optimizer::property::{Direction, Order};
+use crate::session::OptimizerContextRef;
+use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::TableCatalog;
+
+/// [`Source`] returns contents of a table or other equivalent object
+#[derive(Debug, Clone)]
+pub struct Source {
+    pub catalog: Rc<SourceCatalog>,
+}
+impl GenericPlanNode for Source {
+    fn schema(&self) -> Schema {
+        let fields = self
+            .catalog
+            .columns
+            .iter()
+            .map(|c| (&c.column_desc).into())
+            .collect();
+        Schema { fields }
+    }
+
+    fn logical_pk(&self) -> Option<Vec<usize>> {
+        let mut id_to_idx = HashMap::new();
+        self.catalog
+            .columns
+            .iter()
+            .enumerate()
+            .for_each(|(idx, c)| {
+                id_to_idx.insert(c.column_id(), idx);
+            });
+        self.catalog
+            .pk_col_ids
+            .iter()
+            .map(|c| id_to_idx.get(c).copied())
+            .collect::<Option<Vec<_>>>()
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        unimplemented!()
+    }
+}
+
+impl Source {
+    pub fn infer_internal_table_catalog(me: &impl GenericPlanRef) -> TableCatalog {
+        // note that source's internal table is to store partition_id -> offset mapping and its
+        // schema is irrelevant to input schema
+        let mut builder =
+            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
+
+        let key = Field {
+            data_type: DataType::Varchar,
+            name: "partition_id".to_string(),
+            sub_fields: vec![],
+            type_name: "".to_string(),
+        };
+        let value = Field {
+            data_type: DataType::Varchar,
+            name: "offset".to_string(),
+            sub_fields: vec![],
+            type_name: "".to_string(),
+        };
+
+        let ordered_col_idx = builder.add_column(&key);
+        builder.add_column(&value);
+        builder.add_order_column(ordered_col_idx, OrderType::Ascending);
+
+        builder.build(vec![])
+    }
+}

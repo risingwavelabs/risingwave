@@ -1,5 +1,6 @@
 use risingwave_common::util::sort_util::OrderType;
 
+use super::GenericPlanNode;
 use crate::optimizer::plan_node::stream;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::utils::Condition;
