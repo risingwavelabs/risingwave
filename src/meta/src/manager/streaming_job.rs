@@ -21,7 +21,7 @@ use risingwave_pb::catalog::{Index, Sink, Source, Table};
 #[derive(Debug)]
 pub enum StreamingJob {
     MaterializedView(Table),
-    Sink(Sink),
+    Sink(Sink, Table),
     MaterializedSource(Source, Table),
     Index(Index, Table),
 }
@@ -30,7 +30,10 @@ impl StreamingJob {
     pub fn set_id(&mut self, id: u32) {
         match self {
             Self::MaterializedView(table) => table.id = id,
-            Self::Sink(sink) => sink.id = id,
+            Self::Sink(sink, table) => {
+                sink.id = id;
+                table.id = id
+            }
             Self::MaterializedSource(_, table) => table.id = id,
             Self::Index(index, index_table) => {
                 index.id = id;
@@ -43,7 +46,7 @@ impl StreamingJob {
     pub fn id(&self) -> u32 {
         match self {
             Self::MaterializedView(table) => table.id,
-            Self::Sink(sink) => sink.id,
+            Self::Sink(sink, _) => sink.id,
             Self::MaterializedSource(_, table) => table.id,
             Self::Index(index, _) => index.id,
         }
@@ -52,7 +55,7 @@ impl StreamingJob {
     pub fn set_dependent_relations(&mut self, dependent_relations: Vec<u32>) {
         match self {
             Self::MaterializedView(table) => table.dependent_relations = dependent_relations,
-            Self::Sink(sink) => sink.dependent_relations = dependent_relations,
+            Self::Sink(_, table) => table.dependent_relations = dependent_relations,
             Self::Index(_, index_table) => index_table.dependent_relations = dependent_relations,
             _ => {}
         }
@@ -61,7 +64,7 @@ impl StreamingJob {
     pub fn schema_id(&self) -> u32 {
         match self {
             Self::MaterializedView(table) => table.schema_id,
-            Self::Sink(sink) => sink.schema_id,
+            Self::Sink(sink, _) => sink.schema_id,
             Self::MaterializedSource(_, table) => table.schema_id,
             Self::Index(index, _) => index.schema_id,
         }
@@ -70,7 +73,7 @@ impl StreamingJob {
     pub fn database_id(&self) -> u32 {
         match self {
             Self::MaterializedView(table) => table.database_id,
-            Self::Sink(sink) => sink.database_id,
+            Self::Sink(sink, _) => sink.database_id,
             Self::MaterializedSource(_, table) => table.database_id,
             Self::Index(index, _) => index.database_id,
         }
@@ -79,7 +82,7 @@ impl StreamingJob {
     pub fn name(&self) -> String {
         match self {
             Self::MaterializedView(table) => table.name.clone(),
-            Self::Sink(sink) => sink.name.clone(),
+            Self::Sink(sink, _) => sink.name.clone(),
             Self::MaterializedSource(_, table) => table.name.clone(),
             Self::Index(index, _) => index.name.clone(),
         }
@@ -96,7 +99,7 @@ impl StreamingJob {
     pub fn properties(&self) -> HashMap<String, String> {
         match self {
             Self::MaterializedView(table) => table.properties.clone(),
-            Self::Sink(sink) => sink.properties.clone(),
+            Self::Sink(_, table) => table.properties.clone(),
             Self::MaterializedSource(_, table) => table.properties.clone(),
             Self::Index(_, index_table) => index_table.properties.clone(),
         }

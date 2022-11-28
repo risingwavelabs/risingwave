@@ -18,12 +18,12 @@ use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::ObjectType;
+use super::{Ident, ObjectType, Query};
 use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
 use crate::keywords::Keyword;
-use crate::parser::{Parser, ParserError};
+use crate::parser::{IsOptional, Parser, ParserError};
 use crate::tokenizer::Token;
 
 /// Consumes token from the parser into an AST node.
@@ -242,6 +242,22 @@ impl fmt::Display for CreateSourceStatement {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateSink {
+    From(ObjectName),
+    AsQuery(Box<Query>),
+}
+
+impl fmt::Display for CreateSink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::From(mv) => write!(f, "FROM MATERIALIZED VIEW {}", mv),
+            Self::AsQuery(query) => write!(f, "AS QUERY {}", query),
+        }
+    }
+}
+
 // sql_grammar!(CreateSinkStatement {
 //     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
 //     sink_name: Ident,
@@ -255,7 +271,8 @@ pub struct CreateSinkStatement {
     pub if_not_exists: bool,
     pub sink_name: ObjectName,
     pub with_properties: WithProperties,
-    pub materialized_view: ObjectName,
+    pub sink_from: CreateSink,
+    pub columns: Vec<Ident>,
 }
 
 impl ParseTo for CreateSinkStatement {
@@ -263,15 +280,26 @@ impl ParseTo for CreateSinkStatement {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(sink_name: ObjectName, p);
 
-        p.expect_keyword(Keyword::FROM)?;
-        impl_parse_to!(materialized_view: ObjectName, p);
+        let columns = p.parse_parenthesized_column_list(IsOptional::Optional)?;
+
+        let sink_from = if p.parse_keyword(Keyword::FROM) {
+            impl_parse_to!(from_name: ObjectName, p);
+            CreateSink::From(from_name)
+        } else if p.parse_keyword(Keyword::AS) {
+            let query = Box::new(p.parse_query()?);
+            CreateSink::AsQuery(query)
+        } else {
+            p.expected("FROM or AS after CREATE SINK sink_name", p.peek_token())?
+        };
 
         impl_parse_to!(with_properties: WithProperties, p);
+
         Ok(Self {
             if_not_exists,
             sink_name,
             with_properties,
-            materialized_view,
+            sink_from,
+            columns,
         })
     }
 }
@@ -282,7 +310,7 @@ impl fmt::Display for CreateSinkStatement {
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(sink_name, v, self);
         impl_fmt_display!([Keyword::FROM], v);
-        impl_fmt_display!(materialized_view, v, self);
+        impl_fmt_display!(sink_from, v, self);
         impl_fmt_display!(with_properties, v, self);
         v.iter().join(" ").fmt(f)
     }

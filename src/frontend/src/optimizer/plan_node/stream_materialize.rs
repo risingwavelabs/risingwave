@@ -23,13 +23,14 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::WithOptions;
 
 /// The first column id to allocate for a new materialized view.
 ///
@@ -199,6 +200,16 @@ impl StreamMaterialize {
 
     pub fn name(&self) -> &str {
         self.table.name()
+    }
+
+    pub fn rewrite_into_sink(self, properties: WithOptions) -> StreamSink {
+        let Self {
+            base,
+            input,
+            mut table,
+        } = self;
+        table.properties = properties;
+        StreamSink::with_base(input, table, base)
     }
 }
 

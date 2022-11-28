@@ -32,7 +32,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
+use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize, StreamSink};
 use self::plan_visitor::{
     has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_logical_apply,
     has_logical_over_agg,
@@ -43,6 +43,7 @@ use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
+use crate::WithOptions;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -517,6 +518,29 @@ impl PlanRoot {
             "".into(),
             false,
         )
+    }
+
+    /// Optimize and generate a create sink plan.
+    pub fn gen_create_sink_plan(
+        &mut self,
+        sink_name: String,
+        definition: String,
+        col_names: Vec<String>,
+        properties: WithOptions,
+    ) -> Result<StreamSink> {
+        let stream_plan = self.gen_stream_plan()?;
+        StreamMaterialize::create(
+            stream_plan,
+            sink_name,
+            self.required_dist.clone(),
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            col_names,
+            false,
+            definition,
+            false,
+        )
+        .map(|plan| plan.rewrite_into_sink(properties))
     }
 
     /// Set the plan root's required dist.

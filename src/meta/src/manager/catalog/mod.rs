@@ -460,7 +460,7 @@ where
     ) -> MetaResult<()> {
         match stream_job {
             StreamingJob::MaterializedView(table) => self.start_create_table_procedure(table).await,
-            StreamingJob::Sink(sink) => self.start_create_sink_procedure(sink).await,
+            StreamingJob::Sink(sink, table) => self.start_create_sink_procedure(sink, table).await,
             StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
             }
@@ -1226,8 +1226,6 @@ where
                 .await;
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Add, Info::Index(index.to_owned()))
                 .await;
 
@@ -1237,27 +1235,28 @@ where
         }
     }
 
-    pub async fn start_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
+    pub async fn start_create_sink_procedure(&self, sink: &Sink, table: &Table) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         database_core.ensure_database_id(sink.database_id)?;
         database_core.ensure_schema_id(sink.schema_id)?;
-        database_core.ensure_table_id(sink.associated_table_id)?;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         database_core.check_relation_name_duplicated(&key)?;
         #[cfg(not(test))]
         user_core.ensure_user_id(sink.owner)?;
+        assert_eq!(sink.owner, table.owner);
 
         if database_core.has_in_progress_creation(&key) {
             bail!("sink already in creating procedure");
         } else {
             database_core.mark_creating(&key);
-            database_core.mark_creating_streaming_job(sink.id);
-            for &dependent_relation_id in &sink.dependent_relations {
+            database_core.mark_creating_streaming_job(table.id);
+            for &dependent_relation_id in &table.dependent_relations {
                 database_core.increase_ref_count(dependent_relation_id);
             }
-            user_core.increase_ref(sink.owner);
+            // sink and table.
+            user_core.increase_ref_count(table.owner, 2);
             Ok(())
         }
     }
@@ -1265,21 +1264,29 @@ where
     pub async fn finish_create_sink_procedure(
         &self,
         sink: &Sink,
+        table: &Table,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        let key = (table.database_id, table.schema_id, sink.name.clone());
+
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
-        let key = (sink.database_id, sink.schema_id, sink.name.clone());
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         if !sinks.contains_key(&sink.id)
             && database_core.in_progress_creation_tracker.contains(&key)
         {
             database_core.in_progress_creation_tracker.remove(&key);
             database_core
                 .in_progress_creation_streaming_job
-                .remove(&sink.id);
+                .remove(&table.id);
 
             sinks.insert(sink.id, sink.clone());
-            commit_meta!(self, sinks)?;
+            tables.insert(table.id, table.clone());
+
+            commit_meta!(self, sinks, tables)?;
+
+            self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+                .await;
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
@@ -1291,17 +1298,21 @@ where
         }
     }
 
-    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
+    pub async fn cancel_create_sink_procedure(&self, sink: &Sink, table: &Table) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !database_core.sinks.contains_key(&sink.id)
+        if !database_core.indexes.contains_key(&sink.id)
             && database_core.has_in_progress_creation(&key)
         {
             database_core.unmark_creating(&key);
-            database_core.unmark_creating_streaming_job(sink.id);
-            user_core.decrease_ref(sink.owner);
+            database_core.unmark_creating_streaming_job(table.id);
+            for &dependent_relation_id in &table.dependent_relations {
+                database_core.decrease_ref_count(dependent_relation_id);
+            }
+            // sink and table.
+            user_core.decrease_ref_count(table.owner, 2);
             Ok(())
         } else {
             unreachable!("sink must not exist and be in creating procedure");

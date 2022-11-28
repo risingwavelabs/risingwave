@@ -64,6 +64,7 @@ export interface DropSourceResponse {
 
 export interface CreateSinkRequest {
   sink: Sink | undefined;
+  table: Table | undefined;
   fragmentGraph: StreamFragmentGraph | undefined;
 }
 
@@ -494,13 +495,14 @@ export const DropSourceResponse = {
 };
 
 function createBaseCreateSinkRequest(): CreateSinkRequest {
-  return { sink: undefined, fragmentGraph: undefined };
+  return { sink: undefined, table: undefined, fragmentGraph: undefined };
 }
 
 export const CreateSinkRequest = {
   fromJSON(object: any): CreateSinkRequest {
     return {
       sink: isSet(object.sink) ? Sink.fromJSON(object.sink) : undefined,
+      table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
       fragmentGraph: isSet(object.fragmentGraph) ? StreamFragmentGraph.fromJSON(object.fragmentGraph) : undefined,
     };
   },
@@ -508,6 +510,7 @@ export const CreateSinkRequest = {
   toJSON(message: CreateSinkRequest): unknown {
     const obj: any = {};
     message.sink !== undefined && (obj.sink = message.sink ? Sink.toJSON(message.sink) : undefined);
+    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
     message.fragmentGraph !== undefined &&
       (obj.fragmentGraph = message.fragmentGraph ? StreamFragmentGraph.toJSON(message.fragmentGraph) : undefined);
     return obj;
@@ -516,6 +519,7 @@ export const CreateSinkRequest = {
   fromPartial<I extends Exact<DeepPartial<CreateSinkRequest>, I>>(object: I): CreateSinkRequest {
     const message = createBaseCreateSinkRequest();
     message.sink = (object.sink !== undefined && object.sink !== null) ? Sink.fromPartial(object.sink) : undefined;
+    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
     message.fragmentGraph = (object.fragmentGraph !== undefined && object.fragmentGraph !== null)
       ? StreamFragmentGraph.fromPartial(object.fragmentGraph)
       : undefined;

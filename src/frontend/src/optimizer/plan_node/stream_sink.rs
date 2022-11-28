@@ -20,14 +20,14 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::{PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::WithOptions;
+use crate::TableCatalog;
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone)]
 pub struct StreamSink {
     pub base: PlanBase,
     input: PlanRef,
-    properties: WithOptions,
+    table: TableCatalog,
 }
 
 impl StreamSink {
@@ -48,13 +48,17 @@ impl StreamSink {
     }
 
     #[must_use]
-    pub fn new(input: PlanRef, properties: WithOptions) -> Self {
+    pub fn new(input: PlanRef, table: TableCatalog) -> Self {
         let base = Self::derive_plan_base(&input).unwrap();
-        Self {
-            base,
-            input,
-            properties,
-        }
+        Self { base, input, table }
+    }
+
+    pub fn with_base(input: PlanRef, table: TableCatalog, base: PlanBase) -> Self {
+        Self { base, input, table }
+    }
+
+    pub fn table(&self) -> &TableCatalog {
+        &self.table
     }
 }
 
@@ -64,7 +68,7 @@ impl PlanTreeNodeUnary for StreamSink {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.properties.clone())
+        Self::new(input, self.table.clone())
         // TODO(nanderstabel): Add assertions (assert_eq!)
     }
 }
@@ -82,14 +86,10 @@ impl StreamNode for StreamSink {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
-        let input = self.input.clone();
-        let table = input.as_stream_table_scan().unwrap();
-        let table_desc = table.logical().table_desc();
-
         ProstStreamNode::Sink(SinkNode {
-            table_id: table_desc.table_id.table_id(),
+            table_id: self.table.id().into(),
             column_ids: vec![], // TODO(nanderstabel): fix empty Vector
-            properties: self.properties.inner().clone(),
+            table: Some(self.table.to_internal_table_prost()),
         })
     }
 }

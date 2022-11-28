@@ -68,7 +68,6 @@ export interface Sink {
   schemaId: number;
   databaseId: number;
   name: string;
-  associatedTableId: number;
   properties: { [key: string]: string };
   owner: number;
   dependentRelations: number[];
@@ -381,16 +380,7 @@ export const Source_PropertiesEntry = {
 };
 
 function createBaseSink(): Sink {
-  return {
-    id: 0,
-    schemaId: 0,
-    databaseId: 0,
-    name: "",
-    associatedTableId: 0,
-    properties: {},
-    owner: 0,
-    dependentRelations: [],
-  };
+  return { id: 0, schemaId: 0, databaseId: 0, name: "", properties: {}, owner: 0, dependentRelations: [] };
 }
 
 export const Sink = {
@@ -400,7 +390,6 @@ export const Sink = {
       schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
-      associatedTableId: isSet(object.associatedTableId) ? Number(object.associatedTableId) : 0,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
@@ -420,7 +409,6 @@ export const Sink = {
     message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
     message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
     message.name !== undefined && (obj.name = message.name);
-    message.associatedTableId !== undefined && (obj.associatedTableId = Math.round(message.associatedTableId));
     obj.properties = {};
     if (message.properties) {
       Object.entries(message.properties).forEach(([k, v]) => {
@@ -442,7 +430,6 @@ export const Sink = {
     message.schemaId = object.schemaId ?? 0;
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
-    message.associatedTableId = object.associatedTableId ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
         if (value !== undefined) {

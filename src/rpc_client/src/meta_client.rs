@@ -198,10 +198,12 @@ impl MetaClient {
     pub async fn create_sink(
         &self,
         sink: ProstSink,
+        table: ProstTable,
         graph: StreamFragmentGraph,
     ) -> Result<(u32, CatalogVersion)> {
         let request = CreateSinkRequest {
             sink: Some(sink),
+            table: Some(table),
             fragment_graph: Some(graph),
         };
 
