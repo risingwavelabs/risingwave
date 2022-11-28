@@ -619,10 +619,10 @@ impl LocalStreamManagerCore {
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
-            let trace_reporter = self
+            let trace = self
                 .stack_trace_manager
                 .as_mut()
-                .map(|(m, _)| m.register(actor_id));
+                .map(|(m, c)| (m.register(actor_id), c.clone()));
 
             let handle = {
                 let context = self.context.clone();
@@ -634,15 +634,11 @@ impl LocalStreamManagerCore {
                     }
                 };
                 #[auto_enums::auto_enum(Future)]
-                let traced = match trace_reporter {
-                    Some(trace_reporter) => trace_reporter.trace(
+                let traced = match trace {
+                    Some((reporter, config)) => reporter.trace(
                         actor,
                         format!("Actor {actor_id}: `{}`", mview_definition),
-                        TraceConfig {
-                            report_detached: true,
-                            verbose: true,
-                            interval: Duration::from_secs(1),
-                        },
+                        config,
                     ),
                     None => actor,
                 };

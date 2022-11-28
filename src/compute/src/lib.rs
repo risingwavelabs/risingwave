@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, ArgEnum)]
 pub enum AsyncStackTraceOption {
     Off,
-    On,
+    On, // default
     Verbose,
 }
 
@@ -71,7 +71,7 @@ pub struct ComputeNodeOpts {
     pub enable_jaeger_tracing: bool,
 
     /// Enable async stack tracing for risectl.
-    #[clap(long, arg_enum, default_value_t = AsyncStackTraceOption::Off)]
+    #[clap(long, arg_enum, default_value_t = AsyncStackTraceOption::On)]
     pub async_stack_trace: AsyncStackTraceOption,
 
     /// Path to file cache data directory.
