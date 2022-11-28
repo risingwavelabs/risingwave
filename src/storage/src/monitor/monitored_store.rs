@@ -16,15 +16,15 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
-use async_stream::try_stream;
 use bytes::Bytes;
-use futures::Future;
+use futures::{Future, TryStreamExt};
+use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 
 use super::StateStoreMetrics;
-use crate::error::StorageResult;
+use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::storage_value::StorageValue;
@@ -248,17 +248,23 @@ struct MonitoredStateStoreIterStats {
 }
 
 impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
-    fn into_stream(mut self) -> impl StateStoreIterItemStream {
-        use futures::TryStreamExt;
-        try_stream! {
-            let inner = self.inner;
-            futures::pin_mut!(inner);
-            while let Some((key, value)) = inner.try_next().await.inspect_err(|e| error!("Failed in next: {:?}", e))? {
-                self.stats.total_items += 1;
-                self.stats.total_size += key.encoded_len() + value.len();
-                yield (key, value);
-            }
+    #[try_stream(ok = StateStoreIterItem, error = StorageError)]
+    async fn into_stream_inner(mut self) {
+        let inner = self.inner;
+        futures::pin_mut!(inner);
+        while let Some((key, value)) = inner
+            .try_next()
+            .await
+            .inspect_err(|e| error!("Failed in next: {:?}", e))?
+        {
+            self.stats.total_items += 1;
+            self.stats.total_size += key.encoded_len() + value.len();
+            yield (key, value);
         }
+    }
+
+    fn into_stream(self) -> impl StateStoreIterItemStream {
+        Self::into_stream_inner(self)
     }
 }
 

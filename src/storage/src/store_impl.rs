@@ -240,13 +240,15 @@ pub mod verify {
 
     use bytes::Bytes;
     use futures::pin_mut;
+    use futures::stream::StreamExt;
+    use futures_async_stream::stream;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
     use crate::storage_value::StorageValue;
     use crate::store::*;
-    use crate::store_impl::{AsHummockTrait, HummockTrait};
+    use crate::store_impl::{AsHummockTrait, HummockTrait, StorageResult};
     use crate::{StateStore, StateStoreIter};
 
     fn assert_result_eq<Item: PartialEq + Debug, E>(
@@ -326,9 +328,6 @@ pub mod verify {
             read_options: ReadOptions,
         ) -> Self::IterFuture<'_> {
             async move {
-                use async_stream::stream;
-                use futures::stream::StreamExt;
-
                 let actual = self
                     .actual
                     .iter(key_range.clone(), epoch, read_options.clone())
@@ -339,28 +338,33 @@ pub mod verify {
                     None
                 };
 
-                let stream = stream! {
-                    pin_mut!(actual);
-                    pin_mut!(expected);
-                    let mut expected = expected.as_pin_mut();
+                Ok(verify_stream(actual, expected))
+            }
+        }
+    }
 
-                    loop {
-                        let actual = actual.next().await;
-                        if let Some(expected) = expected.as_mut() {
-                            let expected = expected.next().await;
-                            assert_eq!(actual.is_some(), expected.is_some());
-                            if let Some(actual) = actual.as_ref() {
-                                assert_result_eq(actual, expected.as_ref().unwrap());
-                            }
-                        }
-                        if let Some(actual) = actual {
-                            yield actual;
-                        } else {
-                            break;
-                        }
-                    }
-                };
-                Ok(stream)
+    #[stream(item = StorageResult<StateStoreIterItem>)]
+    async fn verify_stream(
+        actual: impl StateStoreReadIterStream,
+        expected: Option<impl StateStoreReadIterStream>,
+    ) {
+        pin_mut!(actual);
+        pin_mut!(expected);
+        let mut expected = expected.as_pin_mut();
+
+        loop {
+            let actual = actual.next().await;
+            if let Some(expected) = expected.as_mut() {
+                let expected = expected.next().await;
+                assert_eq!(actual.is_some(), expected.is_some());
+                if let Some(actual) = actual.as_ref() {
+                    assert_result_eq(actual, expected.as_ref().unwrap());
+                }
+            }
+            if let Some(actual) = actual {
+                yield actual;
+            } else {
+                break;
             }
         }
     }

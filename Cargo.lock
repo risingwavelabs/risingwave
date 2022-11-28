@@ -5896,7 +5896,6 @@ version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
- "async-stream",
  "async-trait",
  "async_stack_trace",
  "auto_enums",

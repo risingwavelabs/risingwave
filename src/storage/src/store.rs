@@ -16,15 +16,15 @@ use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use async_stream::try_stream;
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
+use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
-use crate::error::StorageResult;
+use crate::error::{StorageError, StorageResult};
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
@@ -46,16 +46,19 @@ pub trait StateStoreIterExt: StateStoreIter {
     fn into_stream(self) -> Self::ItemStream;
 }
 
+#[try_stream(ok = I::Item, error = StorageError)]
+async fn into_stream_inner<I: StateStoreIter>(mut iter: I) {
+    while let Some(item) = iter.next().await? {
+        yield item;
+    }
+}
+
 pub type StreamTypeOfIter<I> = <I as StateStoreIterExt>::ItemStream;
 impl<I: StateStoreIter> StateStoreIterExt for I {
     type ItemStream = impl Stream<Item = StorageResult<<Self as StateStoreIter>::Item>>;
 
-    fn into_stream(mut self) -> Self::ItemStream {
-        try_stream! {
-            while let Some(item) = self.next().await? {
-                yield item;
-            }
-        }
+    fn into_stream(self) -> Self::ItemStream {
+        into_stream_inner(self)
     }
 }
 
