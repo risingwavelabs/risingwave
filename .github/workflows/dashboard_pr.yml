@@ -12,7 +12,13 @@ jobs:
   dashboard-ui-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout risingwavelabs/risingwave
+        uses: actions/checkout@v3
+      - name: Checkout forked repo
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
       - run: |
           git remote
           git fetch origin $GITHUB_BASE_REF $GITHUB_HEAD_REF
