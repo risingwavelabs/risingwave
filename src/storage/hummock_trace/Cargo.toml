@@ -7,8 +7,8 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1"
 bincode = { version = "=2.0.0-rc.2", features = ["serde"] }
-bytes = { version = "1", features = ["serde"] }
 byteorder = "1"
+bytes = { version = "1", features = ["serde"] }
 either = "1"
 flume = "0.10.14"
 lazy_static = "1.4.0"
