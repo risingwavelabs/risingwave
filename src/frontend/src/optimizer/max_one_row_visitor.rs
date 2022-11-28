@@ -14,10 +14,7 @@
 
 use std::collections::HashSet;
 
-use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit,
-    LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeUnary,
-};
+use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit, LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeBinary, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 pub struct MaxOneRowVisitor;
@@ -84,6 +81,6 @@ impl PlanVisitor<bool> for HasMaxOneRowApply {
     }
 
     fn visit_logical_apply(&mut self, plan: &LogicalApply) -> bool {
-        plan.max_one_row()
+        plan.max_one_row() | self.visit(plan.left()) | self.visit(plan.right())
     }
 }
