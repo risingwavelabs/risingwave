@@ -66,7 +66,7 @@ impl fmt::Display for BatchNestedLoopJoin {
             "predicate",
             &ConditionDisplay {
                 condition: self.logical.on(),
-                input_schema: &concat_schema
+                input_schema: &concat_schema,
             },
         );
 

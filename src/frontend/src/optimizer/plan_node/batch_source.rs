@@ -71,10 +71,7 @@ impl fmt::Display for BatchSource {
         let mut builder = f.debug_struct("BatchSource");
         builder
             .field("source", &self.logical.source_catalog().name)
-            .field(
-                "columns",
-                &self.column_names(),
-            )
+            .field("columns", &self.column_names())
             .finish()
     }
 }

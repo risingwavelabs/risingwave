@@ -212,12 +212,9 @@ fn task_main(
                 writeln!(
                     log_buffer,
                     "* Run {} to start Postgres interactive shell.",
-                    style(format!(
-                        "psql -h localhost -p {} -d dev -U root",
-                        c.port
-                    ))
-                    .blue()
-                    .bold()
+                    style(format!("psql -h localhost -p {} -d dev -U root", c.port))
+                        .blue()
+                        .bold()
                 )?;
             }
             ServiceConfig::Compactor(c) => {

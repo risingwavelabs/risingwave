@@ -110,7 +110,7 @@ impl fmt::Display for BatchHashJoin {
             "predicate",
             &EqJoinPredicateDisplay {
                 eq_join_predicate: self.eq_join_predicate(),
-                input_schema: &concat_schema
+                input_schema: &concat_schema,
             },
         );
 

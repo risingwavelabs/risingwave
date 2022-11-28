@@ -417,8 +417,9 @@ impl fmt::Display for PlanAggOrderByFieldDisplay<'_> {
         let that = self.plan_agg_order_by_field;
         InputRefDisplay {
             input_ref: &that.input,
-            input_schema: self.input_schema
-        }.fmt(f)?;
+            input_schema: self.input_schema,
+        }
+        .fmt(f)?;
         match that.direction {
             Direction::Asc => write!(f, " ASC")?,
             Direction::Desc => write!(f, " DESC")?,

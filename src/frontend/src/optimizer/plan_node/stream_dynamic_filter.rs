@@ -68,7 +68,7 @@ impl fmt::Display for StreamDynamicFilter {
             "predicate",
             &ConditionDisplay {
                 condition: &self.core.predicate,
-                input_schema: &concat_schema
+                input_schema: &concat_schema,
             },
         );
 

@@ -54,7 +54,7 @@ impl fmt::Display for StreamExchange {
                 "dist",
                 &DistributionDisplay {
                     distribution: &self.base.dist,
-                    input_schema: self.input.schema()
+                    input_schema: self.input.schema(),
                 },
             )
             .finish()
