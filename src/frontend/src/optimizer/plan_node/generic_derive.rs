@@ -77,7 +77,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
                     plan_agg_call: agg_call,
                     input_schema: self.input.schema(),
                 };
-                let name = format!("{}", plan_agg_call_display);
+                let name = plan_agg_call_display.to_string();
                 Field::with_name(agg_call.return_type.clone(), name)
             }))
             .collect();
