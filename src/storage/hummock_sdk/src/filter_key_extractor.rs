@@ -32,7 +32,7 @@ const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(60);
 /// `FilterKeyExtractor` generally used to extract key which will store in BloomFilter
 pub trait FilterKeyExtractor: Send + Sync {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8];
-    fn start_index(&self) -> usize;
+    fn start_index(&self, full_key: &[u8]) -> usize;
 }
 
 pub enum FilterKeyExtractorImpl {
@@ -77,9 +77,9 @@ macro_rules! impl_filter_key_extractor {
                     $( Self::$variant_name(inner) => inner.extract(full_key), )*
                 }
             }
-            pub fn start_index(&self) -> usize{
+            pub fn start_index(&self, full_key: &[u8]) -> usize{
                 match self {
-                    $( Self::$variant_name(inner) => inner.start_index(), )*
+                    $( Self::$variant_name(inner) => inner.start_index(full_key), )*
                 }
             }
         }
@@ -102,26 +102,15 @@ macro_rules! for_all_filter_key_extractor_variants {
 for_all_filter_key_extractor_variants! { impl_filter_key_extractor }
 
 #[derive(Default)]
-pub struct FullKeyFilterKeyExtractor {
-    distribution_key_start_index_in_pk: usize,
-}
+pub struct FullKeyFilterKeyExtractor;
 
-impl FullKeyFilterKeyExtractor {
-    pub fn new(table_catalog: &Table) -> Self {
-        let distribution_key_start_index_in_pk =
-            table_catalog.distribution_key_start_index_in_pk as usize;
-        Self {
-            distribution_key_start_index_in_pk,
-        }
-    }
-}
 impl FilterKeyExtractor for FullKeyFilterKeyExtractor {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        &full_key[self.distribution_key_start_index_in_pk..]
+        full_key
     }
 
-    fn start_index(&self) -> usize {
-        self.distribution_key_start_index_in_pk
+    fn start_index(&self, _full_key: &[u8]) -> usize {
+        0
     }
 }
 
@@ -132,7 +121,7 @@ impl FilterKeyExtractor for DummyFilterKeyExtractor {
         &[]
     }
 
-    fn start_index(&self) -> usize {
+    fn start_index(&self, _full_key: &[u8]) -> usize {
         0
     }
 }
@@ -148,7 +137,7 @@ impl FilterKeyExtractor for FixedLengthFilterKeyExtractor {
         &full_key[0..self.fixed_length]
     }
 
-    fn start_index(&self) -> usize {
+    fn start_index(&self, _full_key: &[u8]) -> usize {
         0
     }
 }
@@ -199,8 +188,22 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
         &full_key[dist_key_start_index..prefix_len]
     }
 
-    fn start_index(&self) -> usize {
-        self.distribution_key_start_index_in_pk
+    fn start_index(&self, full_key: &[u8]) -> usize {
+        if full_key.len() < TABLE_PREFIX_LEN + VirtualNode::SIZE {
+            return 0;
+        }
+
+        let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
+        let (_vnode_prefix, pk) = key.split_at(VirtualNode::SIZE);
+        let (start_index, _) = self
+            .deserializer
+            .deserialize_dist_key_range_indices(
+                pk,
+                0..self.distribution_key_start_index_in_pk + self.read_pattern_prefix_column,
+                self.distribution_key_start_index_in_pk,
+            )
+            .unwrap();
+        start_index
     }
 }
 
@@ -244,14 +247,12 @@ impl SchemaFilterKeyExtractor {
 #[derive(Default)]
 pub struct MultiFilterKeyExtractor {
     id_to_filter_key_extractor: HashMap<u32, Arc<FilterKeyExtractorImpl>>,
-    distribution_key_start_index_in_pk: usize,
     // cached state
     // last_filter_key_extractor_state: Mutex<Option<(u32, Arc<FilterKeyExtractorImpl>)>>,
 }
 
 impl MultiFilterKeyExtractor {
     pub fn register(&mut self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
-        self.distribution_key_start_index_in_pk = filter_key_extractor.start_index();
         self.id_to_filter_key_extractor
             .insert(table_id, filter_key_extractor);
     }
@@ -280,8 +281,12 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
             .extract(full_key)
     }
 
-    fn start_index(&self) -> usize {
-        self.distribution_key_start_index_in_pk
+    fn start_index(&self, full_key: &[u8]) -> usize {
+        let table_id = get_table_id(full_key);
+        self.id_to_filter_key_extractor
+            .get(&table_id)
+            .unwrap()
+            .start_index(full_key)
     }
 }
 

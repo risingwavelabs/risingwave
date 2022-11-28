@@ -1022,12 +1022,15 @@ impl<S: StateStore> StateTable<S> {
         let dist_key_hint = {
             if self.dist_key_indices.is_empty()
                 || !is_subset(self.dist_key_indices.clone(), pk_prefix_indices.to_vec())
+                || self.dist_key_indices().len() + self.distribution_key_start_index_in_pk
+                    > pk_prefix.len()
             {
                 None
             } else {
                 // let dist_key_end_index_in_pk =
                 // self.distribution_key_start_index_in_pk + self.dist_key_indices.len();
                 // let dist_key = (&pk_prefix).project(&self.dist_key_in_pk_indices);
+
                 let (dist_key_start_index, dist_key_len) =
                     self.pk_serde.deserialize_dist_key_range_indices(
                         &encoded_prefix,

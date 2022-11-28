@@ -203,8 +203,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
             // 2. extract_key key is not duplicate
             if !extract_key.is_empty()
                 && (extract_key
-                    != &self.last_full_key[self.filter_key_extractor.start_index()
-                        ..self.filter_key_extractor.start_index()
+                    != &self.last_full_key[self.filter_key_extractor.start_index(extract_key)
+                        ..self.filter_key_extractor.start_index(extract_key)
                             + self.last_bloom_filter_key_length])
             {
                 // avoid duplicate add to bloom filter
