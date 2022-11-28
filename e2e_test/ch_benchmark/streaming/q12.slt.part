@@ -1,0 +1,11 @@
+query III rowsort
+select * from ch_benchmark_q12;
+----
+        6              20             50
+        7              30             40
+        8              20             66
+        9              46             47
+       10               0             48
+       11               0             49
+       12              11             17
+       13               6              0
