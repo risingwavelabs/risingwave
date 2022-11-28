@@ -184,6 +184,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             continue;
         }
 
+        // TODO
+        // in new thread, start dummy follower service
+        // not elegant, because we would have to shut down dummy services and start leader
+        // services
+        // not good: Start service and check if you are leader
+        // interceptor pattern
+        // GRPC pattern Rust?
+
         tracing::info!("Node is leader. Preparing services...");
 
         let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
