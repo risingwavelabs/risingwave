@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Write;
+use std::num::FpCategory;
 
 use super::{DatumRef, ScalarRefImpl};
 
@@ -58,40 +59,72 @@ implement_using_itoa! {
 
 impl ToText for crate::types::OrderedF32 {
     fn to_text(&self) -> String {
-        match self.to_f32() {
-            Some(v) => {
-                if v.is_infinite() {
-                    if v.is_sign_positive() {
-                        "Infinity".to_owned()
-                    } else {
-                        "-Infinity".to_owned()
+        match self.classify() {
+            FpCategory::Infinite if self.is_sign_negative() => "-Infinity".to_owned(),
+            FpCategory::Infinite => "Infinity".to_owned(),
+            FpCategory::Zero if self.is_sign_negative() => "-0".to_owned(),
+            FpCategory::Nan => "NaN".to_owned(),
+            _ => {
+                match self.to_f32() {
+                    Some(v) => {
+                        let mut buf = ryu::Buffer::new();
+                        let mut s = buf.format_finite(v);
+                        if let Some(trimmed) = s.strip_suffix(".0") {
+                            s = trimmed;
+                        }
+                        let mut s_chars= s.chars().peekable();
+                        let mut index = 0;
+                        while let Some(c) = s_chars.next() {
+                            index += 1;
+                            if c == 'e' && s_chars.peek() != Some(&'-') {
+                                break;
+                            }
+                        }
+                        let mut s = s.to_owned();
+                        if index < s.len() {
+                            s.insert(index, '+');
+                        }
+                        s
                     }
-                } else {
-                    let mut buffer = ryu::Buffer::new();
-                    buffer.format(v).to_owned()
+                    None => "NaN".to_owned(),
                 }
             }
-            None => "NaN".to_owned(),
         }
     }
 }
 
 impl ToText for crate::types::OrderedF64 {
     fn to_text(&self) -> String {
-        match self.to_f64() {
-            Some(v) => {
-                if v.is_infinite() {
-                    if v.is_sign_positive() {
-                        "Infinity".to_owned()
-                    } else {
-                        "-Infinity".to_owned()
+        match self.classify() {
+            FpCategory::Infinite if self.is_sign_negative() => "-Infinity".to_owned(),
+            FpCategory::Infinite => "Infinity".to_owned(),
+            FpCategory::Zero if self.is_sign_negative() => "-0".to_owned(),
+            FpCategory::Nan => "NaN".to_owned(),
+            _ => {
+                match self.to_f64() {
+                    Some(v) => {
+                        let mut buf = ryu::Buffer::new();
+                        let mut s = buf.format_finite(v);
+                        if let Some(trimmed) = s.strip_suffix(".0") {
+                            s = trimmed;
+                        }
+                        let mut s_chars= s.chars().peekable();
+                        let mut index = 0;
+                        while let Some(c) = s_chars.next() {
+                            index += 1;
+                            if c == 'e' && s_chars.peek() != Some(&'-') {
+                                break;
+                            }
+                        }
+                        let mut s = s.to_owned();
+                        if index < s.len() {
+                            s.insert(index, '+');
+                        }
+                        s
                     }
-                } else {
-                    let mut buffer = ryu::Buffer::new();
-                    buffer.format(v).to_owned()
+                    None => "NaN".to_owned(),
                 }
             }
-            None => "NaN".to_owned(),
         }
     }
 }
@@ -153,7 +186,8 @@ mod tests {
     fn test_float_to_text() {
         // f64 -> text.
         let ret: OrderedFloat<f64> = OrderedFloat::<f64>::from(1.234567890123456);
-        assert_eq!("1.234567890123456".to_text(), ret.to_text());
+        tracing::info!("ret: {}", ret.to_text());
+        assert_eq!("1.234567890123456".to_string(), ret.to_text());
 
         // f32 -> text.
         let ret: OrderedFloat<f32> = OrderedFloat::<f32>::from(1.234567);
