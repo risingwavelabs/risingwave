@@ -40,6 +40,7 @@ pub use pg_operator::*;
 pub use pg_type::*;
 pub use pg_user::*;
 pub use pg_views::*;
+use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
 use risingwave_common::row::Row;
 use risingwave_common::types::ScalarImpl;
@@ -297,7 +298,14 @@ impl SysCatalogReaderImpl {
                     Row::new(vec![
                         Some(ScalarImpl::Int32(index.id.index_id() as i32)),
                         Some(ScalarImpl::Int32(index.primary_table.id.table_id() as i32)),
-                        Some(ScalarImpl::Int16(index.index_item.len() as i16)),
+                        Some(ScalarImpl::Int16(index.original_columns.len() as i16)),
+                        Some(ScalarImpl::List(ListValue::new(
+                            index
+                                .original_columns
+                                .iter()
+                                .map(|index| Some(ScalarImpl::Int16(index.get_id() as i16 + 1)))
+                                .collect_vec(),
+                        ))),
                     ])
                 })
             })

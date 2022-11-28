@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
@@ -19,8 +21,16 @@ use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 /// The catalog `pg_index` contains part of the information about indexes.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-index.html`]
 pub const PG_INDEX_TABLE_NAME: &str = "pg_index";
-pub const PG_INDEX_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "indexrelid"),
-    (DataType::Int32, "indrelid"),
-    (DataType::Int16, "indnatts"),
-];
+pub static PG_INDEX_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
+    vec![
+        (DataType::Int32, "indexrelid"),
+        (DataType::Int32, "indrelid"),
+        (DataType::Int16, "indnatts"),
+        (
+            DataType::List {
+                datatype: Box::new(DataType::Int16),
+            },
+            "indkey",
+        ),
+    ]
+});
