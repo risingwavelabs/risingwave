@@ -5199,6 +5199,7 @@ name = "risingwave_compaction_test"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytes",
  "clap 3.2.23",
  "itertools",

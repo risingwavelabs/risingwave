@@ -24,9 +24,11 @@
 #![warn(clippy::await_holding_lock)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+mod delete_range_runner;
 mod runner;
 
 use clap::Parser;
+pub use delete_range_runner::start_delete_range;
 use risingwave_common::config::{ServerConfig, StorageConfig};
 use serde::{Deserialize, Serialize};
 
