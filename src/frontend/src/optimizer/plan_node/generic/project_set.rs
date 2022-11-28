@@ -33,6 +33,7 @@ pub struct ProjectSet<PlanRef> {
     pub select_list: Vec<ExprImpl>,
     pub input: PlanRef,
 }
+
 impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
     fn schema(&self) -> Schema {
         let input_schema = self.input.schema();

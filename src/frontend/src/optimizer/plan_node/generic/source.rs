@@ -30,6 +30,7 @@ use crate::TableCatalog;
 pub struct Source {
     pub catalog: Rc<SourceCatalog>,
 }
+
 impl GenericPlanNode for Source {
     fn schema(&self) -> Schema {
         let fields = self

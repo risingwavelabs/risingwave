@@ -34,6 +34,7 @@ pub struct Expand<PlanRef> {
     pub column_subsets: Vec<Vec<usize>>,
     pub input: PlanRef,
 }
+
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
     fn schema(&self) -> Schema {
         let mut fields = self.input.schema().clone().into_fields();

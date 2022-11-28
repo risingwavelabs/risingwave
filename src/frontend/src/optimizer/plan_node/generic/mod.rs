@@ -41,6 +41,7 @@ mod union;
 pub use union::*;
 mod top_n;
 pub use top_n::*;
+
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;
     fn logical_pk(&self) -> &[usize];

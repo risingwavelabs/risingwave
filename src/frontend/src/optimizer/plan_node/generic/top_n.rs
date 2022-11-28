@@ -32,6 +32,7 @@ pub struct TopN<PlanRef> {
     pub order: Order,
     pub group_key: Vec<usize>,
 }
+
 impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
     /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
     pub fn infer_internal_table_catalog(

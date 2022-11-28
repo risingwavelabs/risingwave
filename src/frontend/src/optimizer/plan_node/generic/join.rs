@@ -33,6 +33,7 @@ pub struct Join<PlanRef> {
     pub join_type: JoinType,
     pub output_indices: Vec<usize>,
 }
+
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
     fn schema(&self) -> Schema {
         let left_schema = self.left.schema();

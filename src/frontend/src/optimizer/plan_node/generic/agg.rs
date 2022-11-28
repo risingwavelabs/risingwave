@@ -45,6 +45,7 @@ pub struct Agg<PlanRef> {
     pub group_key: Vec<usize>,
     pub input: PlanRef,
 }
+
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     fn schema(&self) -> Schema {
         let fields = self
