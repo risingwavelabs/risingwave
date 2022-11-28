@@ -805,7 +805,7 @@ impl Session<PgResponseStream> for SessionImpl {
             } else {
                 handle_fut.await
             }
-        } 
+        }
         .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
         Ok(rsp)
     }
