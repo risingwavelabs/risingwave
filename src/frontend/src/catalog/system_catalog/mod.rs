@@ -181,7 +181,7 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_TYPE, vec![0], read_types },
     { PG_CATALOG, PG_NAMESPACE, vec![0], read_namespace },
     { PG_CATALOG, PG_CAST, vec![0], read_cast },
-    { PG_CATALOG, PG_MATVIEWS_INFO, vec![0], read_mviews_info await },
+    { PG_CATALOG, PG_MATVIEWS, vec![0], read_mviews_info await },
     { PG_CATALOG, PG_USER, vec![0], read_user_info },
     { PG_CATALOG, PG_CLASS, vec![0], read_class_info },
     { PG_CATALOG, PG_INDEX, vec![0], read_index_info },

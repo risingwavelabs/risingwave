@@ -18,7 +18,7 @@ pub mod pg_cast;
 pub mod pg_class;
 pub mod pg_collation;
 pub mod pg_index;
-pub mod pg_matviews_info;
+pub mod pg_matviews;
 pub mod pg_namespace;
 pub mod pg_opclass;
 pub mod pg_operator;
@@ -35,7 +35,7 @@ pub use pg_cast::*;
 pub use pg_class::*;
 pub use pg_collation::*;
 pub use pg_index::*;
-pub use pg_matviews_info::*;
+pub use pg_matviews::*;
 pub use pg_namespace::*;
 pub use pg_opclass::*;
 pub use pg_operator::*;
@@ -340,12 +340,12 @@ impl SysCatalogReaderImpl {
                 .for_each(|t| {
                     if let Some(fragments) = table_fragments.get(&t.id.table_id) {
                         rows.push(Row::new(vec![
-                            Some(ScalarImpl::Int32(t.id.table_id as i32)),
-                            Some(ScalarImpl::Utf8(t.name.clone())),
                             Some(ScalarImpl::Utf8(schema.clone())),
+                            Some(ScalarImpl::Utf8(t.name.clone())),
                             Some(ScalarImpl::Int32(t.owner as i32)),
-                            Some(ScalarImpl::Utf8(json!(fragments).to_string())),
                             Some(ScalarImpl::Utf8(t.definition.clone())),
+                            Some(ScalarImpl::Int32(t.id.table_id as i32)),
+                            Some(ScalarImpl::Utf8(json!(fragments).to_string())),
                         ]));
                     }
                 });
