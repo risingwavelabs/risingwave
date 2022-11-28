@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, Row2};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
@@ -246,10 +246,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
     ) -> StreamExecutorResult<ScalarImpl> {
         let watermark_iter_futures = (0..VirtualNode::COUNT).map(|vnode| async move {
             let pk = Row::new(vec![Some(ScalarImpl::Int16(vnode as _))]);
-            let watermark_row = table.get_row(&pk).await?;
+            let watermark_row: Option<Row> = table.get_row(&pk).await?;
             match watermark_row {
                 Some(row) => {
-                    if row.size() == 1 {
+                    if row.len() == 1 {
                         Ok::<_, StreamExecutorError>(row[0].to_owned())
                     } else {
                         bail!("The watermark row should only contains 1 datum");
@@ -282,11 +282,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};
+    use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::Distribution;
@@ -429,9 +428,9 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                NaiveDate::from_ymd(2022, 11, 7).and_hms(0, 0, 0)
-            )))
+            watermark!(ScalarImpl::NaiveDateTime(
+                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 7).and_hms_uncheck(0, 0, 0)
+            ))
         );
 
         // push the 2nd barrier
@@ -452,9 +451,9 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                NaiveDate::from_ymd(2022, 11, 9).and_hms(0, 0, 0)
-            )))
+            watermark!(ScalarImpl::NaiveDateTime(
+                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
+            ))
         );
 
         // push the 3nd barrier
@@ -476,9 +475,9 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                NaiveDate::from_ymd(2022, 11, 9).and_hms(0, 0, 0)
-            )))
+            watermark!(ScalarImpl::NaiveDateTime(
+                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
+            ))
         );
 
         // push the 3rd chunk
@@ -495,9 +494,9 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                NaiveDate::from_ymd(2022, 11, 13).and_hms(0, 0, 0)
-            )))
+            watermark!(ScalarImpl::NaiveDateTime(
+                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 13).and_hms_uncheck(0, 0, 0)
+            ))
         );
     }
 }

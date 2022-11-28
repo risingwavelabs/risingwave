@@ -113,7 +113,7 @@ fn nexmark_chaos_common(
 
 macro_rules! test {
     ($query:ident) => {
-        test!($query, Duration::from_secs(5));
+        test!($query, Duration::from_secs(1));
     };
     ($query:ident, $after_scale_duration:expr) => {
         paste::paste! {
@@ -156,6 +156,6 @@ test!(q4);
 test!(q5);
 // q6: cannot plan
 test!(q7);
-test!(q8, Duration::from_secs(2));
+test!(q8);
 test!(q9);
 // TODO: extended queries from q10

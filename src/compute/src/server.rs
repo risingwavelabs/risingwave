@@ -32,6 +32,7 @@ use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
+use risingwave_source::dml_manager::DmlManager;
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::TableSourceManager;
 use risingwave_storage::hummock::compactor::{
@@ -207,6 +208,7 @@ pub async fn compute_node_serve(
         stream_config.developer.stream_connector_message_buffer_size,
     ));
     let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
+    let dml_mgr = Arc::new(DmlManager::default());
 
     // Initialize batch environment.
     let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
@@ -219,6 +221,7 @@ pub async fn compute_node_serve(
         state_store.clone(),
         batch_task_metrics.clone(),
         client_pool,
+        dml_mgr.clone(),
     );
 
     // Initialize the streaming environment.
@@ -229,6 +232,7 @@ pub async fn compute_node_serve(
         stream_config,
         worker_id,
         state_store,
+        dml_mgr,
     );
 
     // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if

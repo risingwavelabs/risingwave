@@ -29,8 +29,8 @@ use super::{
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, hash_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarRefImpl,
+    deserialize_datum_from, hash_datum, serialize_datum_into, DataType, Datum, DatumRef, Scalar,
+    ScalarRefImpl, ToDatumRef,
 };
 
 /// This is a naive implementation of list array.
@@ -90,7 +90,7 @@ impl ArrayBuilder for ListArrayBuilder {
                 let values_ref = v.values_ref();
                 self.offsets.push(last + values_ref.len());
                 for f in values_ref {
-                    self.value.append_datum_ref(f);
+                    self.value.append_datum(f);
                 }
             }
         }
@@ -138,7 +138,7 @@ impl ListArrayBuilder {
         self.offsets.push(last + row.size());
         self.len += 1;
         for v in row.values() {
-            self.value.append_datum_ref(v);
+            self.value.append_datum(v);
         }
     }
 }
@@ -380,7 +380,7 @@ macro_rules! iter_elems_ref {
                 $($body)*
             }
             ListRef::ValueRef { val } => {
-                let $it = val.values.iter().map(to_datum_ref);
+                let $it = val.values.iter().map(ToDatumRef::to_datum_ref);
                 $($body)*
             }
         }
@@ -417,7 +417,7 @@ impl<'a> ListRef<'a> {
             }
             ListRef::ValueRef { val } => {
                 if let Some(datum) = val.values().iter().nth(index - 1) {
-                    Ok(to_datum_ref(datum))
+                    Ok(datum.to_datum_ref())
                 } else {
                     Ok(None)
                 }
@@ -432,7 +432,7 @@ impl<'a> ListRef<'a> {
         let mut inner_serializer = memcomparable::Serializer::new(vec![]);
         iter_elems_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_ref_into(&datum_ref, &mut inner_serializer)?
+                serialize_datum_into(datum_ref, &mut inner_serializer)?
             }
         });
         serializer.serialize_bytes(&inner_serializer.into_inner())
@@ -441,7 +441,7 @@ impl<'a> ListRef<'a> {
     pub fn hash_scalar_inner<H: std::hash::Hasher>(&self, state: &mut H) {
         iter_elems_ref!(self, it, {
             for datum_ref in it {
-                hash_datum_ref(datum_ref, state);
+                hash_datum(datum_ref, state);
             }
         })
     }
