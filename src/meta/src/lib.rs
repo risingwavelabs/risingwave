@@ -17,6 +17,7 @@
     clippy::or_fun_call,
     reason = "https://github.com/rust-lang/rust-clippy/issues/8574"
 )]
+#![feature(once_cell)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
@@ -30,7 +31,6 @@
 #![feature(is_some_and)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
-#![feature(once_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]

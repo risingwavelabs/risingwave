@@ -27,6 +27,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
+lazy_static = "1.4.0"
 memcomparable = { path = "../utils/memcomparable" }
 mime_guess = "2"
 num-integer = "0.1"

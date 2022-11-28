@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
+use lazy_static::lazy_static;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
@@ -32,6 +34,8 @@ use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch::Receiver;
 use tokio::task::JoinHandle;
+use tonic::transport::Server;
+use tonic::{Request, Response, Status};
 
 use super::elections::run_elections;
 use super::intercept::MetricsMiddlewareLayer;
@@ -407,17 +411,38 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         // Start services.
         tokio::spawn(async move {
+            //  let counter = Arc::new(Mutex::new(0));
+            //  let inter = |mut req: Request<()>| {
+            //      let mut counter_lock = counter.lock().unwrap();
+            //      *counter_lock = *counter_lock + 1;
+            //      println!("Count: {}. Intercepting request: {:?}", *counter_lock, req);
+            //      Ok(req)
+            //  };
             tonic::transport::Server::builder()
                 .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
-                .add_service(HeartbeatServiceServer::new(heartbeat_srv))
-                .add_service(ClusterServiceServer::new(cluster_srv))
-                .add_service(StreamManagerServiceServer::new(stream_srv))
-                .add_service(HummockManagerServiceServer::new(hummock_srv))
-                .add_service(NotificationServiceServer::new(notification_srv))
-                .add_service(DdlServiceServer::new(ddl_srv))
-                .add_service(UserServiceServer::new(user_srv))
-                .add_service(ScaleServiceServer::new(scale_srv))
-                .add_service(HealthServer::new(health_srv))
+                .add_service(HeartbeatServiceServer::with_interceptor(
+                    heartbeat_srv,
+                    intercept,
+                ))
+                .add_service(ClusterServiceServer::with_interceptor(
+                    cluster_srv,
+                    intercept,
+                ))
+                .add_service(StreamManagerServiceServer::with_interceptor(
+                    stream_srv, intercept,
+                ))
+                .add_service(HummockManagerServiceServer::with_interceptor(
+                    hummock_srv,
+                    intercept,
+                ))
+                .add_service(NotificationServiceServer::with_interceptor(
+                    notification_srv,
+                    intercept,
+                ))
+                .add_service(DdlServiceServer::with_interceptor(ddl_srv, intercept))
+                .add_service(UserServiceServer::with_interceptor(user_srv, intercept))
+                .add_service(ScaleServiceServer::with_interceptor(scale_srv, intercept))
+                .add_service(HealthServer::with_interceptor(health_srv, intercept))
                 .serve(address_info.listen_addr)
                 .await
                 .unwrap();
@@ -440,6 +465,25 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         return Ok((join_handle, shutdown_send));
     }
+}
+
+lazy_static! {
+    static ref COUNT: Mutex<i32> = Mutex::new(0);
+}
+
+pub fn intercept(mut req: Request<()>) -> Result<Request<()>, Status> {
+    println!(
+        "Count: {}. Intercepting request: {:?}",
+        *COUNT.lock().unwrap(),
+        req
+    );
+    *COUNT.lock().unwrap() = *COUNT.lock().unwrap() + 1;
+    // Set an extension that can be retrieved by `say_hello`
+    // req.extensions_mut().insert(MyExtension {
+    //     some_piece_of_data: "foo".to_string(),
+    // });
+
+    Ok(req)
 }
 
 #[cfg(test)]
