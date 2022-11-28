@@ -73,10 +73,10 @@ impl fmt::Display for StreamIndexScan {
         let mut builder = f.debug_struct("StreamIndexScan");
 
         builder
-            .field("index", &format_args!("{}", self.logical.table_name()))
+            .field("index", &self.logical.table_name())
             .field(
                 "columns",
-                &format_args!(
+                &format!(
                     "[{}]",
                     match verbose {
                         false => self.logical.column_names(),

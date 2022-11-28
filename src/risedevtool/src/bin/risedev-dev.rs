@@ -212,7 +212,7 @@ fn task_main(
                 writeln!(
                     log_buffer,
                     "* Run {} to start Postgres interactive shell.",
-                    style(format_args!(
+                    style(format!(
                         "psql -h localhost -p {} -d dev -U root",
                         c.port
                     ))

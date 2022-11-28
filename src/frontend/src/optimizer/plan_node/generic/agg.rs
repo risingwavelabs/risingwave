@@ -412,17 +412,13 @@ pub struct PlanAggOrderByFieldDisplay<'a> {
     pub input_schema: &'a Schema,
 }
 
-impl fmt::Debug for PlanAggOrderByFieldDisplay<'_> {
+impl fmt::Display for PlanAggOrderByFieldDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let that = self.plan_agg_order_by_field;
-        write!(
-            f,
-            "{:?}",
-            InputRefDisplay {
-                input_ref: &that.input,
-                input_schema: self.input_schema
-            }
-        )?;
+        InputRefDisplay {
+            input_ref: &that.input,
+            input_schema: self.input_schema
+        }.fmt(f)?;
         match that.direction {
             Direction::Asc => write!(f, " ASC")?,
             Direction::Desc => write!(f, " DESC")?,
@@ -603,13 +599,10 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                     f,
                     " order_by({})",
                     that.order_by_fields.iter().format_with(", ", |e, f| {
-                        f(&format_args!(
-                            "{:?}",
-                            PlanAggOrderByFieldDisplay {
-                                plan_agg_order_by_field: e,
-                                input_schema: self.input_schema,
-                            }
-                        ))
+                        f(&PlanAggOrderByFieldDisplay {
+                            plan_agg_order_by_field: e,
+                            input_schema: self.input_schema,
+                        })
                     })
                 )?;
             }

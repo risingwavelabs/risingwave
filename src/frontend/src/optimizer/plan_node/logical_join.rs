@@ -54,20 +54,17 @@ impl fmt::Display for LogicalJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("LogicalJoin");
-        builder.field("type", &format_args!("{:?}", self.join_type()));
+        builder.field("type", &self.join_type());
 
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
         builder.field(
             "on",
-            &format_args!(
-                "{}",
-                ConditionDisplay {
-                    condition: self.on(),
-                    input_schema: &concat_schema
-                }
-            ),
+            &ConditionDisplay {
+                condition: self.on(),
+                input_schema: &concat_schema,
+            },
         );
 
         if verbose {
@@ -77,7 +74,7 @@ impl fmt::Display for LogicalJoin {
                 .copied()
                 .eq(0..self.internal_column_num())
             {
-                builder.field("output", &format_args!("all"));
+                builder.field("output", &"all");
             } else {
                 builder.field(
                     "output",

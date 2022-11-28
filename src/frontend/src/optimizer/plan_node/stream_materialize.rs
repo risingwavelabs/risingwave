@@ -208,11 +208,11 @@ impl fmt::Display for StreamMaterialize {
 
         let mut builder = f.debug_struct("StreamMaterialize");
         builder
-            .field("columns", &format_args!("[{}]", column_names))
-            .field("pk_columns", &format_args!("[{}]", pk_column_names));
+            .field("columns", &format!("[{}]", column_names))
+            .field("pk_columns", &format!("[{}]", pk_column_names));
 
         if pk_column_names != order_descs {
-            builder.field("order_descs", &format_args!("[{}]", order_descs));
+            builder.field("order_descs", &format!("[{}]", order_descs));
         }
         builder.finish()
     }

@@ -105,7 +105,7 @@ impl std::fmt::Debug for WindowFunction {
                 .field("return_type", &self.return_type)
                 .field("args", &self.args)
                 .field("partition_by", &self.partition_by)
-                .field("order_by", &format_args!("{}", self.order_by))
+                .field("order_by", &self.order_by.to_string())
                 .finish()
         } else {
             write!(f, "{}() OVER(", self.function_type)?;

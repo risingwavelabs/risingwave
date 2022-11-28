@@ -73,7 +73,7 @@ impl fmt::Display for BatchSource {
             .field("source", &self.logical.source_catalog().name)
             .field(
                 "columns",
-                &format_args!("[{}]", &self.column_names().join(", ")),
+                &self.column_names(),
             )
             .finish()
     }
