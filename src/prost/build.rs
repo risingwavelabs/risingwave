@@ -30,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "meta",
         "batch_plan",
         "task_service",
+        "connector_service",
         "stream_plan",
         "stream_service",
         "compactor",
