@@ -1,26 +1,13 @@
-
 use std::fmt;
-
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, IntervalUnit};
 
-
-
-
-
-
-
-use super::super::utils::{IndicesDisplay};
+use super::super::utils::IndicesDisplay;
 use super::{GenericPlanNode, GenericPlanRef};
-
-
 use crate::expr::{InputRef, InputRefDisplay};
-
 use crate::session::OptimizerContextRef;
-
-
 
 /// [`HopWindow`] implements Hop Table Function.
 #[derive(Debug, Clone)]

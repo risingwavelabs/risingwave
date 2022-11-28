@@ -12,30 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
-
-
-
-use risingwave_common::catalog::{Schema};
-
-
-
-
-
-
-
-
+use risingwave_common::catalog::Schema;
 
 use super::{stream, EqJoinPredicate};
-
-
-
-
 use crate::session::OptimizerContextRef;
-
-
-
 
 pub mod dynamic_filter;
 pub use dynamic_filter::*;

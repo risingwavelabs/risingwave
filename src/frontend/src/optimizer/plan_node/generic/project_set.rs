@@ -1,23 +1,10 @@
-
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::{DataType};
-
-
-
-
-
-
-
+use risingwave_common::types::DataType;
 
 use super::{GenericPlanNode, GenericPlanRef};
-
-
 use crate::expr::{Expr, ExprDisplay, ExprImpl};
-
 use crate::session::OptimizerContextRef;
-
-use crate::utils::{ColIndexMapping};
-
+use crate::utils::ColIndexMapping;
 
 /// [`ProjectSet`] projects one row multiple times according to `select_list`.
 ///

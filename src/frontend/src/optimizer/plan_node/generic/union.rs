@@ -1,26 +1,7 @@
-
-
-
-
-use itertools::Itertools;
-use risingwave_common::catalog::{Schema};
-
-
-
-
-
-
-
-
+use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
-
-
-
-
 use crate::session::OptimizerContextRef;
-
-
 
 /// `Union` returns the union of the rows of its inputs.
 /// If `all` is false, it needs to eliminate duplicates.

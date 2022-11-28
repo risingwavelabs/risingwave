@@ -1,27 +1,12 @@
-
 use std::fmt;
-
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
-
-
-
-
-
-
-
-
 use super::{GenericPlanNode, GenericPlanRef};
-
-
 use crate::expr::{Expr, ExprDisplay, ExprImpl};
-
 use crate::session::OptimizerContextRef;
-
-use crate::utils::{ColIndexMapping};
-
+use crate::utils::ColIndexMapping;
 
 /// [`Project`] computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]

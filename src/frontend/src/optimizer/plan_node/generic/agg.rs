@@ -1,23 +1,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
-use risingwave_common::types::{DataType};
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
-
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
-use super::super::utils::{TableCatalogBuilder};
+use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
-
-
 use crate::expr::{Expr, InputRef, InputRefDisplay};
-use crate::optimizer::property::{Direction};
+use crate::optimizer::property::Direction;
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};

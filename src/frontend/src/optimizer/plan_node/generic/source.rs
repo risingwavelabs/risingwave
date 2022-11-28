@@ -1,26 +1,14 @@
-use std::collections::{HashMap};
-
+use std::collections::HashMap;
 use std::rc::Rc;
 
-
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::{DataType};
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
-
-
-
-
-
-use super::super::utils::{TableCatalogBuilder};
+use super::super::utils::TableCatalogBuilder;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::catalog::source_catalog::SourceCatalog;
-
-
-
 use crate::session::OptimizerContextRef;
-
-
 use crate::TableCatalog;
 
 /// [`Source`] returns contents of a table or other equivalent object

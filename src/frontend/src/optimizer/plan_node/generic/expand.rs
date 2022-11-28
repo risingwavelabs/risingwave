@@ -1,27 +1,9 @@
-
-
-
-
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
-use risingwave_common::types::{DataType};
-
-
-
-
-
-
-
+use risingwave_common::types::DataType;
 
 use super::{GenericPlanNode, GenericPlanRef};
-
-
-
-
 use crate::session::OptimizerContextRef;
-
-
-
 
 /// [`Expand`] expand one row multiple times according to `column_subsets` and also keep
 /// original columns of input. It can be used to implement distinct aggregation and group set.

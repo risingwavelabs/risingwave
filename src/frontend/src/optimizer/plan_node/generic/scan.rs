@@ -1,26 +1,12 @@
-use std::collections::{HashMap};
-
+use std::collections::HashMap;
 use std::rc::Rc;
-
 
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 
-
-
-
-
-
-
-
-
-use super::{GenericPlanNode};
-
+use super::GenericPlanNode;
 use crate::catalog::{ColumnId, IndexCatalog};
-
-
 use crate::session::OptimizerContextRef;
-
-use crate::utils::{Condition};
+use crate::utils::Condition;
 
 /// [`Scan`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]

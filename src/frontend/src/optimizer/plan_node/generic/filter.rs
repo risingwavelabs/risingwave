@@ -1,26 +1,8 @@
-
-
-
-
-
-use risingwave_common::catalog::{Schema};
-
-
-
-
-
-
-
-
+use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
-
-
-
-
 use crate::session::OptimizerContextRef;
-
-use crate::utils::{Condition};
+use crate::utils::Condition;
 
 /// [`Filter`] iterates over its input and returns elements for which `predicate` evaluates to
 /// true, filtering out the others.
