@@ -15,6 +15,8 @@
 use std::fmt::Write;
 use std::num::FpCategory;
 
+use num_traits::ToPrimitive;
+
 use super::{DatumRef, ScalarRefImpl};
 
 // Used to convert ScalarRef to text format
@@ -64,31 +66,29 @@ impl ToText for crate::types::OrderedF32 {
             FpCategory::Infinite => "Infinity".to_owned(),
             FpCategory::Zero if self.is_sign_negative() => "-0".to_owned(),
             FpCategory::Nan => "NaN".to_owned(),
-            _ => {
-                match self.to_f32() {
-                    Some(v) => {
-                        let mut buf = ryu::Buffer::new();
-                        let mut s = buf.format_finite(v);
-                        if let Some(trimmed) = s.strip_suffix(".0") {
-                            s = trimmed;
-                        }
-                        let mut s_chars= s.chars().peekable();
-                        let mut index = 0;
-                        while let Some(c) = s_chars.next() {
-                            index += 1;
-                            if c == 'e' && s_chars.peek() != Some(&'-') {
-                                break;
-                            }
-                        }
-                        let mut s = s.to_owned();
-                        if index < s.len() {
-                            s.insert(index, '+');
-                        }
-                        s
+            _ => match self.to_f32() {
+                Some(v) => {
+                    let mut buf = ryu::Buffer::new();
+                    let mut s = buf.format_finite(v);
+                    if let Some(trimmed) = s.strip_suffix(".0") {
+                        s = trimmed;
                     }
-                    None => "NaN".to_owned(),
+                    let mut s_chars = s.chars().peekable();
+                    let mut index = 0;
+                    while let Some(c) = s_chars.next() {
+                        index += 1;
+                        if c == 'e' && s_chars.peek() != Some(&'-') {
+                            break;
+                        }
+                    }
+                    let mut s = s.to_owned();
+                    if index < s.len() {
+                        s.insert(index, '+');
+                    }
+                    s
                 }
-            }
+                None => "NaN".to_owned(),
+            },
         }
     }
 }
@@ -100,31 +100,29 @@ impl ToText for crate::types::OrderedF64 {
             FpCategory::Infinite => "Infinity".to_owned(),
             FpCategory::Zero if self.is_sign_negative() => "-0".to_owned(),
             FpCategory::Nan => "NaN".to_owned(),
-            _ => {
-                match self.to_f64() {
-                    Some(v) => {
-                        let mut buf = ryu::Buffer::new();
-                        let mut s = buf.format_finite(v);
-                        if let Some(trimmed) = s.strip_suffix(".0") {
-                            s = trimmed;
-                        }
-                        let mut s_chars= s.chars().peekable();
-                        let mut index = 0;
-                        while let Some(c) = s_chars.next() {
-                            index += 1;
-                            if c == 'e' && s_chars.peek() != Some(&'-') {
-                                break;
-                            }
-                        }
-                        let mut s = s.to_owned();
-                        if index < s.len() {
-                            s.insert(index, '+');
-                        }
-                        s
+            _ => match self.to_f64() {
+                Some(v) => {
+                    let mut buf = ryu::Buffer::new();
+                    let mut s = buf.format_finite(v);
+                    if let Some(trimmed) = s.strip_suffix(".0") {
+                        s = trimmed;
                     }
-                    None => "NaN".to_owned(),
+                    let mut s_chars = s.chars().peekable();
+                    let mut index = 0;
+                    while let Some(c) = s_chars.next() {
+                        index += 1;
+                        if c == 'e' && s_chars.peek() != Some(&'-') {
+                            break;
+                        }
+                    }
+                    let mut s = s.to_owned();
+                    if index < s.len() {
+                        s.insert(index, '+');
+                    }
+                    s
                 }
-            }
+                None => "NaN".to_owned(),
+            },
         }
     }
 }
