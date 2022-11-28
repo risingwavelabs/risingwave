@@ -32,7 +32,9 @@ jobs:
           npm install
           npm run gen-proto
 
-          if ! git diff --quiet; then
+          git add -A
+          if ! git diff --quiet --staged; then
+            git reset
             echo "::error::Generated proto files are not up to date."
             FORK_POINT=$(git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF)
             if ! git diff --quiet $FORK_POINT..upstream/$GITHUB_BASE_REF -- ../proto; then
