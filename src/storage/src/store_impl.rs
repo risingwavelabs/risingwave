@@ -17,13 +17,11 @@ use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_object_store::object::{
     parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
 };
-use tracing::info;
 
 use crate::error::StorageResult;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -35,7 +33,6 @@ use crate::hummock::{
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
-use crate::store_impl::verify::VerifyStateStore;
 use crate::StateStore;
 
 pub type HummockStorageType = impl StateStore + AsHummockTrait;
@@ -85,6 +82,11 @@ fn may_verify(state_store: impl StateStore + AsHummockTrait) -> impl StateStore 
     }
     #[cfg(debug_assertions)]
     {
+        use risingwave_common::util::env_var::env_var_is_true;
+        use tracing::info;
+
+        use crate::store_impl::verify::VerifyStateStore;
+
         let expected = if env_var_is_true("ENABLE_STATE_STORE_VERIFY") {
             info!("enable verify state store");
             Some(SledStateStore::new_temp())
