@@ -211,6 +211,15 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
     })
 }
 
+fn validate_result<T>(result: Result<T>) -> Result<()> {
+    if let Err(e) = result {
+        if let Some(s) = e.message() && !is_permissible_error(s) {
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
 pub fn run() {
     let args = Arguments::from_args();
     let env = Arc::new(setup_sqlsmith_with_seed(0).unwrap());
@@ -225,18 +234,15 @@ pub fn run() {
                     tables,
                     setup_sql,
                 } = &*env;
-                if let Err(e) = test_batch_query(session.clone(), tables.clone(), i, setup_sql) {
-                    if let Some(s) = e.message() && !is_permissible_error(s) {
-                        return Err(e);
-                    }
-                }
+                validate_result(test_batch_query(
+                    session.clone(),
+                    tables.clone(),
+                    i,
+                    setup_sql,
+                ))?;
                 let test_stream_query =
                     test_stream_query(session.clone(), tables.clone(), i, setup_sql);
-                if let Err(e) = build_runtime().block_on(test_stream_query) {
-                    if let Some(s) = e.message()  && !is_permissible_error(s) {
-                        return Err(e);
-                    }
-                }
+                validate_result(build_runtime().block_on(test_stream_query))?;
                 Ok(())
             })
         })
