@@ -90,7 +90,7 @@ mod tests {
     use crate::error::StorageResult;
 
     fn gen_pk_and_row(i: u8) -> StorageResult<(Vec<u8>, Row)> {
-        Ok((vec![i], Row(vec![Some(ScalarImpl::Int64(i as _))])))
+        Ok((vec![i], Row::new(vec![Some(ScalarImpl::Int64(i as _))])))
     }
 
     #[tokio::test]

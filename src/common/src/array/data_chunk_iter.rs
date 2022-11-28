@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-
 use super::column::Column;
 use crate::array::DataChunk;
-use crate::row::Row;
-use crate::types::{DatumRef, ToOwnedDatum};
+use crate::row::{Row, Row2, RowExt};
+use crate::types::DatumRef;
 
 impl DataChunk {
     /// Get an iterator for visible rows.
@@ -94,7 +92,7 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct RowRef<'a> {
     chunk: &'a DataChunk,
 
@@ -113,6 +111,7 @@ impl<'a> RowRef<'a> {
         Self { chunk, idx }
     }
 
+    /// TODO(row trait): use `Row::datum_at` instead.
     pub fn value_at(&self, pos: usize) -> DatumRef<'_> {
         debug_assert!(self.idx < self.chunk.capacity());
         // for `RowRef`, the index is always in bound.
@@ -123,10 +122,25 @@ impl<'a> RowRef<'a> {
         }
     }
 
+    /// Returns the datum ref at the `pos`, without doing bounds checking.
+    ///
+    /// # Safety
+    /// Calling this method with an out-of-bounds index is undefined behavior.
+    pub(super) unsafe fn value_at_unchecked(&self, pos: usize) -> DatumRef<'_> {
+        debug_assert!(self.idx < self.chunk.capacity());
+        // for `RowRef`, the index is always in bound.
+        self.chunk
+            .columns()
+            .get_unchecked(pos)
+            .array_ref()
+            .value_at_unchecked(self.idx)
+    }
+
     pub fn size(&self) -> usize {
         self.chunk.columns().len()
     }
 
+    /// TODO(row trait): make `pub(super)` and use `Row::iter` instead.
     pub fn values<'b>(&'b self) -> impl Iterator<Item = DatumRef<'a>>
     where
         'a: 'b,
@@ -138,21 +152,18 @@ impl<'a> RowRef<'a> {
         }
     }
 
-    pub fn to_owned_row(&self) -> Row {
-        Row(self.values().map(ToOwnedDatum::to_owned_datum).collect())
-    }
-
     /// Get an owned `Row` by the given `indices` from current row ref.
     ///
     /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
+    ///
+    /// TODO(row trait): use `Row::project` instead.
     pub fn row_by_indices(&self, indices: &[usize]) -> Row {
-        Row(indices
-            .iter()
-            .map(|&idx| self.value_at(idx).to_owned_datum())
-            .collect_vec())
+        self.project(indices).into_owned_row()
     }
 
     /// Get an iterator of datum refs by the given `indices` from current row ref.
+    ///
+    /// TODO(row trait): use `Row::project` instead.
     pub fn datum_refs_by_indices<'b, 'c>(
         &'b self,
         indices: &'c [usize],
@@ -173,12 +184,9 @@ impl<'a> RowRef<'a> {
 
 impl PartialEq for RowRef<'_> {
     fn eq(&self, other: &Self) -> bool {
-        self.values()
-            .zip_longest(other.values())
-            .all(|pair| pair.both().map(|(a, b)| a == b).unwrap_or(false))
+        self.values().eq(other.values())
     }
 }
-
 impl Eq for RowRef<'_> {}
 
 impl PartialOrd for RowRef<'_> {
@@ -186,10 +194,31 @@ impl PartialOrd for RowRef<'_> {
         self.values().partial_cmp(other.values())
     }
 }
-
 impl Ord for RowRef<'_> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
+        self.values().cmp(other.values())
+    }
+}
+
+impl Row2 for RowRef<'_> {
+    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    where
+        Self: 'a;
+
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        RowRef::value_at(self, index)
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        RowRef::value_at_unchecked(self, index)
+    }
+
+    fn len(&self) -> usize {
+        RowRef::size(self)
+    }
+
+    fn iter(&self) -> Self::Iter<'_> {
+        RowRef::values(self)
     }
 }
 

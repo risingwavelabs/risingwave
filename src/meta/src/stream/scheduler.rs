@@ -19,7 +19,7 @@ use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::types::VnodeMapping;
+use risingwave_common::hash::VnodeMapping;
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -268,7 +268,7 @@ mod test {
 
     use itertools::Itertools;
     use risingwave_common::buffer::Bitmap;
-    use risingwave_common::types::VIRTUAL_NODE_COUNT;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_pb::catalog::Table;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -400,7 +400,7 @@ mod test {
             for actor in fragment.actors {
                 vnode_sum += Bitmap::from(actor.get_vnode_bitmap()?).num_high_bits();
             }
-            assert_eq!(vnode_sum, VIRTUAL_NODE_COUNT);
+            assert_eq!(vnode_sum, VirtualNode::COUNT);
         }
 
         Ok(())

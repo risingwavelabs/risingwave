@@ -30,6 +30,8 @@ use risingwave_sqlparser::parser::Parser;
 
 mod expr;
 pub use expr::print_function_table;
+use risingwave_expr::ExprError;
+
 mod relation;
 pub mod runner;
 mod scalar;
@@ -68,7 +70,7 @@ pub struct Column {
 impl From<ColumnDef> for Column {
     fn from(c: ColumnDef) -> Self {
         Self {
-            name: c.name.value.clone(),
+            name: c.name.real_value(),
             data_type: bind_data_type(&c.data_type).unwrap().into(),
         }
     }
@@ -210,9 +212,19 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates a query with local context.
-    /// Used by `WITH`, subquery
+    /// Used by `WITH`, `Table Subquery` in Relation
     fn gen_local_query(&mut self) -> (Query, Vec<Column>) {
         let old_ctxt = self.new_local_context();
+        let t = self.gen_query();
+        self.restore_context(old_ctxt);
+        t
+    }
+
+    /// Generates a query with correlated context to ensure proper recursion.
+    /// Used by Exists `Subquery`
+    /// TODO: <https://github.com/risingwavelabs/risingwave/pull/4431#issuecomment-1327417328>
+    fn _gen_correlated_query(&mut self) -> (Query, Vec<Column>) {
+        let old_ctxt = self._clone_local_context();
         let t = self.gen_query();
         self.restore_context(old_ctxt);
         t
@@ -239,7 +251,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
 
         let with_tables = vec![Table {
-            name: alias.name.value,
+            name: alias.name.real_value(),
             columns: query_schema,
         }];
         (
@@ -445,9 +457,31 @@ pub fn parse_sql(sql: &str) -> Vec<Statement> {
 pub fn create_table_statement_to_table(statement: &Statement) -> Table {
     match statement {
         Statement::CreateTable { name, columns, .. } => Table {
-            name: name.0[0].value.clone(),
+            name: name.0[0].real_value(),
             columns: columns.iter().map(|c| c.clone().into()).collect(),
         },
         _ => panic!("Unexpected statement: {}", statement),
     }
+}
+
+fn is_division_by_zero_err(db_error: &str) -> bool {
+    db_error.contains(&ExprError::DivisionByZero.to_string())
+}
+
+fn is_numeric_out_of_range_err(db_error: &str) -> bool {
+    db_error.contains(&ExprError::NumericOutOfRange.to_string())
+}
+
+/// Skip queries with unimplemented features
+fn is_unimplemented_error(db_error: &str) -> bool {
+    db_error.contains("Feature is not yet implemented")
+}
+
+/// Certain errors are permitted to occur. This is because:
+/// 1. It is more complex to generate queries without these errors.
+/// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
+pub fn is_permissible_error(db_error: &str) -> bool {
+    is_numeric_out_of_range_err(db_error)
+        || is_division_by_zero_err(db_error)
+        || is_unimplemented_error(db_error)
 }

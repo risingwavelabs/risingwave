@@ -225,6 +225,19 @@ impl Default for StorageConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ConnectorConfig {
+    #[serde(default)]
+    pub connector_addr: Option<String>,
+}
+
+impl Default for ConnectorConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache_capacity_mb")]
     pub capacity_mb: usize,
@@ -365,7 +378,7 @@ mod default {
     }
 
     pub fn barrier_interval_ms() -> u32 {
-        250
+        1000
     }
 
     pub fn in_flight_barrier_nums() -> usize {

@@ -14,6 +14,7 @@
 
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
+use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::SourceDescBuilder;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -25,13 +26,14 @@ pub struct SourceExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for SourceExecutorBuilder {
+    type Node = SourceNode;
+
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Source)?;
         let (sender, barrier_receiver) = unbounded_channel();
         stream
             .context
@@ -39,14 +41,17 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .register_sender(params.actor_context.id, sender);
 
         let source_id = TableId::new(node.source_id);
+        let source_name = node.source_name.clone();
+
         let source_builder = SourceDescBuilder::new(
             source_id,
             node.row_id_index.clone(),
             node.columns.clone(),
             node.pk_column_ids.clone(),
             node.properties.clone(),
-            node.get_info()?.clone(),
+            node.get_info()?.get_source_info()?.clone(),
             params.env.source_manager_ref(),
+            params.env.connector_params(),
         );
 
         let columns = node.columns.clone();
@@ -77,6 +82,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             params.actor_context,
             source_builder,
             source_id,
+            source_name,
             vnodes,
             state_table_handler,
             column_ids,

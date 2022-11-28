@@ -17,6 +17,7 @@
 mod agg_common;
 mod batch_query;
 mod chain;
+mod dml;
 mod dynamic_filter;
 mod expand;
 mod filter;
@@ -32,6 +33,7 @@ mod merge;
 mod mview;
 mod project;
 mod project_set;
+mod row_id_gen;
 mod sink;
 mod sort;
 mod source;
@@ -42,13 +44,13 @@ mod watermark_filter;
 
 // import for submodules
 use itertools::Itertools;
-use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_storage::StateStore;
 
 use self::batch_query::*;
 use self::chain::*;
+use self::dml::*;
 use self::dynamic_filter::*;
 use self::expand::*;
 use self::filter::*;
@@ -64,6 +66,7 @@ use self::merge::*;
 use self::mview::*;
 use self::project::*;
 use self::project_set::*;
+use self::row_id_gen::RowIdGenExecutorBuilder;
 use self::sink::*;
 use self::sort::*;
 use self::source::*;
@@ -77,10 +80,12 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 #[async_trait::async_trait]
 trait ExecutorBuilder {
+    type Node;
+
     /// Create a [`BoxedExecutor`] from [`StreamNode`].
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor>;
@@ -90,8 +95,8 @@ macro_rules! build_executor {
     ($source:expr, $node:expr, $store:expr, $stream:expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $node.get_node_body().unwrap() {
             $(
-                $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor($source, $node, $store, $stream).await
+                $proto_type_name(node) => {
+                    <$data_type>::new_boxed_executor($source, node, $store, $stream).await
                 },
             )*
             NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) => unreachable!()
@@ -136,5 +141,7 @@ pub async fn create_executor(
         NodeBody::GroupTopN => GroupTopNExecutorBuilder,
         NodeBody::Sort => SortExecutorBuilder,
         NodeBody::WatermarkFilter => WatermarkFilterBuilder,
+        NodeBody::Dml => DmlExecutorBuilder,
+        NodeBody::RowIdGen => RowIdGenExecutorBuilder,
     }
 }

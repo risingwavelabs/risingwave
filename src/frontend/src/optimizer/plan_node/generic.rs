@@ -465,7 +465,16 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         (self.agg_calls, self.group_key, self.input)
     }
 
-    pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let mut builder = f.debug_struct(name);
+        if !self.group_key.is_empty() {
+            builder.field("group_key", &self.group_key_display());
+        }
+        builder.field("aggs", &self.agg_calls_display());
+        builder.finish()
+    }
+
+    fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
         self.agg_calls
             .iter()
             .map(|plan_agg_call| PlanAggCallDisplay {
@@ -475,7 +484,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect_vec()
     }
 
-    pub fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
+    fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
         self.group_key
             .iter()
             .copied()
@@ -1110,4 +1119,16 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.o2i_col_mapping().inverse()
     }
+}
+
+/// `Union` returns the union of the rows of its inputs.
+/// If `all` is false, it needs to eliminate duplicates.
+#[derive(Debug, Clone)]
+pub struct Union<PlanRef> {
+    pub all: bool,
+    pub inputs: Vec<PlanRef>,
+    /// It is used by streaming processing. We need to use `source_col` to identify the record came
+    /// from which source input.
+    /// We add it as a logical property, because we need to derive the logical pk based on it.
+    pub source_col: Option<usize>,
 }

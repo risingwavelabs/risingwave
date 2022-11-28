@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use aho_corasick::AhoCorasickBuilder;
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use risingwave_common::array::{StringWriter, WrittenGuard};
 use risingwave_common::types::NaiveDateTimeWrapper;
 
 use crate::Result;
@@ -49,9 +49,9 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> String {
 pub fn to_char_timestamp(
     data: NaiveDateTimeWrapper,
     tmpl: &str,
-    dst: BytesWriter,
-) -> Result<BytesGuard> {
+    writer: StringWriter<'_>,
+) -> Result<WrittenGuard> {
     let chrono_tmpl = compile_pattern_to_chrono(tmpl);
     let res = data.0.format(&chrono_tmpl).to_string();
-    dst.write_ref(&res).map_err(Into::into)
+    Ok(writer.write_ref(&res))
 }

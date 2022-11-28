@@ -51,28 +51,29 @@ impl FrontendService {
                 "{}:{}",
                 config.listen_address, config.exporter_port
             ))
+            .arg("--health-check-listener-addr")
+            .arg(format!(
+                "{}:{}",
+                config.listen_address, config.health_check_port
+            ))
             .arg("--metrics-level")
             .arg("1");
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
-        match provide_meta_node.len() {
-            0 => {
-                return Err(anyhow!(
-                    "Cannot configure node: no meta node found in this configuration."
-                ));
+        if provide_meta_node.is_empty() {
+            return Err(anyhow!(
+                "Cannot configure node: no meta node found in this configuration."
+            ));
+        } else {
+            let meta_node = provide_meta_node.last().unwrap();
+            cmd.arg("--meta-addr")
+                .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
+            if provide_meta_node.len() > 1 {
+                eprintln!("WARN: more than 1 meta node instance is detected, only using the last one for meta node.");
+                // According to some heruistics, the last etcd node seems always to be elected as
+                // leader. Therefore we ensure compute node can start by using the last one.
             }
-            1 => {
-                let meta_node = &provide_meta_node[0];
-                cmd.arg("--meta-addr")
-                    .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
-            }
-            other_size => {
-                return Err(anyhow!(
-                    "Cannot configure node: {} meta nodes found in this configuration, but only 1 is needed.",
-                    other_size
-                ));
-            }
-        };
+        }
 
         Ok(())
     }

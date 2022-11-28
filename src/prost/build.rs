@@ -30,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "meta",
         "batch_plan",
         "task_service",
+        "connector_service",
         "stream_plan",
         "stream_service",
         "compactor",
@@ -38,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "source",
         "monitor_service",
         "health",
+        "cdc_service",
     ];
     let protos: Vec<String> = proto_files
         .iter()

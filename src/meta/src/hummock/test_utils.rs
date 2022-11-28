@@ -37,7 +37,12 @@ use crate::storage::{MemStore, MetaStore};
 
 pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
     ssts.iter()
-        .map(|sst| LocalSstableInfo::new(StaticCompactionGroupId::StateDefault.into(), sst.clone()))
+        .map(|sst| {
+            LocalSstableInfo::with_compaction_group(
+                StaticCompactionGroupId::StateDefault.into(),
+                sst.clone(),
+            )
+        })
         .collect_vec()
 }
 
@@ -105,7 +110,7 @@ where
     compact_task.sorted_output_ssts = test_tables_2.clone();
     compact_task.set_task_status(TaskStatus::Success);
     hummock_manager
-        .report_compact_task(context_id, &mut compact_task)
+        .report_compact_task(context_id, &mut compact_task, None)
         .await
         .unwrap();
     if temp_compactor {

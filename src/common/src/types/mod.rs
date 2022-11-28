@@ -47,7 +47,7 @@ pub mod to_text;
 
 mod ordered_float;
 
-use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 pub use chrono_wrapper::{
     NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,
 };
@@ -67,17 +67,6 @@ use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
     StructValue,
 };
-
-/// Parallel unit is the minimal scheduling unit.
-pub type ParallelUnitId = u32;
-pub type VnodeMapping = Vec<ParallelUnitId>;
-
-/// `VirtualNode` (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
-/// consistent hashing.
-pub type VirtualNode = u8;
-pub const VIRTUAL_NODE_SIZE: usize = std::mem::size_of::<VirtualNode>();
-pub const VNODE_BITS: usize = 8;
-pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -376,7 +365,7 @@ impl DataType {
             DataType::Boolean => ScalarImpl::Bool(false),
             DataType::Varchar => ScalarImpl::Utf8("".to_string()),
             DataType::Date => ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::MIN)),
-            DataType::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper(NaiveTime::from_hms(0, 0, 0))),
+            DataType::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(0, 0, 0)),
             DataType::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::MIN))
             }
@@ -546,44 +535,14 @@ for_all_scalar_variants! { scalar_impl_partial_ord }
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
-/// Convert a [`Datum`] to a [`DatumRef`].
-pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
-    datum.as_ref().map(|d| d.as_scalar_ref_impl())
-}
-
-// TODO: specify `NULL FIRST` or `NULL LAST`.
-pub fn serialize_datum_ref_into(
-    datum_ref: &DatumRef<'_>,
-    serializer: &mut memcomparable::Serializer<impl BufMut>,
-) -> memcomparable::Result<()> {
-    // By default, `null` is treated as largest in PostgreSQL.
-    if let Some(datum_ref) = datum_ref {
-        0u8.serialize(&mut *serializer)?;
-        datum_ref.serialize(serializer)?;
-    } else {
-        1u8.serialize(serializer)?;
-    }
-    Ok(())
-}
-
-pub fn serialize_datum_ref_not_null_into(
-    datum_ref: &DatumRef<'_>,
-    serializer: &mut memcomparable::Serializer<impl BufMut>,
-) -> memcomparable::Result<()> {
-    datum_ref
-        .as_ref()
-        .expect("datum cannot be null")
-        .serialize(serializer)
-}
-
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 // TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_into(
-    datum: &Datum,
+    datum: impl ToDatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
     // By default, `null` is treated as largest in PostgreSQL.
-    if let Some(datum) = datum {
+    if let Some(datum) = datum.to_datum_ref() {
         0u8.serialize(&mut *serializer)?;
         datum.serialize(serializer)?;
     } else {
@@ -594,10 +553,11 @@ pub fn serialize_datum_into(
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 pub fn serialize_datum_not_null_into(
-    datum: &Datum,
+    datum: impl ToDatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
     datum
+        .to_datum_ref()
         .as_ref()
         .expect("datum cannot be null")
         .serialize(serializer)
@@ -626,13 +586,38 @@ pub fn deserialize_datum_not_null_from(
 
 /// This trait is to implement `to_owned_datum` for `Option<ScalarImpl>`
 pub trait ToOwnedDatum {
-    /// implement `to_owned_datum` for `DatumRef` to convert to `Datum`
+    /// Convert the datum to an owned [`Datum`].
     fn to_owned_datum(self) -> Datum;
 }
 
 impl ToOwnedDatum for DatumRef<'_> {
+    #[inline(always)]
     fn to_owned_datum(self) -> Datum {
         self.map(ScalarRefImpl::into_scalar_impl)
+    }
+}
+
+pub trait ToDatumRef: PartialEq + Eq + std::fmt::Debug {
+    /// Convert the datum to [`DatumRef`].
+    fn to_datum_ref(&self) -> DatumRef<'_>;
+}
+
+impl ToDatumRef for Datum {
+    #[inline(always)]
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        self.as_ref().map(|d| d.as_scalar_ref_impl())
+    }
+}
+impl ToDatumRef for &Datum {
+    #[inline(always)]
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        self.as_ref().map(|d| d.as_scalar_ref_impl())
+    }
+}
+impl ToDatumRef for DatumRef<'_> {
+    #[inline(always)]
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        *self
     }
 }
 
@@ -794,26 +779,15 @@ macro_rules! scalar_impl_hash {
 
 for_all_scalar_variants! { scalar_impl_hash }
 
-/// Feeds the raw scalar of `datum` to the given `state`, which should behave the same as
-/// [`crate::array::Array::hash_at`], where NULL value will be carefully handled.
-///
-/// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
-/// type alias of `Datum = Option<_>`, we should manually implement [`std::hash::Hash`] for
-/// [`Datum`] in the future when it becomes a newtype. (#477)
-#[inline(always)]
-pub fn hash_datum(datum: &Datum, state: &mut impl std::hash::Hasher) {
-    hash_datum_ref(to_datum_ref(datum), state)
-}
-
-/// Feeds the raw scalar reference of `datum_ref` to the given `state`, which should behave the same
+/// Feeds the raw scalar reference of `datum` to the given `state`, which should behave the same
 /// as [`crate::array::Array::hash_at`], where NULL value will be carefully handled.
 ///
 /// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
 /// type alias of `DatumRef = Option<_>`, we should manually implement [`std::hash::Hash`] for
 /// [`DatumRef`] in the future when it becomes a newtype. (#477)
 #[inline(always)]
-pub fn hash_datum_ref(datum_ref: DatumRef<'_>, state: &mut impl std::hash::Hasher) {
-    match datum_ref {
+pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
+    match datum.to_datum_ref() {
         Some(scalar_ref) => scalar_ref.hash(state),
         None => NULL_VAL_FOR_HASH.hash(state),
     }
@@ -997,7 +971,6 @@ mod tests {
     use std::hash::{BuildHasher, Hasher};
     use std::ops::Neg;
 
-    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use itertools::Itertools;
     use rand::thread_rng;
     use strum::IntoEnumIterator;
@@ -1122,7 +1095,7 @@ mod tests {
 
             let hash_from_datum_ref = {
                 let mut state = Crc32FastBuilder.build_hasher();
-                hash_datum_ref(to_datum_ref(&datum), &mut state);
+                hash_datum(datum.to_datum_ref(), &mut state);
                 state.finish()
             };
 
@@ -1146,18 +1119,18 @@ mod tests {
                     DataType::Decimal,
                 ),
                 DataTypeName::Date => (
-                    ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::from_ymd(2333, 3, 3))),
+                    ScalarImpl::NaiveDate(NaiveDateWrapper::from_ymd_uncheck(2333, 3, 3)),
                     DataType::Date,
                 ),
                 DataTypeName::Varchar => (ScalarImpl::Utf8("233".to_string()), DataType::Varchar),
                 DataTypeName::Time => (
-                    ScalarImpl::NaiveTime(NaiveTimeWrapper(NaiveTime::from_hms(2, 3, 3))),
+                    ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(2, 3, 3)),
                     DataType::Time,
                 ),
                 DataTypeName::Timestamp => (
-                    ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::from_timestamp(
+                    ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_timestamp_uncheck(
                         23333333, 2333,
-                    ))),
+                    )),
                     DataType::Timestamp,
                 ),
                 DataTypeName::Timestampz => (ScalarImpl::Int64(233333333), DataType::Timestampz),

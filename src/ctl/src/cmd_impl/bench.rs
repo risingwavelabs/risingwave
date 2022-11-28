@@ -63,8 +63,8 @@ impl InterestedMetrics {
         let iter_rate = (self.iter_cnt - metrics.iter_cnt) as f64 / elapsed;
         println!(
             "read_rate: {}/s\nwrite_rate:{}/s\nnext_rate:{}/s\niter_rate:{}/s\n",
-            Size::Bytes(read_rate),
-            Size::Bytes(write_rate),
+            Size::from_bytes(read_rate),
+            Size::from_bytes(write_rate),
             next_rate,
             iter_rate
         );

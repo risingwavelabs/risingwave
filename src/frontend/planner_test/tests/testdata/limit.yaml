@@ -50,9 +50,6 @@
     LogicalTopN { order: "[t.v ASC]", limit: 2, offset: 0, with_ties: true }
     └─LogicalProject { exprs: [t.v] }
       └─LogicalScan { table: t, columns: [t.v, t._row_id] }
-  batch_error: |-
-    Feature is not yet implemented: TopN with ties in batch mode
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/5302
 - sql: |
     -- Should be equivalent to above
     create table t (v int);
