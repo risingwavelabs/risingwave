@@ -1,26 +1,26 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::fmt;
+use std::collections::{HashMap};
+
 use std::rc::Rc;
 
-use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, FieldDisplay, Schema, TableDesc};
-use risingwave_common::types::{DataType, IntervalUnit};
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::AggKind;
-use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
-use risingwave_pb::expr::AggCall as ProstAggCall;
-use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
-use super::super::utils::{IndicesDisplay, TableCatalogBuilder};
-use super::{stream, EqJoinPredicate, GenericPlanNode, GenericPlanRef};
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::{DataType};
+use risingwave_common::util::sort_util::OrderType;
+
+
+
+
+
+
+use super::super::utils::{TableCatalogBuilder};
+use super::{GenericPlanNode, GenericPlanRef};
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{Expr, ExprDisplay, ExprImpl, InputRef, InputRefDisplay};
-use crate::optimizer::property::{Direction, Order};
+
+
+
 use crate::session::OptimizerContextRef;
-use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+
+
 use crate::TableCatalog;
 
 /// [`Source`] returns contents of a table or other equivalent object
