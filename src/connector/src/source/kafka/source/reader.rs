@@ -115,6 +115,12 @@ impl KafkaSplitReader {
                 let msg = msg?;
                 if let Some(stop_offset) = self.stop_offset {
                     if msg.offset() >= stop_offset {
+                        tracing::debug!(
+                            "stop offset reached, stop reading, offset: {}, stop offset: {}",
+                            msg.offset(),
+                            stop_offset
+                        );
+                        yield res;
                         break 'for_outer_loop;
                     }
                 }
