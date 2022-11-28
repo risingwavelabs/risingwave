@@ -149,7 +149,7 @@ impl fmt::Display for FunctionalDependencySet {
         f.write_str("{")?;
         self.strict
             .iter()
-            .format_with(", ", |fd, f| f(&fd))
+            .format(", ")
             .fmt(f)?;
         f.write_str("}")
     }
