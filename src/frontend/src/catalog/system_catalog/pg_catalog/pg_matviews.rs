@@ -16,7 +16,8 @@ use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-/// The view `pg_matviews` provides access to useful information about each materialized view in the database.
+/// The view `pg_matviews` provides access to useful information about each materialized view in the
+/// database.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-matviews.html`]
 pub const PG_MATVIEWS_TABLE_NAME: &str = "pg_matviews";
 pub const PG_MATVIEWS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
