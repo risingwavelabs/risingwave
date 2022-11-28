@@ -202,7 +202,10 @@ impl<W: SstableWriter> SstableBuilder<W> {
             // 1. not empty_key
             // 2. extract_key key is not duplicate
             if !extract_key.is_empty()
-                && (extract_key != &self.last_full_key[0..self.last_bloom_filter_key_length])
+                && (extract_key
+                    != &self.last_full_key[self.filter_key_extractor.start_index()
+                        ..self.filter_key_extractor.start_index()
+                            + self.last_bloom_filter_key_length])
             {
                 // avoid duplicate add to bloom filter
                 self.user_key_hashes
