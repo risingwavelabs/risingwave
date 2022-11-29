@@ -496,12 +496,13 @@ where
             }
         }
         // FIXME: https://github.com/risingwavelabs/risingwave/issues/6534
+        // TODO: do not comment this part
         // check prevents meta node failover
-        trx.check_equal(
-            META_CF_NAME.to_owned(),
-            META_LEADER_KEY.as_bytes().to_vec(),
-            info.encode_to_vec(),
-        );
+        //    trx.check_equal(
+        //        META_CF_NAME.to_owned(),
+        //        META_LEADER_KEY.as_bytes().to_vec(),
+        //        info.encode_to_vec(),
+        //    );
         meta_store.txn(trx).await.map_err(Into::into)
     }
 
