@@ -356,12 +356,6 @@ impl SstableStore {
             })
             .verbose_stack_trace("meta_cache_lookup")
             .await
-            .map_err(|e| {
-                HummockError::other(format!(
-                    "meta cache lookup request dedup get cancel: {:?}",
-                    e,
-                ))
-            })?
     }
 
     pub async fn list_ssts_from_object_store(&self) -> HummockResult<Vec<ObjectMetadata>> {
