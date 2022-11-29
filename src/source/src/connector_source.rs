@@ -360,7 +360,7 @@ impl SourceDescBuilderV2 {
             self.source_info.proto_message_name,
             self.properties,
             columns.clone(),
-            self.connector_params.connector_source_endpoint,
+            self.connector_params.connector_rpc_endpoint,
             self.connector_message_buffer_size,
         )
         .await?;

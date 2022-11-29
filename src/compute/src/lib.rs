@@ -80,12 +80,8 @@ pub struct ComputeNodeOpts {
     pub file_cache_dir: String,
 
     /// Endpoint of the connector node
-    #[clap(long, env = "CONNECTOR_SOURCE_ENDPOINT")]
-    pub connector_source_endpoint: Option<String>,
-
-    /// Endpoint of connector sink node
-    #[clap(long, env = "CONNECTOR_SINK_ENDPOINT")]
-    pub connector_sink_endpoint: Option<String>,
+    #[clap(long, env = "CONNECTOR_RPC_ENDPOINT")]
+    pub connector_rpc_endpoint: Option<String>,
 }
 
 use std::future::Future;
