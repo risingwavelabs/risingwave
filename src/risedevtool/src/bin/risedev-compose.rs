@@ -20,6 +20,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
+use itertools::Itertools;
 use risedev::{
     compose_deploy, compute_risectl_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
     ComposeService, ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
@@ -110,7 +111,7 @@ fn main() -> Result<()> {
         config_directory: opts.directory.clone(),
     };
 
-    let (steps, services) = ConfigExpander::select(&risedev_config, &opts.profile)?;
+    let services = ConfigExpander::deserialize(&risedev_config, &opts.profile)?;
 
     let mut compose_services: BTreeMap<String, BTreeMap<String, ComposeService>> = BTreeMap::new();
     let mut service_on_node: BTreeMap<String, String> = BTreeMap::new();
@@ -119,8 +120,7 @@ fn main() -> Result<()> {
     let mut log_buffer = String::new();
     use std::fmt::Write;
 
-    for step in &steps {
-        let service = services.get(step).unwrap();
+    for (step, service) in &services {
         let compose_deploy_config = compose_deploy_config.as_ref();
         let (address, mut compose) = match service {
             ServiceConfig::Minio(c) => {
@@ -289,7 +289,7 @@ fn main() -> Result<()> {
 
         compose_deploy(
             Path::new(&opts.directory),
-            &steps,
+            &services.keys().cloned().collect_vec(),
             &compose_deploy_config.as_ref().unwrap().instances,
             &compose_config,
             &service_on_node,

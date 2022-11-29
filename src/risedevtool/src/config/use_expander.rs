@@ -24,8 +24,8 @@ pub struct UseExpander {
 }
 
 impl UseExpander {
-    pub fn new(yt: &Yaml) -> Result<Self> {
-        let ytm = yt
+    pub fn new(template: &Yaml) -> Result<Self> {
+        let ytm = template
             .as_hash()
             .ok_or_else(|| anyhow!("template is not a hashmap"))?;
         let mut template = HashMap::new();
@@ -41,11 +41,25 @@ impl UseExpander {
         Ok(Self { template })
     }
 
-    /// merge `{ "a": 1 }, { "a": 233 }` yields `{ "a": 233 }`.
-    fn merge(to: &yaml::Hash, from: &yaml::Hash) -> yaml::Hash {
-        let mut result = to.clone();
-        for (k, v) in from {
-            result.insert(k.clone(), v.clone());
+    /// Overwrites values in `default` with values from `provided`.
+    fn merge(use_id: &str, default: &yaml::Hash, provided: &yaml::Hash) -> yaml::Hash {
+        let mut result = yaml::Hash::new();
+        // put `use` as the first element to make the generated yaml more readable.
+        result.insert(Yaml::String("use".into()), Yaml::String(use_id.into()));
+        result.extend(default.clone());
+        for (k, new_v) in provided {
+            match result.get_mut(k) {
+                Some(v) => {
+                    // update the value, but do not change the order.
+                    *v = new_v.clone()
+                }
+                None => {
+                    // For keys not defined in the template (optional keys), we just append them
+                    // here. It may be rejected later when deserializing to
+                    // specific `ServiceConfig` if it's invalid.
+                    result.insert(k.clone(), new_v.clone());
+                }
+            };
         }
         result
     }
@@ -68,7 +82,7 @@ impl UseExpander {
                 .template
                 .get(use_id)
                 .ok_or_else(|| anyhow!("use source {} not found", use_id))?;
-            Ok::<_, anyhow::Error>(Yaml::Hash(Self::merge(use_data, map)))
+            Ok::<_, anyhow::Error>(Yaml::Hash(Self::merge(use_id, use_data, map)))
         });
         Ok(Yaml::Array(array.try_collect()?))
     }

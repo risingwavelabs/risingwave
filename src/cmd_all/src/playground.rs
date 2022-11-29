@@ -30,9 +30,7 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio::signal;
 
-async fn load_risedev_config(
-    profile: &str,
-) -> Result<(Vec<String>, HashMap<String, ServiceConfig>)> {
+async fn load_risedev_config(profile: &str) -> Result<HashMap<String, ServiceConfig>> {
     let risedev_config = {
         let mut content = String::new();
         File::open("risedev.yml")
@@ -42,9 +40,9 @@ async fn load_risedev_config(
         content
     };
     let risedev_config = ConfigExpander::expand(&risedev_config, profile)?;
-    let (steps, services) = ConfigExpander::select(&risedev_config, profile)?;
+    let services = ConfigExpander::deserialize(&risedev_config, profile)?;
 
-    Ok((steps, services))
+    Ok(services)
 }
 
 pub enum RisingWaveService {
@@ -73,26 +71,21 @@ pub async fn playground() -> Result<()> {
     };
 
     let services = match load_risedev_config(&profile).await {
-        Ok((steps, services)) => {
+        Ok(services) => {
             tracing::info!(
                 "Launching services from risedev config playground using profile: {}",
                 profile
             );
-            tracing::info!("steps: {:?}", steps);
+            tracing::info!("steps: {:?}", services.keys());
 
-            let steps: Vec<_> = steps
-                .into_iter()
-                .map(|step| services.get(&step).expect("service not found"))
-                .collect();
-
-            let compute_node_count = steps
-                .iter()
+            let compute_node_count = services
+                .values()
                 .filter(|s| matches!(s, ServiceConfig::ComputeNode(_)))
                 .count();
 
             let mut rw_services = vec![];
-            for step in steps {
-                match step {
+            for service in services.values() {
+                match service {
                     ServiceConfig::ComputeNode(c) => {
                         let mut command = Command::new("compute-node");
                         ComputeNodeService::apply_command_args(
@@ -141,7 +134,7 @@ pub async fn playground() -> Result<()> {
                         ));
                     }
                     _ => {
-                        return Err(anyhow!("unsupported service: {:?}", step));
+                        return Err(anyhow!("unsupported service: {:?}", service));
                     }
                 }
             }

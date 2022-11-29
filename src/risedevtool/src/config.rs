@@ -16,29 +16,37 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
-use yaml_rust::{yaml, Yaml, YamlEmitter, YamlLoader};
+use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
 
-use self::dollar_expander::DollarExpander;
-use self::id_expander::IdExpander;
-use self::use_expander::UseExpander;
 use crate::ServiceConfig;
 
 mod dollar_expander;
 mod id_expander;
 mod provide_expander;
 mod use_expander;
-pub use provide_expander::*;
+use dollar_expander::DollarExpander;
+use id_expander::IdExpander;
+use provide_expander::ProvideExpander;
+use use_expander::UseExpander;
 
 pub struct ConfigExpander;
 
 impl ConfigExpander {
-    pub fn expand(config: &str, section: &str) -> Result<Yaml> {
-        Self::expand_with_extra_info(config, section, HashMap::new())
+    /// Transforms `risedev.yml` to a fully expanded yaml file.
+    ///
+    /// * `config` is the full content of `risedev.yml`.
+    /// * `profile` is the selected config profile called by `risedev dev <profile>`. It is one of
+    ///   the keys in the `risedev` section.
+    pub fn expand(config: &str, profile: &str) -> Result<Yaml> {
+        Self::expand_with_extra_info(config, profile, HashMap::new())
     }
 
+    /// * `extra_info` is additional variables for variable expansion by [`DollarExpander`].
+    ///
+    /// See [`ConfigExpander::expand`] for other information.
     pub fn expand_with_extra_info(
         config: &str,
-        section: &str,
+        profile: &str,
         extra_info: HashMap<String, String>,
     ) -> Result<Yaml> {
         let [config]: [_; 1] = YamlLoader::load_from_str(config)?
@@ -57,11 +65,12 @@ impl ConfigExpander {
         let template_section = global_config
             .get(&Yaml::String("template".to_string()))
             .ok_or_else(|| anyhow!("expect `risedev` section"))?;
-        let risedev_section: Vec<(Yaml, Yaml)> = risedev_section
+        // selected and expanded profile config.
+        let expanded_config: Vec<(Yaml, Yaml)> = risedev_section
             .iter()
-            .filter(|(k, _)| k == &&Yaml::String(section.to_string()))
-            .map(|(k, v)| {
-                let k = k
+            .filter(|(k, _)| k == &&Yaml::String(profile.to_string()))
+            .map(|(profile, v)| {
+                profile
                     .as_str()
                     .ok_or_else(|| anyhow!("expect `risedev` section to use string key"))?;
                 let mut use_expander = UseExpander::new(template_section)?;
@@ -72,24 +81,28 @@ impl ConfigExpander {
                 let v = id_expander.visit(v)?;
                 let mut provide_expander = ProvideExpander::new(&v)?;
                 let v = provide_expander.visit(v)?;
-                Ok::<_, anyhow::Error>((Yaml::String(k.to_string()), v))
+                Ok::<_, anyhow::Error>((profile.clone(), v))
             })
             .try_collect()?;
-        let risedev_section = yaml::Hash::from_iter(risedev_section.into_iter());
 
-        Ok(Yaml::Hash(risedev_section))
+        assert!(
+            expanded_config.len() == 1,
+            "`risedev` section key should be unique"
+        );
+        Ok(Yaml::Hash(expanded_config.into_iter().collect()))
     }
 
-    pub fn select(
-        risedev_section: &Yaml,
-        name: &str,
-    ) -> Result<(Vec<String>, HashMap<String, ServiceConfig>)> {
-        let risedev_section = risedev_section
+    /// Parses the expanded yaml into a map of `id` to [`ServiceConfig`].
+    pub fn deserialize(
+        expanded_config: &Yaml,
+        profile: &str,
+    ) -> Result<HashMap<String, ServiceConfig>> {
+        let risedev_section = expanded_config
             .as_hash()
             .ok_or_else(|| anyhow!("expect risedev section to be a hashmap"))?;
         let scene = risedev_section
-            .get(&Yaml::String(name.to_string()))
-            .ok_or_else(|| anyhow!("{} not found", name))?;
+            .get(&Yaml::String(profile.to_string()))
+            .ok_or_else(|| anyhow!("{} not found", profile))?;
         let steps = scene
             .as_vec()
             .ok_or_else(|| anyhow!("expect steps to be an array"))?;
@@ -134,12 +147,13 @@ impl ConfigExpander {
             })
             .try_collect()?;
 
-        Ok((
-            config.iter().map(|x| x.id().to_string()).collect_vec(),
-            config
-                .into_iter()
-                .map(|x| (x.id().to_string(), x))
-                .collect(),
-        ))
+        let mut services = HashMap::new();
+        for x in config {
+            let id = x.id().to_string();
+            if services.insert(id.clone(), x).is_some() {
+                return Err(anyhow!("duplicate id: {}", id));
+            }
+        }
+        Ok(services)
     }
 }

@@ -66,7 +66,6 @@ impl ProgressManager {
 
 fn task_main(
     manager: &mut ProgressManager,
-    steps: &[String],
     services: &HashMap<String, ServiceConfig>,
 ) -> Result<(Vec<(String, Duration)>, String)> {
     let log_path = env::var("PREFIX_LOG")?;
@@ -99,8 +98,7 @@ fn task_main(
     // Firstly, ensure that all ports needed is not occupied by previous runs.
     let mut ports = vec![];
 
-    for step in steps {
-        let service = services.get(step).unwrap();
+    for service in services.values() {
         let listen_info = match service {
             ServiceConfig::Minio(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Etcd(c) => Some((c.port, c.id.clone())),
@@ -135,8 +133,7 @@ fn task_main(
 
     let mut stat = vec![];
 
-    for step in steps {
-        let service = services.get(step).unwrap();
+    for service in services.values() {
         let start_time = Instant::now();
 
         match service {
@@ -347,6 +344,8 @@ fn task_main(
 }
 
 fn main() -> Result<()> {
+    preflight_check()?;
+
     let risedev_config = {
         let mut content = String::new();
         File::open("risedev.yml")?.read_to_string(&mut content)?;
@@ -367,10 +366,7 @@ fn main() -> Result<()> {
             &out_str,
         )?;
     }
-
-    preflight_check()?;
-
-    let (steps, services) = ConfigExpander::select(&risedev_config, &task_name)?;
+    let services = ConfigExpander::deserialize(&risedev_config, &task_name)?;
 
     let mut manager = ProgressManager::new();
     // Always create a progress before calling `task_main`. Otherwise the progress bar won't be
@@ -379,10 +375,10 @@ fn main() -> Result<()> {
     p.set_prefix("dev cluster");
     p.set_message(format!(
         "starting {} services for {}...",
-        steps.len(),
+        services.len(),
         task_name
     ));
-    let task_result = task_main(&mut manager, &steps, &services);
+    let task_result = task_main(&mut manager, &services);
 
     match task_result {
         Ok(_) => {
