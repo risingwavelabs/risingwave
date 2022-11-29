@@ -319,7 +319,8 @@ impl TestCase {
                     constraints,
                     ..
                 } => {
-                    create_table::handle_create_table(context, name, columns, constraints).await?;
+                    create_table::handle_create_table(context, name, columns, constraints, false)
+                        .await?;
                 }
                 Statement::CreateSource {
                     is_materialized,

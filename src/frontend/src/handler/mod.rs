@@ -134,17 +134,10 @@ pub async fn handle(
                 )
                 .into());
             }
-            if if_not_exists {
-                return Err(ErrorCode::NotImplemented(
-                    "CREATE TABLE IF NOT EXISTS".to_string(),
-                    None.into(),
-                )
-                .into());
-            }
             if query.is_some() {
                 return Err(ErrorCode::NotImplemented("CREATE AS".to_string(), 6215.into()).into());
             }
-            create_table::handle_create_table(context, name, columns, constraints).await
+            create_table::handle_create_table(context, name, columns, constraints, if_not_exists).await
         }
         Statement::CreateDatabase {
             db_name,
