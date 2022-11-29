@@ -104,7 +104,7 @@ async fn campaign<S: MetaStore>(
                 "new cluster put leader info failed, MetaStoreError: {:?}",
                 e
             );
-            return None; // TODO: is return none correct?
+            return None;
         }
 
         let mut addr_port = addr.split(":");
@@ -160,6 +160,7 @@ async fn campaign<S: MetaStore>(
         _meta_lease_info: lease_info,
         is_leader,
         host_addr: HostAddr {
+            // TODO: write MetaLeaderInfo to HostAddr into func
             host: addr_port.next().unwrap().to_owned(),
             port: addr_port.next().unwrap().to_owned().parse::<u16>().unwrap(),
         },
@@ -186,6 +187,7 @@ async fn renew_lease<S: MetaStore>(
     lease_time_sec: u64,
     meta_store: &Arc<S>,
 ) -> Option<bool> {
+    // does this function work?
     let now = since_epoch();
     let mut txn = Transaction::default();
     let lease_info = MetaLeaseInfo {
@@ -193,10 +195,12 @@ async fn renew_lease<S: MetaStore>(
         lease_register_time: now.as_secs(),
         lease_expire_time: now.as_secs() + lease_time_sec,
     };
+    tracing::info!("check_equal leader_info {:?}", leader_info);
+
     txn.check_equal(
         META_CF_NAME.to_string(),
         META_LEADER_KEY.as_bytes().to_vec(),
-        leader_info.encode_to_vec(),
+        leader_info.encode_to_vec(), // will not work, because leader_info differs
     );
     txn.put(
         META_CF_NAME.to_string(),
@@ -417,7 +421,7 @@ pub async fn run_elections<S: MetaStore>(
                 }
                 initial_election = false;
 
-                // signal to observers if this node currently is leader
+                // signal to observers if there is a change in leadership
                 loop {
                     if let Err(err) = leader_tx.send((leader_addr.clone(), is_leader)) {
                         tracing::info!("Error when sending leader update: {}", err);
