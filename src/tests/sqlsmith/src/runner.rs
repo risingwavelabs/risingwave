@@ -14,10 +14,11 @@
 
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
-use risingwave_expr::error::ExprError;
-use tokio_postgres::error::{DbError, Error as PgError, SqlState};
+use tokio_postgres::error::Error as PgError;
 
-use crate::{create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table};
+use crate::{
+    create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
+};
 
 /// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {
@@ -62,8 +63,9 @@ pub async fn test_sqlsmith<R: Rng>(
     setup_sql: &str,
 ) {
     // Test percentage of skipped queries <=5% of sample size.
+    let threshold = 0.20; // permit at most 20% of queries to be skipped.
     let mut batch_skipped = 0;
-    let batch_sample_size = 100;
+    let batch_sample_size = 50;
     client
         .query("SET query_mode TO distributed;", &[])
         .await
@@ -75,12 +77,16 @@ pub async fn test_sqlsmith<R: Rng>(
         batch_skipped +=
             validate_response_with_skip_count(setup_sql, &format!("{};", sql), response);
     }
-    if batch_skipped > 5 {
-        panic!("skipped >5% batch queries");
+    let skipped_percentage = batch_skipped as f64 / batch_sample_size as f64;
+    if skipped_percentage > threshold {
+        panic!(
+            "percentage of skipped batch queries = {}, threshold: {}",
+            skipped_percentage, threshold
+        );
     }
 
     let mut stream_skipped = 0;
-    let stream_sample_size = 100;
+    let stream_sample_size = 50;
     for _ in 0..stream_sample_size {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("Executing: {}", sql);
@@ -90,8 +96,12 @@ pub async fn test_sqlsmith<R: Rng>(
         drop_mview_table(&table, client).await;
     }
 
-    if stream_skipped > 5 {
-        panic!("skipped >5% stream queries");
+    let skipped_percentage = stream_skipped as f64 / stream_sample_size as f64;
+    if skipped_percentage > threshold {
+        panic!(
+            "percentage of skipped batch queries = {}, threshold: {}",
+            skipped_percentage, threshold
+        );
     }
 }
 
@@ -129,6 +139,7 @@ async fn create_tables(
     for i in 0..10 {
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         setup_sql.push_str(&format!("{};", &create_sql));
+        tracing::info!("Executing MView Setup: {}", &create_sql);
         client.execute(&create_sql, &[]).await.unwrap();
         tables.push(table.clone());
         mviews.push(table);
@@ -161,37 +172,6 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
     }
 }
 
-fn is_division_by_zero_err(db_error: &DbError) -> bool {
-    db_error
-        .message()
-        .contains(&ExprError::DivisionByZero.to_string())
-}
-
-fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
-    db_error
-        .message()
-        .contains(&ExprError::NumericOutOfRange.to_string())
-}
-
-/// Workaround to permit runtime errors not being propagated through channels.
-/// FIXME: This also means some internal system errors won't be caught.
-/// Tracked by: <https://github.com/risingwavelabs/risingwave/issues/3908#issuecomment-1186782810>
-fn is_broken_chan_err(db_error: &DbError) -> bool {
-    db_error
-        .message()
-        .contains("internal error: broken fifo_channel")
-}
-
-/// Certain errors are permitted to occur. This is because:
-/// 1. It is more complex to generate queries without these errors.
-/// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
-fn is_permissible_error(db_error: &DbError) -> bool {
-    let is_internal_error = *db_error.code() == SqlState::INTERNAL_ERROR;
-    (is_internal_error && is_broken_chan_err(db_error))
-        || is_numeric_out_of_range_err(db_error)
-        || is_division_by_zero_err(db_error)
-}
-
 /// Validate client responses
 fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, PgError>) {
     validate_response_with_skip_count(setup_sql, query, response);
@@ -208,7 +188,7 @@ fn validate_response_with_skip_count<_Row>(
         Err(e) => {
             // Permit runtime errors conservatively.
             if let Some(e) = e.as_db_error()
-                && is_permissible_error(e)
+                && is_permissible_error(&e.to_string())
             {
                 return 1;
             }

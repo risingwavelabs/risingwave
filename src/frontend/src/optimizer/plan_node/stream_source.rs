@@ -72,6 +72,7 @@ impl StreamNode for StreamSource {
         let source_catalog = self.logical.source_catalog();
         ProstStreamNode::Source(SourceNode {
             source_id: source_catalog.id,
+            source_name: source_catalog.name.clone(),
             state_table: Some(
                 self.logical
                     .infer_internal_table_catalog()

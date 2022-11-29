@@ -3316,11 +3316,11 @@ name = "memcomparable"
 version = "0.2.0-alpha"
 dependencies = [
  "bytes",
+ "criterion",
  "rand 0.8.5",
  "rust_decimal",
  "serde",
  "thiserror",
- "workspace-hack",
 ]
 
 [[package]]
@@ -4480,6 +4480,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus-http-query"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "544213c26792ce82b2d01e5b0aca35cd70761a0eb4d635ca3f86f6ad372ecd4a"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "time 0.3.15",
+ "url",
+]
+
+[[package]]
 name = "prost"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5581,6 +5594,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
+ "prometheus-http-query",
  "prost 0.11.2",
  "rand 0.8.5",
  "reqwest",
@@ -6067,6 +6081,7 @@ dependencies = [
  "bytes",
  "num-traits",
  "postgres",
+ "rand 0.8.5",
  "serde",
  "tokio-postgres",
 ]
