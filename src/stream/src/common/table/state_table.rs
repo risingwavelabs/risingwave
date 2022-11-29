@@ -1035,12 +1035,8 @@ impl<S: StateStore> StateTable<S> {
                         self.distribution_key_start_index_in_pk,
                     )?;
                 Some(
-                    [
-                        &vnode,
-                        &encoded_prefix
-                            [dist_key_start_position..dist_key_len + dist_key_start_position],
-                    ]
-                    .concat(),
+                    encoded_prefix[dist_key_start_position..dist_key_len + dist_key_start_position]
+                        .to_vec(),
                 )
             }
         };

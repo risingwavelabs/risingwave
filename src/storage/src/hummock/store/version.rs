@@ -519,11 +519,7 @@ impl HummockVersionReader {
         }
         let mut staging_sst_iter_count = 0;
         // encode once
-        let bloom_filter_key = if let Some(prefix) = read_options.dist_key_hint.as_ref() {
-            Some(UserKey::new(read_options.table_id, TableKey(prefix)).encode())
-        } else {
-            None
-        };
+        let bloom_filter_key = read_options.dist_key_hint.as_deref();
 
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
@@ -534,7 +530,7 @@ impl HummockVersionReader {
             if let Some(bloom_filter_key) = bloom_filter_key.as_ref() {
                 if !hit_sstable_bloom_filter(
                     table_holder.value(),
-                    bloom_filter_key.as_slice(),
+                    bloom_filter_key,
                     &mut local_stats,
                 ) {
                     continue;
@@ -601,12 +597,10 @@ impl HummockVersionReader {
                         .sstable(sstable_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(bloom_filter_key) = read_options.dist_key_hint.as_ref() {
+                    if let Some(bloom_filter_key) = read_options.dist_key_hint.as_deref() {
                         if !hit_sstable_bloom_filter(
                             sstable.value(),
-                            UserKey::new(read_options.table_id, TableKey(bloom_filter_key))
-                                .encode()
-                                .as_slice(),
+                            &TableKey(bloom_filter_key),
                             &mut local_stats,
                         ) {
                             continue;
@@ -638,7 +632,7 @@ impl HummockVersionReader {
                     if let Some(bloom_filter_key) = bloom_filter_key.as_ref()
                         && !hit_sstable_bloom_filter(
                             sstable.value(),
-                            bloom_filter_key.as_slice(),
+                            bloom_filter_key,
                             &mut local_stats,
                         )
                     {

@@ -296,11 +296,7 @@ impl HummockStorageV1 {
         );
         assert!(pinned_version.is_valid());
         // encode once
-        let bloom_filter_key = if let Some(prefix) = read_options.dist_key_hint.as_ref() {
-            Some(UserKey::new(read_options.table_id, TableKey(prefix)).encode())
-        } else {
-            None
-        };
+        let bloom_filter_key = read_options.dist_key_hint.map(TableKey);
         for level in pinned_version.levels(table_id) {
             let table_infos = prune_ssts(level.table_infos.iter(), table_id, &table_key_range);
             if table_infos.is_empty() {

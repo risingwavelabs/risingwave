@@ -912,8 +912,8 @@ pub(crate) mod tests {
         assert_eq!(key_count, scan_count);
     }
 
-    #[tokio::test]
-    async fn test_compaction_with_filter_key_extractor() {
+    // #[tokio::test]
+    async fn _test_compaction_with_filter_key_extractor() {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
