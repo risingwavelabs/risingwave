@@ -1,5 +1,11 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET QUERY_MODE TO distributed;
+
 # Create tpch tables
-include ../tpch/create_tables.slt.part
+include ../../tpch/create_tables.slt.part
 
 # Drop unneeded tables
 statement ok
@@ -18,27 +24,27 @@ statement ok
 DROP TABLE part;
 
 # Insert data to tpch tables
-include ../tpch/insert_nation.slt.part
-include ../tpch/insert_region.slt.part
-include ../tpch/insert_supplier.slt.part
+include ../../tpch/insert_nation.slt.part
+include ../../tpch/insert_region.slt.part
+include ../../tpch/insert_supplier.slt.part
 
 # Create materialized sources from tpcc tables
-include ./create_sources.slt.part
+include ../create_sources.slt.part
 
 # Ensure that the upstream data is fully consumed
 statement ok
 flush;
 
 # Run CH-benCHmark queries
-include ./q01.slt.part
-include ./q02.slt.part
-include ./q03.slt.part
-include ./q04.slt.part
-# include ./q05.slt.part --> no output
-include ./q06.slt.part
-# include ./q07.slt.part --> no output
-# include ./q08.slt.part --> no output
-include ./q09.slt.part
+include ./q1.slt.part
+include ./q2.slt.part
+include ./q3.slt.part
+include ./q4.slt.part
+# include ./q5.slt.part --> no output
+include ./q6.slt.part
+# include ./q7.slt.part --> no output
+# include ./q8.slt.part --> no output
+include ./q9.slt.part
 include ./q10.slt.part
 include ./q11.slt.part
 include ./q12.slt.part
@@ -53,7 +59,7 @@ include ./q20.slt.part
 include ./q21.slt.part
 include ./q22.slt.part
 
-include ./drop_sources.slt.part
+include ../drop_sources.slt.part
 
 # Drop tpch tables
 statement ok
