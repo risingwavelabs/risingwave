@@ -67,7 +67,7 @@ enum Backend {
 pub struct MetaNodeOpts {
     // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:5690")]
-    listen_addr: String,
+    listen_addr: String, // TODO: The port is defined here
 
     #[clap(long)]
     host: Option<String>,
@@ -182,14 +182,14 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
-            addr: meta_addr,
+            addr: meta_addr, // has port
             listen_addr,
             prometheus_addr,
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
         let (join_handle, _shutdown_send) = rpc_serve(
-            add_info,
+            add_info, // has port
             backend,
             max_heartbeat_interval,
             opts.meta_leader_lease_secs,

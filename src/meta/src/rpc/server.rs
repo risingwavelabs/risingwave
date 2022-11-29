@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -34,8 +34,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::watch::Receiver;
 use tokio::task::JoinHandle;
 use tonic::service::Interceptor;
-use tonic::transport::Server;
-use tonic::{Request, Response, Status};
+use tonic::{Request, Status};
 
 use super::elections::run_elections;
 use super::intercept::MetricsMiddlewareLayer;
@@ -89,7 +88,7 @@ impl Default for AddressInfo {
 }
 
 pub async fn rpc_serve(
-    address_info: AddressInfo,
+    address_info: AddressInfo, // has port
     meta_store_backend: MetaStoreBackend,
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
@@ -154,7 +153,12 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,
     lease_time_sec: u64,
-) -> MetaResult<(MetaLeaderInfo, JoinHandle<()>, Sender<()>, Receiver<bool>)> {
+) -> MetaResult<(
+    MetaLeaderInfo,
+    JoinHandle<()>,
+    Sender<()>,
+    Receiver<(HostAddr, bool)>,
+)> {
     run_elections(addr, meta_store, lease_time_sec).await
 }
 
@@ -165,9 +169,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, Sender<()>)> {
+    // Contains address info with port
+    //   address_info.listen_addr;
+
     // Initialize managers.
     let (info, lease_handle, lease_shutdown, mut leader_rx) = register_leader_for_meta(
-        address_info.addr.clone(),
+        address_info.listen_addr.clone().to_string(),
         meta_store.clone(),
         lease_interval_secs,
     )
@@ -177,22 +184,22 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // wait for leader update
         if leader_rx.changed().await.is_err() {
             tracing::error!("issue receiving leader value from channel");
-        }
-
-        let is_leader = *leader_rx.borrow();
-        let node_state = if is_leader { "leader" } else { "follower" };
-        tracing::info!("This node currently is a {}", node_state);
-
-        // only start services if node is leader
-        if !is_leader {
             continue;
         }
 
-        // TODO
-        // https://docs.rs/tonic/latest/tonic/service/trait.Interceptor.html
-        // Start service and check if you are leader
-        // interceptor pattern
-        // GRPC pattern Rust?
+        let (host_addr, is_leader) = leader_rx.borrow().clone();
+        let mut node_state = "leader";
+        if !is_leader {
+            node_state = "follower";
+            tracing::info!("Current leader is serving at {}", host_addr);
+        }
+        tracing::info!("This node currently is a {}", node_state);
+
+        // TODO: remove this!
+        // only start services if node is leader
+        //  if !is_leader {
+        //      continue;
+        //  }
 
         let prometheus_endpoint = opts.prometheus_endpoint.clone();
         let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
@@ -205,8 +212,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 .await
                 .unwrap(),
         );
-
-        tracing::info!("Node is leader. Preparing services...");
 
         let cluster_manager = Arc::new(
             ClusterManager::new(env.clone(), max_heartbeat_interval)
@@ -477,13 +482,15 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
 #[derive(Clone)]
 struct InterceptorWrapper {
-    leader_rx: Receiver<bool>, // TODO: Can I clone this?
+    leader_rx: Receiver<(HostAddr, bool)>, /* TODO: Can I clone this?
+                                            * TODO: leader_rx has to return the correct client
+                                            * addr */
 }
 
 impl Interceptor for InterceptorWrapper {
     fn call(&mut self, req: Request<()>) -> std::result::Result<Request<()>, Status> {
-        if !*self.leader_rx.borrow() {
-            tracing::info!("Blocking, request because this is not a leader");
+        let (_, is_leader) = self.leader_rx.borrow().clone();
+        if !is_leader {
             return Err(Status::aborted(
                 "Blocking request, because node is not leader",
             ));

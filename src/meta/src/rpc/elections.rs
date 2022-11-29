@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use prost::Message;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch::Receiver;
@@ -42,6 +43,7 @@ struct ElectionOutcome {
 
     // True if current node is leader, else false
     pub is_leader: bool,
+    pub host_addr: HostAddr,
 }
 
 /// Runs for election in an attempt to become leader
@@ -102,9 +104,10 @@ async fn campaign<S: MetaStore>(
                 "new cluster put leader info failed, MetaStoreError: {:?}",
                 e
             );
-            return None;
+            return None; // TODO: is return none correct?
         }
 
+        let mut addr_port = addr.split(":");
         // Check if new leader was elected in the meantime
         return match renew_lease(&leader_info, lease_time_sec, meta_store).await {
             Some(is_leader) => {
@@ -115,6 +118,10 @@ async fn campaign<S: MetaStore>(
                     meta_leader_info: leader_info,
                     _meta_lease_info: lease_info,
                     is_leader: true,
+                    host_addr: HostAddr {
+                        host: addr_port.next().unwrap().to_owned(),
+                        port: addr_port.next().unwrap().to_owned().parse::<u16>().unwrap(),
+                    },
                 })
             }
             None => None,
@@ -127,10 +134,35 @@ async fn campaign<S: MetaStore>(
         Some(val) => val,
     };
 
+    if is_leader {
+        // if is leader, return HostAddress to this node
+        let mut addr_port = addr.split(":");
+        return Some(ElectionOutcome {
+            meta_leader_info: leader_info,
+            _meta_lease_info: lease_info,
+            is_leader,
+            host_addr: HostAddr {
+                host: addr_port.next().unwrap().to_owned(),
+                port: addr_port.next().unwrap().to_owned().parse::<u16>().unwrap(),
+            },
+        });
+    }
+
+    // if it is not leader, then get the current leaders HostAddress
+
+    // TODO: Can I get the infos here or do I have to get these in
+    // one transaction when I call renew_lease?
+    let (leader, _) = get_infos_obj(meta_store).await?;
+    let mut addr_port = leader.get_node_address().split(":");
+
     Some(ElectionOutcome {
         meta_leader_info: leader_info,
         _meta_lease_info: lease_info,
         is_leader,
+        host_addr: HostAddr {
+            host: addr_port.next().unwrap().to_owned(),
+            port: addr_port.next().unwrap().to_owned().parse::<u16>().unwrap(),
+        },
     })
 }
 
@@ -171,6 +203,8 @@ async fn renew_lease<S: MetaStore>(
         META_LEASE_KEY.as_bytes().to_vec(),
         lease_info.encode_to_vec(),
     );
+
+    // TODO: transaction get the current leader
     let is_leader = match meta_store.txn(txn).await {
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => false,
@@ -225,6 +259,28 @@ async fn get_infos<S: MetaStore>(
     Some((current_leader_info, current_leader_lease))
 }
 
+/// Retrieve infos about the current leader
+/// Wrapper for get_infos
+///
+/// ## Returns
+/// None on error, else infos about the leader
+async fn get_infos_obj<S: MetaStore>(
+    meta_store: &Arc<S>,
+) -> Option<(MetaLeaderInfo, MetaLeaseInfo)> {
+    match get_infos(meta_store).await {
+        None => return None,
+        Some(infos) => {
+            let (leader, lease) = infos;
+            return Some((
+                MetaLeaderInfo::decode(&mut leader.as_slice()).unwrap(),
+                MetaLeaseInfo::decode(&mut lease.as_slice()).unwrap(),
+            ));
+        }
+    }
+}
+
+// TODO: Implement retry logic for get_infos
+
 fn gen_rand_lease_id() -> u64 {
     rand::thread_rng().gen_range(0..std::u64::MAX)
 }
@@ -252,7 +308,12 @@ pub async fn run_elections<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,
     lease_time_sec: u64,
-) -> MetaResult<(MetaLeaderInfo, JoinHandle<()>, Sender<()>, Receiver<bool>)> {
+) -> MetaResult<(
+    MetaLeaderInfo,
+    JoinHandle<()>,
+    Sender<()>,
+    Receiver<(HostAddr, bool)>,
+)> {
     // Randomize interval to reduce mitigate likelihood of simultaneous requests
     let mut rng: StdRng = SeedableRng::from_entropy();
     let mut ticker = tokio::time::interval(
@@ -291,7 +352,13 @@ pub async fn run_elections<S: MetaStore>(
 
         // define all follow up elections and terms in handle
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let (leader_tx, leader_rx) = tokio::sync::watch::channel(is_initial_leader);
+        let (leader_tx, leader_rx) = tokio::sync::watch::channel((
+            HostAddr {
+                host: "127.0.0.1".to_owned(), // TODO: add implementation
+                port: 123,
+            },
+            is_initial_leader,
+        ));
         let handle = tokio::spawn(async move {
             // runs all follow-up elections
             let mut wait = true;
@@ -307,11 +374,19 @@ pub async fn run_elections<S: MetaStore>(
                 }
                 wait = true;
 
+                // TODO: write MetaLeaderInfo to HostAddr function
+                // TODO: What is the difference between HostAddr and HostAddress?  Do we need both?
+
                 // Do not elect new leader directly after running the initial election
                 let mut is_leader = is_initial_leader;
                 let mut leader_info = initial_leader.clone();
+                let mut addr_port = initial_leader.get_node_address().split(":");
+                let mut leader_addr = HostAddr {
+                    host: addr_port.next().unwrap().to_owned(),
+                    port: addr_port.next().unwrap().to_owned().parse::<u16>().unwrap(),
+                };
                 if !initial_election {
-                    let (l_info, is_l) =
+                    let (l_addr, l_info, is_l) =
                         match campaign(&meta_store, &addr, lease_time_sec, gen_rand_lease_id())
                             .await
                         {
@@ -321,7 +396,11 @@ pub async fn run_elections<S: MetaStore>(
                             }
                             Some(outcome) => {
                                 tracing::info!("election finished");
-                                (outcome.meta_leader_info, outcome.is_leader)
+                                (
+                                    outcome.host_addr,
+                                    outcome.meta_leader_info,
+                                    outcome.is_leader,
+                                )
                             }
                         };
 
@@ -334,12 +413,13 @@ pub async fn run_elections<S: MetaStore>(
                     }
                     leader_info = l_info;
                     is_leader = is_l;
+                    leader_addr = l_addr;
                 }
                 initial_election = false;
 
                 // signal to observers if this node currently is leader
                 loop {
-                    if let Err(err) = leader_tx.send(is_leader) {
+                    if let Err(err) = leader_tx.send((leader_addr.clone(), is_leader)) {
                         tracing::info!("Error when sending leader update: {}", err);
                         ticker.tick().await;
                         continue;
