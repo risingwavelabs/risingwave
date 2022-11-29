@@ -1,3 +1,13 @@
+# `src/risedevtool/risedev-schema.json` defines the schema for risedev.yml
+#
+# You can add the following section to `.vscode/settings.json` to get hover support in VS Code:
+#
+# ```
+#     "yaml.schemas": {
+#         "src/risedevtool/risedev-schema.json": "risedev.yml"
+#     }
+# ```
+
 risedev:
   #########################################
   ### Configurations used by developers ###
