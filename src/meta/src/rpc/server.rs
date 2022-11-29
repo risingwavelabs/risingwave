@@ -295,7 +295,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
 
 pub async fn rpc_serve_with_store<S: MetaStore>(
     meta_store: Arc<S>,
-    mut address_info: AddressInfo,
+    address_info: AddressInfo,
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
@@ -336,9 +336,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
 
     #[cfg(not(madsim))]
-    if let Some(dashboard_addr) = address_info.dashboard_addr.take() {
+    if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
-            dashboard_addr,
+            dashboard_addr: *dashboard_addr,
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
             meta_store: env.meta_store_ref(),

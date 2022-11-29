@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::max;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -421,23 +422,50 @@ impl LogicalJoin {
         let table_desc = logical_scan.table_desc().clone();
         let output_column_ids = logical_scan.output_column_ids();
 
-        // Verify that the right join key columns are the same as the primary key
-        // TODO: Refactor Lookup Join so that prefixes of the primary key are allowed
+        // Verify that the right join key columns are the the prefix of the primary key and
+        // also contain the distribution key.
         let order_col_ids = table_desc.order_column_ids();
-        if order_col_ids.len() != predicate.right_eq_indexes().len() {
-            // In Lookup Join, the right columns of the equality join predicates must be the same as
-            // the primary key. A different join will be used instead.
+        let order_key = table_desc.order_column_indices();
+        let dist_key = table_desc.distribution_key.clone();
+        // The at least prefix of order key that contains distribution key.
+        let at_least_prefix_len = {
+            let mut max_pos = 0;
+            for d in dist_key {
+                max_pos = max(
+                    max_pos,
+                    order_key
+                        .iter()
+                        .position(|x| *x == d)
+                        .expect("dist_key must in order_key"),
+                );
+            }
+            max_pos + 1
+        };
+
+        if predicate.right_eq_indexes().len() < at_least_prefix_len {
+            // In Lookup Join, the right columns of the equality join predicates must contains the
+            // prefix of order key.
             return None;
         }
 
-        for (order_col_id, eq_idx) in order_col_ids
+        // Lookup prefix len is the prefix length of the order key.
+        let mut lookup_prefix_len = 0;
+        #[expect(clippy::disallowed_methods)]
+        for (i, (order_col_id, eq_idx)) in order_col_ids
             .into_iter()
-            .zip_eq(predicate.right_eq_indexes())
+            .zip(predicate.right_eq_indexes())
+            .enumerate()
         {
             if order_col_id != output_column_ids[eq_idx] {
-                // In Lookup Join, the right columns of the equality join predicates must be the
-                // same as the primary key. A different join will be used instead.
-                return None;
+                if i < at_least_prefix_len {
+                    // In Lookup Join, the right columns of the equality join predicates must
+                    // contains the prefix of order key.
+                    return None;
+                } else {
+                    break;
+                }
+            } else {
+                lookup_prefix_len = i + 1;
             }
         }
 
@@ -541,6 +569,7 @@ impl LogicalJoin {
                 new_predicate,
                 table_desc,
                 new_scan_output_column_ids,
+                lookup_prefix_len,
                 false,
             )
             .into(),
