@@ -137,7 +137,8 @@ pub async fn handle(
             if query.is_some() {
                 return Err(ErrorCode::NotImplemented("CREATE AS".to_string(), 6215.into()).into());
             }
-            create_table::handle_create_table(context, name, columns, constraints, if_not_exists).await
+            create_table::handle_create_table(context, name, columns, constraints, if_not_exists)
+                .await
         }
         Statement::CreateDatabase {
             db_name,

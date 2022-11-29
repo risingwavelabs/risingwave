@@ -264,7 +264,7 @@ pub async fn handle_create_table(
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    if_not_exists: bool
+    if_not_exists: bool,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
