@@ -1027,25 +1027,18 @@ impl<S: StateStore> StateTable<S> {
             {
                 None
             } else {
-                // let dist_key_end_index_in_pk =
-                // self.distribution_key_start_index_in_pk + self.dist_key_indices.len();
-                // let dist_key = (&pk_prefix).project(&self.dist_key_in_pk_indices);
-
-                let (dist_key_start_index, dist_key_len) =
-                    self.pk_serde.deserialize_dist_key_range_indices(
+                let (dist_key_start_position, dist_key_len) = self
+                    .pk_serde
+                    .deserialize_dist_key_position_with_column_indices(
                         &encoded_prefix,
                         0..self.dist_key_indices().len() + self.distribution_key_start_index_in_pk,
                         self.distribution_key_start_index_in_pk,
                     )?;
-                // let dist_key_serializer = self.pk_serde.dist_key_serde(
-                //     self.distribution_key_start_index_in_pk,
-                //     dist_key_end_index_in_pk,
-                // );
-                // let serialized_dist_key = serialize_pk(dist_key, &dist_key_serializer);
                 Some(
                     [
                         &vnode,
-                        &encoded_prefix[dist_key_start_index..dist_key_len + dist_key_start_index],
+                        &encoded_prefix
+                            [dist_key_start_position..dist_key_len + dist_key_start_position],
                     ]
                     .concat(),
                 )

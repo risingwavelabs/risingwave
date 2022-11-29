@@ -32,7 +32,7 @@ const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(60);
 /// `FilterKeyExtractor` generally used to extract key which will store in BloomFilter
 pub trait FilterKeyExtractor: Send + Sync {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8];
-    fn start_index(&self, full_key: &[u8]) -> usize;
+    fn dist_key_start_position(&self, full_key: &[u8]) -> usize;
 }
 
 pub enum FilterKeyExtractorImpl {
@@ -77,9 +77,9 @@ macro_rules! impl_filter_key_extractor {
                     $( Self::$variant_name(inner) => inner.extract(full_key), )*
                 }
             }
-            pub fn start_index(&self, full_key: &[u8]) -> usize{
+            pub fn dist_key_start_position(&self, full_key: &[u8]) -> usize{
                 match self {
-                    $( Self::$variant_name(inner) => inner.start_index(full_key), )*
+                    $( Self::$variant_name(inner) => inner.dist_key_start_position(full_key), )*
                 }
             }
         }
@@ -109,7 +109,7 @@ impl FilterKeyExtractor for FullKeyFilterKeyExtractor {
         full_key
     }
 
-    fn start_index(&self, _full_key: &[u8]) -> usize {
+    fn dist_key_start_position(&self, _full_key: &[u8]) -> usize {
         0
     }
 }
@@ -121,7 +121,7 @@ impl FilterKeyExtractor for DummyFilterKeyExtractor {
         &[]
     }
 
-    fn start_index(&self, _full_key: &[u8]) -> usize {
+    fn dist_key_start_position(&self, _full_key: &[u8]) -> usize {
         0
     }
 }
@@ -137,7 +137,7 @@ impl FilterKeyExtractor for FixedLengthFilterKeyExtractor {
         &full_key[0..self.fixed_length]
     }
 
-    fn start_index(&self, _full_key: &[u8]) -> usize {
+    fn dist_key_start_position(&self, _full_key: &[u8]) -> usize {
         0
     }
 }
@@ -157,7 +157,7 @@ pub struct SchemaFilterKeyExtractor {
     /// from storage key.
 
     /// distribution_key does not need to be the prefix of pk.
-    distribution_key_start_index_in_pk: usize,
+    distribution_key_dist_key_start_position_in_pk: usize,
     read_pattern_prefix_column: usize,
     deserializer: OrderedRowSerde,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
@@ -175,42 +175,44 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
-        let (dist_key_start_index, dist_ken_len) = self
+        let (dist_key_start_position, dist_ken_len) = self
             .deserializer
-            .deserialize_dist_key_range_indices(
+            .deserialize_dist_key_position_with_column_indices(
                 pk,
-                0..self.read_pattern_prefix_column + self.distribution_key_start_index_in_pk,
-                self.distribution_key_start_index_in_pk,
+                0..self.read_pattern_prefix_column
+                    + self.distribution_key_dist_key_start_position_in_pk,
+                self.distribution_key_dist_key_start_position_in_pk,
             )
             .unwrap();
 
         let prefix_len = TABLE_PREFIX_LEN + VirtualNode::SIZE + dist_ken_len;
-        &full_key[dist_key_start_index..prefix_len]
+        &full_key[dist_key_start_position..prefix_len]
     }
 
-    fn start_index(&self, full_key: &[u8]) -> usize {
+    fn dist_key_start_position(&self, full_key: &[u8]) -> usize {
         if full_key.len() < TABLE_PREFIX_LEN + VirtualNode::SIZE {
             return 0;
         }
 
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
         let (_vnode_prefix, pk) = key.split_at(VirtualNode::SIZE);
-        let (start_index, _) = self
+        let (dist_key_start_position, _) = self
             .deserializer
-            .deserialize_dist_key_range_indices(
+            .deserialize_dist_key_position_with_column_indices(
                 pk,
-                0..self.distribution_key_start_index_in_pk + self.read_pattern_prefix_column,
-                self.distribution_key_start_index_in_pk,
+                0..self.distribution_key_dist_key_start_position_in_pk
+                    + self.read_pattern_prefix_column,
+                self.distribution_key_dist_key_start_position_in_pk,
             )
             .unwrap();
-        start_index
+        dist_key_start_position
     }
 }
 
 impl SchemaFilterKeyExtractor {
     pub fn new(table_catalog: &Table) -> Self {
         let read_pattern_prefix_column = table_catalog.distribution_key.len();
-        let distribution_key_start_index_in_pk =
+        let distribution_key_dist_key_start_position_in_pk =
             table_catalog.distribution_key_start_index_in_pk as usize;
         assert_ne!(0, read_pattern_prefix_column);
         // column_index in pk
@@ -237,7 +239,7 @@ impl SchemaFilterKeyExtractor {
             .collect();
 
         Self {
-            distribution_key_start_index_in_pk,
+            distribution_key_dist_key_start_position_in_pk,
             read_pattern_prefix_column,
             deserializer: OrderedRowSerde::new(data_types, order_types),
         }
@@ -281,12 +283,12 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
             .extract(full_key)
     }
 
-    fn start_index(&self, full_key: &[u8]) -> usize {
+    fn dist_key_start_position(&self, full_key: &[u8]) -> usize {
         let table_id = get_table_id(full_key);
         self.id_to_filter_key_extractor
             .get(&table_id)
             .unwrap()
-            .start_index(full_key)
+            .dist_key_start_position(full_key)
     }
 }
 
