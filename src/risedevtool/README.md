@@ -127,6 +127,18 @@ All steps for downloading components, copying config, and building RisingWave ar
 
 `risedev.yml` is powerful yet simple. If you want to make changes to the configuration format, you may need to understand how it works. Source code is in `risedevtool/src/config`.
 
+> **Note**
+> 
+> `src/risedevtool/risedev-schema.json` defines the schema for risedev.yml
+> 
+> You can add the following section to `.vscode/settings.json` to get hover support in VS Code:
+> 
+> ```yml
+>     "yaml.schemas": {
+>         "src/risedevtool/risedev-schema.json": "risedev.yml"
+>     }
+> ```
+
 #### Template Expanding
 
 `risedev.yml` has two sections: template and risedev. The template section contains templates for a single component. For example:
@@ -174,7 +186,7 @@ risedev:
       exporter-port: 1222
 ```
 
-The config in template (namely port and exporter port) will be overwritten by user-provided config.
+The config in template (namely `port` and `exporter-port`) will be overwritten by user-provided config.
 
 #### Variable Expanding
 
