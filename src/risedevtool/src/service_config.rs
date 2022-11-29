@@ -59,6 +59,7 @@ pub struct MetaNodeConfig {
     pub user_managed: bool,
 
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
+    pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 
     pub max_heartbeat_interval_secs: u64,
     pub unsafe_disable_recovery: bool,

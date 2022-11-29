@@ -47,6 +47,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             stream.streaming_metrics.clone(),
             table.clone(),
             params.executor_id,
+            params.env.connector_params(),
         )))
     }
 }

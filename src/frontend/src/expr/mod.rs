@@ -284,7 +284,7 @@ impl ExprImpl {
                 &mut self,
                 correlated_input_ref: &CorrelatedInputRef,
             ) -> bool {
-                correlated_input_ref.depth() >= self.depth
+                correlated_input_ref.depth() == self.depth
             }
 
             fn visit_subquery(&mut self, subquery: &Subquery) -> bool {

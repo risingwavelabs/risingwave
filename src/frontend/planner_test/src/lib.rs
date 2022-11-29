@@ -317,9 +317,17 @@ impl TestCase {
                     name,
                     columns,
                     constraints,
+                    if_not_exists,
                     ..
                 } => {
-                    create_table::handle_create_table(context, name, columns, constraints).await?;
+                    create_table::handle_create_table(
+                        context,
+                        name,
+                        columns,
+                        constraints,
+                        if_not_exists,
+                    )
+                    .await?;
                 }
                 Statement::CreateSource {
                     is_materialized,
@@ -333,12 +341,13 @@ impl TestCase {
                     columns,
                     include,
                     distributed_by,
+                    if_not_exists,
                     // TODO: support unique and if_not_exist in planner test
                     ..
                 } => {
                     create_index::handle_create_index(
                         context,
-                        false,
+                        if_not_exists,
                         name,
                         table_name,
                         columns,
