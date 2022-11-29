@@ -150,7 +150,6 @@ impl OrderedRowSerde {
         use crate::types::ScalarImpl;
         let mut dist_key_start_position: usize = 0;
         let mut len: usize = 0;
-
         for index in column_indices {
             let data_type = &self.schema[index];
             let order_type = &self.order_types[index];
@@ -297,6 +296,68 @@ mod tests {
             let deserde = OrderedRowSerde::new(schema, order_types);
             let prefix_slice = &array[0][0..row_0_idx_1_len];
             assert_eq!(deserde.deserialize(prefix_slice).unwrap(), row1);
+        }
+    }
+
+    #[test]
+    fn test_deserialize_dist_key_position_with_column_indices() {
+        let order_types = vec![
+            OrderType::Descending,
+            OrderType::Ascending,
+            OrderType::Descending,
+            OrderType::Ascending,
+        ];
+
+        let schema = vec![
+            DataType::Varchar,
+            DataType::Int16,
+            DataType::Varchar,
+            DataType::Varchar,
+        ];
+        let serde = OrderedRowSerde::new(schema, order_types);
+        let row1 = Row(vec![
+            Some(Utf8("aaa".to_string())),
+            Some(Int16(5)),
+            Some(Utf8("bbb".to_string())),
+            Some(Utf8("ccc".to_string())),
+        ]);
+        let rows = vec![row1];
+        let mut array = vec![];
+        for row in &rows {
+            let mut row_bytes = vec![];
+            serde.serialize(row, &mut row_bytes);
+            array.push(row_bytes);
+        }
+
+        {
+            let dist_key_indices = [1, 2];
+            let dist_key_start_index = 1;
+            let (dist_ket_start_position, dist_key_len) = serde
+                .deserialize_dist_key_position_with_column_indices(
+                    &array[0],
+                    0..dist_key_start_index + dist_key_indices.len(),
+                    dist_key_start_index,
+                )
+                .unwrap();
+
+            let schema = vec![DataType::Varchar];
+            let order_types = vec![OrderType::Descending];
+            let deserde = OrderedRowSerde::new(schema, order_types);
+            let prefix_slice = &array[0][0..dist_ket_start_position];
+            assert_eq!(
+                deserde.deserialize(prefix_slice).unwrap(),
+                Row(vec![Some(Utf8("aaa".to_string()))])
+            );
+
+            let schema = vec![DataType::INT16, DataType::VARCHAR];
+            let order_types = vec![OrderType::Ascending, OrderType::Descending];
+            let deserde = OrderedRowSerde::new(schema, order_types);
+            let dist_key_slice =
+                &array[0][dist_ket_start_position..dist_ket_start_position + dist_key_len];
+            assert_eq!(
+                deserde.deserialize(dist_key_slice).unwrap(),
+                Row(vec![Some(Int16(5)), Some(Utf8("bbb".to_string()))])
+            );
         }
     }
 

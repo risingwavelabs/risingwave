@@ -1022,7 +1022,7 @@ impl<S: StateStore> StateTable<S> {
         let dist_key_hint = {
             if self.dist_key_indices.is_empty()
                 || !is_subset(self.dist_key_indices.clone(), pk_prefix_indices.to_vec())
-                || self.dist_key_indices().len() + self.distribution_key_start_index_in_pk
+                || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk
                     > pk_prefix.len()
             {
                 None

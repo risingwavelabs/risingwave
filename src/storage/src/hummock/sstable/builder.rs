@@ -100,6 +100,7 @@ pub struct SstableBuilder<W: SstableWriter> {
     /// Hashes of user keys.
     user_key_hashes: Vec<u32>,
     last_full_key: Vec<u8>,
+    last_extract_key: Vec<u8>,
     /// Buffer for encoded key and value to avoid allocation.
     raw_key: BytesMut,
     raw_value: BytesMut,
@@ -152,6 +153,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             raw_key: BytesMut::new(),
             raw_value: BytesMut::new(),
             last_full_key: vec![],
+            last_extract_key: vec![],
             range_tombstones: vec![],
             sstable_id,
             filter_key_extractor,
@@ -201,20 +203,12 @@ impl<W: SstableWriter> SstableBuilder<W> {
             // add bloom_filter check
             // 1. not empty_key
             // 2. extract_key key is not duplicate
-            if !extract_key.is_empty()
-                && (extract_key
-                    != &self.last_full_key[self
-                        .filter_key_extractor
-                        .dist_key_start_position(extract_key)
-                        ..self
-                            .filter_key_extractor
-                            .dist_key_start_position(extract_key)
-                            + self.last_bloom_filter_key_length])
-            {
+            if !extract_key.is_empty() && extract_key.to_vec() != self.last_extract_key {
                 // avoid duplicate add to bloom filter
                 self.user_key_hashes
                     .push(farmhash::fingerprint32(extract_key));
                 self.last_bloom_filter_key_length = extract_key.len();
+                self.last_extract_key = extract_key.to_vec();
             }
         } else {
             self.stale_key_count += 1;

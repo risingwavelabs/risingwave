@@ -275,7 +275,7 @@ impl<S: StateStore> StorageTable<S> {
             .collect_vec();
         let read_options = ReadOptions {
             dist_key_hint: None,
-            check_bloom_filter: self.dist_key_indices == key_indices,
+            check_bloom_filter: is_subset(self.dist_key_indices.clone(), key_indices),
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
@@ -460,6 +460,8 @@ impl<S: StateStore> StorageTable<S> {
             .collect_vec();
         let dist_key_hint = if self.dist_key_indices.is_empty()
             || !is_subset(self.dist_key_indices.clone(), pk_prefix_indices.clone())
+            || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk
+                > pk_prefix.len()
         {
             trace!(
                 "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
