@@ -20,8 +20,8 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
-use risingwave_pb::catalog::Table;
 use risingwave_connector::ConnectorParams;
+use risingwave_pb::catalog::Table;
 use risingwave_storage::StateStore;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
