@@ -98,6 +98,7 @@ impl ColPrunable for LogicalLimit {
 
 impl PredicatePushdown for LogicalLimit {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        // filter can not transpose limit
         gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }

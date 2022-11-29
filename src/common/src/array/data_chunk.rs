@@ -25,12 +25,12 @@ use crate::array::data_chunk_iter::RowRef;
 use crate::array::{ArrayBuilderImpl, StructValue};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
-use crate::row::Row;
+use crate::row::{Row, Row2};
 use crate::types::struct_type::StructType;
 use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
-use crate::util::value_encoding::serialize_datum_ref;
+use crate::util::value_encoding::serialize_datum;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, PartialEq)]
@@ -72,7 +72,7 @@ impl DataChunk {
             .collect::<Vec<_>>();
 
         for row in rows {
-            for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
+            for (datum, builder) in row.iter().zip_eq(array_builders.iter_mut()) {
                 builder.append_datum(datum);
             }
         }
@@ -259,7 +259,7 @@ impl DataChunk {
                         .array_ref()
                         .create_builder(end_row_idx - start_row_idx + 1);
                     for row_idx in start_row_idx..=end_row_idx {
-                        array_builder.append_datum_ref(column.array_ref().value_at(row_idx));
+                        array_builder.append_datum(column.array_ref().value_at(row_idx));
                     }
                     builder.append_array(&array_builder.finish());
                 });
@@ -385,7 +385,7 @@ impl DataChunk {
             .collect();
         for &i in indexes {
             for (builder, col) in array_builders.iter_mut().zip_eq(&self.columns) {
-                builder.append_datum_ref(col.array_ref().value_at(i));
+                builder.append_datum(col.array_ref().value_at(i));
             }
         }
         let columns = array_builders
@@ -411,7 +411,7 @@ impl DataChunk {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
                         unsafe {
                             if vis.is_set_unchecked(i) {
-                                serialize_datum_ref(&c.value_at_unchecked(i), buffer);
+                                serialize_datum(c.value_at_unchecked(i), buffer);
                             }
                         }
                     }
@@ -426,7 +426,7 @@ impl DataChunk {
                     for (i, buffer) in buffers.iter_mut().enumerate() {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
                         unsafe {
-                            serialize_datum_ref(&c.value_at_unchecked(i), buffer);
+                            serialize_datum(c.value_at_unchecked(i), buffer);
                         }
                     }
                 }

@@ -133,6 +133,10 @@ pub struct MetaNodeOpts {
 
     #[clap(long, default_value = "10")]
     node_num_monitor_interval_sec: u64,
+
+    /// For dashboard service to fetch cluster info.
+    #[clap(long)]
+    prometheus_endpoint: Option<String>,
 }
 
 use std::future::Future;
@@ -205,6 +209,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: meta_config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: opts.node_num_monitor_interval_sec,
+                prometheus_endpoint: opts.prometheus_endpoint,
             },
         )
         .await
