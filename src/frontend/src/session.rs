@@ -789,17 +789,14 @@ impl Session<PgResponseStream> for SessionImpl {
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
-                let mut ticker = tokio::time::interval(SLOW_QUERY_LOG_PERIOD);
-                ticker.reset();
                 pin_mut!(handle_fut);
                 loop {
-                    tokio::select! {
-                        _ = ticker.tick() => {
-                            tracing::warn!(sql, "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}");
-                        }
-                        result = &mut handle_fut => {
-                            break result;
-                        }
+                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
+                        Ok(result) => break result,
+                        Err(_) => tracing::warn!(
+                            sql,
+                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
+                        ),
                     }
                 }
             } else {
