@@ -121,7 +121,7 @@ impl Cluster {
                         "0.0.0.0:4566",
                         "--client-address",
                         &format!("{frontend_ip}:4566"),
-                        "--meta-addr",
+                        "--meta-addr", // FIXME: use multiple addresses fo HA setup?
                         &format!("{meta}:5690"),
                     ]);
                     risingwave_frontend::start(opts).await
@@ -145,8 +145,8 @@ impl Cluster {
                         "0.0.0.0:5688",
                         "--client-address",
                         &format!("192.168.3.{i}:5688"),
-                        "--meta-address",
-                        &format!("{meta}:5690"),
+                        "--meta-address", // FIXME: use multiple addresses fo HA setup?
+                        &format!("{meta}:5690,{meta}:15690,{meta}:25690"),
                         "--state-store",
                         "hummock+memory-shared",
                     ]);

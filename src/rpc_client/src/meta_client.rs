@@ -104,6 +104,7 @@ impl MetaClient {
         addr: &HostAddr,
         worker_node_parallelism: usize,
     ) -> Result<Self> {
+        // FIXME: This may be multiple meta_addr like a,b,c
         let grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,

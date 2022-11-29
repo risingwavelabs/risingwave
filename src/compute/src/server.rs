@@ -14,6 +14,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
 use risingwave_batch::executor::BatchTaskMetrics;
@@ -79,15 +80,39 @@ pub async fn compute_node_serve(
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
+    info!("current meta_addr is {}", opts.meta_address);
+
+    // TODO: even after initializing the meta_client we have to be careful when talking to meta
+    // every call to meta may fail if the current meta is not a leader
+
     // Register to the cluster. We're not ready to serve until activate is called.
-    let meta_client = MetaClient::register_new(
-        &opts.meta_address,
-        WorkerType::ComputeNode,
-        &client_addr,
-        config.streaming.worker_node_parallelism,
-    )
-    .await
-    .unwrap();
+    // Try each of the meta nodes
+    // FIXME: Should we communicate with ETCD here?
+
+    let addrs: Vec<&str> = opts.meta_address.split(",").collect();
+    let mut meta_client_opt: Option<MetaClient> = None;
+    'outer: loop {
+        for addr in &addrs {
+            tracing::info!("trying {}", addr);
+            let client_res = MetaClient::register_new(
+                addr,
+                WorkerType::ComputeNode,
+                &client_addr,
+                config.streaming.worker_node_parallelism,
+            )
+            .await;
+            if client_res.is_err() {
+                tracing::info!("failed: trying {}", addr);
+
+                continue;
+            }
+            meta_client_opt = Some(client_res.unwrap());
+            break 'outer;
+        }
+        thread::sleep(Duration::from_millis(4000));
+    }
+
+    let meta_client = meta_client_opt.unwrap();
 
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
