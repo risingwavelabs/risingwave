@@ -75,9 +75,16 @@ export interface Sink {
   schemaId: number;
   databaseId: number;
   name: string;
-  properties: { [key: string]: string };
-  owner: number;
+  columns: ColumnCatalog[];
+  pk: ColumnOrder[];
   dependentRelations: number[];
+  distributionKey: number[];
+  /** pk_indices of the corresponding materialize operator's output. */
+  streamKey: number[];
+  appendonly: boolean;
+  owner: number;
+  properties: { [key: string]: string };
+  definition: string;
 }
 
 export interface Sink_PropertiesEntry {
@@ -439,7 +446,21 @@ export const Source_PropertiesEntry = {
 };
 
 function createBaseSink(): Sink {
-  return { id: 0, schemaId: 0, databaseId: 0, name: "", properties: {}, owner: 0, dependentRelations: [] };
+  return {
+    id: 0,
+    schemaId: 0,
+    databaseId: 0,
+    name: "",
+    columns: [],
+    pk: [],
+    dependentRelations: [],
+    distributionKey: [],
+    streamKey: [],
+    appendonly: false,
+    owner: 0,
+    properties: {},
+    definition: "",
+  };
 }
 
 export const Sink = {
@@ -449,16 +470,24 @@ export const Sink = {
       schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
+      columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
+      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
+      dependentRelations: Array.isArray(object?.dependentRelations)
+        ? object.dependentRelations.map((e: any) => Number(e))
+        : [],
+      distributionKey: Array.isArray(object?.distributionKey)
+        ? object.distributionKey.map((e: any) => Number(e))
+        : [],
+      streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
+      appendonly: isSet(object.appendonly) ? Boolean(object.appendonly) : false,
+      owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
           return acc;
         }, {})
         : {},
-      owner: isSet(object.owner) ? Number(object.owner) : 0,
-      dependentRelations: Array.isArray(object?.dependentRelations)
-        ? object.dependentRelations.map((e: any) => Number(e))
-        : [],
+      definition: isSet(object.definition) ? String(object.definition) : "",
     };
   },
 
@@ -468,18 +497,40 @@ export const Sink = {
     message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
     message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
     message.name !== undefined && (obj.name = message.name);
+    if (message.columns) {
+      obj.columns = message.columns.map((e) => e ? ColumnCatalog.toJSON(e) : undefined);
+    } else {
+      obj.columns = [];
+    }
+    if (message.pk) {
+      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    } else {
+      obj.pk = [];
+    }
+    if (message.dependentRelations) {
+      obj.dependentRelations = message.dependentRelations.map((e) => Math.round(e));
+    } else {
+      obj.dependentRelations = [];
+    }
+    if (message.distributionKey) {
+      obj.distributionKey = message.distributionKey.map((e) => Math.round(e));
+    } else {
+      obj.distributionKey = [];
+    }
+    if (message.streamKey) {
+      obj.streamKey = message.streamKey.map((e) => Math.round(e));
+    } else {
+      obj.streamKey = [];
+    }
+    message.appendonly !== undefined && (obj.appendonly = message.appendonly);
+    message.owner !== undefined && (obj.owner = Math.round(message.owner));
     obj.properties = {};
     if (message.properties) {
       Object.entries(message.properties).forEach(([k, v]) => {
         obj.properties[k] = v;
       });
     }
-    message.owner !== undefined && (obj.owner = Math.round(message.owner));
-    if (message.dependentRelations) {
-      obj.dependentRelations = message.dependentRelations.map((e) => Math.round(e));
-    } else {
-      obj.dependentRelations = [];
-    }
+    message.definition !== undefined && (obj.definition = message.definition);
     return obj;
   },
 
@@ -489,6 +540,13 @@ export const Sink = {
     message.schemaId = object.schemaId ?? 0;
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
+    message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
+    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
+    message.distributionKey = object.distributionKey?.map((e) => e) || [];
+    message.streamKey = object.streamKey?.map((e) => e) || [];
+    message.appendonly = object.appendonly ?? false;
+    message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
         if (value !== undefined) {
@@ -498,8 +556,7 @@ export const Sink = {
       },
       {},
     );
-    message.owner = object.owner ?? 0;
-    message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
+    message.definition = object.definition ?? "";
     return message;
   },
 };
