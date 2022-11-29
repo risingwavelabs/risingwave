@@ -603,8 +603,8 @@ template:
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
 
-    # RPC endpoint for source connector node (not allow to change for now)
-    connector-source-endpoint: "127.0.0.1:60061"
+    # RPC endpoint for connector node
+    connector-rpc-endpoint: "127.0.0.1:60061"
 
     # Minio instances used by this compute node
     provide-minio: "minio*"
@@ -773,7 +773,7 @@ template:
     # Connector node advertise address
     address: "127.0.0.1"
 
-    # Connector node listen port (not allow to change for now)
+    # Connector node listen port
     port: 60061
 
     # Id of this instance

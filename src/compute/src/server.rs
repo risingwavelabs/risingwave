@@ -235,8 +235,7 @@ pub async fn compute_node_serve(
     );
 
     let connector_params = risingwave_connector::ConnectorParams {
-        connector_source_endpoint: opts.connector_source_endpoint,
-        connector_sink_endpoint: opts.connector_sink_endpoint,
+        connector_rpc_endpoint: opts.connector_rpc_endpoint,
     };
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
