@@ -27,7 +27,8 @@ use crate::TableCatalog;
 pub struct StreamSink {
     pub base: PlanBase,
     input: PlanRef,
-    table: TableCatalog,
+    // TODO(yuhao): Maybe use a real `SinkCatalog` here. @st1page
+    sink_catalog: TableCatalog,
 }
 
 impl StreamSink {
@@ -48,17 +49,21 @@ impl StreamSink {
     }
 
     #[must_use]
-    pub fn new(input: PlanRef, table: TableCatalog) -> Self {
+    pub fn new(input: PlanRef, sink_catalog: TableCatalog) -> Self {
         let base = Self::derive_plan_base(&input).unwrap();
-        Self { base, input, table }
+        Self::with_base(input, sink_catalog, base)
     }
 
-    pub fn with_base(input: PlanRef, table: TableCatalog, base: PlanBase) -> Self {
-        Self { base, input, table }
+    pub fn with_base(input: PlanRef, sink_catalog: TableCatalog, base: PlanBase) -> Self {
+        Self {
+            base,
+            input,
+            sink_catalog,
+        }
     }
 
-    pub fn table(&self) -> &TableCatalog {
-        &self.table
+    pub fn sink_catalog(&self) -> &TableCatalog {
+        &self.sink_catalog
     }
 }
 
@@ -68,7 +73,7 @@ impl PlanTreeNodeUnary for StreamSink {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.table.clone())
+        Self::new(input, self.sink_catalog.clone())
         // TODO(nanderstabel): Add assertions (assert_eq!)
     }
 }
@@ -87,9 +92,9 @@ impl StreamNode for StreamSink {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::Sink(SinkNode {
-            table_id: self.table.id().into(),
+            table_id: self.sink_catalog.id().into(),
             column_ids: vec![], // TODO(nanderstabel): fix empty Vector
-            table: Some(self.table.to_internal_table_prost()),
+            table: Some(self.sink_catalog.to_internal_table_prost()),
         })
     }
 }

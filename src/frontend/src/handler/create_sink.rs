@@ -135,9 +135,11 @@ pub fn gen_sink_plan(
     let sink_plan =
         plan_root.gen_create_sink_plan(sink_table_name, definition, col_names, properties)?;
 
-    let table_prost = sink_plan.table().to_prost(sink_schema_id, sink_database_id);
+    let sink_catalog_prost = sink_plan
+        .sink_catalog()
+        .to_prost(sink_schema_id, sink_database_id);
 
-    let sink_prost = into_sink_prost(table_prost);
+    let sink_prost = into_sink_prost(sink_catalog_prost);
 
     let sink_plan: PlanRef = sink_plan.into();
 

@@ -112,7 +112,7 @@ pub fn available_prost_privilege(object: ProstObject) -> ProstPrivilege {
             AVAILABLE_ACTION_ON_MVIEW.to_vec()
         }
         ProstObject::ViewId(_) => AVAILABLE_ACTION_ON_VIEW.to_vec(),
-        ProstObject::SinkId(_) => AVAILABLE_ACTION_ON_VIEW.to_vec(),
+        ProstObject::SinkId(_) => AVAILABLE_ACTION_ON_SINK.to_vec(),
     };
     let actions = actions
         .iter()

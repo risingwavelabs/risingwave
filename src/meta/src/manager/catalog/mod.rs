@@ -1252,7 +1252,7 @@ where
             for &dependent_relation_id in &sink.dependent_relations {
                 database_core.increase_ref_count(dependent_relation_id);
             }
-            user_core.increase_ref_count(sink.owner, 1);
+            user_core.increase_ref(sink.owner);
             Ok(())
         }
     }
@@ -1293,7 +1293,7 @@ where
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !database_core.indexes.contains_key(&sink.id)
+        if !database_core.sinks.contains_key(&sink.id)
             && database_core.has_in_progress_creation(&key)
         {
             database_core.unmark_creating(&key);
@@ -1301,7 +1301,7 @@ where
             for &dependent_relation_id in &sink.dependent_relations {
                 database_core.decrease_ref_count(dependent_relation_id);
             }
-            user_core.decrease_ref_count(sink.owner, 1);
+            user_core.decrease_ref(sink.owner);
             Ok(())
         } else {
             unreachable!("sink must not exist and be in creating procedure");
@@ -1833,7 +1833,7 @@ where
     }
 
     /// `update_user_privileges` removes the privileges with given object from given users, it will
-    /// be called when a database/schema/table/source/table is dropped.
+    /// be called when a database/schema/table/source/sink is dropped.
     #[inline(always)]
     fn update_user_privileges(
         users: &mut BTreeMapTransaction<'_, UserId, UserInfo>,
