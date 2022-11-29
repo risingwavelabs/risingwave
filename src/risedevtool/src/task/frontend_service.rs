@@ -70,6 +70,7 @@ impl FrontendService {
                 .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
             if provide_meta_node.len() > 1 {
                 eprintln!("WARN: more than 1 meta node instance is detected, only using the last one for meta node.");
+                // FIXME: We are now supporting multiple meta nodes
                 // According to some heruistics, the last etcd node seems always to be elected as
                 // leader. Therefore we ensure compute node can start by using the last one.
             }

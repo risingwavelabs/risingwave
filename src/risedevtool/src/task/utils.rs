@@ -26,14 +26,17 @@ pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) ->
                 "Cannot configure node: no meta node found in this configuration."
             ));
         }
+
         meta_nodes => {
-            cmd.arg("--meta-address").arg(format!(
-                "http://{}:{}",
-                meta_nodes.last().unwrap().address,
-                meta_nodes.last().unwrap().port
-            ));
+            let mut parameter = "".to_owned();
+            for meta_node in meta_nodes {
+                parameter
+                    .push_str(format!(",http://{}:{}", meta_node.address, meta_node.port).as_str());
+            }
+            cmd.arg("--meta-address").arg(parameter);
             if meta_nodes.len() > 1 {
-                eprintln!("WARN: more than 1 meta node instance is detected, only using the last one for meta node.");
+                eprintln!("WARN: more than 1 meta node instance is detected. Using all of them.");
+                // TODO: This has to change. We are now supporting multiple meta nodes
                 // According to some heruistics, the last etcd node seems always to be elected as
                 // leader. Therefore we ensure compute node can start by using the last one.
             }
