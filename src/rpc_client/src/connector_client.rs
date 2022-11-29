@@ -17,8 +17,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::cdc_service::cdc_service_client::CdcServiceClient;
-use risingwave_pb::cdc_service::*;
+use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
+use risingwave_pb::connector_service::*;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 
@@ -26,18 +26,20 @@ use crate::error::Result;
 use crate::RpcClient;
 
 #[derive(Clone)]
-pub struct CdcClient(CdcServiceClient<Channel>);
+// ConnectorService
+pub struct ConnectorClient(ConnectorServiceClient<Channel>);
 
-impl CdcClient {
+impl ConnectorClient {
     pub async fn new(host_addr: HostAddr) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await?;
-        Ok(Self(CdcServiceClient::new(channel)))
+        Ok(Self(ConnectorServiceClient::new(channel)))
     }
 
+    /// Get source event stream
     pub async fn get_event_stream(
         &self,
         source_id: u64,
@@ -59,7 +61,7 @@ impl CdcClient {
 }
 
 #[async_trait]
-impl RpcClient for CdcClient {
+impl RpcClient for ConnectorClient {
     async fn new_client(host_addr: HostAddr) -> Result<Self> {
         Self::new(host_addr).await
     }

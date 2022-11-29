@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use risingwave_pb::cdc_service::CdcMessage;
+use risingwave_pb::connector_service::CdcMessage;
 
 use crate::source::base::SourceMessage;
 
