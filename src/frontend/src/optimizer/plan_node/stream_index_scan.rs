@@ -74,7 +74,7 @@ impl fmt::Display for StreamIndexScan {
 
         builder.field("index", &self.logical.table_name()).field(
             "columns",
-            &format!(
+            &format_args!(
                 "[{}]",
                 match verbose {
                     false => self.logical.column_names(),
