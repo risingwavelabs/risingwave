@@ -297,7 +297,7 @@ impl SourceDescBuilder {
         let mut source_props: HashMap<String, String> =
             HashMap::from_iter(self.properties.clone().into_iter());
         self.connector_params
-            .connector_source_endpoint
+            .connector_rpc_endpoint
             .as_ref()
             .map(|addr| source_props.insert("connector_node_addr".to_string(), addr.clone()));
         let config = ConnectorProperties::extract(source_props)
@@ -366,8 +366,7 @@ pub mod test_utils {
             info,
             source_manager,
             connector_params: ConnectorParams {
-                connector_source_endpoint: None,
-                connector_sink_endpoint: None,
+                connector_rpc_endpoint: None,
             },
         }
     }

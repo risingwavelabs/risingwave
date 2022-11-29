@@ -166,6 +166,11 @@ pub(crate) fn gen_create_index_plan(
             .iter()
             .map(InputRef::to_expr_proto)
             .collect_vec(),
+        original_columns: index_columns
+            .iter()
+            .chain(include_columns.iter())
+            .map(|index| *index as i32)
+            .collect_vec(),
     };
 
     let plan: PlanRef = materialize.into();
