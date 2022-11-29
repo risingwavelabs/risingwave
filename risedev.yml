@@ -775,7 +775,7 @@ template:
     # Connector node advertise address
     address: "127.0.0.1"
 
-    # Connector node listen port (not allow to change for now)
+    # Connector node listen port
     port: 60061
 
     # Id of this instance
