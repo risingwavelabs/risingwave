@@ -422,6 +422,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         source_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
+        barrier_manager.clone(),
     );
 
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());

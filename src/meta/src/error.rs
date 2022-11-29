@@ -52,6 +52,9 @@ enum MetaErrorInner {
     #[error("{0} with name {1} exists")]
     Duplicated(&'static str, String),
 
+    #[error("Service unavailable: {0}")]
+    Unavailable(String),
+
     #[error(transparent)]
     Internal(anyhow::Error),
 }
@@ -109,6 +112,10 @@ impl MetaError {
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
         MetaErrorInner::Duplicated(relation, name.into()).into()
     }
+
+    pub fn unavailable(s: String) -> Self {
+        MetaErrorInner::Unavailable(s).into()
+    }
 }
 
 impl From<MetadataModelError> for MetaError {
@@ -143,6 +150,7 @@ impl From<MetaError> for tonic::Status {
             }
             MetaErrorInner::CatalogIdNotFound(_, _) => tonic::Status::not_found(err.to_string()),
             MetaErrorInner::Duplicated(_, _) => tonic::Status::already_exists(err.to_string()),
+            MetaErrorInner::Unavailable(_) => tonic::Status::unavailable(err.to_string()),
             _ => tonic::Status::internal(err.to_string()),
         }
     }
