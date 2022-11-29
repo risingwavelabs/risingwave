@@ -392,7 +392,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Utf8(column.name.clone())),
                             Some(ScalarImpl::Int32(column.data_type().to_oid())),
                             Some(ScalarImpl::Int16(column.data_type().type_len())),
-                            Some(ScalarImpl::Int32(index as i32 + 1)),
+                            Some(ScalarImpl::Int16(index as i16 + 1)),
                             Some(ScalarImpl::Bool(false)),
                         ])
                     })
@@ -412,7 +412,7 @@ impl SysCatalogReaderImpl {
                                     Some(ScalarImpl::Utf8(column.name().to_string())),
                                     Some(ScalarImpl::Int32(column.data_type().to_oid())),
                                     Some(ScalarImpl::Int16(column.data_type().type_len())),
-                                    Some(ScalarImpl::Int32(index as i32 + 1)),
+                                    Some(ScalarImpl::Int16(index as i16 + 1)),
                                     Some(ScalarImpl::Bool(false)),
                                 ])
                             })
