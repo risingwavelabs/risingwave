@@ -26,7 +26,6 @@ use crate::error::Result;
 use crate::RpcClient;
 
 #[derive(Clone)]
-// ConnectorService
 pub struct ConnectorClient(ConnectorServiceClient<Channel>);
 
 impl ConnectorClient {
