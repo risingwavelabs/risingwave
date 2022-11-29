@@ -43,6 +43,9 @@ pub struct BatchLookupJoin {
     /// Output column ids of the right side table
     right_output_column_ids: Vec<ColumnId>,
 
+    /// The prefix length of the order key of right side table.
+    lookup_prefix_len: usize,
+
     /// If `distributed_lookup` is true, it will generate `DistributedLookupJoinNode` for
     /// `ToBatchProst`. Otherwise, it will generate `LookupJoinNode`.
     distributed_lookup: bool,
@@ -54,6 +57,7 @@ impl BatchLookupJoin {
         eq_join_predicate: EqJoinPredicate,
         right_table_desc: TableDesc,
         right_output_column_ids: Vec<ColumnId>,
+        lookup_prefix_len: usize,
         distributed_lookup: bool,
     ) -> Self {
         let ctx = logical.base.ctx.clone();
@@ -65,6 +69,7 @@ impl BatchLookupJoin {
             eq_join_predicate,
             right_table_desc,
             right_output_column_ids,
+            lookup_prefix_len,
             distributed_lookup,
         }
     }
@@ -148,6 +153,7 @@ impl PlanTreeNodeUnary for BatchLookupJoin {
             self.eq_join_predicate.clone(),
             self.right_table_desc.clone(),
             self.right_output_column_ids.clone(),
+            self.lookup_prefix_len,
             self.distributed_lookup,
         )
     }
@@ -184,6 +190,12 @@ impl ToBatchProst for BatchLookupJoin {
                     .into_iter()
                     .map(|a| a as _)
                     .collect(),
+                inner_side_key: self
+                    .eq_join_predicate
+                    .right_eq_indexes()
+                    .into_iter()
+                    .map(|a| a as _)
+                    .collect(),
                 inner_side_table_desc: Some(self.right_table_desc.to_protobuf()),
                 inner_side_column_ids: self
                     .right_output_column_ids
@@ -197,6 +209,7 @@ impl ToBatchProst for BatchLookupJoin {
                     .map(|&x| x as u32)
                     .collect(),
                 null_safe: self.eq_join_predicate.null_safes(),
+                lookup_prefix_len: self.lookup_prefix_len as u32,
             })
         } else {
             NodeBody::LocalLookupJoin(LocalLookupJoinNode {
@@ -209,6 +222,12 @@ impl ToBatchProst for BatchLookupJoin {
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()
+                    .into_iter()
+                    .map(|a| a as _)
+                    .collect(),
+                inner_side_key: self
+                    .eq_join_predicate
+                    .right_eq_indexes()
                     .into_iter()
                     .map(|a| a as _)
                     .collect(),
@@ -227,6 +246,7 @@ impl ToBatchProst for BatchLookupJoin {
                     .collect(),
                 worker_nodes: vec![], // To be filled in at local.rs
                 null_safe: self.eq_join_predicate.null_safes(),
+                lookup_prefix_len: self.lookup_prefix_len as u32,
             })
         }
     }
