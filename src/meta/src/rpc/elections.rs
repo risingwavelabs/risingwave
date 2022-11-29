@@ -195,7 +195,6 @@ async fn renew_lease<S: MetaStore>(
         lease_register_time: now.as_secs(),
         lease_expire_time: now.as_secs() + lease_time_sec,
     };
-    tracing::info!("check_equal leader_info {:?}", leader_info);
 
     txn.check_equal(
         META_CF_NAME.to_string(),
