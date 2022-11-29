@@ -143,33 +143,6 @@
       |     └─BatchScan { table: bc, columns: [bc.b, bc.c], distribution: SomeShard }
       └─BatchExchange { order: [], dist: HashShard(ca.c) }
         └─BatchScan { table: ca, columns: [ca.c, ca.a], distribution: SomeShard }
-- name: Only push to left
-  sql: |
-    create table t1 (v1 int, v2 int);
-    create table t2 (v1 int, v2 int);
-    select * from t1 left join t2 where t1.v2 > 100;
-  optimized_logical_plan: |
-    LogicalJoin { type: LeftOuter, on: true, output: all }
-    ├─LogicalScan { table: t1, output_columns: [t1.v1, t1.v2], required_columns: [v1, v2], predicate: (t1.v2 > 100:Int32) }
-    └─LogicalScan { table: t2, columns: [t2.v1, t2.v2] }
-- name: Only push to right
-  sql: |
-    create table t1 (v1 int, v2 int);
-    create table t2 (v1 int, v2 int);
-    select * from t1 right join t2 where t2.v2 > 100;
-  optimized_logical_plan: |
-    LogicalJoin { type: LeftOuter, on: true, output: [t1.v1, t1.v2, t2.v1, t2.v2] }
-    ├─LogicalScan { table: t2, output_columns: [t2.v1, t2.v2], required_columns: [v1, v2], predicate: (t2.v2 > 100:Int32) }
-    └─LogicalScan { table: t1, columns: [t1.v1, t1.v2] }
-- name: Push to left, right and on
-  sql: |
-    create table t1 (v1 int, v2 int);
-    create table t2 (v1 int, v2 int);
-    select * from t1, t2 where t1.v1 > 100 and t2.v1 < 1000 and t1.v2 = t2.v2;
-  optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: (t1.v2 = t2.v2), output: all }
-    ├─LogicalScan { table: t1, output_columns: [t1.v1, t1.v2], required_columns: [v1, v2], predicate: (t1.v1 > 100:Int32) }
-    └─LogicalScan { table: t2, output_columns: [t2.v1, t2.v2], required_columns: [v1, v2], predicate: (t2.v1 < 1000:Int32) }
 - name: Left & right has same SomeShard distribution. There should still be exchanges below hash join
   sql: |
     create table t(x int);

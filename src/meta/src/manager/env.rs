@@ -95,6 +95,9 @@ pub struct MetaOpts {
     pub periodic_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
+
+    /// The prometheus endpoint for dashboard service.
+    pub prometheus_endpoint: Option<String>,
 }
 
 impl MetaOpts {
@@ -114,6 +117,7 @@ impl MetaOpts {
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
+            prometheus_endpoint: None,
         }
     }
 }

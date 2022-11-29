@@ -131,7 +131,7 @@ async fn get_local_hummock_storage(
         event_tx.clone(),
         MemoryLimiter::unlimit(),
         #[cfg(not(madsim))]
-        Arc::new(risingwave_tracing::RwTracingService::new()),
+        Arc::new(risingwave_tracing::RwTracingService::disabled()),
     )
 }
 

@@ -119,6 +119,7 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
             metrics.state_store_metrics.clone(),
             metrics.object_store_metrics.clone(),
             TieredCacheMetricsBuilder::unused(),
+            Arc::new(risingwave_tracing::RwTracingService::disabled()),
         )
         .await?;
 

@@ -484,13 +484,9 @@ impl StateStoreRead for HummockStorageV1 {
             // not check
         }
 
-        let stream = self
-            .iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options)
-            .map_ok(|iter| iter.into_stream());
-        #[cfg(not(madsim))]
-        return stream.in_span(self.tracing.new_tracer("hummock_iter"));
-        #[cfg(madsim)]
-        stream
+        self.iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options)
+            .map_ok(|iter| iter.into_stream())
+            .in_span(self.tracing.new_tracer("hummock_iter"))
     }
 }
 

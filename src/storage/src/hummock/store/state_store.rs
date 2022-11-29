@@ -16,7 +16,6 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-#[cfg(not(madsim))]
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
@@ -61,8 +60,6 @@ pub struct HummockStorageCore {
 
 pub struct LocalHummockStorage {
     core: Arc<HummockStorageCore>,
-
-    #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
@@ -72,7 +69,6 @@ impl Clone for LocalHummockStorage {
     fn clone(&self) -> Self {
         Self {
             core: self.core.clone(),
-            #[cfg(not(madsim))]
             tracing: self.tracing.clone(),
         }
     }
@@ -162,13 +158,9 @@ impl StateStoreRead for LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        let stream = self
-            .core
-            .iter_inner(map_table_key_range(key_range), epoch, read_options);
-        #[cfg(not(madsim))]
-        return stream.in_span(self.tracing.new_tracer("hummock_iter"));
-        #[cfg(madsim)]
-        stream
+        self.core
+            .iter_inner(map_table_key_range(key_range), epoch, read_options)
+            .in_span(self.tracing.new_tracer("hummock_iter"))
     }
 }
 
@@ -221,7 +213,7 @@ impl LocalHummockStorage {
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
-        #[cfg(not(madsim))] tracing: Arc<risingwave_tracing::RwTracingService>,
+        tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> Self {
         let storage_core = HummockStorageCore::new(
             instance_guard,
@@ -233,7 +225,6 @@ impl LocalHummockStorage {
 
         Self {
             core: Arc::new(storage_core),
-            #[cfg(not(madsim))]
             tracing,
         }
     }
