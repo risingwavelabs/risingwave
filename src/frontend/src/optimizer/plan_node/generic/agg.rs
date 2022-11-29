@@ -12,169 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, FieldDisplay, Schema, TableDesc};
-use risingwave_common::types::{DataType, IntervalUnit};
+use risingwave_common::catalog::{Field, FieldDisplay, Schema};
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
-use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
-use super::stream;
-use super::utils::{IndicesDisplay, TableCatalogBuilder};
-use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{Expr, ExprDisplay, ExprImpl, InputRef, InputRefDisplay};
-use crate::optimizer::property::{Direction, Order};
+use super::super::utils::TableCatalogBuilder;
+use super::{stream, GenericPlanNode, GenericPlanRef};
+use crate::expr::{Expr, InputRef, InputRefDisplay};
+use crate::optimizer::property::Direction;
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 use crate::TableCatalog;
-
-pub trait GenericPlanRef {
-    fn schema(&self) -> &Schema;
-    fn logical_pk(&self) -> &[usize];
-    fn ctx(&self) -> OptimizerContextRef;
-}
-
-#[derive(Clone, Debug)]
-pub struct DynamicFilter<PlanRef> {
-    /// The predicate (formed with exactly one of < , <=, >, >=)
-    pub predicate: Condition,
-    // dist_key_l: Distribution,
-    pub left_index: usize,
-    pub left: PlanRef,
-    pub right: PlanRef,
-}
-
-pub mod dynamic_filter {
-    use risingwave_common::util::sort_util::OrderType;
-
-    use crate::optimizer::plan_node::stream;
-    use crate::optimizer::plan_node::utils::TableCatalogBuilder;
-    use crate::TableCatalog;
-
-    pub fn infer_left_internal_table_catalog(
-        me: &impl stream::StreamPlanRef,
-        left_key_index: usize,
-    ) -> TableCatalog {
-        let schema = me.schema();
-
-        let dist_keys = me.distribution().dist_column_indices().to_vec();
-
-        // The pk of dynamic filter internal table should be left_key + input_pk.
-        let mut pk_indices = vec![left_key_index];
-        // TODO(yuhao): dedup the dist key and pk.
-        pk_indices.extend(me.logical_pk());
-
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
-
-        schema.fields().iter().for_each(|field| {
-            internal_table_catalog_builder.add_column(field);
-        });
-
-        pk_indices.iter().for_each(|idx| {
-            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
-        });
-
-        internal_table_catalog_builder.build(dist_keys)
-    }
-
-    pub fn infer_right_internal_table_catalog(input: &impl stream::StreamPlanRef) -> TableCatalog {
-        let schema = input.schema();
-
-        // We require that the right table has distribution `Single`
-        assert_eq!(
-            input.distribution().dist_column_indices().to_vec(),
-            Vec::<usize>::new()
-        );
-
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
-
-        schema.fields().iter().for_each(|field| {
-            internal_table_catalog_builder.add_column(field);
-        });
-
-        // No distribution keys
-        internal_table_catalog_builder.build(vec![])
-    }
-}
-
-/// [`HopWindow`] implements Hop Table Function.
-#[derive(Debug, Clone)]
-pub struct HopWindow<PlanRef> {
-    pub input: PlanRef,
-    pub(super) time_col: InputRef,
-    pub(super) window_slide: IntervalUnit,
-    pub(super) window_size: IntervalUnit,
-    pub(super) output_indices: Vec<usize>,
-}
-
-impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
-    pub fn into_parts(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit, Vec<usize>) {
-        (
-            self.input,
-            self.time_col,
-            self.window_slide,
-            self.window_size,
-            self.output_indices,
-        )
-    }
-
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let output_type = DataType::window_of(&self.time_col.data_type).unwrap();
-        write!(
-            f,
-            "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
-            name,
-            format_args!(
-                "{}",
-                InputRefDisplay {
-                    input_ref: &self.time_col,
-                    input_schema: self.input.schema()
-                }
-            ),
-            self.window_slide,
-            self.window_size,
-            if self
-                .output_indices
-                .iter()
-                .copied()
-                // Behavior is the same as `LogicalHopWindow::internal_column_num`
-                .eq(0..(self.input.schema().len() + 2))
-            {
-                "all".to_string()
-            } else {
-                let original_schema: Schema = self
-                    .input
-                    .schema()
-                    .clone()
-                    .into_fields()
-                    .into_iter()
-                    .chain([
-                        Field::with_name(output_type.clone(), "window_start"),
-                        Field::with_name(output_type, "window_end"),
-                    ])
-                    .collect();
-                format!(
-                    "{:?}",
-                    &IndicesDisplay {
-                        indices: &self.output_indices,
-                        input_schema: &original_schema,
-                    }
-                )
-            },
-        )
-    }
-}
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
 ///
@@ -187,6 +44,34 @@ pub struct Agg<PlanRef> {
     pub agg_calls: Vec<PlanAggCall>,
     pub group_key: Vec<usize>,
     pub input: PlanRef,
+}
+
+impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
+    fn schema(&self) -> Schema {
+        let fields = self
+            .group_key
+            .iter()
+            .cloned()
+            .map(|i| self.input.schema().fields()[i].clone())
+            .chain(self.agg_calls.iter().map(|agg_call| {
+                let plan_agg_call_display = PlanAggCallDisplay {
+                    plan_agg_call: agg_call,
+                    input_schema: self.input.schema(),
+                };
+                let name = format!("{:?}", plan_agg_call_display);
+                Field::with_name(agg_call.return_type.clone(), name)
+            }))
+            .collect();
+        Schema { fields }
+    }
+
+    fn logical_pk(&self) -> Option<Vec<usize>> {
+        Some((0..self.group_key.len()).into_iter().collect_vec())
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.input.ctx()
+    }
 }
 
 pub enum AggCallState {
@@ -465,7 +350,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         (self.agg_calls, self.group_key, self.input)
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         if !self.group_key.is_empty() {
             builder.field("group_key", &self.group_key_display());
@@ -743,392 +628,4 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
         }
         Ok(())
     }
-}
-
-/// [`ProjectSet`] projects one row multiple times according to `select_list`.
-///
-/// Different from `Project`, it supports [`TableFunction`](crate::expr::TableFunction)s.
-/// See also [`ProjectSetSelectItem`](risingwave_pb::expr::ProjectSetSelectItem) for examples.
-///
-/// To have a pk, it has a hidden column `projected_row_id` at the beginning. The implementation of
-/// `LogicalProjectSet` is highly similar to [`LogicalProject`], except for the additional hidden
-/// column.
-#[derive(Debug, Clone)]
-pub struct ProjectSet<PlanRef> {
-    pub select_list: Vec<ExprImpl>,
-    pub input: PlanRef,
-}
-
-impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
-    /// Gets the Mapping of columnIndex from output column index to input column index
-    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        let input_len = self.input.schema().len();
-        let mut map = vec![None; 1 + self.select_list.len()];
-        for (i, item) in self.select_list.iter().enumerate() {
-            map[1 + i] = match item {
-                ExprImpl::InputRef(input) => Some(input.index()),
-                _ => None,
-            }
-        }
-        ColIndexMapping::with_target_size(map, input_len)
-    }
-
-    /// Gets the Mapping of columnIndex from input column index to output column index,if a input
-    /// column corresponds more than one out columns, mapping to any one
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.o2i_col_mapping().inverse()
-    }
-}
-
-/// [`Join`] combines two relations according to some condition.
-///
-/// Each output row has fields from the left and right inputs. The set of output rows is a subset
-/// of the cartesian product of the two inputs; precisely which subset depends on the join
-/// condition. In addition, the output columns are a subset of the columns of the left and
-/// right columns, dependent on the output indices provided. A repeat output index is illegal.
-#[derive(Debug, Clone)]
-pub struct Join<PlanRef> {
-    pub left: PlanRef,
-    pub right: PlanRef,
-    pub on: Condition,
-    pub join_type: JoinType,
-    pub output_indices: Vec<usize>,
-}
-
-impl<PlanRef> Join<PlanRef> {
-    pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
-        (
-            self.left,
-            self.right,
-            self.on,
-            self.join_type,
-            self.output_indices,
-        )
-    }
-
-    pub fn full_out_col_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
-        match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                left_len + right_len
-            }
-            JoinType::LeftSemi | JoinType::LeftAnti => left_len,
-            JoinType::RightSemi | JoinType::RightAnti => right_len,
-            JoinType::Unspecified => unreachable!(),
-        }
-    }
-}
-
-impl<PlanRef: GenericPlanRef> Join<PlanRef> {
-    pub fn with_full_output(
-        left: PlanRef,
-        right: PlanRef,
-        join_type: JoinType,
-        on: Condition,
-    ) -> Self {
-        let out_column_num =
-            Self::full_out_col_num(left.schema().len(), right.schema().len(), join_type);
-        Self {
-            left,
-            right,
-            join_type,
-            on,
-            output_indices: (0..out_column_num).collect(),
-        }
-    }
-
-    pub fn internal_column_num(&self) -> usize {
-        Self::full_out_col_num(
-            self.left.schema().len(),
-            self.right.schema().len(),
-            self.join_type,
-        )
-    }
-
-    /// Get the Mapping of columnIndex from internal column index to left column index.
-    pub fn i2l_col_mapping(&self) -> ColIndexMapping {
-        let left_len = self.left.schema().len();
-        let right_len = self.right.schema().len();
-
-        match self.join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                ColIndexMapping::identity_or_none(left_len + right_len, left_len)
-            }
-
-            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
-            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
-            JoinType::Unspecified => unreachable!(),
-        }
-    }
-
-    /// Get the Mapping of columnIndex from internal column index to right column index.
-    pub fn i2r_col_mapping(&self) -> ColIndexMapping {
-        let left_len = self.left.schema().len();
-        let right_len = self.right.schema().len();
-
-        match self.join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
-            }
-            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
-            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
-            JoinType::Unspecified => unreachable!(),
-        }
-    }
-
-    /// Get the Mapping of columnIndex from left column index to internal column index.
-    pub fn l2i_col_mapping(&self) -> ColIndexMapping {
-        self.i2l_col_mapping().inverse()
-    }
-
-    /// Get the Mapping of columnIndex from right column index to internal column index.
-    pub fn r2i_col_mapping(&self) -> ColIndexMapping {
-        self.i2r_col_mapping().inverse()
-    }
-}
-/// [`Expand`] expand one row multiple times according to `column_subsets` and also keep
-/// original columns of input. It can be used to implement distinct aggregation and group set.
-///
-/// This is the schema of `Expand`:
-/// | expanded columns(i.e. some columns are set to null) | original columns of input | flag |.
-///
-/// Aggregates use expanded columns as their arguments and original columns for their filter. `flag`
-/// is used to distinguish between different `subset`s in `column_subsets`.
-#[derive(Debug, Clone)]
-pub struct Expand<PlanRef> {
-    // `column_subsets` has many `subset`s which specifies the columns that need to be
-    // reserved and other columns will be filled with NULL.
-    pub column_subsets: Vec<Vec<usize>>,
-    pub input: PlanRef,
-}
-
-impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
-    pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
-        self.column_subsets
-            .iter()
-            .map(|subset| {
-                subset
-                    .iter()
-                    .map(|&i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-                    .collect_vec()
-            })
-            .collect_vec()
-    }
-}
-
-/// [`Filter`] iterates over its input and returns elements for which `predicate` evaluates to
-/// true, filtering out the others.
-///
-/// If the condition allows nulls, then a null value is treated the same as false.
-#[derive(Debug, Clone)]
-pub struct Filter<PlanRef> {
-    pub predicate: Condition,
-    pub input: PlanRef,
-}
-
-/// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
-#[derive(Debug, Clone)]
-pub struct TopN<PlanRef> {
-    pub input: PlanRef,
-    pub limit: u64,
-    pub offset: u64,
-    pub with_ties: bool,
-    pub order: Order,
-    pub group_key: Vec<usize>,
-}
-
-pub trait GenericPlanNode {
-    fn schema(&self) -> Schema;
-    fn logical_pk(&self) -> Option<Vec<usize>>;
-    fn ctx(&self) -> OptimizerContextRef;
-}
-
-impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
-    /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
-    pub fn infer_internal_table_catalog(
-        &self,
-        me: &impl stream::StreamPlanRef,
-        vnode_col_idx: Option<usize>,
-    ) -> TableCatalog {
-        let schema = me.schema();
-        let pk_indices = me.logical_pk();
-        let columns_fields = schema.fields().to_vec();
-        let field_order = &self.order.field_order;
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
-
-        columns_fields.iter().for_each(|field| {
-            internal_table_catalog_builder.add_column(field);
-        });
-        let mut order_cols = HashSet::new();
-
-        // Here we want the state table to store the states in the order we want, firstly in
-        // ascending order by the columns specified by the group key, then by the columns
-        // specified by `order`. If we do that, when the later group topN operator
-        // does a prefix scanning with the group key, we can fetch the data in the
-        // desired order.
-        self.group_key.iter().for_each(|&idx| {
-            internal_table_catalog_builder.add_order_column(idx, OrderType::Ascending);
-            order_cols.insert(idx);
-        });
-
-        field_order.iter().for_each(|field_order| {
-            if !order_cols.contains(&field_order.index) {
-                internal_table_catalog_builder
-                    .add_order_column(field_order.index, OrderType::from(field_order.direct));
-                order_cols.insert(field_order.index);
-            }
-        });
-
-        pk_indices.iter().for_each(|idx| {
-            if !order_cols.contains(idx) {
-                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
-                order_cols.insert(*idx);
-            }
-        });
-        if let Some(vnode_col_idx) = vnode_col_idx {
-            internal_table_catalog_builder.set_vnode_col_idx(vnode_col_idx);
-        }
-        internal_table_catalog_builder
-            .build(self.input.distribution().dist_column_indices().to_vec())
-    }
-}
-
-/// [`Scan`] returns contents of a table or other equivalent object
-#[derive(Debug, Clone)]
-pub struct Scan {
-    pub table_name: String,
-    pub is_sys_table: bool,
-    /// Include `output_col_idx` and columns required in `predicate`
-    pub required_col_idx: Vec<usize>,
-    pub output_col_idx: Vec<usize>,
-    // Descriptor of the table
-    pub table_desc: Rc<TableDesc>,
-    // Descriptors of all indexes on this table
-    pub indexes: Vec<Rc<IndexCatalog>>,
-    /// The pushed down predicates. It refers to column indexes of the table.
-    pub predicate: Condition,
-}
-
-impl Scan {
-    /// Get the descs of the output columns.
-    pub fn column_descs(&self) -> Vec<ColumnDesc> {
-        self.output_col_idx
-            .iter()
-            .map(|&i| self.table_desc.columns[i].clone())
-            .collect()
-    }
-
-    /// Helper function to create a mapping from `column_id` to `operator_idx`
-    pub fn get_id_to_op_idx_mapping(
-        output_col_idx: &[usize],
-        table_desc: &Rc<TableDesc>,
-    ) -> HashMap<ColumnId, usize> {
-        let mut id_to_op_idx = HashMap::new();
-        output_col_idx
-            .iter()
-            .enumerate()
-            .for_each(|(op_idx, tb_idx)| {
-                let col = &table_desc.columns[*tb_idx];
-                id_to_op_idx.insert(col.column_id, op_idx);
-            });
-        id_to_op_idx
-    }
-}
-
-/// [`Source`] returns contents of a table or other equivalent object
-#[derive(Debug, Clone)]
-pub struct Source {
-    pub catalog: Rc<SourceCatalog>,
-}
-
-impl Source {
-    pub fn infer_internal_table_catalog(me: &impl GenericPlanRef) -> TableCatalog {
-        // note that source's internal table is to store partition_id -> offset mapping and its
-        // schema is irrelevant to input schema
-        let mut builder =
-            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
-
-        let key = Field {
-            data_type: DataType::Varchar,
-            name: "partition_id".to_string(),
-            sub_fields: vec![],
-            type_name: "".to_string(),
-        };
-        let value = Field {
-            data_type: DataType::Varchar,
-            name: "offset".to_string(),
-            sub_fields: vec![],
-            type_name: "".to_string(),
-        };
-
-        let ordered_col_idx = builder.add_column(&key);
-        builder.add_column(&value);
-        builder.add_order_column(ordered_col_idx, OrderType::Ascending);
-
-        builder.build(vec![])
-    }
-}
-
-/// [`Project`] computes a set of expressions from its input relation.
-#[derive(Debug, Clone)]
-pub struct Project<PlanRef> {
-    pub exprs: Vec<ExprImpl>,
-    pub input: PlanRef,
-}
-
-impl<PlanRef: GenericPlanRef> Project<PlanRef> {
-    pub fn new(exprs: Vec<ExprImpl>, input: PlanRef) -> Self {
-        Project { exprs, input }
-    }
-
-    pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
-        (self.exprs, self.input)
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field(
-            "exprs",
-            &self
-                .exprs
-                .iter()
-                .map(|expr| ExprDisplay {
-                    expr,
-                    input_schema: self.input.schema(),
-                })
-                .collect_vec(),
-        );
-        builder.finish()
-    }
-
-    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        let exprs = &self.exprs;
-        let input_len = self.input.schema().len();
-        let mut map = vec![None; exprs.len()];
-        for (i, expr) in exprs.iter().enumerate() {
-            map[i] = match expr {
-                ExprImpl::InputRef(input) => Some(input.index()),
-                _ => None,
-            }
-        }
-        ColIndexMapping::with_target_size(map, input_len)
-    }
-
-    /// get the Mapping of columnIndex from input column index to output column index,if a input
-    /// column corresponds more than one out columns, mapping to any one
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.o2i_col_mapping().inverse()
-    }
-}
-
-/// `Union` returns the union of the rows of its inputs.
-/// If `all` is false, it needs to eliminate duplicates.
-#[derive(Debug, Clone)]
-pub struct Union<PlanRef> {
-    pub all: bool,
-    pub inputs: Vec<PlanRef>,
-    /// It is used by streaming processing. We need to use `source_col` to identify the record came
-    /// from which source input.
-    /// We add it as a logical property, because we need to derive the logical pk based on it.
-    pub source_col: Option<usize>,
 }
