@@ -403,17 +403,83 @@ impl LogicalJoin {
         }
     }
 
+    /// Index Join:
+    /// Try to convert logical join into batch lookup join and meanwhile it will do
+    /// the index selection for the lookup table so that we can benefit from indexes.
+    fn to_batch_lookup_join_with_index_selection(
+        &self,
+        predicate: EqJoinPredicate,
+        logical_join: LogicalJoin,
+    ) -> Option<BatchLookupJoin> {
+        match logical_join.join_type() {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {}
+            _ => return None,
+        };
+
+        // Index selection for index join.
+        let right = self.right();
+        // Lookup Join only supports basic tables on the join's right side.
+        let logical_scan: &LogicalScan = right.as_logical_scan()?;
+
+        let mut result_plan = None;
+        // Lookup primary table.
+        if let Some(lookup_join) =
+            self.to_batch_lookup_join(predicate.clone(), logical_join.clone())
+        {
+            result_plan = Some(lookup_join);
+        }
+
+        let required_col_idx = logical_scan.required_col_idx();
+        let indexes = logical_scan.indexes();
+        for index in indexes {
+            let p2s_mapping = index.primary_to_secondary_mapping();
+            if required_col_idx.iter().all(|x| p2s_mapping.contains_key(x)) {
+                // Covering index selection
+                let index_scan: PlanRef = logical_scan
+                    .to_index_scan(
+                        &index.name,
+                        index.index_table.table_desc().into(),
+                        p2s_mapping,
+                    )
+                    .into();
+
+                let that = self.clone_with_left_right(self.left(), index_scan.clone());
+                let new_logical_join = logical_join.clone_with_left_right(
+                    logical_join.left(),
+                    index_scan.to_batch().expect("index scan failed to batch"),
+                );
+
+                // Lookup covered index.
+                if let Some(lookup_join) =
+                    that.to_batch_lookup_join(predicate.clone(), new_logical_join)
+                {
+                    match &result_plan {
+                        None => result_plan = Some(lookup_join),
+                        Some(prev_lookup_join) => {
+                            // Prefer to choose lookup join with longer lookup prefix len.
+                            if prev_lookup_join.lookup_prefix_len()
+                                < lookup_join.lookup_prefix_len()
+                            {
+                                result_plan = Some(lookup_join)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        result_plan
+    }
+
+    /// Try to convert logical join into batch lookup join.
     fn to_batch_lookup_join(
         &self,
         predicate: EqJoinPredicate,
         logical_join: LogicalJoin,
-    ) -> Option<PlanRef> {
+    ) -> Option<BatchLookupJoin> {
         match logical_join.join_type() {
-            JoinType::RightOuter
-            | JoinType::RightSemi
-            | JoinType::RightAnti
-            | JoinType::FullOuter => return None,
-            _ => {}
+            JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {}
+            _ => return None,
         };
 
         let right = self.right();
@@ -563,17 +629,14 @@ impl LogicalJoin {
             new_join_output_indices,
         );
 
-        Some(
-            BatchLookupJoin::new(
-                new_logical_join,
-                new_predicate,
-                table_desc,
-                new_scan_output_column_ids,
-                lookup_prefix_len,
-                false,
-            )
-            .into(),
-        )
+        Some(BatchLookupJoin::new(
+            new_logical_join,
+            new_predicate,
+            table_desc,
+            new_scan_output_column_ids,
+            lookup_prefix_len,
+            false,
+        ))
     }
 
     pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
@@ -1015,7 +1078,8 @@ impl LogicalJoin {
 
         Ok(self
             .to_batch_lookup_join(predicate, logical_join)
-            .expect("Fail to convert to lookup join"))
+            .expect("Fail to convert to lookup join")
+            .into())
     }
 
     fn to_batch_nested_loop_join(
@@ -1044,10 +1108,11 @@ impl ToBatch for LogicalJoin {
 
         if predicate.has_eq() {
             if config.get_batch_enable_lookup_join() {
-                if let Some(lookup_join) =
-                    self.to_batch_lookup_join(predicate.clone(), logical_join.clone())
-                {
-                    return Ok(lookup_join);
+                if let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
+                    predicate.clone(),
+                    logical_join.clone(),
+                ) {
+                    return Ok(lookup_join.into());
                 }
             }
 

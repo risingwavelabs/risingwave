@@ -9,6 +9,9 @@ explain select v1 from ddl_t;
 statement error
 create table ddl_t (v2 int);
 
+statement ok
+create table if not exists ddl_t (v2 int);
+
 # Drop the table.
 statement ok
 drop table ddl_t;

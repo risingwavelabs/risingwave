@@ -47,9 +47,10 @@ impl Task for ConnectorNodeService {
 
         let mut cmd = Command::new("java");
         // the main class can be removed in the next version of cdc source
-        cmd.arg("-cp")
+        cmd.arg("-jar")
             .arg(path)
-            .arg("com.risingwave.sourcenode.service.SourceServiceMain");
+            .arg("--port")
+            .arg(self.config.port.to_string());
         ctx.run_command(ctx.tmux_run(cmd)?)?;
         ctx.pb.set_message("started");
 

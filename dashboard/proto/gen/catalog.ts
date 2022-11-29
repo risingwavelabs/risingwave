@@ -99,6 +99,7 @@ export interface Index {
    * The index of `InputRef` is the column index of the primary table.
    */
   indexItem: ExprNode[];
+  originalColumns: number[];
 }
 
 /** See `TableCatalog` struct in frontend crate for more information. */
@@ -542,7 +543,17 @@ export const Sink_PropertiesEntry = {
 };
 
 function createBaseIndex(): Index {
-  return { id: 0, schemaId: 0, databaseId: 0, name: "", owner: 0, indexTableId: 0, primaryTableId: 0, indexItem: [] };
+  return {
+    id: 0,
+    schemaId: 0,
+    databaseId: 0,
+    name: "",
+    owner: 0,
+    indexTableId: 0,
+    primaryTableId: 0,
+    indexItem: [],
+    originalColumns: [],
+  };
 }
 
 export const Index = {
@@ -558,6 +569,7 @@ export const Index = {
       indexItem: Array.isArray(object?.indexItem)
         ? object.indexItem.map((e: any) => ExprNode.fromJSON(e))
         : [],
+      originalColumns: Array.isArray(object?.originalColumns) ? object.originalColumns.map((e: any) => Number(e)) : [],
     };
   },
 
@@ -575,6 +587,11 @@ export const Index = {
     } else {
       obj.indexItem = [];
     }
+    if (message.originalColumns) {
+      obj.originalColumns = message.originalColumns.map((e) => Math.round(e));
+    } else {
+      obj.originalColumns = [];
+    }
     return obj;
   },
 
@@ -588,6 +605,7 @@ export const Index = {
     message.indexTableId = object.indexTableId ?? 0;
     message.primaryTableId = object.primaryTableId ?? 0;
     message.indexItem = object.indexItem?.map((e) => ExprNode.fromPartial(e)) || [];
+    message.originalColumns = object.originalColumns?.map((e) => e) || [];
     return message;
   },
 };
