@@ -29,15 +29,21 @@ use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::build_graph;
 use crate::Planner;
 
-fn gen_sink_prost(table: &Table) -> ProstSink {
+fn into_sink_prost(table: Table) -> ProstSink {
     ProstSink {
         id: 0,
         schema_id: table.schema_id,
         database_id: table.database_id,
-        name: table.name.clone(),
-        properties: table.properties.clone(),
+        name: table.name,
+        columns: table.columns,
+        pk: table.pk,
+        dependent_relations: table.dependent_relations,
+        distribution_key: table.distribution_key,
+        stream_key: table.stream_key,
+        appendonly: table.appendonly,
+        properties: table.properties,
         owner: table.owner,
-        dependent_relations: vec![],
+        definition: table.definition,
     }
 }
 
@@ -70,7 +76,7 @@ pub fn gen_sink_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: CreateSinkStatement,
-) -> Result<(PlanRef, Table, ProstSink)> {
+) -> Result<(PlanRef, ProstSink)> {
     let db_name = session.database();
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
@@ -131,7 +137,7 @@ pub fn gen_sink_plan(
 
     let table_prost = sink_plan.table().to_prost(sink_schema_id, sink_database_id);
 
-    let sink_prost = gen_sink_prost(&table_prost);
+    let sink_prost = into_sink_prost(table_prost);
 
     let sink_plan: PlanRef = sink_plan.into();
 
@@ -143,7 +149,7 @@ pub fn gen_sink_plan(
         ctx.trace(sink_plan.explain_to_string().unwrap());
     }
 
-    Ok((sink_plan, table_prost, sink_prost))
+    Ok((sink_plan, sink_prost))
 }
 
 pub async fn handle_create_sink(
@@ -154,14 +160,14 @@ pub async fn handle_create_sink(
 
     session.check_relation_name_duplicated(stmt.sink_name.clone())?;
 
-    let (sink, table, graph) = {
-        let (plan, table, sink) = gen_sink_plan(&session, context.into(), stmt)?;
+    let (sink, graph) = {
+        let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
 
-        (sink, table, build_graph(plan))
+        (sink, build_graph(plan))
     };
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.create_sink(sink, table, graph).await?;
+    catalog_writer.create_sink(sink, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }

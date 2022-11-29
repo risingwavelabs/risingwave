@@ -85,12 +85,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_source(&self, source: ProstSource) -> Result<()>;
 
-    async fn create_sink(
-        &self,
-        sink: ProstSink,
-        table: ProstTable,
-        graph: StreamFragmentGraph,
-    ) -> Result<()>;
+    async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()>;
 
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()>;
 
@@ -193,13 +188,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_sink(
-        &self,
-        sink: ProstSink,
-        table: ProstTable,
-        graph: StreamFragmentGraph,
-    ) -> Result<()> {
-        let (_id, version) = self.meta_client.create_sink(sink, table, graph).await?;
+    async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()> {
+        let (_id, version) = self.meta_client.create_sink(sink, graph).await?;
         self.wait_version(version).await
     }
 

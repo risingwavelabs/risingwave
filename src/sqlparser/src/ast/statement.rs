@@ -256,8 +256,8 @@ pub enum CreateSink {
 impl fmt::Display for CreateSink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::From(mv) => write!(f, "FROM MATERIALIZED VIEW {}", mv),
-            Self::AsQuery(query) => write!(f, "AS QUERY {}", query),
+            Self::From(mv) => write!(f, "FROM {}", mv),
+            Self::AsQuery(query) => write!(f, "AS {}", query),
         }
     }
 }
@@ -313,7 +313,6 @@ impl fmt::Display for CreateSinkStatement {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(sink_name, v, self);
-        impl_fmt_display!([Keyword::FROM], v);
         impl_fmt_display!(sink_from, v, self);
         impl_fmt_display!(with_properties, v, self);
         v.iter().join(" ").fmt(f)

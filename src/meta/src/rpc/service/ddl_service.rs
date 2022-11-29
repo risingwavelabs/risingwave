@@ -204,10 +204,9 @@ where
 
         let req = request.into_inner();
         let sink = req.get_sink()?.clone();
-        let table = req.get_table()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
 
-        let mut stream_job = StreamingJob::Sink(sink, table);
+        let mut stream_job = StreamingJob::Sink(sink);
         let version = self
             .create_stream_job(&mut stream_job, fragment_graph)
             .await?;
@@ -507,9 +506,15 @@ where
         match stream_job {
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
-            | StreamingJob::Sink(_, table)
             | StreamingJob::MaterializedSource(_, table) => {
-                actor_graph_builder.fill_mview_id(table)
+                table.fragment_id = actor_graph_builder.fill_mview_id(
+                    table.database_id,
+                    table.schema_id,
+                    table.id.into(),
+                );
+            }
+            StreamingJob::Sink(sink) => {
+                actor_graph_builder.fill_mview_id(sink.database_id, sink.schema_id, sink.id.into());
             }
         }
 
@@ -524,8 +529,11 @@ where
         match stream_job {
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
-            | StreamingJob::Sink(_, table)
             | StreamingJob::MaterializedSource(_, table) => creating_tables.push(table.clone()),
+
+            StreamingJob::Sink(_sink) => {
+                // TODO(yuhao): maybe mark the sink as creating for recovery.
+            }
         }
 
         self.catalog_manager
@@ -550,9 +558,9 @@ where
                     .cancel_create_table_procedure(table)
                     .await?;
             }
-            StreamingJob::Sink(sink, table) => {
+            StreamingJob::Sink(sink) => {
                 self.catalog_manager
-                    .cancel_create_sink_procedure(sink, table)
+                    .cancel_create_sink_procedure(sink)
                     .await?;
             }
             StreamingJob::MaterializedSource(source, table) => {
@@ -591,9 +599,9 @@ where
                     .finish_create_table_procedure(ctx.internal_tables(), table)
                     .await?
             }
-            StreamingJob::Sink(sink, table) => {
+            StreamingJob::Sink(sink) => {
                 self.catalog_manager
-                    .finish_create_sink_procedure(sink, table)
+                    .finish_create_sink_procedure(sink)
                     .await?
             }
             StreamingJob::MaterializedSource(source, table) => {

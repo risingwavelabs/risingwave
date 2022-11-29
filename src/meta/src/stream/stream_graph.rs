@@ -785,7 +785,12 @@ impl ActorGraphBuilder {
         })
     }
 
-    pub fn fill_mview_id(&mut self, table: &mut Table) {
+    pub fn fill_mview_id(
+        &mut self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+        table_id: TableId,
+    ) -> FragmentId {
         // Fill in the correct mview id for stream node.
         struct FillIdContext {
             database_id: DatabaseId,
@@ -819,19 +824,20 @@ impl ActorGraphBuilder {
         }
 
         let mut mview_count = 0;
+        let mut fragment_id = 0;
         for fragment in self.fragment_graph.fragments_mut().values_mut() {
             let delta = fill_mview_id_inner(
                 fragment.node.as_mut().unwrap(),
                 &FillIdContext {
-                    database_id: table.database_id,
-                    schema_id: table.schema_id,
-                    table_id: table.id.into(),
+                    database_id,
+                    schema_id,
+                    table_id,
                     fragment_id: fragment.fragment_id,
                 },
             );
             mview_count += delta;
             if delta != 0 {
-                table.fragment_id = fragment.fragment_id
+                fragment_id = fragment.fragment_id
             }
         }
 
@@ -839,6 +845,8 @@ impl ActorGraphBuilder {
             mview_count, 1,
             "require exactly 1 materialize node when creating materialized view"
         );
+
+        fragment_id
     }
 
     pub async fn generate_graph<S>(

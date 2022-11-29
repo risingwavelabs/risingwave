@@ -458,7 +458,7 @@ where
     ) -> MetaResult<()> {
         match stream_job {
             StreamingJob::MaterializedView(table) => self.start_create_table_procedure(table).await,
-            StreamingJob::Sink(sink, table) => self.start_create_sink_procedure(sink, table).await,
+            StreamingJob::Sink(sink) => self.start_create_sink_procedure(sink).await,
             StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
             }
@@ -1233,7 +1233,7 @@ where
         }
     }
 
-    pub async fn start_create_sink_procedure(&self, sink: &Sink, table: &Table) -> MetaResult<()> {
+    pub async fn start_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -1243,18 +1243,16 @@ where
         database_core.check_relation_name_duplicated(&key)?;
         #[cfg(not(test))]
         user_core.ensure_user_id(sink.owner)?;
-        assert_eq!(sink.owner, table.owner);
 
         if database_core.has_in_progress_creation(&key) {
             bail!("sink already in creating procedure");
         } else {
             database_core.mark_creating(&key);
-            database_core.mark_creating_streaming_job(table.id);
-            for &dependent_relation_id in &table.dependent_relations {
+            database_core.mark_creating_streaming_job(sink.id);
+            for &dependent_relation_id in &sink.dependent_relations {
                 database_core.increase_ref_count(dependent_relation_id);
             }
-            // sink and table.
-            user_core.increase_ref_count(table.owner, 2);
+            user_core.increase_ref_count(sink.owner, 1);
             Ok(())
         }
     }
@@ -1262,29 +1260,23 @@ where
     pub async fn finish_create_sink_procedure(
         &self,
         sink: &Sink,
-        table: &Table,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let key = (table.database_id, table.schema_id, sink.name.clone());
+        let key = (sink.database_id, sink.schema_id, sink.name.clone());
 
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
-        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         if !sinks.contains_key(&sink.id)
             && database_core.in_progress_creation_tracker.contains(&key)
         {
             database_core.in_progress_creation_tracker.remove(&key);
             database_core
                 .in_progress_creation_streaming_job
-                .remove(&table.id);
+                .remove(&sink.id);
 
             sinks.insert(sink.id, sink.clone());
-            tables.insert(table.id, table.clone());
 
-            commit_meta!(self, sinks, tables)?;
-
-            self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
-                .await;
+            commit_meta!(self, sinks)?;
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
@@ -1296,7 +1288,7 @@ where
         }
     }
 
-    pub async fn cancel_create_sink_procedure(&self, sink: &Sink, table: &Table) -> MetaResult<()> {
+    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -1305,12 +1297,11 @@ where
             && database_core.has_in_progress_creation(&key)
         {
             database_core.unmark_creating(&key);
-            database_core.unmark_creating_streaming_job(table.id);
-            for &dependent_relation_id in &table.dependent_relations {
+            database_core.unmark_creating_streaming_job(sink.id);
+            for &dependent_relation_id in &sink.dependent_relations {
                 database_core.decrease_ref_count(dependent_relation_id);
             }
-            // sink and table.
-            user_core.decrease_ref_count(table.owner, 2);
+            user_core.decrease_ref_count(sink.owner, 1);
             Ok(())
         } else {
             unreachable!("sink must not exist and be in creating procedure");
@@ -1322,21 +1313,40 @@ where
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
         let sink = sinks.remove(sink_id);
         if let Some(sink) = sink {
-            commit_meta!(self, sinks)?;
+            match database_core.relation_ref_count.get(&sink_id).cloned() {
+                Some(_) => bail!("No relation should depend on Sink"),
+                None => {
+                    let dependent_relations = sink.dependent_relations.clone();
 
-            user_core.decrease_ref(sink.owner);
+                    let objects = &[Object::SinkId(sink.id)];
 
-            for &dependent_relation_id in &sink.dependent_relations {
-                database_core.decrease_ref_count(dependent_relation_id);
+                    let users_need_update = Self::update_user_privileges(&mut users, objects);
+
+                    commit_meta!(self, sinks, users)?;
+
+                    // sink table and sink.
+                    user_core.decrease_ref_count(sink.owner, 2);
+
+                    for user in users_need_update {
+                        self.notify_frontend(Operation::Update, Info::User(user))
+                            .await;
+                    }
+
+                    for dependent_relation_id in dependent_relations {
+                        database_core.decrease_ref_count(dependent_relation_id);
+                    }
+
+                    let version = self
+                        .notify_frontend(Operation::Delete, Info::Sink(sink))
+                        .await;
+
+                    Ok(version)
+                }
             }
-
-            let version = self
-                .notify_frontend(Operation::Delete, Info::Sink(sink))
-                .await;
-
-            Ok(version)
         } else {
             Err(MetaError::catalog_id_not_found("sink", sink_id))
         }
@@ -1823,7 +1833,7 @@ where
     }
 
     /// `update_user_privileges` removes the privileges with given object from given users, it will
-    /// be called when a database/schema/table/source is dropped.
+    /// be called when a database/schema/table/source/table is dropped.
     #[inline(always)]
     fn update_user_privileges(
         users: &mut BTreeMapTransaction<'_, UserId, UserInfo>,
