@@ -48,6 +48,9 @@ pub mod batch_plan;
 #[cfg_attr(madsim, path = "sim/task_service.rs")]
 pub mod task_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path="sim/connector_service.rs")]
+pub mod connector_service;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/stream_plan.rs")]
 pub mod stream_plan;
 #[rustfmt::skip]

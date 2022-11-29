@@ -42,6 +42,8 @@ pub enum Error {
     InvalidUtf8(#[from] std::string::FromUtf8Error),
     #[error("invalid bytes encoding: {0}")]
     InvalidBytesEncoding(u8),
+    #[error("invalid decimal encoding: {0}")]
+    InvalidDecimalEncoding(u8),
     #[error("trailing characters")]
     TrailingCharacters,
     #[error("invalid NaiveDate scope: days: {0}")]

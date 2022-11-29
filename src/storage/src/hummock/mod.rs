@@ -135,7 +135,6 @@ pub struct HummockStorage {
 
     read_version_mapping: Arc<ReadVersionMappingType>,
 
-    #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
@@ -148,6 +147,7 @@ impl HummockStorage {
         notification_client: impl NotificationClient,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
+        tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> HummockResult<Self> {
         let sstable_id_manager = Arc::new(SstableIdManager::new(
             hummock_meta_client.clone(),
@@ -175,9 +175,6 @@ impl HummockStorage {
             pin_version_rx,
             hummock_meta_client.clone(),
         ));
-
-        #[cfg(not(madsim))]
-        let tracing = Arc::new(risingwave_tracing::RwTracingService::new());
 
         let compactor_context = Arc::new(Context::new_local_compact_context(
             options.clone(),
@@ -207,7 +204,6 @@ impl HummockStorage {
                 shutdown_sender: event_tx,
             }),
             read_version_mapping: hummock_event_handler.read_version_mapping(),
-            #[cfg(not(madsim))]
             tracing,
         };
 
@@ -233,7 +229,6 @@ impl HummockStorage {
             self.hummock_version_reader.clone(),
             self.hummock_event_sender.clone(),
             self.buffer_tracker.get_memory_limiter().clone(),
-            #[cfg(not(madsim))]
             self.tracing.clone(),
         )
     }
@@ -308,6 +303,7 @@ impl HummockStorage {
             hummock_meta_client,
             notification_client,
             Arc::new(StateStoreMetrics::unused()),
+            Arc::new(risingwave_tracing::RwTracingService::disabled()),
         )
         .await
     }
@@ -472,7 +468,6 @@ pub struct HummockStorageV1 {
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 
-    #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
@@ -485,6 +480,7 @@ impl HummockStorageV1 {
         notification_client: impl NotificationClient,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
+        tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
@@ -514,9 +510,6 @@ impl HummockStorageV1 {
             pin_version_rx,
             hummock_meta_client.clone(),
         ));
-
-        #[cfg(not(madsim))]
-        let tracing = Arc::new(risingwave_tracing::RwTracingService::new());
 
         let compactor_context = Arc::new(Context::new_local_compact_context(
             options.clone(),
@@ -571,7 +564,6 @@ impl HummockStorageV1 {
             }),
             version_update_notifier_tx: epoch_update_tx_clone,
             hummock_event_sender: event_tx,
-            #[cfg(not(madsim))]
             tracing,
         };
 

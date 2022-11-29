@@ -669,6 +669,9 @@ template:
     # Enable sanity check when SSTs are committed. Disabled by default.
     enable-committed-sst-sanity-check: false
 
+    # Prometheus nodes used by dashboard service
+    provide-prometheus: "prometheus*"
+
   prometheus:
     # Advertise address of Prometheus
     address: "127.0.0.1"
@@ -842,7 +845,7 @@ template:
 
     # Kafka broker id. If there are multiple instances of Kafka, we will need to set.
     broker-id: 0
-  
+
   # Google pubsub emulator service
   pubsub:
     id: pubsub-${port}

@@ -18,6 +18,7 @@ mod empty;
 mod once;
 mod owned_row;
 mod project;
+mod repeat_n;
 
 use std::cmp::Ordering;
 use std::hash::{BuildHasher, Hasher};
@@ -29,9 +30,10 @@ pub use empty::{empty, Empty};
 pub use once::{once, Once};
 pub use owned_row::{Row, RowDeserializer};
 pub use project::Project;
+pub use repeat_n::{repeat_n, RepeatN};
 
 use crate::hash::HashCode;
-use crate::types::{hash_datum_ref, DatumRef, ToDatumRef, ToOwnedDatum};
+use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum};
 use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
@@ -63,9 +65,11 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Converts the row into an owned [`Row`].
+    ///
+    /// Prefer `into_owned_row` if the row is already owned.
     #[inline]
     fn to_owned_row(&self) -> Row {
-        Row(self.iter().map(|d| d.to_owned_datum()).collect())
+        Row::new(self.iter().map(|d| d.to_owned_datum()).collect())
     }
 
     /// Consumes `self` and converts it into an owned [`Row`].
@@ -78,14 +82,14 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     #[inline]
     fn value_serialize_into(&self, mut buf: impl BufMut) {
         for datum in self.iter() {
-            value_encoding::serialize_datum_ref(&datum, &mut buf);
+            value_encoding::serialize_datum(datum, &mut buf);
         }
     }
 
     /// Serializes the row with value encoding and returns the bytes.
     #[inline]
     fn value_serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(self.len()); // each datum is at least 1 byte
         self.value_serialize_into(&mut buf);
         buf
     }
@@ -95,7 +99,7 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
         let mut hasher = hash_builder.build_hasher();
         for datum in self.iter() {
-            hash_datum_ref(datum, &mut hasher);
+            hash_datum(datum, &mut hasher);
         }
         HashCode(hasher.finish())
     }

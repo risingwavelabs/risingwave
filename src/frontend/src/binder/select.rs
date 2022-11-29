@@ -62,8 +62,7 @@ impl BoundSelect {
             .iter_mut()
             .chain(self.group_by.iter_mut())
             .chain(self.where_clause.iter_mut())
-        // TODO: uncomment `having` below after #4850 is fixed
-        // .chain(self.having.iter_mut())
+            .chain(self.having.iter_mut())
     }
 
     pub fn is_correlated(&self) -> bool {
