@@ -295,16 +295,10 @@ impl HummockSnapshotManager {
             .drain_filter(|key, _| key <= &align_epoch)
             .collect();
 
-        let query_hummock_snapshot = match evens.pop_last() {
-            Some((_, values)) => values,
-            None => (
-                QueryHummockSnapshot {
-                    committed_epoch: epoch,
-                    current_epoch: epoch,
-                },
-                vec![],
-            ),
-        };
+        if evens.is_empty() {
+            return;
+        }
+        let query_hummock_snapshot = evens.pop_last().unwrap().1;
         self.update_snapshot_epoch(query_hummock_snapshot.0);
         query_hummock_snapshot
             .1

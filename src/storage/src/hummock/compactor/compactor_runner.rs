@@ -133,6 +133,7 @@ impl CompactorRunner {
                 builder.add_tombstone(table.value().meta.range_tombstone_list.clone());
             }
         }
+        local_stats.ignore();
         let aggregator = builder.build(compact_task.watermark, compact_task.gc_delete_keys);
         Ok(aggregator)
     }

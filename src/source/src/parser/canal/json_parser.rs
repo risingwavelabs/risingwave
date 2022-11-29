@@ -64,15 +64,11 @@ impl CanalJsonParser {
         }
         match event.op.as_str() {
             CANAL_INSERT_EVENT => {
-                let inserted = event
-                    .after
-                    .as_ref()
-                    .and_then(|l| Some(l.iter()))
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "data is missing for delete event".to_string(),
-                        ))
-                    })?;
+                let inserted = event.after.as_ref().map(|l| l.iter()).ok_or_else(|| {
+                    RwError::from(ProtocolError(
+                        "data is missing for delete event".to_string(),
+                    ))
+                })?;
 
                 let results = inserted
                     .map(|v| {
@@ -85,26 +81,18 @@ impl CanalJsonParser {
                 at_least_one_ok(results)
             }
             CANAL_UPDATE_EVENT => {
-                let before = event
-                    .before
-                    .as_ref()
-                    .and_then(|l| Some(l.iter()))
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError("old is missing for delete event".to_string()))
-                    })?;
+                let before = event.before.as_ref().map(|l| l.iter()).ok_or_else(|| {
+                    RwError::from(ProtocolError("old is missing for delete event".to_string()))
+                })?;
 
-                let after = event
-                    .after
-                    .as_ref()
-                    .and_then(|l| Some(l.iter()))
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "data is missing for delete event".to_string(),
-                        ))
-                    })?;
+                let after = event.after.as_ref().map(|l| l.iter()).ok_or_else(|| {
+                    RwError::from(ProtocolError(
+                        "data is missing for delete event".to_string(),
+                    ))
+                })?;
 
                 let results = before
-                    .zip(after)
+                    .zip_eq(after)
                     .map(|(before, after)| {
                         writer.update(|column| {
                             // in origin canal, old only contains the changed columns but data
@@ -124,13 +112,9 @@ impl CanalJsonParser {
                 at_least_one_ok(results)
             }
             CANAL_DELETE_EVENT => {
-                let deleted = event
-                    .after
-                    .as_ref()
-                    .and_then(|l| Some(l.iter()))
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError("old is missing for delete event".to_string()))
-                    })?;
+                let deleted = event.after.as_ref().map(|l| l.iter()).ok_or_else(|| {
+                    RwError::from(ProtocolError("old is missing for delete event".to_string()))
+                })?;
                 let results = deleted
                     .map(|v| {
                         writer.delete(|columns| {

@@ -164,6 +164,7 @@ export interface HummockSnapshot {
   committedEpoch: number;
   /** Epoch without checkpoint, we will read real-time data with it. But it may be rolled back. */
   currentEpoch: number;
+  needAlign: boolean;
 }
 
 export interface PinVersionRequest {
@@ -1402,7 +1403,7 @@ export const HummockVersionDeltas = {
 };
 
 function createBaseHummockSnapshot(): HummockSnapshot {
-  return { committedEpoch: 0, currentEpoch: 0 };
+  return { committedEpoch: 0, currentEpoch: 0, needAlign: false };
 }
 
 export const HummockSnapshot = {
@@ -1410,6 +1411,7 @@ export const HummockSnapshot = {
     return {
       committedEpoch: isSet(object.committedEpoch) ? Number(object.committedEpoch) : 0,
       currentEpoch: isSet(object.currentEpoch) ? Number(object.currentEpoch) : 0,
+      needAlign: isSet(object.needAlign) ? Boolean(object.needAlign) : false,
     };
   },
 
@@ -1417,6 +1419,7 @@ export const HummockSnapshot = {
     const obj: any = {};
     message.committedEpoch !== undefined && (obj.committedEpoch = Math.round(message.committedEpoch));
     message.currentEpoch !== undefined && (obj.currentEpoch = Math.round(message.currentEpoch));
+    message.needAlign !== undefined && (obj.needAlign = message.needAlign);
     return obj;
   },
 
@@ -1424,6 +1427,7 @@ export const HummockSnapshot = {
     const message = createBaseHummockSnapshot();
     message.committedEpoch = object.committedEpoch ?? 0;
     message.currentEpoch = object.currentEpoch ?? 0;
+    message.needAlign = object.needAlign ?? false;
     return message;
   },
 };

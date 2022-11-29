@@ -411,6 +411,7 @@ export interface SubscribeResponse {
     | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
     | { $case: "snapshot"; snapshot: MetaSnapshot };
+  alignEpoch: AlignEpoch | undefined;
 }
 
 export const SubscribeResponse_Operation = {
@@ -464,6 +465,10 @@ export function subscribeResponse_OperationToJSON(object: SubscribeResponse_Oper
     default:
       return "UNRECOGNIZED";
   }
+}
+
+export interface AlignEpoch {
+  alignEpoch: number;
 }
 
 export interface MetaLeaderInfo {
@@ -1618,7 +1623,13 @@ export const MetaSnapshot_SnapshotVersion = {
 };
 
 function createBaseSubscribeResponse(): SubscribeResponse {
-  return { status: undefined, operation: SubscribeResponse_Operation.UNSPECIFIED, version: 0, info: undefined };
+  return {
+    status: undefined,
+    operation: SubscribeResponse_Operation.UNSPECIFIED,
+    version: 0,
+    info: undefined,
+    alignEpoch: undefined,
+  };
 }
 
 export const SubscribeResponse = {
@@ -1662,6 +1673,7 @@ export const SubscribeResponse = {
         : isSet(object.snapshot)
         ? { $case: "snapshot", snapshot: MetaSnapshot.fromJSON(object.snapshot) }
         : undefined,
+      alignEpoch: isSet(object.alignEpoch) ? AlignEpoch.fromJSON(object.alignEpoch) : undefined,
     };
   },
 
@@ -1696,6 +1708,8 @@ export const SubscribeResponse = {
       : undefined);
     message.info?.$case === "snapshot" &&
       (obj.snapshot = message.info?.snapshot ? MetaSnapshot.toJSON(message.info?.snapshot) : undefined);
+    message.alignEpoch !== undefined &&
+      (obj.alignEpoch = message.alignEpoch ? AlignEpoch.toJSON(message.alignEpoch) : undefined);
     return obj;
   },
 
@@ -1766,6 +1780,31 @@ export const SubscribeResponse = {
     if (object.info?.$case === "snapshot" && object.info?.snapshot !== undefined && object.info?.snapshot !== null) {
       message.info = { $case: "snapshot", snapshot: MetaSnapshot.fromPartial(object.info.snapshot) };
     }
+    message.alignEpoch = (object.alignEpoch !== undefined && object.alignEpoch !== null)
+      ? AlignEpoch.fromPartial(object.alignEpoch)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseAlignEpoch(): AlignEpoch {
+  return { alignEpoch: 0 };
+}
+
+export const AlignEpoch = {
+  fromJSON(object: any): AlignEpoch {
+    return { alignEpoch: isSet(object.alignEpoch) ? Number(object.alignEpoch) : 0 };
+  },
+
+  toJSON(message: AlignEpoch): unknown {
+    const obj: any = {};
+    message.alignEpoch !== undefined && (obj.alignEpoch = Math.round(message.alignEpoch));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<AlignEpoch>, I>>(object: I): AlignEpoch {
+    const message = createBaseAlignEpoch();
+    message.alignEpoch = object.alignEpoch ?? 0;
     return message;
   },
 };
