@@ -489,8 +489,8 @@ pub(crate) mod tests {
         assert_eq!(pinned_snapshot.get_committed_epoch(), 2);
         hummock_snapshot_manager.update_align_epoch(3);
         let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
-        assert_eq!(pinned_snapshot.get_current_epoch(), 3);
-        assert_eq!(pinned_snapshot.get_committed_epoch(), 3);
+        assert_eq!(pinned_snapshot.get_current_epoch(), 2);
+        assert_eq!(pinned_snapshot.get_committed_epoch(), 2);
     }
 
     #[tokio::test]
