@@ -43,8 +43,11 @@ pub struct ObjectStoreBackupStorage {
 }
 
 impl ObjectStoreBackupStorage {
-    pub fn new(path: String, store: ObjectStoreRef) -> Self {
-        Self { path, store }
+    pub fn new(path: &str, store: ObjectStoreRef) -> Self {
+        Self {
+            path: path.to_string(),
+            store,
+        }
     }
 
     fn get_db_snapshot_path(&self, id: DbSnapshotId) -> String {

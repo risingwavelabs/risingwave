@@ -21,6 +21,8 @@ use prost::Message;
 use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
@@ -39,7 +41,7 @@ use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
-use crate::backup_restore::{BackupManager, DummyBackupStorage};
+use crate::backup_restore::{BackupManager, ObjectStoreBackupStorage};
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
@@ -409,8 +411,18 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .unwrap();
 
     // Initialize services.
-    // TODO #6482 use correct backup storage
-    let backup_storage = Box::new(DummyBackupStorage {});
+    let backup_object_store = Arc::new(
+        parse_remote_object_store(
+            &env.opts.backup_storage_url,
+            Arc::new(ObjectStoreMetrics::unused()),
+            true,
+        )
+        .await,
+    );
+    let backup_storage = Box::new(ObjectStoreBackupStorage::new(
+        &env.opts.backup_storage_directory,
+        backup_object_store,
+    ));
     let backup_manager =
         Arc::new(BackupManager::new(env.clone(), hummock_manager.clone(), backup_storage).await?);
     let vacuum_manager = Arc::new(hummock::VacuumManager::new(

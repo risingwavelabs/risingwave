@@ -20,6 +20,8 @@ mod db_snapshot;
 mod error;
 mod storage;
 pub use storage::*;
+mod config;
 mod utils;
+pub use config::*;
 
 pub type DbSnapshotId = u64;

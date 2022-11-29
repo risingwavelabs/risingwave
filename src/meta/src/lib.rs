@@ -211,6 +211,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_compaction_interval_sec: meta_config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: opts.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
+                backup_storage_url: meta_config.backup.storage_url,
+                backup_storage_directory: meta_config.backup.storage_directory,
             },
         )
         .await
