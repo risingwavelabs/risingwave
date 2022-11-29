@@ -95,8 +95,6 @@ risedev:
       persist-data: true
     - use: kafka
       persist-data: true
-    - use: pubsub
-      persist-data: true
 
   full-compaction-test:
     - use: aws-s3
