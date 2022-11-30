@@ -355,7 +355,7 @@ fn main() -> Result<()> {
         .nth(1)
         .unwrap_or_else(|| "default".to_string());
 
-    let risedev_config = ConfigExpander::expand(&risedev_config, &task_name)?;
+    let risedev_config = ConfigExpander::expand(&risedev_config, &task_name)?.1;
     {
         let mut out_str = String::new();
         let mut emitter = YamlEmitter::new(&mut out_str);

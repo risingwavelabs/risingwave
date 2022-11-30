@@ -15,6 +15,7 @@ risedev:
 
   # The default configuration will start 1 compute node, 1 meta node and 1 frontend.
   default:
+    config-path: src/risedevtool/configs/default/risingwave.toml
     steps:
       # If you want to use the local s3 storage, enable the following line
       # - use: minio
@@ -29,7 +30,6 @@ risedev:
       # - use: etcd
       #   unsafe-no-fsync: true
       - use: meta-node
-        unsafe-disable-recovery: true
       - use: compute-node
       - use: frontend
 
@@ -67,10 +67,10 @@ risedev:
 
   # The minimum config to use with risectl.
   for-ctl:
+    config-path: src/risedevtool/configs/default/risingwave.toml
     steps:
       - use: minio
       - use: meta-node
-        unsafe-disable-recovery: true
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -113,12 +113,12 @@ risedev:
         persist-data: true
 
   full-compaction-test:
+    config-path: src/risedevtool/configs/compaction-test/risingwave.toml
     steps:
       - use: aws-s3
         bucket: some-bucket # configure a valid bucket name
       - use: etcd
       - use: meta-node
-        enable-compaction-deterministic: true
       - use: compute-node
       - use: frontend
       - use: compactor
@@ -148,6 +148,7 @@ risedev:
         persist-data: true
 
   3etcd-3meta-1cn-1fe:
+    config-path: src/risedevtool/configs/default/risingwave.toml
     steps:
       - use: etcd
         unsafe-no-fsync: true
@@ -165,17 +166,14 @@ risedev:
         peer-port: 22389
         exporter-port: 22379
       - use: meta-node
-        unsafe-disable-recovery: true
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
       - use: meta-node
-        unsafe-disable-recovery: true
         port: 15690
         dashboard-port: 15691
         exporter-port: 11250
       - use: meta-node
-        unsafe-disable-recovery: true
         port: 25690
         dashboard-port: 25691
         exporter-port: 21250
@@ -187,18 +185,16 @@ risedev:
   ##########################################
 
   playground:
+    config-path: src/risedevtool/configs/playground/risingwave.toml
     steps:
       - use: meta-node
-        unsafe-disable-recovery: true
-        max-idle-secs-to-exit: 1800
       - use: compute-node
       - use: frontend
 
   playground-3cn:
+    config-path: src/risedevtool/configs/playground/risingwave.toml
     steps:
       - use: meta-node
-        unsafe-disable-recovery: true
-        max-idle-secs-to-exit: 1800
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -212,9 +208,9 @@ risedev:
       - use: compactor
 
   docker-playground:
+    config-path: src/risedevtool/configs/default/risingwave.toml
     steps:
       - use: meta-node
-        unsafe-disable-recovery: true
         listen-address: "0.0.0.0"
         address: "127.0.0.1"
       - use: compute-node
@@ -226,10 +222,9 @@ risedev:
 
   # The profile for the online playground
   online-docker-playground:
+    config-path: src/risedevtool/configs/playground/risingwave.toml
     steps:
       - use: meta-node
-        unsafe-disable-recovery: true
-        max-idle-secs-to-exit: 1800
         listen-address: "0.0.0.0"
         address: "127.0.0.1"
       - use: compute-node
@@ -374,26 +369,24 @@ risedev:
   #################################
 
   ci-1cn-1fe:
+    config-path: src/risedevtool/configs/ci/risingwave.toml
     steps:
       - use: minio
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
-        unsafe-disable-recovery: true
-        enable-committed-sst-sanity-check: true
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
 
   ci-3cn-1fe:
+    config-path: src/risedevtool/configs/ci/risingwave.toml
     steps:
       - use: minio
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
-        unsafe-disable-recovery: true
-        enable-committed-sst-sanity-check: true
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -410,13 +403,12 @@ risedev:
       - use: compactor
 
   ci-3cn-3fe:
+    config-path: src/risedevtool/configs/ci/risingwave.toml
     steps:
       - use: minio
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
-        unsafe-disable-recovery: true
-        enable-committed-sst-sanity-check: true
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -444,11 +436,11 @@ risedev:
       - use: compactor
 
   ci-3cn-3fe-in-memory:
+    config-path: src/risedevtool/configs/ci/risingwave.toml
     steps:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
-        unsafe-disable-recovery: true
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -475,12 +467,12 @@ risedev:
         health-check-port: 6788
 
   ci-pubsub:
+    config-path: src/risedevtool/configs/ci/risingwave.toml
     steps:
       - use: minio
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
-        unsafe-disable-recovery: true
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -489,12 +481,12 @@ risedev:
         persist-data: true
 
   ci-kafka:
+    config-path: src/risedevtool/configs/ci/risingwave.toml
     steps:
       - use: minio
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
-        unsafe-disable-recovery: true
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -505,12 +497,12 @@ risedev:
         persist-data: true
 
   ci-kafka-plus-pubsub:
+    config-path: src/risedevtool/configs/ci/risingwave.toml
     steps:
       - use: minio
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
-        unsafe-disable-recovery: true
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -523,12 +515,12 @@ risedev:
         persist-data: true
 
   ci-redis:
+    config-path: src/risedevtool/configs/ci/risingwave.toml
     steps:
       - use: minio
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
-        unsafe-disable-recovery: true
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -536,13 +528,12 @@ risedev:
       - use: redis
 
   ci-compaction-test:
+    config-path: src/risedevtool/configs/ci-compaction-test/risingwave.toml
     steps:
       - use: minio
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
-        unsafe-disable-recovery: true
-        enable-compaction-deterministic: true
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -688,18 +679,6 @@ template:
 
     # Etcd backend config
     provide-etcd-backend: "etcd*"
-
-    # Maximum allowed heartbeat interval in seconds.
-    max-heartbeat-interval-secs: 600
-
-    # Whether to disable recovery mode
-    unsafe-disable-recovery: false
-
-    # Whether run in compaction deterministic test mode
-    enable-compaction-deterministic: false
-
-    # Enable sanity check when SSTs are committed. Disabled by default.
-    enable-committed-sst-sanity-check: false
 
     # Prometheus nodes used by dashboard service
     provide-prometheus: "prometheus*"

@@ -14,53 +14,8 @@
 
 //! This module defines the structure of the configuration file `risingwave.toml`.
 //!
-//! Each config struct here defines a section in `risingwave.toml`, and it contains
-//! `#[serde(deny_unknown_fields)]` to deny unknown fields.
-//!
-//! To use the config file, you need to define a struct containing the sections you need.
-//! The other sections will be ignored. e.g.,
-//!
-//! ```
-//! #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-//! pub struct ComputeNodeConfig {
-//!     #[serde(default)]
-//!     pub server: ServerConfig,
-//!
-//!     #[serde(default)]
-//!     pub batch: BatchConfig,
-//!
-//!     #[serde(default)]
-//!     pub streaming: StreamingConfig,
-//!
-//!     #[serde(default)]
-//!     pub storage: StorageConfig,
-//! }
-//! ```
-//!
-//! It corresponds to
-//!
-//! ```toml
-//! [server]
-//! ...
-//!
-//! [batch]
-//! ...
-//!
-//! [streaming]
-//! ...
-//!
-//! [storage]
-//! ...
-//!
-//! # Other sections are ignored.
-//! [meta]
-//! ```
-//!
-//! And then it can be loaded like this:
-//!
-//! ```
-//! let config: ComputeNodeConfig = load_config(&opts.config_path);
-//! ```
+//! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
+//! section in `risingwave.toml`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -74,38 +29,106 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 
-/// Deserializes `risingwave.toml` to a `Config` struct.
-///
-/// Note that you should not use the configs defined in this module as `S`. Define a struct whose
-/// fields are the configs in this module instead. Refer to [module level doc](self) for more
-/// details.
-pub fn load_config<S>(path: &str) -> S
+pub fn load_config(path: &str) -> RwConfig
 where
-    for<'a> S: Deserialize<'a> + Default,
 {
     if path.is_empty() {
         tracing::warn!("risingwave.toml not found, using default config.");
-        return S::default();
+        return RwConfig::default();
     }
     let config_str = fs::read_to_string(PathBuf::from(path.to_owned()))
         .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
-    let config: S =
-        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e));
-    config
+    toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
 }
 
+/// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
+/// section.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct RwConfig {
+    #[serde(default)]
+    pub server: ServerConfig,
+
+    #[serde(default)]
+    pub meta: MetaConfig,
+
+    #[serde(default)]
+    pub batch: BatchConfig,
+
+    #[serde(default)]
+    pub streaming: StreamingConfig,
+
+    #[serde(default)]
+    pub storage: StorageConfig,
+}
+
+/// The section `[meta]` in `risingwave.toml`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetaConfig {
+    /// Threshold used by worker node to filter out new SSTs when scanning object store, during
+    /// full SST GC.
+    #[serde(default = "default::meta::min_sst_retention_time_sec")]
+    pub min_sst_retention_time_sec: u64,
+
+    /// The spin interval when collecting global GC watermark in hummock
+    #[serde(default = "default::meta::collect_gc_watermark_spin_interval_sec")]
+    pub collect_gc_watermark_spin_interval_sec: u64,
+
+    /// Schedule compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_compaction_interval_sec")]
+    pub periodic_compaction_interval_sec: u64,
+
+    /// Interval of GC metadata in meta store and stale SSTs in object store.
+    #[serde(default = "default::meta::vacuum_interval_sec")]
+    pub vacuum_interval_sec: u64,
+
+    /// Maximum allowed heartbeat interval in seconds.
+    #[serde(default = "default::meta::max_heartbeat_interval_sec")]
+    pub max_heartbeat_interval_secs: u32,
+
+    /// Whether to enable fail-on-recovery. Should only be used in e2e tests.
+    #[serde(default)]
+    pub disable_recovery: bool,
+
+    #[serde(default = "default::meta::meta_leader_lease_secs")]
+    pub meta_leader_lease_secs: u64,
+
+    /// After specified seconds of idle (no mview or flush), the process will be exited.
+    /// It is mainly useful for playgrounds.
+    pub dangerous_max_idle_secs: Option<u64>,
+
+    /// Whether to enable deterministic compaction scheduling, which
+    /// will disable all auto scheduling of compaction tasks
+    #[serde(default)]
+    pub enable_compaction_deterministic: bool,
+
+    /// Enable sanity check when SSTs are committed.
+    #[serde(default)]
+    pub enable_committed_sst_sanity_check: bool,
+
+    #[serde(default = "default::meta::node_num_monitor_interval_sec")]
+    pub node_num_monitor_interval_sec: u64,
+}
+
+impl Default for MetaConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+/// The section `[server]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     /// The interval for periodic heartbeat from worker to the meta service.
-    #[serde(default = "default::heartbeat_interval_ms")]
+    #[serde(default = "default::server::heartbeat_interval_ms")]
     pub heartbeat_interval_ms: u32,
 
     /// The maximum allowed heartbeat interval for workers.
-    #[serde(default = "default::max_heartbeat_interval_secs")]
+    #[serde(default = "default::server::max_heartbeat_interval_secs")]
     pub max_heartbeat_interval_secs: u32,
 
-    #[serde(default = "default::connection_pool_size")]
+    #[serde(default = "default::server::connection_pool_size")]
     pub connection_pool_size: u16,
 }
 
@@ -115,6 +138,7 @@ impl Default for ServerConfig {
     }
 }
 
+/// The section `[batch]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BatchConfig {
@@ -133,24 +157,20 @@ impl Default for BatchConfig {
     }
 }
 
+/// The section `[streaming]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StreamingConfig {
-    /// Not used.
-    #[cfg(any())]
-    #[serde(default = "default::chunk_size")]
-    pub chunk_size: u32,
-
     /// The interval of periodic barrier.
-    #[serde(default = "default::barrier_interval_ms")]
+    #[serde(default = "default::streaming::barrier_interval_ms")]
     pub barrier_interval_ms: u32,
 
     /// The maximum number of barriers in-flight in the compute nodes.
-    #[serde(default = "default::in_flight_barrier_nums")]
+    #[serde(default = "default::streaming::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
 
     /// There will be a checkpoint for every n barriers
-    #[serde(default = "default::checkpoint_frequency")]
+    #[serde(default = "default::streaming::checkpoint_frequency")]
     pub checkpoint_frequency: usize,
 
     /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
@@ -159,7 +179,7 @@ pub struct StreamingConfig {
     pub minimal_scheduling: bool,
 
     /// The parallelism that the compute node will register to the scheduler of the meta service.
-    #[serde(default = "default::worker_node_parallelism")]
+    #[serde(default = "default::streaming::worker_node_parallelism")]
     pub worker_node_parallelism: usize,
 
     /// The thread number of the streaming actor runtime in the compute node. The default value is
@@ -167,7 +187,7 @@ pub struct StreamingConfig {
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
 
-    #[serde(default = "default::total_memory_available_bytes")]
+    #[serde(default = "default::streaming::total_memory_available_bytes")]
     pub total_memory_available_bytes: usize,
 
     #[serde(default)]
@@ -180,90 +200,90 @@ impl Default for StreamingConfig {
     }
 }
 
-/// Currently all configurations are server before they can be specified with DDL syntaxes.
+/// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
     /// Target size of the Sstable.
-    #[serde(default = "default::sst_size_mb")]
+    #[serde(default = "default::storage::sst_size_mb")]
     pub sstable_size_mb: u32,
 
     /// Size of each block in bytes in SST.
-    #[serde(default = "default::block_size_kb")]
+    #[serde(default = "default::storage::block_size_kb")]
     pub block_size_kb: u32,
 
     /// False positive probability of bloom filter.
-    #[serde(default = "default::bloom_false_positive")]
+    #[serde(default = "default::storage::bloom_false_positive")]
     pub bloom_false_positive: f64,
 
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
-    #[serde(default = "default::share_buffers_sync_parallelism")]
+    #[serde(default = "default::storage::share_buffers_sync_parallelism")]
     pub share_buffers_sync_parallelism: u32,
 
     /// Worker threads number of dedicated tokio runtime for share buffer compaction. 0 means use
     /// tokio's default value (number of CPU core).
-    #[serde(default = "default::share_buffer_compaction_worker_threads_number")]
+    #[serde(default = "default::storage::share_buffer_compaction_worker_threads_number")]
     pub share_buffer_compaction_worker_threads_number: u32,
 
     /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
     /// is enough space.
-    #[serde(default = "default::shared_buffer_capacity_mb")]
+    #[serde(default = "default::storage::shared_buffer_capacity_mb")]
     pub shared_buffer_capacity_mb: u32,
 
     /// Remote directory for storing data and metadata objects.
-    #[serde(default = "default::data_directory")]
+    #[serde(default = "default::storage::data_directory")]
     pub data_directory: String,
 
     /// Whether to enable write conflict detection
-    #[serde(default = "default::write_conflict_detection_enabled")]
+    #[serde(default = "default::storage::write_conflict_detection_enabled")]
     pub write_conflict_detection_enabled: bool,
 
     /// Capacity of sstable block cache.
-    #[serde(default = "default::block_cache_capacity_mb")]
+    #[serde(default = "default::storage::block_cache_capacity_mb")]
     pub block_cache_capacity_mb: usize,
 
     /// Capacity of sstable meta cache.
-    #[serde(default = "default::meta_cache_capacity_mb")]
+    #[serde(default = "default::storage::meta_cache_capacity_mb")]
     pub meta_cache_capacity_mb: usize,
 
-    #[serde(default = "default::disable_remote_compactor")]
+    #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
 
-    #[serde(default = "default::enable_local_spill")]
+    #[serde(default = "default::storage::enable_local_spill")]
     pub enable_local_spill: bool,
 
     /// Local object store root. We should call `get_local_object_store` to get the object store.
-    #[serde(default = "default::local_object_store")]
+    #[serde(default = "default::storage::local_object_store")]
     pub local_object_store: String,
 
     /// Number of tasks shared buffer can upload in parallel.
-    #[serde(default = "default::share_buffer_upload_concurrency")]
+    #[serde(default = "default::storage::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
 
     /// Capacity of sstable meta cache.
-    #[serde(default = "default::compactor_memory_limit_mb")]
+    #[serde(default = "default::storage::compactor_memory_limit_mb")]
     pub compactor_memory_limit_mb: usize,
 
     /// Number of SST ids fetched from meta per RPC
-    #[serde(default = "default::sstable_id_remote_fetch_number")]
+    #[serde(default = "default::storage::sstable_id_remote_fetch_number")]
     pub sstable_id_remote_fetch_number: u32,
 
     #[serde(default)]
     pub file_cache: FileCacheConfig,
 
     /// Whether to enable streaming upload for sstable.
-    #[serde(default = "default::min_sst_size_for_streaming_upload")]
+    #[serde(default = "default::storage::min_sst_size_for_streaming_upload")]
     pub min_sst_size_for_streaming_upload: u64,
 
     /// Max sub compaction task numbers
-    #[serde(default = "default::max_sub_compaction")]
+    #[serde(default = "default::storage::max_sub_compaction")]
     pub max_sub_compaction: u32,
 
-    #[serde(default = "default::object_store_use_batch_delete")]
+    #[serde(default = "default::storage::object_store_use_batch_delete")]
     pub object_store_use_batch_delete: bool,
 
     /// Whether to enable state_store_v1 for hummock
-    #[serde(default = "default::enable_state_store_v1")]
+    #[serde(default = "default::storage::enable_state_store_v1")]
     pub enable_state_store_v1: bool,
 }
 
@@ -273,22 +293,25 @@ impl Default for StorageConfig {
     }
 }
 
+/// The subsection `[storage.file_cache]` in `risingwave.toml`.
+///
+/// It's put at [`StorageConfig::file_cache`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileCacheConfig {
-    #[serde(default = "default::file_cache_capacity_mb")]
+    #[serde(default = "default::file_cache::capacity_mb")]
     pub capacity_mb: usize,
 
-    #[serde(default = "default::file_cache_total_buffer_capacity_mb")]
+    #[serde(default = "default::file_cache::total_buffer_capacity_mb")]
     pub total_buffer_capacity_mb: usize,
 
-    #[serde(default = "default::file_cache_cache_file_fallocate_unit_mb")]
+    #[serde(default = "default::file_cache::cache_file_fallocate_unit_mb")]
     pub cache_file_fallocate_unit_mb: usize,
 
-    #[serde(default = "default::file_cache_cache_meta_fallocate_unit_mb")]
+    #[serde(default = "default::file_cache::cache_meta_fallocate_unit_mb")]
     pub cache_meta_fallocate_unit_mb: usize,
 
-    #[serde(default = "default::file_cache_cache_file_max_write_size_mb")]
+    #[serde(default = "default::file_cache::cache_file_max_write_size_mb")]
     pub cache_file_max_write_size_mb: usize,
 }
 
@@ -298,6 +321,9 @@ impl Default for FileCacheConfig {
     }
 }
 
+/// The subsections `[batch.developer]` and `[streaming.developer]`.
+///
+/// It is put at [`BatchConfig::developer`] and [`StreamingConfig::developer`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeveloperConfig {
@@ -348,140 +374,181 @@ impl Default for DeveloperConfig {
 }
 
 mod default {
-    use sysinfo::{System, SystemExt};
+    pub mod meta {
+        pub fn min_sst_retention_time_sec() -> u64 {
+            604800
+        }
 
-    pub fn heartbeat_interval_ms() -> u32 {
-        1000
+        pub fn collect_gc_watermark_spin_interval_sec() -> u64 {
+            5
+        }
+
+        pub fn periodic_compaction_interval_sec() -> u64 {
+            60
+        }
+
+        pub fn vacuum_interval_sec() -> u64 {
+            30
+        }
+
+        pub fn max_heartbeat_interval_sec() -> u32 {
+            300
+        }
+
+        pub fn meta_leader_lease_secs() -> u64 {
+            10
+        }
+
+        pub fn node_num_monitor_interval_sec() -> u64 {
+            10
+        }
     }
 
-    pub fn max_heartbeat_interval_secs() -> u32 {
-        600
+    pub mod server {
+
+        pub fn heartbeat_interval_ms() -> u32 {
+            1000
+        }
+
+        pub fn max_heartbeat_interval_secs() -> u32 {
+            600
+        }
+
+        pub fn connection_pool_size() -> u16 {
+            16
+        }
     }
 
-    pub fn connection_pool_size() -> u16 {
-        16
+    pub mod storage {
+
+        pub fn sst_size_mb() -> u32 {
+            256
+        }
+
+        pub fn block_size_kb() -> u32 {
+            1024
+        }
+
+        pub fn bloom_false_positive() -> f64 {
+            0.01
+        }
+
+        pub fn share_buffers_sync_parallelism() -> u32 {
+            1
+        }
+
+        pub fn share_buffer_compaction_worker_threads_number() -> u32 {
+            4
+        }
+
+        pub fn shared_buffer_capacity_mb() -> u32 {
+            1024
+        }
+
+        pub fn data_directory() -> String {
+            "hummock_001".to_string()
+        }
+
+        pub fn write_conflict_detection_enabled() -> bool {
+            cfg!(debug_assertions)
+        }
+
+        pub fn block_cache_capacity_mb() -> usize {
+            256
+        }
+
+        pub fn meta_cache_capacity_mb() -> usize {
+            64
+        }
+
+        pub fn disable_remote_compactor() -> bool {
+            false
+        }
+
+        pub fn enable_local_spill() -> bool {
+            true
+        }
+
+        pub fn local_object_store() -> String {
+            "tempdisk".to_string()
+        }
+
+        pub fn share_buffer_upload_concurrency() -> usize {
+            8
+        }
+
+        pub fn compactor_memory_limit_mb() -> usize {
+            512
+        }
+
+        pub fn sstable_id_remote_fetch_number() -> u32 {
+            10
+        }
+
+        pub fn min_sst_size_for_streaming_upload() -> u64 {
+            // 32MB
+            32 * 1024 * 1024
+        }
+
+        pub fn max_sub_compaction() -> u32 {
+            4
+        }
+
+        pub fn object_store_use_batch_delete() -> bool {
+            true
+        }
+        pub fn enable_state_store_v1() -> bool {
+            false
+        }
     }
 
-    pub fn sst_size_mb() -> u32 {
-        256
+    pub mod streaming {
+        pub fn barrier_interval_ms() -> u32 {
+            1000
+        }
+
+        pub fn in_flight_barrier_nums() -> usize {
+            40
+        }
+
+        pub fn checkpoint_frequency() -> usize {
+            10
+        }
+
+        pub fn worker_node_parallelism() -> usize {
+            std::thread::available_parallelism().unwrap().get()
+        }
+
+        pub fn total_memory_available_bytes() -> usize {
+            use sysinfo::{System, SystemExt};
+
+            let mut sys = System::new();
+            sys.refresh_memory();
+            sys.total_memory() as usize
+        }
     }
 
-    pub fn block_size_kb() -> u32 {
-        1024
-    }
+    pub mod file_cache {
 
-    pub fn bloom_false_positive() -> f64 {
-        0.01
-    }
+        pub fn capacity_mb() -> usize {
+            1024
+        }
 
-    pub fn share_buffers_sync_parallelism() -> u32 {
-        1
-    }
+        pub fn total_buffer_capacity_mb() -> usize {
+            128
+        }
 
-    pub fn share_buffer_compaction_worker_threads_number() -> u32 {
-        4
-    }
+        pub fn cache_file_fallocate_unit_mb() -> usize {
+            512
+        }
 
-    pub fn shared_buffer_capacity_mb() -> u32 {
-        1024
-    }
+        pub fn cache_meta_fallocate_unit_mb() -> usize {
+            16
+        }
 
-    pub fn data_directory() -> String {
-        "hummock_001".to_string()
-    }
-
-    pub fn write_conflict_detection_enabled() -> bool {
-        cfg!(debug_assertions)
-    }
-
-    pub fn block_cache_capacity_mb() -> usize {
-        256
-    }
-
-    pub fn meta_cache_capacity_mb() -> usize {
-        64
-    }
-
-    pub fn disable_remote_compactor() -> bool {
-        false
-    }
-
-    pub fn enable_local_spill() -> bool {
-        true
-    }
-
-    pub fn local_object_store() -> String {
-        "tempdisk".to_string()
-    }
-
-    pub fn barrier_interval_ms() -> u32 {
-        1000
-    }
-
-    pub fn in_flight_barrier_nums() -> usize {
-        40
-    }
-
-    pub fn checkpoint_frequency() -> usize {
-        10
-    }
-
-    pub fn share_buffer_upload_concurrency() -> usize {
-        8
-    }
-
-    pub fn worker_node_parallelism() -> usize {
-        std::thread::available_parallelism().unwrap().get()
-    }
-
-    pub fn total_memory_available_bytes() -> usize {
-        let mut sys = System::new();
-        sys.refresh_memory();
-        sys.total_memory() as usize
-    }
-
-    pub fn compactor_memory_limit_mb() -> usize {
-        512
-    }
-
-    pub fn sstable_id_remote_fetch_number() -> u32 {
-        10
-    }
-
-    pub fn file_cache_capacity_mb() -> usize {
-        1024
-    }
-
-    pub fn file_cache_total_buffer_capacity_mb() -> usize {
-        128
-    }
-
-    pub fn file_cache_cache_file_fallocate_unit_mb() -> usize {
-        512
-    }
-
-    pub fn file_cache_cache_meta_fallocate_unit_mb() -> usize {
-        16
-    }
-
-    pub fn file_cache_cache_file_max_write_size_mb() -> usize {
-        4
-    }
-
-    pub fn min_sst_size_for_streaming_upload() -> u64 {
-        // 32MB
-        32 * 1024 * 1024
-    }
-
-    pub fn max_sub_compaction() -> u32 {
-        4
-    }
-
-    pub fn object_store_use_batch_delete() -> bool {
-        true
-    }
-    pub fn enable_state_store_v1() -> bool {
-        false
+        pub fn cache_file_max_write_size_mb() -> usize {
+            4
+        }
     }
 
     pub mod developer {
@@ -520,29 +587,5 @@ mod default {
         pub fn stream_chunk_size() -> usize {
             1024
         }
-    }
-}
-
-pub mod constant {
-    pub mod hummock {
-        use bitflags::bitflags;
-        bitflags! {
-
-            #[derive(Default)]
-            pub struct CompactionFilterFlag: u32 {
-                const NONE = 0b00000000;
-                const STATE_CLEAN = 0b00000010;
-                const TTL = 0b00000100;
-            }
-        }
-
-        impl From<CompactionFilterFlag> for u32 {
-            fn from(flag: CompactionFilterFlag) -> Self {
-                flag.bits()
-            }
-        }
-
-        pub const TABLE_OPTION_DUMMY_RETENTION_SECOND: u32 = 0;
-        pub const PROPERTIES_RETENTION_SECOND_KEY: &str = "retention_seconds";
     }
 }

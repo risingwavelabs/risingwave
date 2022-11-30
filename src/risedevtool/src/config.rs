@@ -39,7 +39,7 @@ impl ConfigExpander {
     /// * `config` is the full content of `risedev.yml`.
     /// * `profile` is the selected config profile called by `risedev dev <profile>`. It is one of
     ///   the keys in the `risedev` section.
-    pub fn expand(config: &str, profile: &str) -> Result<Yaml> {
+    pub fn expand(config: &str, profile: &str) -> Result<(Option<String>, Yaml)> {
         Self::expand_with_extra_info(config, profile, HashMap::new())
     }
 
@@ -50,10 +50,12 @@ impl ConfigExpander {
         config: &str,
         profile: &str,
         extra_info: HashMap<String, String>,
-    ) -> Result<Yaml> {
+    ) -> Result<(Option<String>, Yaml)> {
         let [config]: [_; 1] = YamlLoader::load_from_str(config)?
             .try_into()
             .map_err(|_| anyhow!("expect yaml config to have only one section"))?;
+
+        let mut risingwave_config_path = None;
 
         let global_config = config
             .as_hash()
@@ -84,6 +86,7 @@ impl ConfigExpander {
                         .as_str()
                         .map(|s| s.to_string())
                         .ok_or_else(|| anyhow!("expect `config-path` to be a string"))?;
+                    risingwave_config_path = Some(config_path.clone());
 
                     let path = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
 
@@ -111,7 +114,10 @@ impl ConfigExpander {
             expanded_config.len() == 1,
             "`risedev` section key should be unique"
         );
-        Ok(Yaml::Hash(expanded_config.into_iter().collect()))
+        Ok((
+            risingwave_config_path,
+            Yaml::Hash(expanded_config.into_iter().collect()),
+        ))
     }
 
     /// Parses the expanded yaml into [`ServiceConfig`]s.

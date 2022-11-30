@@ -27,7 +27,6 @@ pub mod server;
 
 use clap::clap_derive::ArgEnum;
 use clap::Parser;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, ArgEnum)]
 pub enum AsyncStackTraceOption {
@@ -62,10 +61,6 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
-    /// No given `config_path` means to use default config.
-    #[clap(long, default_value = "")]
-    pub config_path: String,
-
     /// Enable reporting tracing information to jaeger.
     #[clap(long)]
     pub enable_jaeger_tracing: bool,
@@ -82,12 +77,19 @@ pub struct ComputeNodeOpts {
     /// Endpoint of the connector node
     #[clap(long, env = "CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
+
+    /// Te path of `risingwave.toml` configuration file.
+    ///
+    /// If empty, default configuration values will be used.
+    ///
+    /// Note that internal system parameters should be defined in the configuration file at
+    /// [`risingwave_common::config`] instead of command line arguments.
+    #[clap(long, default_value = "")]
+    pub config_path: String,
 }
 
 use std::future::Future;
 use std::pin::Pin;
-
-use risingwave_common::config::{BatchConfig, ServerConfig, StorageConfig, StreamingConfig};
 
 use crate::server::compute_node_serve;
 
@@ -119,23 +121,4 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             join_handle.await.unwrap();
         }
     })
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct ComputeNodeConfig {
-    // For connection
-    #[serde(default)]
-    pub server: ServerConfig,
-
-    // Below for batch query.
-    #[serde(default)]
-    pub batch: BatchConfig,
-
-    // Below for streaming.
-    #[serde(default)]
-    pub streaming: StreamingConfig,
-
-    // Below for Hummock.
-    #[serde(default)]
-    pub storage: StorageConfig,
 }

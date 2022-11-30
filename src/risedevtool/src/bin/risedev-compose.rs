@@ -91,12 +91,13 @@ fn main() -> Result<()> {
                             .map(|(k, v)| (k.clone(), v.clone())),
                     )
                     .collect(),
-            )?,
+            )?
+            .1,
             Some(compose_deploy_config),
         )
     } else {
         (
-            ConfigExpander::expand(&risedev_config_content, &opts.profile)?,
+            ConfigExpander::expand(&risedev_config_content, &opts.profile)?.1,
             None,
         )
     };
