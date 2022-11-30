@@ -20,10 +20,10 @@ use anyhow::Result;
 use futures::future::BoxFuture;
 use itertools::Itertools;
 use madsim::time::sleep;
-use risingwave_simulation_scale::cluster::Configuration;
-use risingwave_simulation_scale::ctl_ext::Fragment;
-use risingwave_simulation_scale::nexmark::{NexmarkCluster, THROUGHPUT};
-use risingwave_simulation_scale::utils::AssertResult;
+use risingwave_simulation::cluster::Configuration;
+use risingwave_simulation::ctl_ext::Fragment;
+use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
+use risingwave_simulation::utils::AssertResult;
 
 /// Common code for Nexmark chaos tests.
 ///
@@ -119,7 +119,7 @@ macro_rules! test {
         paste::paste! {
             #[madsim::test]
             async fn [< nexmark_chaos_ $query _single >]() -> Result<()> {
-                use risingwave_simulation_scale::nexmark::queries::$query::*;
+                use risingwave_simulation::nexmark::queries::$query::*;
                 nexmark_chaos_common(
                     CREATE,
                     SELECT,
@@ -134,7 +134,7 @@ macro_rules! test {
 
             #[madsim::test]
             async fn [< nexmark_chaos_ $query _multiple >]() -> Result<()> {
-                use risingwave_simulation_scale::nexmark::queries::$query::*;
+                use risingwave_simulation::nexmark::queries::$query::*;
                 nexmark_chaos_common(
                     CREATE,
                     SELECT,

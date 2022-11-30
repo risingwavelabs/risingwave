@@ -19,18 +19,28 @@ use std::time::Duration;
 use anyhow::Result;
 use futures::future::BoxFuture;
 use madsim::time::sleep;
-use risingwave_simulation_scale::cluster::Configuration;
-use risingwave_simulation_scale::ctl_ext::predicate::{
+use risingwave_simulation::cluster::Configuration;
+use risingwave_simulation::ctl_ext::predicate::{
     identity_contains, upstream_fragment_count, BoxedPredicate,
 };
-use risingwave_simulation_scale::nexmark::queries::q4::*;
-use risingwave_simulation_scale::nexmark::{NexmarkCluster, THROUGHPUT};
-use risingwave_simulation_scale::utils::AssertResult;
+use risingwave_simulation::nexmark::queries::q4::*;
+use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
+use risingwave_simulation::utils::AssertResult;
 
+#[cfg(target_os = "linux")]
 const RESULT: &str = r#"
 10 28621445.114754098360655737705
 11 28749150.521624007060900264784
 12 29301291.591155234657039711191
+13 31170352.90419708029197080292
+14 26981020.86615515771526001705
+"#;
+
+#[cfg(target_os = "macos")]
+const RESULT: &str = r#"
+10 28621445.112932604735883424408
+11 28749150.514563106796116504854
+12 29301291.583935018050541516245
 13 31170352.90419708029197080292
 14 26981020.86615515771526001705
 "#;

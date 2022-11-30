@@ -15,8 +15,8 @@
 #![cfg(madsim)]
 
 use anyhow::Result;
-use risingwave_simulation_scale::cluster::{Cluster, Configuration};
-use risingwave_simulation_scale::utils::AssertResult;
+use risingwave_simulation::cluster::{Cluster, Configuration};
+use risingwave_simulation::utils::AssertResult;
 
 #[madsim::test]
 async fn test_hello() -> Result<()> {

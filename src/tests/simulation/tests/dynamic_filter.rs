@@ -18,11 +18,10 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::Result;
-use itertools::Itertools;
 use madsim::time::sleep;
-use risingwave_simulation_scale::cluster::{Cluster, Configuration};
-use risingwave_simulation_scale::ctl_ext::predicate::{identity_contains, no_identity_contains};
-use risingwave_simulation_scale::utils::AssertResult;
+use risingwave_simulation::cluster::{Cluster, Configuration};
+use risingwave_simulation::ctl_ext::predicate::identity_contains;
+use risingwave_simulation::utils::AssertResult;
 
 const SELECT: &str = "select * from mv1 order by v1;";
 

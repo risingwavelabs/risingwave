@@ -19,9 +19,9 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use madsim::time::sleep;
-use risingwave_simulation_scale::cluster::{Cluster, Configuration};
-use risingwave_simulation_scale::ctl_ext::predicate::{identity_contains, no_identity_contains};
-use risingwave_simulation_scale::utils::AssertResult;
+use risingwave_simulation::cluster::{Cluster, Configuration};
+use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
+use risingwave_simulation::utils::AssertResult;
 
 const ROOT_TABLE_CREATE: &str = "create table t1 (v1 int);";
 const MV1: &str = "create materialized view m1 as select * from t1 where v1 > 5;";

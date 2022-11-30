@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::io::Write;
-use std::net::IpAddr;
 use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
 use clap::Parser;
-use futures::future::BoxFuture;
-use madsim::rand::thread_rng;
+use futures::future::{join_all, BoxFuture};
 use madsim::runtime::{Handle, NodeHandle};
-use rand::seq::SliceRandom;
+use rand::Rng;
+use sqllogictest::AsyncDB;
 
-use crate::RisingWave;
+use crate::client::RisingWave;
 
 /// Embed the config file and create a temporary file at runtime.
 static CONFIG_PATH: LazyLock<tempfile::TempPath> = LazyLock::new(|| {
@@ -34,47 +34,97 @@ static CONFIG_PATH: LazyLock<tempfile::TempPath> = LazyLock::new(|| {
     file.into_temp_path()
 });
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Clone, Copy)]
 pub struct Configuration {
     /// The number of frontend nodes.
-    #[clap(long, default_value = "1")]
-    frontend_nodes: usize,
+    pub frontend_nodes: usize,
 
     /// The number of compute nodes.
-    #[clap(long, default_value = "3")]
-    compute_nodes: usize,
+    pub compute_nodes: usize,
 
     /// The number of compactor nodes.
-    #[clap(long, default_value = "1")]
-    compactor_nodes: usize,
+    pub compactor_nodes: usize,
 
     /// The number of CPU cores for each compute node.
     ///
     /// This determines worker_node_parallelism.
-    #[clap(long, default_value = "2")]
-    compute_node_cores: usize,
+    pub compute_node_cores: usize,
+
+    /// The probability of etcd request timeout.
+    pub etcd_timeout_rate: f32,
 }
 
 impl Default for Configuration {
     fn default() -> Self {
-        Self::parse_from::<_, &str>([])
+        Configuration {
+            frontend_nodes: 2,
+            compute_nodes: 3,
+            compactor_nodes: 2,
+            compute_node_cores: 2,
+            etcd_timeout_rate: 0.0,
+        }
     }
 }
 
+/// A risingwave cluster.
+///
+/// # Nodes
+///
+/// | Name           | IP            |
+/// | -------------- | ------------- |
+/// | meta           | 192.168.1.1   |
+/// | frontend-x     | 192.168.2.x   |
+/// | compute-x      | 192.168.3.x   |
+/// | compactor-x    | 192.168.4.x   |
+/// | etcd           | 192.168.10.1  |
+/// | kafka-broker   | 192.168.11.1  |
+/// | kafka-producer | 192.168.11.2  |
+/// | client         | 192.168.100.1 |
+/// | ctl            | 192.168.101.1 |
 pub struct Cluster {
-    frontends: Vec<IpAddr>,
-
-    _handle: Handle,
+    config: Configuration,
+    handle: Handle,
     pub(crate) client: NodeHandle,
     pub(crate) ctl: NodeHandle,
 }
 
 impl Cluster {
+    pub fn start(conf: Configuration) -> BoxFuture<'static, Result<Self>> {
+        Box::pin(Self::start_inner(conf))
+    }
+
     async fn start_inner(conf: Configuration) -> Result<Self> {
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
         println!("{:?}", conf);
         println!("config path = {}", CONFIG_PATH.display());
+
+        // etcd node
+        handle
+            .create_node()
+            .name("etcd")
+            .ip("192.168.10.1".parse().unwrap())
+            .init(move || async move {
+                let addr = "0.0.0.0:2388".parse().unwrap();
+                etcd_client::SimServer::builder()
+                    .timeout_rate(conf.etcd_timeout_rate)
+                    .serve(addr)
+                    .await
+                    .unwrap();
+            })
+            .build();
+
+        // kafka broker
+        handle
+            .create_node()
+            .name("kafka-broker")
+            .ip("192.168.11.1".parse().unwrap())
+            .init(move || async move {
+                rdkafka::SimBroker::default()
+                    .serve("0.0.0.0:29092".parse().unwrap())
+                    .await
+            })
+            .build();
 
         // wait for the service to be ready
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -95,19 +145,18 @@ impl Cluster {
                     "--listen-addr",
                     "0.0.0.0:5690",
                     "--backend",
-                    "mem",
+                    "etcd",
+                    "--etcd-endpoints",
+                    "192.168.10.1:2388",
                 ]);
                 risingwave_meta::start(opts).await
             })
             .build();
         // wait for the service to be ready
-        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(15)).await;
 
         // frontend node
-        let mut frontends = vec![];
         for i in 1..=conf.frontend_nodes {
-            let frontend_ip = format!("192.168.2.{i}").parse().unwrap();
-            frontends.push(frontend_ip);
             handle
                 .create_node()
                 .name(format!("frontend-{i}"))
@@ -120,7 +169,7 @@ impl Cluster {
                         "--host",
                         "0.0.0.0:4566",
                         "--client-address",
-                        &format!("{frontend_ip}:4566"),
+                        &format!("192.168.2.{i}:4566"),
                         "--meta-addr",
                         &format!("{meta}:5690"),
                     ]);
@@ -171,7 +220,7 @@ impl Cluster {
                         "--client-address",
                         &format!("192.168.4.{i}:6660"),
                         "--meta-address",
-                        "192.168.1.1:5690",
+                        &format!("{meta}:5690"),
                         "--state-store",
                         "hummock+memory-shared",
                     ]);
@@ -181,7 +230,7 @@ impl Cluster {
         }
 
         // wait for the service to be ready
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_secs(15)).await;
 
         // client
         let client = handle
@@ -198,31 +247,29 @@ impl Cluster {
             .build();
 
         Ok(Self {
-            frontends,
-            _handle: handle,
+            config: conf,
+            handle,
             client,
             ctl,
         })
     }
 
-    pub fn start(conf: Configuration) -> BoxFuture<'static, Result<Self>> {
-        Box::pin(Self::start_inner(conf))
+    /// Run a SQL query from the client.
+    pub fn run(&mut self, sql: &str) -> BoxFuture<'_, Result<String>> {
+        Box::pin(self.run_inner(sql.to_string()))
     }
 
     async fn run_inner(&mut self, sql: String) -> Result<String> {
-        let frontend = self
-            .frontends
-            .choose(&mut thread_rng())
-            .unwrap()
-            .to_string();
+        let frontend = self.rand_frontend_ip();
 
         let result = self
             .client
             .spawn(async move {
                 // TODO: reuse session
-                let mut session = RisingWave::connect(frontend, "dev".to_string()).await;
+                let mut session = RisingWave::connect(frontend, "dev".to_string())
+                    .await
+                    .expect("failed to connect to RisingWave");
                 let result = session.run(&sql).await?;
-                session.close().await;
                 Ok::<_, anyhow::Error>(result)
             })
             .await??;
@@ -230,8 +277,24 @@ impl Cluster {
         Ok(result)
     }
 
-    pub fn run(&mut self, sql: &str) -> BoxFuture<'_, Result<String>> {
-        Box::pin(self.run_inner(sql.to_string()))
+    /// Run a future on the client node.
+    pub async fn run_on_client<F>(&self, future: F)
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.client.spawn(future).await.unwrap();
+    }
+
+    /// Run a SQL query from the client and wait until the condition is met.
+    pub fn wait_until(
+        &mut self,
+        sql: &str,
+        p: impl FnMut(&str) -> bool + Send + 'static,
+        interval: Duration,
+        timeout: Duration,
+    ) -> BoxFuture<'_, Result<String>> {
+        Box::pin(self.wait_until_inner(sql.to_string(), p, interval, timeout))
     }
 
     async fn wait_until_inner(
@@ -258,16 +321,6 @@ impl Cluster {
         }
     }
 
-    pub fn wait_until(
-        &mut self,
-        sql: &str,
-        p: impl FnMut(&str) -> bool + Send + 'static,
-        interval: Duration,
-        timeout: Duration,
-    ) -> BoxFuture<'_, Result<String>> {
-        Box::pin(self.wait_until_inner(sql.to_string(), p, interval, timeout))
-    }
-
     async fn wait_until_non_empty_inner(
         &mut self,
         sql: String,
@@ -278,6 +331,7 @@ impl Cluster {
             .await
     }
 
+    /// Run a SQL query from the client and wait until the return result is not empty.
     pub fn wait_until_non_empty(
         &mut self,
         sql: &str,
@@ -286,4 +340,74 @@ impl Cluster {
     ) -> BoxFuture<'_, Result<String>> {
         Box::pin(self.wait_until_non_empty_inner(sql.to_string(), interval, timeout))
     }
+
+    /// Kill some nodes and restart them in 2s.
+    pub async fn kill_node(&self, opts: &KillOpts) {
+        let mut nodes = vec![];
+        if opts.kill_meta {
+            nodes.push(format!("meta"));
+        }
+        if opts.kill_frontend {
+            let i = rand::thread_rng().gen_range(1..=self.config.frontend_nodes);
+            nodes.push(format!("frontend-{}", i));
+        }
+        if opts.kill_compute {
+            let i = rand::thread_rng().gen_range(1..=self.config.compute_nodes);
+            nodes.push(format!("compute-{}", i));
+        }
+        if opts.kill_compactor {
+            let i = rand::thread_rng().gen_range(1..=self.config.compactor_nodes);
+            nodes.push(format!("compactor-{}", i));
+        }
+        if nodes.is_empty() {
+            return;
+        }
+        join_all(nodes.iter().map(|name| async move {
+            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            tokio::time::sleep(t).await;
+            tracing::info!("kill {name}");
+            madsim::runtime::Handle::current().kill(&name);
+
+            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            tokio::time::sleep(t).await;
+            tracing::info!("restart {name}");
+            madsim::runtime::Handle::current().restart(&name);
+        }))
+        .await;
+    }
+
+    /// Create a node for kafka producer and prepare data.
+    pub fn create_kafka_producer(&self, datadir: &str) {
+        self.handle
+            .create_node()
+            .name("kafka-producer")
+            .ip("192.168.11.2".parse().unwrap())
+            .build()
+            .spawn(crate::kafka::producer(
+                "192.168.11.1:29092",
+                datadir.to_string(),
+            ));
+    }
+
+    /// Return the IP of a random frontend node.
+    pub fn rand_frontend_ip(&self) -> String {
+        let i = rand::thread_rng().gen_range(1..=self.config.frontend_nodes);
+        format!("192.168.2.{i}")
+    }
+
+    /// Return the IP of all frontend nodes.
+    pub fn frontend_ips(&self) -> Vec<String> {
+        (1..=self.config.frontend_nodes)
+            .map(|i| format!("192.168.2.{i}"))
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KillOpts {
+    pub kill_rate: f32,
+    pub kill_meta: bool,
+    pub kill_frontend: bool,
+    pub kill_compute: bool,
+    pub kill_compactor: bool,
 }
