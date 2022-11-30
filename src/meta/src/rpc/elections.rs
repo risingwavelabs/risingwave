@@ -65,7 +65,18 @@ async fn campaign<S: MetaStore>(
 ) -> Option<ElectionOutcome> {
     tracing::info!("running for election with lease {}", next_lease_id);
 
-    // below is old code
+    let campaign_leader_info = MetaLeaderInfo {
+        lease_id: next_lease_id,
+        node_address: addr.to_string(),
+    };
+
+    let now = since_epoch();
+    let campaign_lease_info = MetaLeaseInfo {
+        leader: Some(campaign_leader_info.clone()),
+        lease_register_time: now.as_secs(),
+        lease_expire_time: now.as_secs() + lease_time_sec,
+    };
+
     // get old leader info and lease
     let current_leader_info = match get_infos(meta_store).await {
         None => return None,
@@ -75,17 +86,9 @@ async fn campaign<S: MetaStore>(
         }
     };
 
-    let leader_info = MetaLeaderInfo {
-        lease_id: next_lease_id,
-        node_address: addr.to_string(),
-    };
-
-    let now = since_epoch();
-    let lease_info = MetaLeaseInfo {
-        leader: Some(leader_info.clone()),
-        lease_register_time: now.as_secs(),
-        lease_expire_time: now.as_secs() + lease_time_sec,
-    };
+    // TODO: remove
+    let (a, b) = get_infos_obj(meta_store).await.unwrap();
+    tracing::info!("leader {:?}, lease {:?}", a, b);
 
     // Initial leader election
     if current_leader_info.is_empty() {
@@ -96,7 +99,7 @@ async fn campaign<S: MetaStore>(
             .put_cf(
                 META_CF_NAME,
                 META_LEADER_KEY.as_bytes().to_vec(),
-                leader_info.encode_to_vec(),
+                campaign_leader_info.encode_to_vec(),
             )
             .await
         {
@@ -109,14 +112,14 @@ async fn campaign<S: MetaStore>(
 
         let mut addr_port = addr.split(":");
         // Check if new leader was elected in the meantime
-        return match renew_lease(&leader_info, lease_time_sec, meta_store).await {
+        return match renew_lease(&campaign_leader_info, lease_time_sec, meta_store).await {
             Some(is_leader) => {
                 if !is_leader {
                     return None;
                 }
                 Some(ElectionOutcome {
-                    meta_leader_info: leader_info,
-                    _meta_lease_info: lease_info,
+                    meta_leader_info: campaign_leader_info,
+                    _meta_lease_info: campaign_lease_info,
                     is_leader: true,
                     host_addr: HostAddr {
                         host: addr_port.next().unwrap().to_owned(),
@@ -129,7 +132,7 @@ async fn campaign<S: MetaStore>(
     }
 
     // follow-up elections: There have already been leaders before
-    let is_leader = match renew_lease(&leader_info, lease_time_sec, meta_store).await {
+    let is_leader = match renew_lease(&campaign_leader_info, lease_time_sec, meta_store).await {
         None => return None,
         Some(val) => val,
     };
@@ -138,8 +141,8 @@ async fn campaign<S: MetaStore>(
         // if is leader, return HostAddress to this node
         let mut addr_port = addr.split(":");
         return Some(ElectionOutcome {
-            meta_leader_info: leader_info,
-            _meta_lease_info: lease_info,
+            meta_leader_info: campaign_leader_info,
+            _meta_lease_info: campaign_lease_info,
             is_leader,
             host_addr: HostAddr {
                 host: addr_port.next().unwrap().to_owned(),
@@ -152,14 +155,16 @@ async fn campaign<S: MetaStore>(
 
     // TODO: Can I get the infos here or do I have to get these in
     // one transaction when I call renew_lease?
-    let (leader, _) = get_infos_obj(meta_store).await?;
-    let mut addr_port = leader.get_node_address().split(":");
+    let (leader, lease) = get_infos_obj(meta_store).await?;
+    let tmp = leader.clone();
+    let mut addr_port = tmp.get_node_address().split(":"); // TODO :use into function here
 
     Some(ElectionOutcome {
-        meta_leader_info: leader_info,
-        _meta_lease_info: lease_info,
+        meta_leader_info: leader,
+        _meta_lease_info: lease,
         is_leader,
         host_addr: HostAddr {
+            // TODO: do we need this or can we just use leader info to deduce this?
             // TODO: write MetaLeaderInfo to HostAddr into func
             host: addr_port.next().unwrap().to_owned(),
             port: addr_port.next().unwrap().to_owned().parse::<u16>().unwrap(),
@@ -329,20 +334,27 @@ pub async fn run_elections<S: MetaStore>(
 
         // every lease gets a random ID to differentiate between leases/leaders
         let mut initial_election = true;
-        let init_lease_id = gen_rand_lease_id();
 
+        // TODO: Why do I need metaLeaderInfo?
+        // DO I return the info of the current leader or of the elected leader?
         // run the initial election
-        let election_outcome = campaign(&meta_store, &addr, lease_time_sec, init_lease_id).await;
-        let (initial_leader, is_initial_leader) = match election_outcome {
+        let election_outcome =
+            campaign(&meta_store, &addr, lease_time_sec, gen_rand_lease_id()).await;
+        let (leader_addr, initial_leader, is_initial_leader) = match election_outcome {
             Some(outcome) => {
                 tracing::info!("initial election finished");
-                (outcome.meta_leader_info, outcome.is_leader)
+                (
+                    outcome.host_addr,
+                    outcome.meta_leader_info,
+                    outcome.is_leader,
+                )
             }
             None => {
                 tracing::info!("initial election failed. Repeating election");
                 continue 'initial_election;
             }
         };
+        // why always false?
         if is_initial_leader {
             tracing::info!(
                 "Initial leader with address '{}' elected. New lease id is {}",
@@ -355,20 +367,7 @@ pub async fn run_elections<S: MetaStore>(
 
         // define all follow up elections and terms in handle
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let mut addr_port = initial_leader.get_node_address().split(":"); // TODO: replace this with an into() call
-                                                                          // TODO: MetaLeaderInfo into NodeAddr
-        let (leader_tx, leader_rx) = tokio::sync::watch::channel((
-            HostAddr {
-                host: addr_port.next().unwrap().to_string(),
-                port: addr_port
-                    .next()
-                    .unwrap()
-                    .to_string()
-                    .parse::<u16>()
-                    .unwrap(),
-            },
-            is_initial_leader,
-        ));
+        let (leader_tx, leader_rx) = tokio::sync::watch::channel((leader_addr, is_initial_leader));
         let handle = tokio::spawn(async move {
             // runs all follow-up elections
             let mut wait = true;
