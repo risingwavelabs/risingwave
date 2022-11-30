@@ -67,7 +67,7 @@ enum Backend {
 pub struct MetaNodeOpts {
     // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:5690")]
-    listen_addr: String, // TODO: The port is defined here
+    listen_addr: String,
 
     #[clap(long)]
     host: Option<String>,

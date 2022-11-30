@@ -82,12 +82,7 @@ pub async fn compute_node_serve(
 
     info!("current meta_addr is {}", opts.meta_address);
 
-    // TODO: even after initializing the meta_client we have to be careful when talking to meta
-    // every call to meta may fail if the current meta is not a leader
-
     // Register to the cluster. We're not ready to serve until activate is called.
-    // Try each of the meta nodes
-    // FIXME: Should we communicate with ETCD here?
 
     let mut client_res = MetaClient::register_new(
         &opts.meta_address,
@@ -97,10 +92,9 @@ pub async fn compute_node_serve(
     )
     .await;
 
-    // FIXME: This may time out during risedev d, if compute has to wait for meta to get
-    // online/elected
-
-    // This finds the initial leader but not the next leader
+    // FIXME: even after initializing the meta_client we have to be careful when talking to meta
+    // every call to meta may fail if the current meta is not a leader
+    // Below code does not handle meta failover
 
     tracing::info!(
         "Trying to connect against meta node {}. May be a follower",

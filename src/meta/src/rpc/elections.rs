@@ -142,10 +142,9 @@ async fn campaign<S: MetaStore>(
         });
     }
 
-    // if it is not leader, then get the current leaders HostAddress
-
     // TODO: Can I get the infos here or do I have to get these in
     // one transaction when I call renew_lease?
+    // if it is not leader, then get the current leaders HostAddress
     let (leader, lease) = get_infos_obj(meta_store).await?;
 
     Some(ElectionOutcome {
@@ -199,10 +198,6 @@ async fn renew_lease<S: MetaStore>(
         lease_expire_time: now.as_secs() + lease_time_sec,
     };
 
-    // TODO: Found issue: We are using the leader_info of the leader and not the leader info of the
-    // candidate
-    tracing::info!("renew_lease leader info {:?}", leader_info);
-
     txn.check_equal(
         META_CF_NAME.to_string(),
         META_LEADER_KEY.as_bytes().to_vec(),
@@ -214,7 +209,6 @@ async fn renew_lease<S: MetaStore>(
         lease_info.encode_to_vec(),
     );
 
-    // TODO: transaction get the current leader
     let is_leader = match meta_store.txn(txn).await {
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => false,
@@ -232,8 +226,6 @@ async fn renew_lease<S: MetaStore>(
         },
         Ok(_) => true,
     };
-    // has to be false, if follower // TODO: remove
-    tracing::info!("renew_lease is_leader {}", is_leader);
     Some(is_leader)
 }
 
@@ -336,9 +328,6 @@ pub async fn run_elections<S: MetaStore>(
 
         // every lease gets a random ID to differentiate between leases/leaders
         let mut initial_election = true;
-
-        // TODO: Why do I need metaLeaderInfo?
-        // DO I return the info of the current leader or of the elected leader?
 
         // run the initial election
         let election_outcome =
@@ -444,7 +433,6 @@ pub async fn run_elections<S: MetaStore>(
                         _ = ticker.tick() => {},
                     }
 
-                    // TODO: have to run with my own info, not with actual leader info
                     if let Some(leader_alive) =
                         manage_term(is_leader, &leader_info, lease_time_sec, &meta_store).await
                     {
@@ -481,14 +469,11 @@ async fn manage_term<S: MetaStore>(
             None => return Some(false),
             Some(val) => {
                 if val {
-                    tracing::info!("node is leader and lease was renewed"); // TODO: remove me
                     return None; // node is leader and lease was renewed
                 }
             }
         }
     };
-    // node is follower
-    tracing::info!("after renew_lease"); // TODO remove
 
     // get leader info
     let (_, lease_info) = get_infos(meta_store).await.unwrap_or_default();
@@ -501,7 +486,6 @@ async fn manage_term<S: MetaStore>(
     // delete lease and run new election if lease is expired for some time
     let some_time = lease_time_sec / 2;
     let lease_info = MetaLeaseInfo::decode(&mut lease_info.as_slice()).unwrap();
-    tracing::info!("after get_info leader info: {:?}", leader_info); // TODO remove
     if lease_info.get_lease_expire_time() + some_time < since_epoch().as_secs() {
         tracing::warn!("Detected that leader is down");
         let mut txn = Transaction::default();

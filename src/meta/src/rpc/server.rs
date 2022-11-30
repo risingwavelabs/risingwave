@@ -480,7 +480,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
 #[derive(Clone)]
 struct InterceptorWrapper {
-    leader_rx: Receiver<(HostAddress, bool)>, // TODO: Can I clone this?
+    leader_rx: Receiver<(HostAddress, bool)>,
 }
 
 impl Interceptor for InterceptorWrapper {
