@@ -38,6 +38,7 @@
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
 mod barrier;
+mod config;
 #[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
 mod error;
@@ -52,7 +53,6 @@ use std::time::Duration;
 
 use clap::{ArgEnum, Parser};
 pub use error::{MetaError, MetaResult};
-use serde::{Deserialize, Serialize};
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
@@ -120,42 +120,31 @@ pub struct MetaNodeOpts {
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// It is mainly useful for playgrounds.
     #[clap(long)]
-    dangerous_max_idle_secs: Option<u64>,
+    pub dangerous_max_idle_secs: Option<u64>,
 
     /// Whether to enable deterministic compaction scheduling, which
     /// will disable all auto scheduling of compaction tasks
     #[clap(long)]
     enable_compaction_deterministic: bool,
 
-    /// Interval of GC metadata in meta store and stale SSTs in object store.
-    #[clap(long, default_value = "30")]
-    vacuum_interval_sec: u64,
-
-    /// Threshold used by worker node to filter out new SSTs when scanning object store, during
-    /// full SST GC.
-    #[clap(long, default_value = "604800")]
-    min_sst_retention_time_sec: u64,
-
-    /// The spin interval when collecting global GC watermark in hummock
-    #[clap(long, default_value = "5")]
-    collect_gc_watermark_spin_interval_sec: u64,
-
     /// Enable sanity check when SSTs are committed. By default disabled.
     #[clap(long)]
     enable_committed_sst_sanity_check: bool,
 
-    /// Schedule compaction for all compaction groups with this interval.
-    #[clap(long, default_value = "60")]
-    pub periodic_compaction_interval_sec: u64,
-
     #[clap(long, default_value = "10")]
     node_num_monitor_interval_sec: u64,
+
+    /// For dashboard service to fetch cluster info.
+    #[clap(long)]
+    prometheus_endpoint: Option<String>,
 }
 
 use std::future::Future;
 use std::pin::Pin;
 
-use risingwave_common::config::{load_config, StreamingConfig};
+use risingwave_common::config::load_config;
+
+use crate::config::MetaNodeConfig;
 
 /// Start meta node
 pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
@@ -164,11 +153,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         let meta_config: MetaNodeConfig = load_config(&opts.config_path).unwrap();
         tracing::info!("Starting meta node with config {:?}", meta_config);
-        tracing::info!(
-            "Starting meta node with options periodic_compaction_interval_sec: {}, enable_compaction_deterministic: {}",
-            opts.periodic_compaction_interval_sec,
-            opts.enable_compaction_deterministic
-        );
+        tracing::info!("Starting meta node with options {:?}", opts);
         let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
@@ -216,12 +201,15 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 max_idle_ms,
                 checkpoint_frequency,
                 compaction_deterministic_test: opts.enable_compaction_deterministic,
-                vacuum_interval_sec: opts.vacuum_interval_sec,
-                min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
-                collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
+                vacuum_interval_sec: meta_config.meta.vacuum_interval_sec,
+                min_sst_retention_time_sec: meta_config.meta.min_sst_retention_time_sec,
+                collect_gc_watermark_spin_interval_sec: meta_config
+                    .meta
+                    .collect_gc_watermark_spin_interval_sec,
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
-                periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,
+                periodic_compaction_interval_sec: meta_config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: opts.node_num_monitor_interval_sec,
+                prometheus_endpoint: opts.prometheus_endpoint,
             },
         )
         .await
@@ -229,11 +217,4 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         join_handle.await.unwrap();
         tracing::info!("Meta server is stopped");
     })
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct MetaNodeConfig {
-    // Below for streaming.
-    #[serde(default)]
-    pub streaming: StreamingConfig,
 }

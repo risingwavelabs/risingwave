@@ -30,3 +30,16 @@ pub mod error;
 mod macros;
 pub mod sink;
 pub mod source;
+
+#[derive(Clone, Debug, Default)]
+pub struct ConnectorParams {
+    pub connector_rpc_endpoint: Option<String>,
+}
+
+impl ConnectorParams {
+    pub fn new(connector_rpc_endpoint: Option<String>) -> Self {
+        Self {
+            connector_rpc_endpoint,
+        }
+    }
+}

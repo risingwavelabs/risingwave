@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use parking_lot::RwLock;
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
@@ -34,6 +34,8 @@ use tracing::log::error;
 
 mod block_cache;
 pub use block_cache::*;
+
+use crate::hummock::store::state_store::LocalHummockStorage;
 
 #[cfg(target_os = "linux")]
 pub mod file_cache;
@@ -77,6 +79,7 @@ use risingwave_hummock_sdk::filter_key_extractor::{
 pub use validator::*;
 use value::*;
 
+use self::event_handler::ReadVersionMappingType;
 use self::iterator::{BackwardUserIterator, HummockIterator, UserIterator};
 pub use self::sstable_store::*;
 use super::monitor::StateStoreMetrics;
@@ -94,7 +97,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
-use crate::hummock::store::version::{HummockReadVersion, HummockVersionReader};
+use crate::hummock::store::version::HummockVersionReader;
 use crate::monitor::StoreLocalStatistic;
 use crate::store::ReadOptions;
 
@@ -116,9 +119,6 @@ impl Drop for HummockStorageShutdownGuard {
 pub struct HummockStorage {
     hummock_event_sender: UnboundedSender<HummockEvent>,
 
-    // TODO: replace it with version mapping
-    read_version: Arc<RwLock<HummockReadVersion>>,
-
     context: Arc<Context>,
 
     buffer_tracker: BufferTracker,
@@ -133,7 +133,8 @@ pub struct HummockStorage {
 
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
-    #[cfg(not(madsim))]
+    read_version_mapping: Arc<ReadVersionMappingType>,
+
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
@@ -146,6 +147,7 @@ impl HummockStorage {
         notification_client: impl NotificationClient,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
+        tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> HummockResult<Self> {
         let sstable_id_manager = Arc::new(SstableIdManager::new(
             hummock_meta_client.clone(),
@@ -183,16 +185,14 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
         ));
 
-        let hummock_event_handler =
-            HummockEventHandler::new(event_rx, pinned_version, compactor_context.clone());
-
-        let read_version = hummock_event_handler.read_version();
-
-        #[cfg(not(madsim))]
-        let tracing = Arc::new(risingwave_tracing::RwTracingService::new());
+        let hummock_event_handler = HummockEventHandler::new(
+            event_tx.clone(),
+            event_rx,
+            pinned_version,
+            compactor_context.clone(),
+        );
 
         let instance = Self {
-            read_version,
             context: compactor_context,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
@@ -203,13 +203,34 @@ impl HummockStorage {
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx,
             }),
-            #[cfg(not(madsim))]
+            read_version_mapping: hummock_event_handler.read_version_mapping(),
             tracing,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
         Ok(instance)
+    }
+
+    // TODO: make it self function and remove hummock_event_sender parameter
+    async fn new_local_inner(&self, table_id: TableId) -> LocalHummockStorage {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.hummock_event_sender
+            .send(HummockEvent::RegisterReadVersion {
+                table_id,
+                new_read_version_sender: tx,
+            })
+            .unwrap();
+
+        let (basic_read_version, instance_guard) = rx.await.unwrap();
+        LocalHummockStorage::new(
+            instance_guard,
+            basic_read_version,
+            self.hummock_version_reader.clone(),
+            self.hummock_event_sender.clone(),
+            self.buffer_tracker.get_memory_limiter().clone(),
+            self.tracing.clone(),
+        )
     }
 
     pub fn sstable_store(&self) -> SstableStoreRef {
@@ -249,6 +270,7 @@ impl HummockStorage {
             if self.pinned_version.load().id() >= version_id {
                 break;
             }
+
             yield_now().await
         }
     }
@@ -259,6 +281,7 @@ impl HummockStorage {
             if self.pinned_version.load().id() >= version.id {
                 break;
             }
+
             yield_now().await
         }
     }
@@ -280,6 +303,7 @@ impl HummockStorage {
             hummock_meta_client,
             notification_client,
             Arc::new(StateStoreMetrics::unused()),
+            Arc::new(risingwave_tracing::RwTracingService::disabled()),
         )
         .await
     }
@@ -444,7 +468,6 @@ pub struct HummockStorageV1 {
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 
-    #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
@@ -457,6 +480,7 @@ impl HummockStorageV1 {
         notification_client: impl NotificationClient,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
+        tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
@@ -540,8 +564,7 @@ impl HummockStorageV1 {
             }),
             version_update_notifier_tx: epoch_update_tx_clone,
             hummock_event_sender: event_tx,
-            #[cfg(not(madsim))]
-            tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
+            tracing,
         };
 
         Ok(instance)

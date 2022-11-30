@@ -20,8 +20,7 @@ use risingwave_common::array::{ArrayBuilderImpl, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
-use risingwave_common::row::Row;
-use risingwave_common::types::Datum;
+use risingwave_common::row::{Row, Row2, RowExt};
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
@@ -39,10 +38,7 @@ pub struct AggGroup<S: StateStore> {
     states: Vec<AggState<S>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
-    ///
-    /// We use `Vec<Datum>` instead of `Row` here to avoid unnecessary memory
-    /// usage for group key prefix and unnecessary construction of `Row` struct.
-    prev_outputs: Option<Vec<Datum>>,
+    prev_outputs: Option<Row>,
 }
 
 impl<S: StateStore> Debug for AggGroup<S> {
@@ -64,7 +60,7 @@ pub struct AggChangesInfo {
     /// The result row containing group key prefix. To be inserted into result table.
     pub result_row: Row,
     /// The previous outputs of all agg calls recorded in the `AggState`.
-    pub prev_outputs: Option<Vec<Datum>>,
+    pub prev_outputs: Option<Row>,
 }
 
 impl<S: StateStore> AggGroup<S> {
@@ -79,11 +75,10 @@ impl<S: StateStore> AggGroup<S> {
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<AggGroup<S>> {
-        let prev_result: Option<Row> = result_table
+        let prev_outputs: Option<Row> = result_table
             .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
             .await?;
-        let prev_outputs: Option<Vec<_>> = prev_result.map(|row| row.0);
-        if let Some(prev_outputs) = prev_outputs.as_ref() {
+        if let Some(prev_outputs) = &prev_outputs {
             assert_eq!(prev_outputs.len(), agg_calls.len());
         }
 
@@ -172,10 +167,7 @@ impl<S: StateStore> AggGroup<S> {
 
     /// Get the outputs of all managed agg states.
     /// Possibly need to read/sync from state table if the state not cached in memory.
-    async fn get_outputs(
-        &mut self,
-        storages: &[AggStateStorage<S>],
-    ) -> StreamExecutorResult<Vec<Datum>> {
+    async fn get_outputs(&mut self, storages: &[AggStateStorage<S>]) -> StreamExecutorResult<Row> {
         futures::future::try_join_all(
             self.states
                 .iter_mut()
@@ -183,6 +175,7 @@ impl<S: StateStore> AggGroup<S> {
                 .map(|(state, storage)| state.get_output(storage, self.group_key.as_ref())),
         )
         .await
+        .map(Row::new)
     }
 
     /// Reset all in-memory states to their initial state, i.e. to reset all agg state structs to
@@ -203,7 +196,7 @@ impl<S: StateStore> AggGroup<S> {
         new_ops: &mut Vec<Op>,
         storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<AggChangesInfo> {
-        let curr_outputs: Vec<Datum> = self.get_outputs(storages).await?;
+        let curr_outputs: Row = self.get_outputs(storages).await?;
 
         let row_count = curr_outputs[ROW_COUNT_COLUMN]
             .as_ref()
@@ -298,10 +291,10 @@ impl<S: StateStore> AggGroup<S> {
         };
 
         let result_row = self
-            .group_key
-            .as_ref()
+            .group_key()
             .unwrap_or_else(Row::empty)
-            .concat(curr_outputs.iter().cloned());
+            .chain(&curr_outputs)
+            .into_owned_row();
 
         let prev_outputs = if n_appended_ops == 0 {
             self.prev_outputs.clone()

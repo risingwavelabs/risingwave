@@ -273,10 +273,20 @@ pub async fn handle_create_table(
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
+    if_not_exists: bool,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
-    session.check_relation_name_duplicated(table_name.clone())?;
+    if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
+        if if_not_exists {
+            return Ok(PgResponse::empty_result_with_notice(
+                StatementType::CREATE_TABLE,
+                format!("relation \"{}\" already exists, skipping", table_name),
+            ));
+        } else {
+            return Err(e);
+        }
+    }
 
     let (graph, source, table) = {
         let (plan, source, table) = gen_create_table_plan(
