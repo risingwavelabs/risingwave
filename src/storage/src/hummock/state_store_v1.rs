@@ -26,8 +26,7 @@ use minitrace::Span;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{
-    bound_table_key_range, map_table_key_range, next_key, user_key, FullKey, TableKey,
-    TableKeyRange, UserKey,
+    bound_table_key_range, map_table_key_range, user_key, FullKey, TableKey, TableKeyRange, UserKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
@@ -430,54 +429,56 @@ impl StateStoreRead for HummockStorageV1 {
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        if let Some(dist_key_hint) = read_options.dist_key_hint.as_ref() {
-            let next_key = next_key(dist_key_hint);
+        // Todo(wcy-fdu): find a correct assert way
 
-            // learn more detail about start_bound with storage_table.rs.
-            match key_range.start_bound() {
-                // it guarantees that the start bound must be included (some different case)
-                // 1. Include(pk + col_bound) => dist_key_hint <= start_bound <
-                // next_key(dist_key_hint)
-                //
-                // for case2, frontend need to reject this, avoid excluded start_bound and
-                // transform it to included(next_key), without this case we can just guarantee
-                // that start_bound < next_key
-                //
-                // 2. Include(next_key(pk +
-                // col_bound)) => dist_key_hint <= start_bound <= next_key(dist_key_hint)
-                //
-                // 3. Include(pk) => dist_key_hint <= start_bound < next_key(dist_key_hint)
-                Included(range_start) | Excluded(range_start) => {
-                    assert!(range_start.as_slice() >= dist_key_hint.as_slice());
-                    assert!(range_start.as_slice() < next_key.as_slice() || next_key.is_empty());
-                }
+        // if let Some(dist_key_hint) = read_options.dist_key_hint.as_ref() {
+        //     let next_key = next_key(dist_key_hint);
 
-                _ => unreachable!(),
-            }
+        //     // learn more detail about start_bound with storage_table.rs.
+        //     match key_range.start_bound() {
+        //         // it guarantees that the start bound must be included (some different case)
+        //         // 1. Include(pk + col_bound) => dist_key_hint <= start_bound <
+        //         // next_key(dist_key_hint)
+        //         //
+        //         // for case2, frontend need to reject this, avoid excluded start_bound and
+        //         // transform it to included(next_key), without this case we can just guarantee
+        //         // that start_bound < next_key
+        //         //
+        //         // 2. Include(next_key(pk +
+        //         // col_bound)) => dist_key_hint <= start_bound <= next_key(dist_key_hint)
+        //         //
+        //         // 3. Include(pk) => dist_key_hint <= start_bound < next_key(dist_key_hint)
+        //         Included(range_start) | Excluded(range_start) => {
+        //             assert!(range_start.as_slice() >= dist_key_hint.as_slice());
+        //             assert!(range_start.as_slice() < next_key.as_slice() || next_key.is_empty());
+        //         }
 
-            match key_range.end_bound() {
-                Included(range_end) => {
-                    assert!(range_end.as_slice() >= dist_key_hint.as_slice());
-                    assert!(range_end.as_slice() < next_key.as_slice() || next_key.is_empty());
-                }
+        //         _ => unreachable!(),
+        //     }
 
-                // 1. Excluded(end_bound_of_prefix(pk + col)) => dist_key_hint < end_bound <=
-                // next_key(dist_key_hint)
-                //
-                // 2. Excluded(pk + bound) => dist_key_hint < end_bound <=
-                // next_key(dist_key_hint)
-                Excluded(range_end) => {
-                    assert!(range_end.as_slice() > dist_key_hint.as_slice());
-                    assert!(range_end.as_slice() <= next_key.as_slice() || next_key.is_empty());
-                }
+        //     match key_range.end_bound() {
+        //         Included(range_end) => {
+        //             assert!(range_end.as_slice() >= dist_key_hint.as_slice());
+        //             assert!(range_end.as_slice() < next_key.as_slice() || next_key.is_empty());
+        //         }
 
-                std::ops::Bound::Unbounded => {
-                    assert!(next_key.is_empty());
-                }
-            }
-        } else {
-            // not check
-        }
+        //         // 1. Excluded(end_bound_of_prefix(pk + col)) => dist_key_hint < end_bound <=
+        //         // next_key(dist_key_hint)
+        //         //
+        //         // 2. Excluded(pk + bound) => dist_key_hint < end_bound <=
+        //         // next_key(dist_key_hint)
+        //         Excluded(range_end) => {
+        //             assert!(range_end.as_slice() > dist_key_hint.as_slice());
+        //             assert!(range_end.as_slice() <= next_key.as_slice() || next_key.is_empty());
+        //         }
+
+        //         std::ops::Bound::Unbounded => {
+        //             assert!(next_key.is_empty());
+        //         }
+        //     }
+        // } else {
+        //     // not check
+        // }
 
         let iter =
             self.iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options);
