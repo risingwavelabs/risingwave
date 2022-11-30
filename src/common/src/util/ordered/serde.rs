@@ -309,7 +309,7 @@ mod tests {
         {
             let dist_key_indices = [1, 2];
             let dist_key_start_index = 1;
-            let (dist_ket_start_position, dist_key_len) = serde
+            let (dist_key_start_position, dist_key_len) = serde
                 .deserialize_dist_key_position_with_column_indices(
                     &array[0],
                     0..dist_key_start_index + dist_key_indices.len(),
@@ -320,7 +320,7 @@ mod tests {
             let schema = vec![DataType::Varchar];
             let order_types = vec![OrderType::Descending];
             let deserde = OrderedRowSerde::new(schema, order_types);
-            let prefix_slice = &array[0][0..dist_ket_start_position];
+            let prefix_slice = &array[0][0..dist_key_start_position];
             assert_eq!(
                 deserde.deserialize(prefix_slice).unwrap(),
                 Row::new(vec![Some(Utf8("aaa".to_string()))])
@@ -330,7 +330,7 @@ mod tests {
             let order_types = vec![OrderType::Ascending, OrderType::Descending];
             let deserde = OrderedRowSerde::new(schema, order_types);
             let dist_key_slice =
-                &array[0][dist_ket_start_position..dist_ket_start_position + dist_key_len];
+                &array[0][dist_key_start_position..dist_key_start_position + dist_key_len];
             assert_eq!(
                 deserde.deserialize(dist_key_slice).unwrap(),
                 Row::new(vec![Some(Int16(5)), Some(Utf8("bbb".to_string()))])
