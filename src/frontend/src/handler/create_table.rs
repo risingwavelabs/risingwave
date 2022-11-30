@@ -223,6 +223,7 @@ pub(crate) fn gen_create_table_plan(
 
 /// Generate a stream plan with `StreamSource` + `StreamMaterialize`, it resembles a
 /// `CREATE MATERIALIZED VIEW AS SELECT * FROM <source>`.
+/// TODO(Yuanxin): Rewrite the comment.
 pub(crate) fn gen_materialized_source_plan(
     context: OptimizerContextRef,
     source: ProstSource,
@@ -243,14 +244,22 @@ pub(crate) fn gen_materialized_source_plan(
             out_names.remove(row_id_index);
         }
 
-        PlanRoot::new(
+        let mut plan_root = PlanRoot::new(
             source_node,
             RequiredDist::Any,
             Order::any(),
             required_cols,
             out_names,
-        )
-        .gen_create_mv_plan(source.name.clone(), "".into(), None, handle_pk_conflict)?
+        );
+
+        plan_root.gen_materialize_plan(
+            source.name.clone(),
+            "".into(),
+            None,
+            handle_pk_conflict,
+            true,
+            row_id_index,
+        )?
     };
     let mut table = materialize
         .table()

@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{PlanBase, PlanRef, StreamNode};
@@ -31,25 +30,9 @@ pub struct StreamSink {
 }
 
 impl StreamSink {
-    fn derive_plan_base(input: &PlanRef) -> Result<PlanBase> {
-        let ctx = input.ctx();
-
-        let schema = input.schema().clone();
-        let pk_indices = input.logical_pk();
-
-        Ok(PlanBase::new_stream(
-            ctx,
-            schema,
-            pk_indices.to_vec(),
-            input.functional_dependency().clone(),
-            input.distribution().clone(),
-            input.append_only(),
-        ))
-    }
-
     #[must_use]
     pub fn new(input: PlanRef, properties: WithOptions) -> Self {
-        let base = Self::derive_plan_base(&input).unwrap();
+        let base = PlanBase::derive_stream_plan_base(&input);
         Self {
             base,
             input,
