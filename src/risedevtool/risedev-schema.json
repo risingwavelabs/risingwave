@@ -28,7 +28,7 @@
                             }
                         },
                         "config-path": {
-                            "description": "The path to `risingwave.toml` for this configuration.\nIt will be copied to `.risingwave/config/risingwave.toml` , which will be used for execution."
+                            "description": "The path to `risingwave.toml` for this configuration.\nIt will be copied to `.risingwave/config/risingwave.toml` , which will be used for execution.\nIf not specified, `src/config/risingwave.toml` will be used."
                         }
                     },
                     "additionalProperties": false,
