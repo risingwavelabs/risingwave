@@ -35,6 +35,12 @@ pub enum BackupError {
         #[source]
         BoxedError,
     ),
+    #[error("Encoding error: {0}")]
+    Encoding(
+        #[backtrace]
+        #[source]
+        BoxedError,
+    ),
     #[error("Decoding error: {0}")]
     Decoding(
         #[backtrace]

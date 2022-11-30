@@ -14,8 +14,8 @@
 
 #![allow(dead_code)]
 
-mod backup;
-pub use backup::*;
+mod backup_manager;
+pub use backup_manager::*;
 mod db_snapshot;
 mod error;
 mod storage;
@@ -23,5 +23,26 @@ pub use storage::*;
 mod config;
 mod utils;
 pub use config::*;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::{HummockSstableId, HummockVersionId};
+use risingwave_pb::hummock::HummockVersion;
+use serde::{Deserialize, Serialize};
 
 pub type DbSnapshotId = u64;
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DbSnapshotMetadata {
+    pub id: DbSnapshotId,
+    pub hummock_version_id: HummockVersionId,
+    pub ssts: Vec<HummockSstableId>,
+}
+
+impl DbSnapshotMetadata {
+    pub fn new(id: DbSnapshotId, v: &HummockVersion) -> Self {
+        Self {
+            id,
+            hummock_version_id: v.id,
+            ssts: v.get_sst_ids(),
+        }
+    }
+}

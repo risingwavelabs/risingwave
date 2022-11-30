@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+use std::ops::Deref;
+use std::sync::Arc;
+
 use itertools::Itertools;
 use risingwave_object_store::object::{ObjectError, ObjectStoreRef};
+use serde::{Deserialize, Serialize};
 
 use crate::backup_restore::db_snapshot::DbSnapshot;
 use crate::backup_restore::error::{BackupError, BackupResult};
-use crate::backup_restore::DbSnapshotId;
+use crate::backup_restore::{DbSnapshotId, DbSnapshotMetadata};
 
 pub type BackupStorageRef = Box<dyn BackupStorage>;
 
@@ -30,24 +35,62 @@ pub trait BackupStorage: 'static + Sync + Send {
     async fn get(&self, id: DbSnapshotId) -> BackupResult<DbSnapshot>;
 
     /// List all db snapshots.
-    async fn list(&self) -> BackupResult<Vec<DbSnapshot>>;
+    async fn list(&self) -> BackupResult<Vec<DbSnapshotMetadata>>;
 
     /// Deletes db snapshots by ids.
     async fn delete(&self, ids: &[DbSnapshotId]) -> BackupResult<()>;
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+struct BackupManifest {
+    pub id: u64,
+    pub db_snapshots: Vec<DbSnapshotMetadata>,
 }
 
 #[derive(Clone)]
 pub struct ObjectStoreBackupStorage {
     path: String,
     store: ObjectStoreRef,
+    manifest: Arc<parking_lot::RwLock<BackupManifest>>,
 }
 
+// TODO #6482: purge stale db snapshot that is not in manifest.
 impl ObjectStoreBackupStorage {
-    pub fn new(path: &str, store: ObjectStoreRef) -> Self {
-        Self {
+    pub async fn new(path: &str, store: ObjectStoreRef) -> BackupResult<Self> {
+        let mut instance = Self {
             path: path.to_string(),
             store,
-        }
+            manifest: Default::default(),
+        };
+        let manifest = match instance.get_manifest().await? {
+            None => BackupManifest::default(),
+            Some(manifest) => manifest,
+        };
+        instance.manifest = Arc::new(parking_lot::RwLock::new(manifest));
+        Ok(instance)
+    }
+
+    async fn update_manifest(&self, new_manifest: BackupManifest) -> BackupResult<()> {
+        *self.manifest.write() = new_manifest;
+        let bytes = serde_json::to_vec(self.manifest.read().deref())
+            .map_err(|e| BackupError::Encoding(e.into()))?;
+        self.store
+            .upload(&self.get_manifest_path(), bytes.into())
+            .await?;
+        Ok(())
+    }
+
+    async fn get_manifest(&self) -> BackupResult<Option<BackupManifest>> {
+        let bytes = self.store.read(&self.get_manifest_path(), None).await?;
+        // TODO #6482: distinguish non-existent object from other error.
+        // The former should return None.
+        let manifest: BackupManifest =
+            serde_json::from_slice(&bytes.to_vec()).map_err(|e| BackupError::Encoding(e.into()))?;
+        Ok(Some(manifest))
+    }
+
+    fn get_manifest_path(&self) -> String {
+        format!("{}/manifest.json", self.path)
     }
 
     fn get_db_snapshot_path(&self, id: DbSnapshotId) -> String {
@@ -69,7 +112,15 @@ impl BackupStorage for ObjectStoreBackupStorage {
     async fn create(&self, snapshot: &DbSnapshot) -> BackupResult<()> {
         let path = self.get_db_snapshot_path(snapshot.id);
         self.store.upload(&path, snapshot.encode().into()).await?;
-        // TODO #6482: update manifest file
+
+        // update manifest last
+        let mut new_manifest = self.manifest.read().clone();
+        new_manifest.id += 1;
+        new_manifest.db_snapshots.push(DbSnapshotMetadata::new(
+            snapshot.id,
+            &snapshot.metadata.hummock_version,
+        ));
+        self.update_manifest(new_manifest).await?;
         Ok(())
     }
 
@@ -79,24 +130,20 @@ impl BackupStorage for ObjectStoreBackupStorage {
         DbSnapshot::decode(&data)
     }
 
-    async fn list(&self) -> BackupResult<Vec<DbSnapshot>> {
-        let object_metadata_list = self.store.list(&self.path).await?;
-        let mut db_snapshots_join_handles = vec![];
-        for object_metadata in object_metadata_list {
-            let id = ObjectStoreBackupStorage::get_db_snapshot_id_from_path(&object_metadata.key);
-            let this = self.clone();
-            let db_snapshot_join_handle = tokio::spawn(async move { this.get(id).await });
-            db_snapshots_join_handles.push(db_snapshot_join_handle);
-        }
-        let db_snapshots = futures::future::try_join_all(db_snapshots_join_handles)
-            .await
-            .map_err(|e| BackupError::Other(e.into()))?
-            .into_iter()
-            .collect::<BackupResult<Vec<DbSnapshot>>>()?;
-        Ok(db_snapshots)
+    async fn list(&self) -> BackupResult<Vec<DbSnapshotMetadata>> {
+        Ok(self.manifest.read().db_snapshots.clone())
     }
 
     async fn delete(&self, ids: &[DbSnapshotId]) -> BackupResult<()> {
+        // update manifest first
+        let to_delete: HashSet<DbSnapshotId> = HashSet::from_iter(ids.iter().cloned());
+        let mut new_manifest = self.manifest.read().clone();
+        new_manifest.id += 1;
+        new_manifest
+            .db_snapshots
+            .retain(|m| !to_delete.contains(&m.id));
+        self.update_manifest(new_manifest).await?;
+
         let paths = ids
             .iter()
             .map(|id| self.get_db_snapshot_path(*id))
@@ -124,7 +171,7 @@ impl BackupStorage for DummyBackupStorage {
         panic!("should not get from DummyBackupStorage")
     }
 
-    async fn list(&self) -> BackupResult<Vec<DbSnapshot>> {
+    async fn list(&self) -> BackupResult<Vec<DbSnapshotMetadata>> {
         // Satisfy `BackupManager`
         Ok(vec![])
     }
