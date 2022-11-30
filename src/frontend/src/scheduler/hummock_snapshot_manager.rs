@@ -57,11 +57,12 @@ pub struct HummockSnapshotManager {
     /// Epoch for fragment mapping updates
     align_epoch: AtomicU64,
 
-    /// Save all snapshots that are not updated (align_epoch -> max_snapshot)
-    align_epoch_snapshot_map: Mutex<AlignEpochSnapshotMap>,
-}
-type AlignEpochSnapshotMap = BTreeMap<u64, (HummockSnapshot, Vec<Callback<()>>)>;
+    /// Save max snapshots that are not updated (align_epoch -> max_snapshot).
+    /// After align_epoch synchronization, the snapshot will be updated using max_snapshot.
+    align_epoch_snapshot_map: Mutex<BTreeMap<u64, HummockSnapshot>>,
 
+    notify_sender: tokio::sync::watch::Sender<()>,
+}
 #[derive(Debug)]
 enum EpochOperation {
     RequestEpoch {
@@ -107,6 +108,7 @@ impl Drop for HummockSnapshotGuard {
 
 impl HummockSnapshotManager {
     pub fn mock() -> Self {
+        let (notify_sender, _) = tokio::sync::watch::channel(());
         Self {
             sender: None,
             latest_snapshot: Arc::new(ArcSwap::from_pointee(HummockSnapshot {
@@ -116,11 +118,13 @@ impl HummockSnapshotManager {
             })),
             align_epoch: AtomicU64::new(INVALID_EPOCH),
             align_epoch_snapshot_map: Mutex::new(BTreeMap::default()),
+            notify_sender,
         }
     }
 
     pub fn new(meta_client: Arc<dyn FrontendMetaClient>) -> Self {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (notify_sender, _) = tokio::sync::watch::channel(());
 
         let latest_snapshot = Arc::new(ArcSwap::from_pointee(HummockSnapshot {
             committed_epoch: INVALID_EPOCH,
@@ -187,6 +191,7 @@ impl HummockSnapshotManager {
             latest_snapshot,
             align_epoch: AtomicU64::new(INVALID_EPOCH),
             align_epoch_snapshot_map: Mutex::new(BTreeMap::default()),
+            notify_sender,
         }
     }
 
@@ -213,46 +218,37 @@ impl HummockSnapshotManager {
         })
     }
 
-    /// Not always update snapshot, The snapshot update schedule must be later than the
-    /// `align_epoch` update schedule
+    /// The `snapshot` update schedule must be later than the `fragment_mapping` update schedule.
+    /// So we will update the snapshot directly only in the following cases.
+    /// 1. Snapshot don't need align, and there are no other snapshots in the map that need to be
+    /// updated. 2. Snapshot need align, but `align_epoch` has been updated.
     pub fn update_snapshot(&self, snapshot: HummockSnapshot) {
-        if !self.need_wait_align_epoch_update(&snapshot) {
+        if !snapshot.need_align {
+            match self.align_epoch_snapshot_map.lock().last_entry() {
+                Some(mut entry) => *entry.get_mut() = snapshot,
+                None => self.update_snapshot_epoch(snapshot),
+            }
+        } else if self.align_epoch.load(Relaxed).ge(&snapshot.committed_epoch) {
             self.update_snapshot_epoch(snapshot);
         } else {
-            self.align_epoch_snapshot_map
+            *self
+                .align_epoch_snapshot_map
                 .lock()
                 .entry(snapshot.committed_epoch)
-                .or_default()
-                .0 = snapshot.clone();
+                .or_default() = snapshot.clone();
         }
     }
 
-    /// We will block until the `align_epoch` update
+    /// If the snapshot is larger than the `latest_snapshot`, it will wait for the `latest_snapshot`
+    /// to be updated
     pub async fn wait_align_epoch(&self, snapshot: &HummockSnapshot) {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        if !self.need_wait_align_epoch_update(snapshot) {
-            return;
+        let mut rx = self.notify_sender.subscribe();
+        loop {
+            if snapshot.current_epoch <= self.latest_snapshot.load().current_epoch {
+                break;
+            }
+            rx.changed().await.unwrap();
         }
-        self.align_epoch_snapshot_map
-            .lock()
-            .entry(snapshot.committed_epoch)
-            .or_default()
-            .1
-            .push(tx);
-        rx.await.unwrap()
-    }
-
-    /// Do you need to wait for the update of `align_epoch`. Returns false in these cases
-    /// 1. Snapshot don't need align and there is no previous snapshot that needs to wait.
-    /// 2. Snapshot need align, but `align_epoch` has been updated.
-    pub fn need_wait_align_epoch_update(&self, snapshot: &HummockSnapshot) -> bool {
-        if !snapshot.need_align && self.align_epoch_snapshot_map.lock().is_empty() {
-            return false;
-        }
-        if snapshot.need_align && self.align_epoch.load(Relaxed).ge(&snapshot.committed_epoch) {
-            return false;
-        }
-        true
     }
 
     pub fn update_snapshot_epoch(&self, snapshot: HummockSnapshot) {
@@ -264,20 +260,23 @@ impl HummockSnapshotManager {
             // Not used here
             need_align: false,
         });
+        if self.notify_sender.receiver_count() != 0 {
+            self.notify_sender.send(()).unwrap();
+        }
     }
 
-    /// Modify `align_epoch`, Only `worker_node_manager` can change the `align_epoch`
+    /// Modify `align_epoch`, Only `worker_node_manager` can change the `align_epoch`.
+    /// After synchronization, we will update snapshot.
     pub fn update_align_epoch(&self, epoch: u64) {
         self.align_epoch.store(epoch, Relaxed);
         let mut evens: BTreeMap<_, _> = self
             .align_epoch_snapshot_map
             .lock()
-            .drain_filter(|key, _| self.align_epoch.load(Relaxed).ge(key))
+            .drain_filter(|key, _| key <= &self.align_epoch.load(Relaxed))
             .collect();
 
         if let Some((_, value)) = evens.pop_last() {
-            self.update_snapshot_epoch(value.0);
-            value.1.into_iter().for_each(|tx| tx.send(()).unwrap());
+            self.update_snapshot_epoch(value);
         }
     }
 }
