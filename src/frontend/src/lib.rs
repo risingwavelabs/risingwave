@@ -110,7 +110,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use pgwire::pg_protocol::TlsConfig;
-use risingwave_common::config::ServerConfig;
+use risingwave_common::config::{BatchConfig, ServerConfig};
 
 /// Start frontend
 pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
@@ -129,4 +129,7 @@ pub struct FrontendConfig {
     // For connection
     #[serde(default)]
     pub server: ServerConfig,
+
+    #[serde(default)]
+    pub batch: BatchConfig,
 }

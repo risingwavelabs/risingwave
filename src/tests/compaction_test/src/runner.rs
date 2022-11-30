@@ -293,7 +293,7 @@ async fn start_replay(
     );
 
     let mut metric = CompactionTestMetrics::new();
-    let config: TestToolConfig = load_config(&opts.config_path).unwrap();
+    let config: TestToolConfig = load_config(&opts.config_path);
     tracing::info!(
         "Starting replay with config {:?} and opts {:?}",
         config,

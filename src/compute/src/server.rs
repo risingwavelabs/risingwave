@@ -68,7 +68,7 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config: ComputeNodeConfig = load_config(&opts.config_path).unwrap();
+    let config: ComputeNodeConfig = load_config(&opts.config_path);
     info!(
         "Starting compute node with config {:?} with debug assertions {}",
         config,

@@ -12,13 +12,60 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module defines the structure of the configuration file `risingwave.toml`.
+//!
+//! Each config struct here defines a section in `risingwave.toml`, and it contains
+//! `#[serde(deny_unknown_fields)]` to deny unknown fields.
+//!
+//! To use the config file, you need to define a struct containing the sections you need.
+//! The other sections will be ignored. e.g.,
+//!
+//! ```
+//! #[derive(Clone, Debug, Serialize, Deserialize, Default)]
+//! pub struct ComputeNodeConfig {
+//!     #[serde(default)]
+//!     pub server: ServerConfig,
+//!
+//!     #[serde(default)]
+//!     pub batch: BatchConfig,
+//!
+//!     #[serde(default)]
+//!     pub streaming: StreamingConfig,
+//!
+//!     #[serde(default)]
+//!     pub storage: StorageConfig,
+//! }
+//! ```
+//!
+//! It corresponds to
+//!
+//! ```toml
+//! [server]
+//! ...
+//!
+//! [batch]
+//! ...
+//!
+//! [streaming]
+//! ...
+//!
+//! [storage]
+//! ...
+//!
+//! # Other sections are ignored.
+//! [meta]
+//! ```
+//!
+//! And then it can be loaded like this:
+//!
+//! ```
+//! let config: ComputeNodeConfig = load_config(&opts.config_path);
+//! ```
+
 use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-
-use crate::error::ErrorCode::InternalError;
-use crate::error::{Result, RwError};
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
 /// streams on the same connection.
@@ -27,26 +74,28 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 
-pub fn load_config<S>(path: &str) -> Result<S>
+/// Deserializes `risingwave.toml` to a `Config` struct.
+///
+/// Note that you should not use the configs defined in this module as `S`. Define a struct whose
+/// fields are the configs in this module instead. Refer to [module level doc](self) for more
+/// details.
+pub fn load_config<S>(path: &str) -> S
 where
     for<'a> S: Deserialize<'a> + Default,
 {
     if path.is_empty() {
         tracing::warn!("risingwave.toml not found, using default config.");
-        return Ok(S::default());
+        return S::default();
     }
-    let config_str = fs::read_to_string(PathBuf::from(path.to_owned())).map_err(|e| {
-        RwError::from(InternalError(format!(
-            "failed to open config file '{}': {}",
-            path, e
-        )))
-    })?;
-    let config: S = toml::from_str(config_str.as_str())
-        .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
-    Ok(config)
+    let config_str = fs::read_to_string(PathBuf::from(path.to_owned()))
+        .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
+    let config: S =
+        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e));
+    config
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     /// The interval for periodic heartbeat from worker to the meta service.
     #[serde(default = "default::heartbeat_interval_ms")]
@@ -67,6 +116,7 @@ impl Default for ServerConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BatchConfig {
     /// The thread number of the batch task runtime in the compute node. The default value is
     /// decided by `tokio`.
@@ -218,19 +268,6 @@ pub struct StorageConfig {
 }
 
 impl Default for StorageConfig {
-    fn default() -> Self {
-        toml::from_str("").unwrap()
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConnectorConfig {
-    #[serde(default)]
-    pub connector_addr: Option<String>,
-}
-
-impl Default for ConnectorConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }

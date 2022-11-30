@@ -151,7 +151,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        let meta_config: MetaNodeConfig = load_config(&opts.config_path).unwrap();
+        let meta_config: MetaNodeConfig = load_config(&opts.config_path);
         tracing::info!("Starting meta node with config {:?}", meta_config);
         tracing::info!("Starting meta node with options {:?}", opts);
         let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());

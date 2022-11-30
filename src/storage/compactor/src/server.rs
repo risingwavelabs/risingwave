@@ -48,7 +48,7 @@ pub async fn compactor_serve(
     client_addr: HostAddr,
     opts: CompactorOpts,
 ) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
-    let config: CompactorConfig = load_config(&opts.config_path).unwrap();
+    let config: CompactorConfig = load_config(&opts.config_path);
     tracing::info!(
         "Starting compactor with config {:?} and opts {:?}",
         config,

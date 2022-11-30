@@ -258,13 +258,12 @@ impl FrontendEnv {
     pub async fn init(
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let frontend_config: FrontendConfig = load_config(&opts.config_path).unwrap();
-        let batch_config: BatchConfig = load_config(&opts.config_path).unwrap();
+        let frontend_config: FrontendConfig = load_config(&opts.config_path);
         tracing::info!(
-            "Starting frontend node with\nfrontend config {:?}\nbatch config {:?}",
+            "Starting frontend node with\nfrontend config {:?}",
             frontend_config,
-            batch_config
         );
+        let batch_config = frontend_config.batch;
 
         let frontend_address: HostAddr = opts
             .client_address
