@@ -259,7 +259,7 @@ async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Res
             session
                 .env()
                 .hummock_snapshot_manager()
-                .wait_and_update_epoch(snapshot)
+                .wait_align_epoch(&snapshot)
                 .await;
         }
         _ => {}

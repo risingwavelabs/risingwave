@@ -164,6 +164,8 @@ impl Command {
         !matches!(self, Command::Plain(None | Some(Mutation::Resume(_))))
     }
 
+    /// `fragment_mapping` will be updated, It means we need to align snapshot and
+    /// `fragment_mapping` in the foreground
     pub fn need_align(&self) -> bool {
         matches!(self, Command::CreateStreamingJob { .. })
             || matches!(self, Command::DropStreamingJobs(_))

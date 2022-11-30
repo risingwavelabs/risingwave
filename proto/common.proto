@@ -62,7 +62,7 @@ message Buffer {
 
 // Vnode mapping for stream fragments. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
-    ParallelUnitMappingInner parallel_unit_mapping = 1;
+  ParallelUnitMappingInner parallel_unit_mapping = 1;
 }
 message ParallelUnitMappingInner {
   uint32 fragment_id = 1;

@@ -192,6 +192,7 @@ where
             }
         }
         if !notified_fronted {
+            // We need to send an empty request to ensure the readability of the frontend
             self.env
                 .notification_manager()
                 .notify_frontend(
@@ -814,6 +815,7 @@ where
         commit_meta!(self, table_fragments)?;
 
         if fragment_mapping_to_notify.is_empty() {
+            // We need to send an empty request to ensure the readability of the frontend
             self.env
                 .notification_manager()
                 .notify_frontend(

@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
@@ -35,23 +36,8 @@ const UNPIN_INTERVAL_SECS: u64 = 10;
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 pub type PinnedHummockSnapshot = HummockSnapshotGuard;
 
-type SnapshotRef = Arc<ArcSwap<QueryHummockSnapshot>>;
+type SnapshotRef = Arc<ArcSwap<HummockSnapshot>>;
 
-#[derive(Clone, Debug, Default)]
-pub struct QueryHummockSnapshot {
-    pub committed_epoch: u64,
-
-    pub current_epoch: u64,
-}
-
-impl QueryHummockSnapshot {
-    fn from(snapshot: HummockSnapshot) -> Self {
-        QueryHummockSnapshot {
-            committed_epoch: snapshot.committed_epoch,
-            current_epoch: snapshot.current_epoch,
-        }
-    }
-}
 /// Cache of hummock snapshot in meta.
 pub struct HummockSnapshotManager {
     /// Send epoch-related operations to `HummockSnapshotManagerCore` for async batch handling.
@@ -68,17 +54,19 @@ pub struct HummockSnapshotManager {
     /// of `committed_epoch`.
     latest_snapshot: SnapshotRef,
 
-    align_epoch: RwLock<u64>,
+    /// Epoch for fragment mapping updates
+    align_epoch: AtomicU64,
 
+    /// Save all snapshots that are not updated (align_epoch -> max_snapshot)
     align_epoch_snapshot_map: Mutex<AlignEpochSnapshotMap>,
 }
-type AlignEpochSnapshotMap = BTreeMap<u64, (QueryHummockSnapshot, Vec<Callback<()>>)>;
+type AlignEpochSnapshotMap = BTreeMap<u64, (HummockSnapshot, Vec<Callback<()>>)>;
 
 #[derive(Debug)]
 enum EpochOperation {
     RequestEpoch {
         query_id: QueryId,
-        sender: Callback<SchedulerResult<QueryHummockSnapshot>>,
+        sender: Callback<SchedulerResult<HummockSnapshot>>,
     },
     ReleaseEpoch {
         query_id: QueryId,
@@ -88,7 +76,7 @@ enum EpochOperation {
 }
 
 pub struct HummockSnapshotGuard {
-    snapshot: QueryHummockSnapshot,
+    snapshot: HummockSnapshot,
     query_id: QueryId,
     unpin_snapshot_sender: UnboundedSender<EpochOperation>,
 }
@@ -121,11 +109,12 @@ impl HummockSnapshotManager {
     pub fn mock() -> Self {
         Self {
             sender: None,
-            latest_snapshot: Arc::new(ArcSwap::from_pointee(QueryHummockSnapshot {
+            latest_snapshot: Arc::new(ArcSwap::from_pointee(HummockSnapshot {
                 committed_epoch: INVALID_EPOCH,
                 current_epoch: INVALID_EPOCH,
+                need_align: false,
             })),
-            align_epoch: RwLock::new(INVALID_EPOCH),
+            align_epoch: AtomicU64::new(INVALID_EPOCH),
             align_epoch_snapshot_map: Mutex::new(BTreeMap::default()),
         }
     }
@@ -133,9 +122,10 @@ impl HummockSnapshotManager {
     pub fn new(meta_client: Arc<dyn FrontendMetaClient>) -> Self {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
 
-        let latest_snapshot = Arc::new(ArcSwap::from_pointee(QueryHummockSnapshot {
+        let latest_snapshot = Arc::new(ArcSwap::from_pointee(HummockSnapshot {
             committed_epoch: INVALID_EPOCH,
             current_epoch: INVALID_EPOCH,
+            need_align: false,
         }));
         let latest_snapshot_cloned = latest_snapshot.clone();
 
@@ -195,7 +185,7 @@ impl HummockSnapshotManager {
         Self {
             sender: Some(sender),
             latest_snapshot,
-            align_epoch: RwLock::new(INVALID_EPOCH),
+            align_epoch: AtomicU64::new(INVALID_EPOCH),
             align_epoch_snapshot_map: Mutex::new(BTreeMap::default()),
         }
     }
@@ -223,87 +213,72 @@ impl HummockSnapshotManager {
         })
     }
 
+    /// Not always update snapshot, The snapshot update schedule must be later than the
+    /// `align_epoch` update schedule
     pub fn update_snapshot(&self, snapshot: HummockSnapshot) {
-        let need_align = snapshot.need_align;
-        let query_hummock_snapshot = QueryHummockSnapshot::from(snapshot);
-        if !need_align {
-            match self.align_epoch_snapshot_map.lock().last_entry() {
-                Some(mut entry) => entry.get_mut().0 = query_hummock_snapshot,
-                None => self.update_snapshot_epoch(query_hummock_snapshot),
-            }
-        } else if self
-            .align_epoch
-            .read()
-            .unwrap()
-            .ge(&query_hummock_snapshot.committed_epoch)
-        {
-            self.update_snapshot_epoch(query_hummock_snapshot);
-        } else {
-            self.align_epoch_snapshot_map
-                .lock()
-                .entry(query_hummock_snapshot.committed_epoch)
-                .or_default()
-                .0 = query_hummock_snapshot.clone();
-        }
-    }
-
-    pub async fn wait_and_update_epoch(&self, snapshot: HummockSnapshot) {
-        self.wait_update_align_epoch(&snapshot).await;
-        self.update_snapshot(snapshot);
-    }
-
-    pub async fn wait_update_align_epoch(&self, snapshot: &HummockSnapshot) {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        if !snapshot.need_align {
-            match self.align_epoch_snapshot_map.lock().last_entry() {
-                Some(mut entry) => entry.get_mut().1.push(tx),
-                None => return,
-            }
-        } else if self
-            .align_epoch
-            .read()
-            .unwrap()
-            .ge(&snapshot.committed_epoch)
-        {
-            return;
+        if !self.need_wait_align_epoch_update(&snapshot) {
+            self.update_snapshot_epoch(snapshot);
         } else {
             self.align_epoch_snapshot_map
                 .lock()
                 .entry(snapshot.committed_epoch)
                 .or_default()
-                .1
-                .push(tx);
+                .0 = snapshot.clone();
         }
+    }
+
+    /// We will block until the `align_epoch` update
+    pub async fn wait_align_epoch(&self, snapshot: &HummockSnapshot) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if !self.need_wait_align_epoch_update(snapshot) {
+            return;
+        }
+        self.align_epoch_snapshot_map
+            .lock()
+            .entry(snapshot.committed_epoch)
+            .or_default()
+            .1
+            .push(tx);
         rx.await.unwrap()
     }
 
-    pub fn update_snapshot_epoch(&self, snapshot: QueryHummockSnapshot) {
+    /// Do you need to wait for the update of `align_epoch`. Returns false in these cases
+    /// 1. Snapshot don't need align and there is no previous snapshot that needs to wait.
+    /// 2. Snapshot need align, but `align_epoch` has been updated.
+    pub fn need_wait_align_epoch_update(&self, snapshot: &HummockSnapshot) -> bool {
+        if !snapshot.need_align && self.align_epoch_snapshot_map.lock().is_empty() {
+            return false;
+        }
+        if snapshot.need_align && self.align_epoch.load(Relaxed).ge(&snapshot.committed_epoch) {
+            return false;
+        }
+        true
+    }
+
+    pub fn update_snapshot_epoch(&self, snapshot: HummockSnapshot) {
         // Note: currently the snapshot is not only updated from the observer, so we need to take
         // the `max` here instead of directly replace the snapshot.
-        self.latest_snapshot.rcu(|prev| QueryHummockSnapshot {
+        self.latest_snapshot.rcu(|prev| HummockSnapshot {
             committed_epoch: std::cmp::max(prev.committed_epoch, snapshot.committed_epoch),
             current_epoch: std::cmp::max(prev.current_epoch, snapshot.current_epoch),
+            // Not used here
+            need_align: false,
         });
     }
 
+    /// Modify `align_epoch`, Only `worker_node_manager` can change the `align_epoch`
     pub fn update_align_epoch(&self, epoch: u64) {
-        let mut align_epoch = self.align_epoch.write().unwrap();
-        *align_epoch = epoch;
+        self.align_epoch.store(epoch, Relaxed);
         let mut evens: BTreeMap<_, _> = self
             .align_epoch_snapshot_map
             .lock()
-            .drain_filter(|key, _| key <= &align_epoch)
+            .drain_filter(|key, _| self.align_epoch.load(Relaxed).ge(key))
             .collect();
 
-        if evens.is_empty() {
-            return;
+        if let Some((_, value)) = evens.pop_last() {
+            self.update_snapshot_epoch(value.0);
+            value.1.into_iter().for_each(|tx| tx.send(()).unwrap());
         }
-        let query_hummock_snapshot = evens.pop_last().unwrap().1;
-        self.update_snapshot_epoch(query_hummock_snapshot.0);
-        query_hummock_snapshot
-            .1
-            .into_iter()
-            .for_each(|tx| tx.send(()).unwrap());
     }
 }
 
@@ -331,14 +306,13 @@ impl HummockSnapshotManagerCore {
     /// better epoch freshness.
     async fn get_epoch_for_query_from_rpc(
         &mut self,
-        batches: &mut Vec<(QueryId, Callback<SchedulerResult<QueryHummockSnapshot>>)>,
-    ) -> QueryHummockSnapshot {
+        batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockSnapshot>>)>,
+    ) -> HummockSnapshot {
         let ret = self.meta_client.get_epoch().await;
         match ret {
             Ok(snapshot) => {
-                let query_snapshot = QueryHummockSnapshot::from(snapshot);
-                self.notify_epoch_assigned_for_queries(&query_snapshot, batches);
-                query_snapshot
+                self.notify_epoch_assigned_for_queries(&snapshot, batches);
+                snapshot
             }
             Err(e) => {
                 for (id, cb) in batches.drain(..) {
@@ -348,9 +322,10 @@ impl HummockSnapshotManagerCore {
                         e
                     ))));
                 }
-                QueryHummockSnapshot {
+                HummockSnapshot {
                     committed_epoch: INVALID_EPOCH,
                     current_epoch: INVALID_EPOCH,
+                    need_align: false,
                 }
             }
         }
@@ -360,9 +335,9 @@ impl HummockSnapshotManagerCore {
     /// maintained by meta's notification service.
     fn get_epoch_for_query_from_push(
         &mut self,
-        batches: &mut Vec<(QueryId, Callback<SchedulerResult<QueryHummockSnapshot>>)>,
-    ) -> QueryHummockSnapshot {
-        let snapshot = QueryHummockSnapshot::clone(&self.latest_snapshot.load());
+        batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockSnapshot>>)>,
+    ) -> HummockSnapshot {
+        let snapshot = HummockSnapshot::clone(&self.latest_snapshot.load());
         self.notify_epoch_assigned_for_queries(&snapshot, batches);
         snapshot
     }
@@ -371,8 +346,8 @@ impl HummockSnapshotManagerCore {
     /// epoch
     fn notify_epoch_assigned_for_queries(
         &mut self,
-        snapshot: &QueryHummockSnapshot,
-        batches: &mut Vec<(QueryId, Callback<SchedulerResult<QueryHummockSnapshot>>)>,
+        snapshot: &HummockSnapshot,
+        batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockSnapshot>>)>,
     ) {
         if batches.is_empty() {
             return;
@@ -471,7 +446,7 @@ pub(crate) mod tests {
             current_epoch: 2,
             need_align: false,
         };
-        // The vnode mapping is updated before the snapshot
+        // The fragment mapping is updated before the snapshot
         hummock_snapshot_manager.update_align_epoch(0);
         hummock_snapshot_manager.update_snapshot(align_snapshot1);
         let query = create_query().await;

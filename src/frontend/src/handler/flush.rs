@@ -27,7 +27,7 @@ pub(super) async fn handle_flush(context: OptimizerContext) -> Result<RwPgRespon
         .session_ctx
         .env()
         .hummock_snapshot_manager()
-        .wait_and_update_epoch(snapshot)
+        .wait_align_epoch(&snapshot)
         .await;
     Ok(PgResponse::empty_result(StatementType::FLUSH))
 }
