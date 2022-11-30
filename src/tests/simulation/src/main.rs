@@ -15,12 +15,7 @@
 #![cfg_attr(not(madsim), allow(dead_code))]
 #![feature(once_cell)]
 
-use std::sync::Arc;
-
 use clap::Parser;
-use risingwave_simulation::client::RisingWave;
-use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
-use risingwave_simulation::slt::*;
 
 #[cfg(not(madsim))]
 fn main() {
@@ -110,6 +105,12 @@ pub struct Args {
 #[cfg(madsim)]
 #[madsim::main]
 async fn main() {
+    use std::sync::Arc;
+
+    use risingwave_simulation::client::RisingWave;
+    use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
+    use risingwave_simulation::slt::*;
+
     let args = Args::parse();
     let config = Configuration {
         frontend_nodes: args.frontend_nodes,
