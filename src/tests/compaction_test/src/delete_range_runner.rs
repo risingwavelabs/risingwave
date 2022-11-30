@@ -446,13 +446,13 @@ fn run_compactor_thread(
     let context = Arc::new(Context {
         options: config,
         hummock_meta_client: meta_client.clone(),
-        sstable_store: sstable_store.clone(),
+        sstable_store,
         stats: state_store_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
-        filter_key_extractor_manager: filter_key_extractor_manager.clone(),
+        filter_key_extractor_manager,
         read_memory_limiter: MemoryLimiter::unlimit(),
-        sstable_id_manager: sstable_id_manager.clone(),
+        sstable_id_manager,
         task_progress_manager: Default::default(),
     });
     let compactor_context = Arc::new(CompactorContext::with_config(
@@ -463,7 +463,7 @@ fn run_compactor_thread(
         },
     ));
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
-        compactor_context.clone(),
+        compactor_context,
         meta_client,
     )
 }
