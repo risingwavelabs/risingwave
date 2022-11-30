@@ -142,7 +142,7 @@ impl<S: MetaStore> DbSnapshotBuilder<S> {
     }
 
     pub fn finish(self) -> BackupResult<DbSnapshot> {
-        // TODO #6482 sanity check, e.g. any required field is not set.
+        // Any sanity check goes here.
         Ok(self.db_snapshot)
     }
 
@@ -160,7 +160,7 @@ impl<S: MetaStore> DbSnapshotBuilder<S> {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct MetadataSnapshot {
     /// Unlike other metadata that has implemented `MetadataModel`,
-    /// DEFAULT_COLUMN_FAMILY stores various single row metadata not implemented `MetadataModel`.
+    /// DEFAULT_COLUMN_FAMILY stores various single row metadata, e.g. id offset and epoch offset.
     /// So we use `default_cf` stores raw KVs for them.
     pub default_cf: HashMap<Vec<u8>, Vec<u8>>,
 

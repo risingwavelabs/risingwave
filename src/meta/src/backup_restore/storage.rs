@@ -24,7 +24,7 @@ pub type BackupStorageRef = Box<dyn BackupStorage>;
 #[async_trait::async_trait]
 pub trait BackupStorage: 'static + Sync + Send {
     /// Creates a db snapshot.
-    async fn create(&self, snapshot: DbSnapshot) -> BackupResult<()>;
+    async fn create(&self, snapshot: &DbSnapshot) -> BackupResult<()>;
 
     /// Gets a db snapshot by id.
     async fn get(&self, id: DbSnapshotId) -> BackupResult<DbSnapshot>;
@@ -66,9 +66,10 @@ impl ObjectStoreBackupStorage {
 
 #[async_trait::async_trait]
 impl BackupStorage for ObjectStoreBackupStorage {
-    async fn create(&self, snapshot: DbSnapshot) -> BackupResult<()> {
+    async fn create(&self, snapshot: &DbSnapshot) -> BackupResult<()> {
         let path = self.get_db_snapshot_path(snapshot.id);
         self.store.upload(&path, snapshot.encode().into()).await?;
+        // TODO #6482: update manifest file
         Ok(())
     }
 
@@ -115,7 +116,7 @@ pub struct DummyBackupStorage {}
 
 #[async_trait::async_trait]
 impl BackupStorage for DummyBackupStorage {
-    async fn create(&self, _snapshot: DbSnapshot) -> BackupResult<()> {
+    async fn create(&self, _snapshot: &DbSnapshot) -> BackupResult<()> {
         panic!("should not create from DummyBackupStorage")
     }
 

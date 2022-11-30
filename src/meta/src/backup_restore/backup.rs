@@ -131,8 +131,13 @@ impl<S: MetaStore> BackupManager<S> {
             .generate::<{ IdCategory::Backup }>()
             .await?;
         let hummock_version_safe_point = self.hummock_manager.register_safe_point().await;
-        // TODO #6482: ideally r/w IO can be made external to meta node, though its volume is not
-        // significant for metadata snapshot. Take care of SST pinning during refactoring.
+        // TODO #6482: ideally `BackupWorker` and its r/w IO can be made external to meta node.
+        // The pros of keeping `BackupWorker` in meta node are:
+        // - It's easier to ensure consistency between valid backups in meta node and that in remote
+        //   backup storage.
+        // - It's likely meta store is deployed in the same node with meta node.
+        // - IO volume of metadata snapshot is not expected to be large.
+        // - Backup job is not expected to be frequent.
         BackupWorker::new(self.clone()).start(job_id);
         let job_handle = BackupJobHandle::new(job_id, hummock_version_safe_point);
         *guard = Some(job_handle);
@@ -142,13 +147,10 @@ impl<S: MetaStore> BackupManager<S> {
     async fn finish_backup_job(&self, job_id: u64, status: BackupJobResult) {
         // _job_handle holds `hummock_version_safe_point` until the db snapshot is added to meta.
         // It ensures db snapshot's SSTs won't be deleted in between.
-        let _job_handle = match self.take_job_handle_by_job_id(job_id).await {
-            None => {
-                tracing::warn!("{} is not a running backup job", job_id);
-                return;
-            }
-            Some(job_handle) => job_handle,
-        };
+        let _job_handle = self
+            .take_job_handle_by_job_id(job_id)
+            .await
+            .expect("job id should match");
         match status {
             BackupJobResult::Finished(db_snapshot) => {
                 tracing::info!("succeeded backup job {}", job_id);
@@ -220,6 +222,10 @@ impl<S: MetaStore> BackupWorker<S> {
             // Reuse job id as db snapshot id.
             db_snapshot_builder.build(job_id).await?;
             let db_snapshot = db_snapshot_builder.finish()?;
+            backup_manager_clone
+                .backup_store
+                .create(&db_snapshot)
+                .await?;
             backup_manager_clone
                 .finish_backup_job(job_id, BackupJobResult::Finished(db_snapshot))
                 .await;
