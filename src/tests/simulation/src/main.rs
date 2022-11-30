@@ -62,7 +62,8 @@ pub struct Args {
 
     /// The number of clients to run simultaneously.
     ///
-    /// If this argument is set, the runner will implicitly create a database for each test file.
+    /// If this argument is set, the runner will implicitly create a database for each test file,
+    /// and all `--kill*` options will be ignored.
     #[clap(short, long)]
     jobs: Option<usize>,
 
@@ -70,27 +71,23 @@ pub struct Args {
     #[clap(long, default_value = "0.0")]
     etcd_timeout_rate: f32,
 
-    /// Randomly kill the meta node after each query.
-    ///
-    /// Currently only available when `-j` is not set.
+    /// Allow to kill all risingwave node.
+    #[clap(long)]
+    kill: bool,
+
+    /// Allow to kill meta node.
     #[clap(long)]
     kill_meta: bool,
 
-    /// Randomly kill a frontend node after each query.
-    ///
-    /// Currently only available when `-j` is not set.
+    /// Allow to kill frontend node.
     #[clap(long)]
     kill_frontend: bool,
 
-    /// Randomly kill a compute node after each query.
-    ///
-    /// Currently only available when `-j` is not set.
+    /// Allow to kill compute node.
     #[clap(long)]
     kill_compute: bool,
 
-    /// Randomly kill a compactor node after each query.
-    ///
-    /// Currently only available when `-j` is not set.
+    /// Allow to kill compactor node.
     #[clap(long)]
     kill_compactor: bool,
 
@@ -122,10 +119,10 @@ async fn main() {
         etcd_timeout_rate: args.etcd_timeout_rate,
     };
     let kill_opts = KillOpts {
-        kill_meta: args.kill_meta,
-        kill_frontend: args.kill_frontend,
-        kill_compute: args.kill_compute,
-        kill_compactor: args.kill_compactor,
+        kill_meta: args.kill_meta || args.kill,
+        kill_frontend: args.kill_frontend || args.kill,
+        kill_compute: args.kill_compute || args.kill,
+        kill_compactor: args.kill_compactor || args.kill,
         kill_rate: args.kill_rate,
     };
 
