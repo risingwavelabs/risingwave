@@ -22,6 +22,7 @@ use lru::{DefaultHasher, LruCache};
 mod evictable;
 mod lru_manager;
 mod managed_lru;
+#[allow(dead_code)]
 mod range_lru;
 pub use evictable::*;
 pub use lru_manager::*;
