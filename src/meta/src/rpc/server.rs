@@ -428,7 +428,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let vacuum_manager = Arc::new(hummock::VacuumManager::new(
         env.clone(),
         hummock_manager.clone(),
-        backup_manager.clone(),
+        backup_manager,
         compactor_manager.clone(),
     ));
 

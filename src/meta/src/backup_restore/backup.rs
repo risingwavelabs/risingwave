@@ -15,11 +15,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::{HummockSstableId, HummockVersionId};
+use risingwave_pb::hummock::HummockVersion;
 use tokio::task::JoinHandle;
 
 use crate::backup_restore::db_snapshot::{DbSnapshot, DbSnapshotBuilder};
@@ -31,29 +31,21 @@ use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
-#[derive(Clone)]
 pub enum BackupJobResult {
-    Cancelled,
     Finished(DbSnapshot),
-    Failed,
+    Failed(BackupError),
 }
 
 /// `BackupJobHandle` tracks running job.
 struct BackupJobHandle {
     job_id: u64,
-    join_handle: JoinHandle<BackupJobResult>,
     hummock_version_safe_point: HummockVersionSafePoint,
 }
 
 impl BackupJobHandle {
-    pub fn new(
-        job_id: u64,
-        join_handle: JoinHandle<BackupJobResult>,
-        hummock_version_safe_point: HummockVersionSafePoint,
-    ) -> Self {
+    pub fn new(job_id: u64, hummock_version_safe_point: HummockVersionSafePoint) -> Self {
         Self {
             job_id,
-            join_handle,
             hummock_version_safe_point,
         }
     }
@@ -67,9 +59,23 @@ pub struct BackupManager<S: MetaStore> {
     hummock_manager: HummockManagerRef<S>,
     backup_store: BackupStorageRef,
     /// Existent database snapshot.
-    db_snapshots: parking_lot::RwLock<HashMap<DbSnapshotId, DbSnapshot>>,
+    db_snapshots: parking_lot::RwLock<HashMap<DbSnapshotId, DbSnapshotSstManifest>>,
     /// Tracks the running backup job. Concurrent jobs is not supported.
     running_backup_job: tokio::sync::Mutex<Option<BackupJobHandle>>,
+}
+
+struct DbSnapshotSstManifest {
+    pub hummock_version_id: HummockVersionId,
+    pub ssts: Vec<HummockSstableId>,
+}
+
+impl From<&HummockVersion> for DbSnapshotSstManifest {
+    fn from(v: &HummockVersion) -> Self {
+        Self {
+            hummock_version_id: v.id,
+            ssts: v.get_sst_ids(),
+        }
+    }
 }
 
 impl<S: MetaStore> BackupManager<S> {
@@ -78,12 +84,16 @@ impl<S: MetaStore> BackupManager<S> {
         hummock_manager: HummockManagerRef<S>,
         backup_store: BackupStorageRef,
     ) -> MetaResult<Self> {
-        // TODO #6482 refine me: meta node actually only need SST manifest in memory.
         let db_snapshots = backup_store
             .list()
             .await?
             .into_iter()
-            .map(|s| (s.id, s))
+            .map(|s| {
+                (
+                    s.id,
+                    DbSnapshotSstManifest::from(&s.metadata.hummock_version),
+                )
+            })
             .collect();
         Ok(Self {
             env,
@@ -121,31 +131,36 @@ impl<S: MetaStore> BackupManager<S> {
             .generate::<{ IdCategory::Backup }>()
             .await?;
         let hummock_version_safe_point = self.hummock_manager.register_safe_point().await;
-        let worker = BackupWorker::new(self.clone());
-        let worker_join_handle = worker.start(job_id);
-        let job_handle =
-            BackupJobHandle::new(job_id, worker_join_handle, hummock_version_safe_point);
+        // TODO #6482: ideally r/w IO can be made external to meta node, though its volume is not
+        // significant for metadata snapshot. Take care of SST pinning during refactoring.
+        BackupWorker::new(self.clone()).start(job_id);
+        let job_handle = BackupJobHandle::new(job_id, hummock_version_safe_point);
         *guard = Some(job_handle);
         Ok(job_id)
     }
 
-    async fn finish_backup_job(&self, job_id: u64, status: BackupJobResult) -> MetaResult<()> {
+    async fn finish_backup_job(&self, job_id: u64, status: BackupJobResult) {
         // _job_handle holds `hummock_version_safe_point` until the db snapshot is added to meta.
         // It ensures db snapshot's SSTs won't be deleted in between.
-        let _job_handle = self
-            .take_job_handle_by_job_id(job_id)
-            .await
-            .ok_or_else(|| anyhow!("{} is not a running backup job", job_id))?;
-        match status {
-            BackupJobResult::Cancelled => {}
-            BackupJobResult::Finished(db_snapshot) => {
-                self.db_snapshots
-                    .write()
-                    .insert(db_snapshot.id, db_snapshot);
+        let _job_handle = match self.take_job_handle_by_job_id(job_id).await {
+            None => {
+                tracing::warn!("{} is not a running backup job", job_id);
+                return;
             }
-            BackupJobResult::Failed => {}
+            Some(job_handle) => job_handle,
+        };
+        match status {
+            BackupJobResult::Finished(db_snapshot) => {
+                tracing::info!("succeeded backup job {}", job_id);
+                self.db_snapshots.write().insert(
+                    db_snapshot.id,
+                    DbSnapshotSstManifest::from(&db_snapshot.metadata.hummock_version),
+                );
+            }
+            BackupJobResult::Failed(e) => {
+                tracing::warn!("failed backup job {}: {}", job_id, e);
+            }
         }
-        Ok(())
     }
 
     async fn take_job_handle_by_job_id(&self, job_id: u64) -> Option<BackupJobHandle> {
@@ -173,8 +188,8 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     /// List all existent backups.
-    pub fn list_backups(&self) -> Vec<DbSnapshot> {
-        self.db_snapshots.read().values().cloned().collect_vec()
+    pub fn list_backups(&self) -> Vec<DbSnapshotId> {
+        self.db_snapshots.read().keys().cloned().collect_vec()
     }
 
     /// List all `SSTables` required by backups.
@@ -182,7 +197,7 @@ impl<S: MetaStore> BackupManager<S> {
         self.db_snapshots
             .read()
             .values()
-            .flat_map(|s| s.metadata.hummock_version.get_sst_ids())
+            .flat_map(|s| s.ssts.clone())
             .collect_vec()
     }
 }
@@ -197,24 +212,25 @@ impl<S: MetaStore> BackupWorker<S> {
         Self { backup_manager }
     }
 
-    fn start(self, job_id: u64) -> JoinHandle<BackupJobResult> {
+    fn start(self, job_id: u64) -> JoinHandle<()> {
+        let backup_manager_clone = self.backup_manager.clone();
         let job = async move {
             let mut db_snapshot_builder =
-                DbSnapshotBuilder::new(self.backup_manager.env.meta_store_ref().clone());
+                DbSnapshotBuilder::new(backup_manager_clone.env.meta_store_ref());
             // Reuse job id as db snapshot id.
             db_snapshot_builder.build(job_id).await?;
             let db_snapshot = db_snapshot_builder.finish()?;
-            let job_status = BackupJobResult::Finished(db_snapshot);
-            self.backup_manager
-                .finish_backup_job(job_id, job_status.clone())
-                .await?;
-            Ok::<BackupJobResult, BackupError>(job_status)
+            backup_manager_clone
+                .finish_backup_job(job_id, BackupJobResult::Finished(db_snapshot))
+                .await;
+            Ok::<(), BackupError>(())
         };
         tokio::spawn(async move {
-            job.await.unwrap_or_else(|e| {
-                tracing::warn!("failed backup job {}: {}", job_id, e);
-                BackupJobResult::Failed
-            })
+            if let Err(e) = job.await {
+                self.backup_manager
+                    .finish_backup_job(job_id, BackupJobResult::Failed(e))
+                    .await;
+            }
         })
     }
 }

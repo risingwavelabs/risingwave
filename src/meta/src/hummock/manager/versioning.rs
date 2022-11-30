@@ -32,6 +32,7 @@ use crate::hummock::HummockManager;
 use crate::storage::MetaStore;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
+/// It's used by meta node itself to temporarily pin versions.
 #[derive(Clone, PartialEq, Eq)]
 pub struct HummockVersionSafePoint {
     id: HummockVersionId,

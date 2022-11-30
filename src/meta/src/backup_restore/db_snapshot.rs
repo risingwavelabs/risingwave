@@ -290,7 +290,7 @@ mod tests {
 
     use crate::backup_restore::db_snapshot::{DbSnapshot, DbSnapshotBuilder, MetadataSnapshot};
     use crate::backup_restore::error::BackupError;
-    use crate::model::{MetadataModel, BARRIER_MANAGER_STATE_KEY};
+    use crate::model::MetadataModel;
     use crate::storage::{MemStore, MetaStore, DEFAULT_COLUMN_FAMILY};
 
     #[test]
@@ -362,13 +362,10 @@ mod tests {
         let mut builder = DbSnapshotBuilder::new(meta_store.clone());
         builder.build(1).await.unwrap();
 
+        let dummy_key = vec![0u8, 1u8, 2u8];
         let mut builder = DbSnapshotBuilder::new(meta_store.clone());
         meta_store
-            .put_cf(
-                DEFAULT_COLUMN_FAMILY,
-                BARRIER_MANAGER_STATE_KEY.to_vec(),
-                vec![100],
-            )
+            .put_cf(DEFAULT_COLUMN_FAMILY, dummy_key.clone(), vec![100])
             .await
             .unwrap();
         builder.build(1).await.unwrap();
@@ -384,7 +381,7 @@ mod tests {
                 .keys()
                 .cloned()
                 .collect_vec(),
-            vec![BARRIER_MANAGER_STATE_KEY.to_vec()]
+            vec![dummy_key.clone()]
         );
         assert_eq!(
             db_snapshot
