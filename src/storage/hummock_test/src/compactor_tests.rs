@@ -912,8 +912,8 @@ pub(crate) mod tests {
         assert_eq!(key_count, scan_count);
     }
 
-    // #[tokio::test]
-    async fn _test_compaction_with_filter_key_extractor() {
+    #[tokio::test]
+    async fn test_compaction_with_filter_key_extractor() {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
@@ -1055,7 +1055,12 @@ pub(crate) mod tests {
         storage.wait_version(version).await;
 
         // 6. scan kv to check key table_id
-        let bloom_filter_key = key_prefix.to_vec();
+        // let mut bloom_filter_key: Vec<u8>;
+        let bloom_filter_key = [
+            existing_table_id.to_be_bytes().to_vec(),
+            key_prefix.to_vec(),
+        ]
+        .concat();
         let start_bound_key = key_prefix.to_vec();
         let end_bound_key = next_key(start_bound_key.as_slice());
         let scan_result = storage
