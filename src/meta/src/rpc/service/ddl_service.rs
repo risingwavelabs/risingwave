@@ -641,8 +641,7 @@ where
         Ok(version)
     }
 
-    /// NOTE: We will use this function for both `CREATE TABLE` and `CREATE TABLE WITH CONNECTOR` in
-    /// the future. The former will
+    // TODO(Yuanxin): Use this function for both `CREATE TABLE` and `CREATE TABLE WITH CONNECTOR`.
     async fn create_materialized_source_inner(
         &self,
         mut source: Source,
