@@ -122,10 +122,6 @@ pub async fn compute_node_serve(
             .collect::<Vec<&str>>()[1];
         used_leader_addr = leader_addr.to_string();
 
-        tracing::info!(
-            "try to connect against leader meta node {}",
-            used_leader_addr,
-        );
         thread::sleep(Duration::from_millis(5000));
         client_res = MetaClient::register_new(
             leader_addr,
