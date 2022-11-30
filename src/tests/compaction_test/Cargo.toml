@@ -15,9 +15,11 @@ clap = { version = "3", features = ["derive"] }
 itertools = "0.10"
 parking_lot = "0.12"
 async-trait = "0.1"
+rand = "0.8"
 risingwave_common = { path = "../../common" }
 risingwave_compactor = { path = "../../storage/compactor" }
 risingwave_hummock_sdk = { path = "../../storage/hummock_sdk" }
+risingwave_hummock_test = { path = "../../storage/hummock_test" }
 risingwave_meta = { path = "../../meta" }
 risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }

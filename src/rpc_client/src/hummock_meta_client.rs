@@ -13,17 +13,19 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use futures::stream::BoxStream;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
-    SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion, VacuumTask,
 };
-use tonic::Streaming;
 
 use crate::error::Result;
+
+pub type CompactTaskItem =
+    std::result::Result<risingwave_pb::hummock::SubscribeCompactTasksResponse, tonic::Status>;
 
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
@@ -52,7 +54,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
-    ) -> Result<Streaming<SubscribeCompactTasksResponse>>;
+    ) -> Result<BoxStream<'static, CompactTaskItem>>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
     async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>>;
     async fn trigger_manual_compaction(

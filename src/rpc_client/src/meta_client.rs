@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::stream::BoxStream;
 use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
@@ -56,7 +57,7 @@ use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 
 use crate::error::Result;
-use crate::hummock_meta_client::HummockMetaClient;
+use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 use crate::{rpc_client_method_impl, ExtraInfoSourceRef};
 
 type DatabaseId = u32;
@@ -721,12 +722,13 @@ impl HummockMetaClient for MetaClient {
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
-    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+    ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
             max_concurrent_task_number,
         };
-        self.inner.subscribe_compact_tasks(req).await
+        let stream = self.inner.subscribe_compact_tasks(req).await?;
+        Ok(Box::pin(stream))
     }
 
     async fn report_compaction_task_progress(

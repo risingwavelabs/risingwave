@@ -1986,10 +1986,10 @@ where
     pub fn init_compaction_scheduler(
         &self,
         sched_channel: CompactionRequestChannelRef,
-        notifier: Arc<Notify>,
+        notifier: Option<Arc<Notify>>,
     ) {
         *self.compaction_request_channel.write() = Some(sched_channel);
-        *self.compaction_resume_notifier.write() = Some(notifier);
+        *self.compaction_resume_notifier.write() = notifier;
     }
 
     /// Cancels pending compaction tasks which are not yet assigned to any compactor.
