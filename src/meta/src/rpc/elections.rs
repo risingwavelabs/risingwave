@@ -18,7 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use prost::Message;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch::Receiver;
@@ -43,7 +43,7 @@ struct ElectionOutcome {
 
     // True if current node is leader, else false
     pub is_leader: bool,
-    pub host_addr: HostAddr,
+    pub host_addr: HostAddress,
 }
 
 /// Runs for election in an attempt to become leader
@@ -86,10 +86,6 @@ async fn campaign<S: MetaStore>(
         }
     };
 
-    // TODO: remove
-    let (a, b) = get_infos_obj(meta_store).await.unwrap();
-    tracing::info!("leader {:?}, lease {:?}", a, b);
-
     // Initial leader election
     if current_leader_info.is_empty() {
         tracing::info!("We have no leader");
@@ -110,7 +106,6 @@ async fn campaign<S: MetaStore>(
             return None;
         }
 
-        let mut addr_port = addr.split(":");
         // Check if new leader was elected in the meantime
         return match renew_lease(&campaign_leader_info, lease_time_sec, meta_store).await {
             Some(is_leader) => {
@@ -121,10 +116,7 @@ async fn campaign<S: MetaStore>(
                     meta_leader_info: campaign_leader_info,
                     _meta_lease_info: campaign_lease_info,
                     is_leader: true,
-                    host_addr: HostAddr {
-                        host: addr_port.next().unwrap().to_owned(),
-                        port: addr_port.next().unwrap().to_owned().parse::<u16>().unwrap(),
-                    },
+                    host_addr: s_to_ha(addr.to_owned()),
                 })
             }
             None => None,
@@ -139,15 +131,11 @@ async fn campaign<S: MetaStore>(
 
     if is_leader {
         // if is leader, return HostAddress to this node
-        let mut addr_port = addr.split(":");
         return Some(ElectionOutcome {
             meta_leader_info: campaign_leader_info,
             _meta_lease_info: campaign_lease_info,
             is_leader,
-            host_addr: HostAddr {
-                host: addr_port.next().unwrap().to_owned(),
-                port: addr_port.next().unwrap().to_owned().parse::<u16>().unwrap(),
-            },
+            host_addr: s_to_ha(addr.to_owned()),
         });
     }
 
@@ -156,20 +144,28 @@ async fn campaign<S: MetaStore>(
     // TODO: Can I get the infos here or do I have to get these in
     // one transaction when I call renew_lease?
     let (leader, lease) = get_infos_obj(meta_store).await?;
-    let tmp = leader.clone();
-    let mut addr_port = tmp.get_node_address().split(":"); // TODO :use into function here
 
     Some(ElectionOutcome {
-        meta_leader_info: leader,
+        meta_leader_info: leader.clone(),
         _meta_lease_info: lease,
         is_leader,
-        host_addr: HostAddr {
-            // TODO: do we need this or can we just use leader info to deduce this?
-            // TODO: write MetaLeaderInfo to HostAddr into func
-            host: addr_port.next().unwrap().to_owned(),
-            port: addr_port.next().unwrap().to_owned().parse::<u16>().unwrap(),
-        },
+        host_addr: s_to_ha(leader.node_address),
     })
+}
+
+// converts a string into a HostAddress
+fn s_to_ha(s: String) -> HostAddress {
+    // adduming addr is e.g. 127.0.0.1:1234
+    let parts = s.split(":").collect::<Vec<&str>>();
+    let host = match parts.get(0) {
+        None => "".to_owned(),
+        Some(h) => h.to_owned().to_owned(),
+    };
+    let port = match parts.get(1) {
+        None => 0,
+        Some(h) => h.to_owned().to_owned().parse::<i32>().unwrap_or_default(),
+    };
+    HostAddress { host, port }
 }
 
 /// Try to renew/acquire the leader lease
@@ -320,7 +316,7 @@ pub async fn run_elections<S: MetaStore>(
     MetaLeaderInfo,
     JoinHandle<()>,
     Sender<()>,
-    Receiver<(HostAddr, bool)>,
+    Receiver<(HostAddress, bool)>,
 )> {
     // Randomize interval to reduce mitigate likelihood of simultaneous requests
     let mut rng: StdRng = SeedableRng::from_entropy();
@@ -389,11 +385,7 @@ pub async fn run_elections<S: MetaStore>(
                 // Do not elect new leader directly after running the initial election
                 let mut is_leader = is_initial_leader;
                 let mut leader_info = initial_leader.clone();
-                let mut addr_port = initial_leader.get_node_address().split(":");
-                let mut leader_addr = HostAddr {
-                    host: addr_port.next().unwrap().to_owned(),
-                    port: addr_port.next().unwrap().to_owned().parse::<u16>().unwrap(),
-                };
+                let mut leader_addr = s_to_ha(initial_leader.clone().node_address);
                 if !initial_election {
                     let (l_addr, l_info, is_l) =
                         match campaign(&meta_store, &addr, lease_time_sec, gen_rand_lease_id())

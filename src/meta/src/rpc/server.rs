@@ -14,13 +14,12 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::thread::spawn;
 use std::time::Duration;
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_pb::common::HostAddress;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
@@ -158,7 +157,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     MetaLeaderInfo,
     JoinHandle<()>,
     Sender<()>,
-    Receiver<(HostAddr, bool)>,
+    Receiver<(HostAddress, bool)>,
 )> {
     run_elections(addr, meta_store, lease_time_sec).await
 }
@@ -407,7 +406,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 if is_leader { "leader" } else { "follower" }
             );
             if !is_leader {
-                tracing::info!("Current leader is serving at {}", host_addr);
+                tracing::info!(
+                    "Current leader is serving at {}:{}",
+                    host_addr.host,
+                    host_addr.port
+                );
             }
         }
     });
@@ -477,17 +480,19 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
 #[derive(Clone)]
 struct InterceptorWrapper {
-    leader_rx: Receiver<(HostAddr, bool)>, /* TODO: Can I clone this?
-                                            * TODO: leader_rx has to return the correct client
-                                            * addr */
+    leader_rx: Receiver<(HostAddress, bool)>, // TODO: Can I clone this?
 }
 
 impl Interceptor for InterceptorWrapper {
     fn call(&mut self, req: Request<()>) -> std::result::Result<Request<()>, Status> {
         let (addr, is_leader) = self.leader_rx.borrow().clone();
         if !is_leader {
-            return Err(Status::aborted(format!("http://{}", addr.to_string()))); // TODO: Do this as
-                                                                                 // json
+            return Err(Status::aborted(format!(
+                "http://{}:{}",
+                addr.get_port(),
+                addr.get_host(),
+            ))); // TODO: Do this as
+                 // json
         }
         Ok(req)
     }
