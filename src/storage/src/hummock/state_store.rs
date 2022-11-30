@@ -13,15 +13,14 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::Bound::{Excluded, Included};
-use std::ops::{Bound, RangeBounds};
+use std::ops::Bound;
 use std::sync::atomic::Ordering as MemOrdering;
 use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::key::{map_table_key_range, next_key, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tokio::sync::oneshot;
 use tracing::log::warn;
@@ -122,55 +121,6 @@ impl StateStoreRead for HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        if let Some(dist_key_hint) = read_options.dist_key_hint.as_ref() {
-            let next_key = next_key(dist_key_hint);
-
-            // learn more detail about start_bound with storage_table.rs.
-            match key_range.start_bound() {
-                // it guarantees that the start bound must be included (some different case)
-                // 1. Include(pk + col_bound) => dist_key_hint <= start_bound <
-                // next_key(dist_key_hint)
-                //
-                // for case2, frontend need to reject this, avoid excluded start_bound and
-                // transform it to included(next_key), without this case we can just guarantee
-                // that start_bound < next_key
-                //
-                // 2. Include(next_key(pk +
-                // col_bound)) => dist_key_hint <= start_bound <= next_key(dist_key_hint)
-                //
-                // 3. Include(pk) => dist_key_hint <= start_bound < next_key(dist_key_hint)
-                Included(range_start) | Excluded(range_start) => {
-                    assert!(range_start.as_slice() >= dist_key_hint.as_slice());
-                    assert!(range_start.as_slice() < next_key.as_slice() || next_key.is_empty());
-                }
-
-                _ => unreachable!(),
-            }
-
-            match key_range.end_bound() {
-                Included(range_end) => {
-                    assert!(range_end.as_slice() >= dist_key_hint.as_slice());
-                    assert!(range_end.as_slice() < next_key.as_slice() || next_key.is_empty());
-                }
-
-                // 1. Excluded(end_bound_of_prefix(pk + col)) => dist_key_hint < end_bound <=
-                // next_key(dist_key_hint)
-                //
-                // 2. Excluded(pk + bound) => dist_key_hint < end_bound <=
-                // next_key(dist_key_hint)
-                Excluded(range_end) => {
-                    assert!(range_end.as_slice() > dist_key_hint.as_slice());
-                    assert!(range_end.as_slice() <= next_key.as_slice() || next_key.is_empty());
-                }
-
-                std::ops::Bound::Unbounded => {
-                    assert!(next_key.is_empty());
-                }
-            }
-        } else {
-            // not check
-        }
-
         self.iter_inner(map_table_key_range(key_range), epoch, read_options)
     }
 }

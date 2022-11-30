@@ -307,14 +307,16 @@ pub async fn get_from_sstable_info(
 
     // Todo(wcy-fdu): calculate dist_key
 
-    // if read_options.check_bloom_filter
-    //     && !hit_sstable_bloom_filter(sstable.value(), &dist_key, local_stats)
-    // {
-    //     if delete_epoch.is_some() {
-    //         return Ok(Some(HummockValue::Delete));
-    //     }
-    //     return Ok(None);
-    // }
+    if let Some(dist_key) = &read_options.dist_key_hint {
+        if read_options.check_bloom_filter
+            && !hit_sstable_bloom_filter(sstable.value(), dist_key, local_stats)
+        {
+            if delete_epoch.is_some() {
+                return Ok(Some(HummockValue::Delete));
+            }
+            return Ok(None);
+        }
+    }
 
     // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
     // use default before refinement.
