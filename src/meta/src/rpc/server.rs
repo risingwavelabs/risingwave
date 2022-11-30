@@ -475,7 +475,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         }
     });
 
-    return Ok((join_handle, shutdown_send));
+    Ok((join_handle, shutdown_send))
 }
 
 #[derive(Clone)]

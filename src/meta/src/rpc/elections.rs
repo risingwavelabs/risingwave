@@ -149,17 +149,17 @@ async fn campaign<S: MetaStore>(
     let (leader, lease) = get_infos_obj(meta_store).await?;
 
     Some(ElectionOutcome {
-        meta_leader_info: leader.clone(),
+        meta_leader_info: leader,
         _meta_lease_info: lease,
         is_leader,
     })
 }
 
 // converts a string into a HostAddress
-fn s_to_ha(s: &String) -> HostAddress {
+fn s_to_ha(s: &str) -> HostAddress {
     // adduming addr is e.g. 127.0.0.1:1234
-    let parts = s.split(":").collect::<Vec<&str>>();
-    let host = match parts.get(0) {
+    let parts = s.split(':').collect::<Vec<&str>>();
+    let host = match parts.first() {
         None => "".to_owned(),
         Some(h) => h.to_owned().to_owned(),
     };
@@ -272,7 +272,7 @@ async fn get_infos<S: MetaStore>(
 }
 
 /// Retrieve infos about the current leader
-/// Wrapper for get_infos
+/// Wrapper for `get_infos`
 ///
 /// ## Returns
 /// None on error, else infos about the leader
@@ -280,7 +280,7 @@ async fn get_infos_obj<S: MetaStore>(
     meta_store: &Arc<S>,
 ) -> Option<(MetaLeaderInfo, MetaLeaseInfo)> {
     match get_infos(meta_store).await {
-        None => return None,
+        None => None,
         Some(infos) => {
             let (leader, lease) = infos;
             return Some((
