@@ -80,9 +80,20 @@ impl ObjectStoreBackupStorage {
     }
 
     async fn get_manifest(&self) -> BackupResult<Option<BackupManifest>> {
-        let bytes = self.store.read(&self.get_manifest_path(), None).await?;
-        // TODO #6482: distinguish non-existent object from other error.
-        // The former should return None.
+        let manifest_path = self.get_manifest_path();
+        let manifest = match self
+            .store
+            .list(&manifest_path)
+            .await?
+            .into_iter()
+            .find(|m| m.key == manifest_path)
+        {
+            None => {
+                return Ok(None);
+            }
+            Some(manifest) => manifest,
+        };
+        let bytes = self.store.read(&manifest.key, None).await?;
         let manifest: BackupManifest =
             serde_json::from_slice(&bytes).map_err(|e| BackupError::Encoding(e.into()))?;
         Ok(Some(manifest))

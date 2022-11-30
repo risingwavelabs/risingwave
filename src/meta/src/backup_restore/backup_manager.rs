@@ -143,8 +143,7 @@ impl<S: MetaStore> BackupManager<S> {
         guard.take()
     }
 
-    /// Deletes existent backups from backup storage, and removes their references in
-    /// `BackupManager`.
+    /// Deletes existent backups from backup storage.
     pub async fn delete_backups(&self, ids: &[DbSnapshotId]) -> MetaResult<()> {
         self.backup_store.delete(ids).await?;
         Ok(())
@@ -158,6 +157,7 @@ impl<S: MetaStore> BackupManager<S> {
             .await?
             .into_iter()
             .flat_map(|s| s.ssts)
+            .dedup()
             .collect_vec();
         Ok(r)
     }
