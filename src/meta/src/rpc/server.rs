@@ -423,8 +423,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         ObjectStoreBackupStorage::new(&env.opts.backup_storage_directory, backup_object_store)
             .await?,
     );
-    let backup_manager =
-        Arc::new(BackupManager::new(env.clone(), hummock_manager.clone(), backup_storage).await?);
+    let backup_manager = Arc::new(BackupManager::new(
+        env.clone(),
+        hummock_manager.clone(),
+        backup_storage,
+    ));
     let vacuum_manager = Arc::new(hummock::VacuumManager::new(
         env.clone(),
         hummock_manager.clone(),

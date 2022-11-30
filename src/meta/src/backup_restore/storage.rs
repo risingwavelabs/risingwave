@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -71,12 +70,12 @@ impl ObjectStoreBackupStorage {
     }
 
     async fn update_manifest(&self, new_manifest: BackupManifest) -> BackupResult<()> {
-        *self.manifest.write() = new_manifest;
-        let bytes = serde_json::to_vec(self.manifest.read().deref())
-            .map_err(|e| BackupError::Encoding(e.into()))?;
+        let bytes =
+            serde_json::to_vec(&new_manifest).map_err(|e| BackupError::Encoding(e.into()))?;
         self.store
             .upload(&self.get_manifest_path(), bytes.into())
             .await?;
+        *self.manifest.write() = new_manifest;
         Ok(())
     }
 
@@ -85,7 +84,7 @@ impl ObjectStoreBackupStorage {
         // TODO #6482: distinguish non-existent object from other error.
         // The former should return None.
         let manifest: BackupManifest =
-            serde_json::from_slice(&bytes.to_vec()).map_err(|e| BackupError::Encoding(e.into()))?;
+            serde_json::from_slice(&bytes).map_err(|e| BackupError::Encoding(e.into()))?;
         Ok(Some(manifest))
     }
 

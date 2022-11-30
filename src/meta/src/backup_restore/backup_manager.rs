@@ -60,17 +60,17 @@ pub struct BackupManager<S: MetaStore> {
 }
 
 impl<S: MetaStore> BackupManager<S> {
-    pub async fn new(
+    pub fn new(
         env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
         backup_store: BackupStorageRef,
-    ) -> MetaResult<Self> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             env,
             hummock_manager,
             backup_store,
             running_backup_job: tokio::sync::Mutex::new(None),
-        })
+        }
     }
 
     #[cfg(test)]
@@ -157,7 +157,7 @@ impl<S: MetaStore> BackupManager<S> {
             .list()
             .await?
             .into_iter()
-            .flat_map(|s| s.ssts.clone())
+            .flat_map(|s| s.ssts)
             .collect_vec();
         Ok(r)
     }
