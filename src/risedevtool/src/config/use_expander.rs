@@ -130,13 +130,13 @@ test2:
 
         let expected_result = YamlLoader::load_from_str(
             "
-- b: 23333
-  use: test
+- use: test
   a: 23333
+  b: 23333
   c: 23333
-- a: 23333
+- use: test2
+  a: 23333
   b: 233333
-  use: test2
   d: 23333",
         )
         .unwrap()
