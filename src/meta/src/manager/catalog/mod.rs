@@ -1157,6 +1157,10 @@ where
         user_core.ensure_user_id(index.owner)?;
         assert_eq!(index.owner, index_table.owner);
 
+        // `dependent_relations` should contains 1 and only 1 item that is the `primary_table_id`
+        assert_eq!(index_table.dependent_relations.len(), 1);
+        assert_eq!(index.primary_table_id, index_table.dependent_relations[0]);
+
         if database_core.has_in_progress_creation(&key) {
             bail!("index already in creating procedure");
         } else {
@@ -1239,6 +1243,10 @@ where
         let user_core = &mut core.user;
         database_core.ensure_database_id(sink.database_id)?;
         database_core.ensure_schema_id(sink.schema_id)?;
+        for dependent_id in &sink.dependent_relations {
+            // TODO(zehua): refactor when using SourceId.
+            database_core.ensure_table_or_source_id(dependent_id)?;
+        }
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         database_core.check_relation_name_duplicated(&key)?;
         #[cfg(not(test))]

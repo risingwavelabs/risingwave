@@ -532,7 +532,7 @@ where
             | StreamingJob::MaterializedSource(_, table) => creating_tables.push(table.clone()),
 
             StreamingJob::Sink(_sink) => {
-                // TODO(yuhao): maybe mark the sink as creating for recovery.
+                // No need to mark it as creating. Do nothing.
             }
         }
 
