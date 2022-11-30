@@ -1,8 +1,9 @@
 [meta]
-enable_compaction_deterministic = true
+disable_recovery = true
+dangerous_max_idle_secs = 1800
 max_heartbeat_interval_secs = 600
 
-# The following is copied from src/config/risingwave.toml
+# The following is copied from ../risingwave.toml
 
 [server]
 heartbeat_interval_ms = 1000
