@@ -305,6 +305,9 @@ where
                 .vnode_mapping
                 .as_ref()
                 .unwrap()
+                .parallel_unit_mapping
+                .as_ref()
+                .unwrap()
                 .fragment_id;
 
             let is_singleton =
@@ -344,8 +347,11 @@ where
             // The upstream vnode_mapping is cloned here,
             // so the fragment id in the mapping needs to be changed to the id of this fragment
             if let Some(mapping) = vnode_mapping.as_mut() {
-                assert_ne!(mapping.fragment_id, fragment.fragment_id);
-                mapping.fragment_id = fragment.fragment_id;
+                assert_ne!(
+                    mapping.parallel_unit_mapping.as_ref().unwrap().fragment_id,
+                    fragment.fragment_id
+                );
+                mapping.parallel_unit_mapping.as_mut().unwrap().fragment_id = fragment.fragment_id;
             }
             fragment.vnode_mapping = vnode_mapping;
         }

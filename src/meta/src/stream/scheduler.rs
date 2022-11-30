@@ -21,7 +21,9 @@ use rand::prelude::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::hash::VnodeMapping;
 use risingwave_common::util::compress::compress_data;
-use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
+use risingwave_pb::common::{
+    ActorInfo, ParallelUnit, ParallelUnitMapping, ParallelUnitMappingInner, WorkerNode,
+};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
@@ -252,9 +254,11 @@ impl Scheduler {
         let vnode_mapping = build_vnode_mapping(parallel_units);
         let (original_indices, data) = compress_data(&vnode_mapping);
         fragment.vnode_mapping = Some(ParallelUnitMapping {
-            original_indices,
-            data,
-            fragment_id: fragment.fragment_id,
+            parallel_unit_mapping: Some(ParallelUnitMappingInner {
+                original_indices,
+                data,
+                fragment_id: fragment.fragment_id,
+            }),
         });
 
         Ok(vnode_mapping)

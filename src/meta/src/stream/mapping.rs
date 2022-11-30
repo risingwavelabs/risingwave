@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ParallelUnitId, VirtualNode, VnodeMapping};
 use risingwave_common::util::compress::compress_data;
-use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
+use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping, ParallelUnitMappingInner};
 use risingwave_pb::stream_plan::ActorMapping;
 
 use crate::model::{ActorId, FragmentId};
@@ -89,11 +89,14 @@ pub(crate) fn parallel_unit_mapping_to_actor_mapping(
     parallel_unit_mapping: &ParallelUnitMapping,
     parallel_unit_to_actor_map: &HashMap<ParallelUnitId, ActorId>,
 ) -> ActorMapping {
-    let ParallelUnitMapping {
+    let ParallelUnitMappingInner {
         original_indices,
         data,
         ..
-    } = parallel_unit_mapping;
+    } = parallel_unit_mapping
+        .parallel_unit_mapping
+        .as_ref()
+        .unwrap();
 
     let actor_data = data
         .iter()
@@ -122,8 +125,10 @@ pub fn actor_mapping_to_parallel_unit_mapping(
         .collect_vec();
 
     ParallelUnitMapping {
-        fragment_id,
-        original_indices: original_indices.clone(),
-        data: parallel_unit_data,
+        parallel_unit_mapping: Some(ParallelUnitMappingInner {
+            fragment_id,
+            original_indices: original_indices.clone(),
+            data: parallel_unit_data,
+        }),
     }
 }

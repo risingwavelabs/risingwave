@@ -18,7 +18,7 @@ use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::watch::Sender;
@@ -119,8 +119,15 @@ impl ObserverState for FrontendObserverNode {
                 .iter()
                 .map(|mapping| {
                     (
-                        mapping.fragment_id,
-                        decompress_data(&mapping.original_indices, &mapping.data),
+                        mapping.parallel_unit_mapping.as_ref().unwrap().fragment_id,
+                        decompress_data(
+                            &mapping
+                                .parallel_unit_mapping
+                                .as_ref()
+                                .unwrap()
+                                .original_indices,
+                            &mapping.parallel_unit_mapping.as_ref().unwrap().data,
+                        ),
                     )
                 })
                 .collect(),
@@ -254,7 +261,9 @@ impl FrontendObserverNode {
             return;
         };
         match info {
-            Info::ParallelUnitMapping(parallel_unit_mapping) => match resp.operation() {
+            Info::ParallelUnitMapping(ParallelUnitMapping {
+                parallel_unit_mapping: Some(parallel_unit_mapping),
+            }) => match resp.operation() {
                 Operation::Add => {
                     let fragment_id = parallel_unit_mapping.fragment_id;
                     let mapping = decompress_data(
@@ -286,6 +295,12 @@ impl FrontendObserverNode {
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
+            Info::ParallelUnitMapping(ParallelUnitMapping {
+                parallel_unit_mapping: None,
+            }) => {
+                self.worker_node_manager
+                    .update_align_epoch(resp.align_epoch);
+            }
             _ => unreachable!(),
         }
     }

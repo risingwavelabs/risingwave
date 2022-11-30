@@ -22,7 +22,9 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_connector::source::SplitImpl;
-use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
+use risingwave_pb::common::{
+    Buffer, ParallelUnit, ParallelUnitMapping, ParallelUnitMappingInner, WorkerNode,
+};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, State};
@@ -59,9 +61,21 @@ impl FragmentManagerCore {
                         .as_ref()
                         .expect("no data distribution found");
                     ParallelUnitMapping {
-                        fragment_id: fragment.fragment_id,
-                        original_indices: parallel_unit_mapping.original_indices.clone(),
-                        data: parallel_unit_mapping.data.clone(),
+                        parallel_unit_mapping: Some(ParallelUnitMappingInner {
+                            fragment_id: fragment.fragment_id,
+                            original_indices: parallel_unit_mapping
+                                .parallel_unit_mapping
+                                .as_ref()
+                                .unwrap()
+                                .original_indices
+                                .clone(),
+                            data: parallel_unit_mapping
+                                .parallel_unit_mapping
+                                .as_ref()
+                                .unwrap()
+                                .data
+                                .clone(),
+                        }),
                     }
                 })
             })
@@ -163,6 +177,7 @@ where
         operation: Operation,
         align_epoch: Option<u64>,
     ) {
+        let mut notified_fronted = false;
         for fragment in table_fragment.fragments.values() {
             if !fragment.state_table_ids.is_empty() {
                 let mapping = fragment
@@ -173,7 +188,20 @@ where
                     .notification_manager()
                     .notify_frontend(operation, Info::ParallelUnitMapping(mapping), align_epoch)
                     .await;
+                notified_fronted = true;
             }
+        }
+        if !notified_fronted {
+            self.env
+                .notification_manager()
+                .notify_frontend(
+                    operation,
+                    Info::ParallelUnitMapping(ParallelUnitMapping {
+                        parallel_unit_mapping: None,
+                    }),
+                    align_epoch,
+                )
+                .await;
         }
     }
 
@@ -713,7 +741,8 @@ where
 
                     if !fragment.state_table_ids.is_empty() {
                         let mut mapping = vnode_mapping.clone();
-                        mapping.fragment_id = fragment.fragment_id;
+                        mapping.parallel_unit_mapping.as_mut().unwrap().fragment_id =
+                            fragment.fragment_id;
                         fragment_mapping_to_notify.push(mapping);
                     }
                 }
@@ -783,6 +812,19 @@ where
 
         assert!(reschedules.is_empty(), "all reschedules must be applied");
         commit_meta!(self, table_fragments)?;
+
+        if fragment_mapping_to_notify.is_empty() {
+            self.env
+                .notification_manager()
+                .notify_frontend(
+                    Operation::Update,
+                    Info::ParallelUnitMapping(ParallelUnitMapping {
+                        parallel_unit_mapping: None,
+                    }),
+                    align_epoch,
+                )
+                .await;
+        }
 
         for mapping in fragment_mapping_to_notify {
             self.env

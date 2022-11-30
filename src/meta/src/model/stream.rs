@@ -333,11 +333,17 @@ impl TableFragments {
         for fragment in self.fragments.values_mut() {
             if fragment.vnode_mapping.is_some() {
                 if let Some(ref mut mapping) = fragment.vnode_mapping {
-                    mapping.data.iter_mut().for_each(|id| {
-                        if migrate_map.contains_key(id) {
-                            *id = migrate_map.get(id).unwrap().id;
-                        }
-                    });
+                    mapping
+                        .parallel_unit_mapping
+                        .as_mut()
+                        .unwrap()
+                        .data
+                        .iter_mut()
+                        .for_each(|id| {
+                            if migrate_map.contains_key(id) {
+                                *id = migrate_map.get(id).unwrap().id;
+                            }
+                        });
                 }
             }
         }
