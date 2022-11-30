@@ -208,6 +208,10 @@ export function buffer_CompressionTypeToJSON(object: Buffer_CompressionType): st
 
 /** Vnode mapping for stream fragments. Stores mapping from virtual node to parallel unit id. */
 export interface ParallelUnitMapping {
+  parallelUnitMapping: ParallelUnitMappingInner | undefined;
+}
+
+export interface ParallelUnitMappingInner {
   fragmentId: number;
   originalIndices: number[];
   data: number[];
@@ -401,11 +405,41 @@ export const Buffer = {
 };
 
 function createBaseParallelUnitMapping(): ParallelUnitMapping {
-  return { fragmentId: 0, originalIndices: [], data: [] };
+  return { parallelUnitMapping: undefined };
 }
 
 export const ParallelUnitMapping = {
   fromJSON(object: any): ParallelUnitMapping {
+    return {
+      parallelUnitMapping: isSet(object.parallelUnitMapping)
+        ? ParallelUnitMappingInner.fromJSON(object.parallelUnitMapping)
+        : undefined,
+    };
+  },
+
+  toJSON(message: ParallelUnitMapping): unknown {
+    const obj: any = {};
+    message.parallelUnitMapping !== undefined && (obj.parallelUnitMapping = message.parallelUnitMapping
+      ? ParallelUnitMappingInner.toJSON(message.parallelUnitMapping)
+      : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ParallelUnitMapping>, I>>(object: I): ParallelUnitMapping {
+    const message = createBaseParallelUnitMapping();
+    message.parallelUnitMapping = (object.parallelUnitMapping !== undefined && object.parallelUnitMapping !== null)
+      ? ParallelUnitMappingInner.fromPartial(object.parallelUnitMapping)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseParallelUnitMappingInner(): ParallelUnitMappingInner {
+  return { fragmentId: 0, originalIndices: [], data: [] };
+}
+
+export const ParallelUnitMappingInner = {
+  fromJSON(object: any): ParallelUnitMappingInner {
     return {
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
       originalIndices: Array.isArray(object?.originalIndices) ? object.originalIndices.map((e: any) => Number(e)) : [],
@@ -413,7 +447,7 @@ export const ParallelUnitMapping = {
     };
   },
 
-  toJSON(message: ParallelUnitMapping): unknown {
+  toJSON(message: ParallelUnitMappingInner): unknown {
     const obj: any = {};
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
     if (message.originalIndices) {
@@ -429,8 +463,8 @@ export const ParallelUnitMapping = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<ParallelUnitMapping>, I>>(object: I): ParallelUnitMapping {
-    const message = createBaseParallelUnitMapping();
+  fromPartial<I extends Exact<DeepPartial<ParallelUnitMappingInner>, I>>(object: I): ParallelUnitMappingInner {
+    const message = createBaseParallelUnitMappingInner();
     message.fragmentId = object.fragmentId ?? 0;
     message.originalIndices = object.originalIndices?.map((e) => e) || [];
     message.data = object.data?.map((e) => e) || [];
