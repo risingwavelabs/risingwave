@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -27,7 +27,7 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use uuid::Uuid;
 
 use crate::barrier::command::CommandContext;
@@ -38,8 +38,6 @@ use crate::model::ActorId;
 use crate::storage::MetaStore;
 use crate::stream::build_actor_connector_splits;
 use crate::MetaResult;
-
-pub type RecoveryResult = Epoch;
 
 impl<S> GlobalBarrierManager<S>
 where
@@ -115,7 +113,7 @@ where
     }
 
     /// Recovery the whole cluster from the latest epoch.
-    pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> RecoveryResult {
+    pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> Epoch {
         // pause discovery of all connector split changes and trigger config change.
         let _source_pause_guard = self.source_manager.paused.lock().await;
 
@@ -209,6 +207,7 @@ where
         let mut cur = 0;
         let mut migrate_map = HashMap::new();
         let mut node_map = HashMap::new();
+        let start = Instant::now();
         while cur < expired_workers.len() {
             let current_nodes = self
                 .cluster_manager
@@ -237,8 +236,12 @@ where
                     return (migrate_map, node_map);
                 }
             }
+            warn!(
+                "waiting for new worker to join, elapsed: {}s",
+                start.elapsed().as_secs()
+            );
             // wait to get newly joined CN
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
         (migrate_map, node_map)
     }
