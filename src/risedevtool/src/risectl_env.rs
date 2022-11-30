@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::process::Command;
 
 use anyhow::Result;
 
 use crate::{add_storage_backend, HummockInMemoryStrategy, ServiceConfig};
 
-pub fn compute_risectl_env(services: &HashMap<String, ServiceConfig>) -> Result<String> {
+pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
     // Pick one of the compute node and generate risectl config
-    for item in services.values() {
+    for item in services {
         if let ServiceConfig::ComputeNode(c) = item {
             let mut cmd = Command::new("compute-node");
             add_storage_backend(

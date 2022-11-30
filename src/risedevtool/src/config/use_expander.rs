@@ -72,6 +72,7 @@ impl UseExpander {
             let map = item
                 .as_hash()
                 .ok_or_else(|| anyhow!("expect a hashmap for use"))?;
+
             let use_id_yaml = map
                 .get(&Yaml::String("use".into()))
                 .ok_or_else(|| anyhow!("expect `use` in hashmap"))?;
@@ -82,6 +83,14 @@ impl UseExpander {
                 .template
                 .get(use_id)
                 .ok_or_else(|| anyhow!("use source {} not found", use_id))?;
+
+            if map.get(&Yaml::String("config-path".into())).is_some() {
+                return Err(anyhow!(
+                    "`config-path` should not be put inside a `use` step. \
+                            Put `config-path` as a property parallel to `steps` instead."
+                ));
+            }
+
             Ok::<_, anyhow::Error>(Yaml::Hash(Self::merge(use_id, use_data, map)))
         });
         Ok(Yaml::Array(array.try_collect()?))

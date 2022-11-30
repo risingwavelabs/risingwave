@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::env;
 use std::fmt::Write;
 use std::fs::{File, OpenOptions};
@@ -66,7 +65,7 @@ impl ProgressManager {
 
 fn task_main(
     manager: &mut ProgressManager,
-    services: &HashMap<String, ServiceConfig>,
+    services: &Vec<ServiceConfig>,
 ) -> Result<(Vec<(String, Duration)>, String)> {
     let log_path = env::var("PREFIX_LOG")?;
 
@@ -98,7 +97,7 @@ fn task_main(
     // Firstly, ensure that all ports needed is not occupied by previous runs.
     let mut ports = vec![];
 
-    for service in services.values() {
+    for service in services {
         let listen_info = match service {
             ServiceConfig::Minio(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Etcd(c) => Some((c.port, c.id.clone())),
@@ -133,7 +132,7 @@ fn task_main(
 
     let mut stat = vec![];
 
-    for service in services.values() {
+    for service in services {
         let start_time = Instant::now();
 
         match service {

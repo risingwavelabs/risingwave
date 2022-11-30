@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
 use std::net::SocketAddr;
@@ -30,7 +29,7 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio::signal;
 
-async fn load_risedev_config(profile: &str) -> Result<HashMap<String, ServiceConfig>> {
+async fn load_risedev_config(profile: &str) -> Result<Vec<ServiceConfig>> {
     let risedev_config = {
         let mut content = String::new();
         File::open("risedev.yml")
@@ -76,15 +75,14 @@ pub async fn playground() -> Result<()> {
                 "Launching services from risedev config playground using profile: {}",
                 profile
             );
-            tracing::info!("steps: {:?}", services.keys());
 
             let compute_node_count = services
-                .values()
+                .iter()
                 .filter(|s| matches!(s, ServiceConfig::ComputeNode(_)))
                 .count();
 
             let mut rw_services = vec![];
-            for service in services.values() {
+            for service in &services {
                 match service {
                     ServiceConfig::ComputeNode(c) => {
                         let mut command = Command::new("compute-node");
