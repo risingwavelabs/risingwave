@@ -194,6 +194,12 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
+    pub fn iter_valid_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_name
+            .iter()
+            .filter_map(|(key, v)| valid_table_name(key).then_some(v))
+    }
+
     /// Iterate all materialized views, excluding the indices.
     pub fn iter_mv(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name

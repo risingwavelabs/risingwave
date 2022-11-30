@@ -285,6 +285,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         mock_hummock_meta_client.clone(),
         get_test_notification_client(env, hummock_manager_ref, worker_node),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(risingwave_tracing::RwTracingService::disabled()),
     )
     .await
     .unwrap();

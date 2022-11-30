@@ -121,7 +121,7 @@ impl RemoteSink {
         let channel = Endpoint::from_shared(format!(
             "http://{}",
             connector_params
-                .connector_sink_endpoint
+                .connector_rpc_endpoint
                 .ok_or_else(|| SinkError::Remote(
                     "connector sink endpoint not specified".parse().unwrap()
                 ))?
