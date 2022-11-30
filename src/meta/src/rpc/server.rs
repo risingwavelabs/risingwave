@@ -489,8 +489,8 @@ impl Interceptor for InterceptorWrapper {
         if !is_leader {
             return Err(Status::aborted(format!(
                 "http://{}:{}",
-                addr.get_port(),
                 addr.get_host(),
+                addr.get_port(),
             ))); // TODO: Do this as
                  // json
         }

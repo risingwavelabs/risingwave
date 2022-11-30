@@ -43,7 +43,12 @@ struct ElectionOutcome {
 
     // True if current node is leader, else false
     pub is_leader: bool,
-    pub host_addr: HostAddress,
+}
+
+impl ElectionOutcome {
+    pub fn get_leader_addr(&self) -> HostAddress {
+        s_to_ha(&self.meta_leader_info.node_address)
+    }
 }
 
 /// Runs for election in an attempt to become leader
@@ -116,7 +121,6 @@ async fn campaign<S: MetaStore>(
                     meta_leader_info: campaign_leader_info,
                     _meta_lease_info: campaign_lease_info,
                     is_leader: true,
-                    host_addr: s_to_ha(addr.to_owned()),
                 })
             }
             None => None,
@@ -135,7 +139,6 @@ async fn campaign<S: MetaStore>(
             meta_leader_info: campaign_leader_info,
             _meta_lease_info: campaign_lease_info,
             is_leader,
-            host_addr: s_to_ha(addr.to_owned()),
         });
     }
 
@@ -149,12 +152,11 @@ async fn campaign<S: MetaStore>(
         meta_leader_info: leader.clone(),
         _meta_lease_info: lease,
         is_leader,
-        host_addr: s_to_ha(leader.node_address),
     })
 }
 
 // converts a string into a HostAddress
-fn s_to_ha(s: String) -> HostAddress {
+fn s_to_ha(s: &String) -> HostAddress {
     // adduming addr is e.g. 127.0.0.1:1234
     let parts = s.split(":").collect::<Vec<&str>>();
     let host = match parts.get(0) {
@@ -283,8 +285,6 @@ async fn get_infos_obj<S: MetaStore>(
     }
 }
 
-// TODO: Implement retry logic for get_infos
-
 fn gen_rand_lease_id() -> u64 {
     rand::thread_rng().gen_range(0..std::u64::MAX)
 }
@@ -333,6 +333,7 @@ pub async fn run_elections<S: MetaStore>(
 
         // TODO: Why do I need metaLeaderInfo?
         // DO I return the info of the current leader or of the elected leader?
+
         // run the initial election
         let election_outcome =
             campaign(&meta_store, &addr, lease_time_sec, gen_rand_lease_id()).await;
@@ -340,7 +341,7 @@ pub async fn run_elections<S: MetaStore>(
             Some(outcome) => {
                 tracing::info!("initial election finished");
                 (
-                    outcome.host_addr,
+                    outcome.get_leader_addr(),
                     outcome.meta_leader_info,
                     outcome.is_leader,
                 )
@@ -379,13 +380,10 @@ pub async fn run_elections<S: MetaStore>(
                 }
                 wait = true;
 
-                // TODO: write MetaLeaderInfo to HostAddr function
-                // TODO: What is the difference between HostAddr and HostAddress?  Do we need both?
-
                 // Do not elect new leader directly after running the initial election
                 let mut is_leader = is_initial_leader;
                 let mut leader_info = initial_leader.clone();
-                let mut leader_addr = s_to_ha(initial_leader.clone().node_address);
+                let mut leader_addr = s_to_ha(&initial_leader.node_address);
                 if !initial_election {
                     let (l_addr, l_info, is_l) =
                         match campaign(&meta_store, &addr, lease_time_sec, gen_rand_lease_id())
@@ -398,7 +396,7 @@ pub async fn run_elections<S: MetaStore>(
                             Some(outcome) => {
                                 tracing::info!("election finished");
                                 (
-                                    outcome.host_addr,
+                                    outcome.get_leader_addr(),
                                     outcome.meta_leader_info,
                                     outcome.is_leader,
                                 )
