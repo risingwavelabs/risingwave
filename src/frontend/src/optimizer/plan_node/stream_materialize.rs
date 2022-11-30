@@ -170,23 +170,6 @@ impl StreamMaterialize {
         let properties = ctx.inner().with_options.internal_table_subset();
         let distribution_key = base.dist.dist_column_indices().to_vec();
 
-        let pk = pk_list.iter().map(|t| t.index).collect_vec();
-        let distribution_key_start_index_in_pk = match distribution_key.is_empty() {
-            true => 0,
-            false => distribution_key
-                .iter()
-                .map(|&di| {
-                    pk.iter().position(|&pi| di == pi).unwrap_or_else(|| {
-                        panic!(
-                            "distribution key {:?} must be a subset of primary key {:?}",
-                            distribution_key, pk
-                        )
-                    })
-                })
-                .next()
-                .unwrap(),
-        };
-
         let table = TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -205,7 +188,6 @@ impl StreamMaterialize {
             value_indices,
             definition,
             handle_pk_conflict,
-            distribution_key_start_index_in_pk,
         };
 
         Ok(Self { base, input, table })

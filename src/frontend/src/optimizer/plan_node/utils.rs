@@ -104,26 +104,6 @@ impl TableCatalogBuilder {
 
     /// Consume builder and create `TableCatalog` (for proto).
     pub fn build(self, distribution_key: Vec<usize>) -> TableCatalog {
-        let pk_indices = self.pk.iter().map(|t| t.index).collect_vec();
-        let distribution_key_start_index_in_pk = match distribution_key.is_empty() {
-            true => 0,
-            false => distribution_key
-                .iter()
-                .map(|&di| {
-                    pk_indices
-                        .iter()
-                        .position(|&pi| di == pi)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "distribution key {:?} must be a subset of primary key {:?}",
-                                distribution_key, pk_indices
-                            )
-                        })
-                })
-                .next()
-                .unwrap(),
-        };
-
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -144,7 +124,6 @@ impl TableCatalogBuilder {
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
             handle_pk_conflict: false,
-            distribution_key_start_index_in_pk,
         }
     }
 

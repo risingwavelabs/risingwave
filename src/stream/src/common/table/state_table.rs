@@ -192,8 +192,24 @@ impl<S: StateStore> StateTable<S> {
             None => Distribution::fallback(),
         };
 
-        let distribution_key_start_index_in_pk =
-            table_catalog.distribution_key_start_index_in_pk as usize;
+        let distribution_key_start_index_in_pk = match dist_key_indices.is_empty() {
+            true => 0,
+            false => dist_key_indices
+                .iter()
+                .map(|&di| {
+                    pk_indices
+                        .iter()
+                        .position(|&pi| di == pi)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "distribution key {:?} must be a subset of primary key {:?}",
+                                dist_key_indices, pk_indices
+                            )
+                        })
+                })
+                .next()
+                .unwrap(),
+        };
         let vnode_col_idx_in_pk = table_catalog
             .vnode_col_idx
             .as_ref()

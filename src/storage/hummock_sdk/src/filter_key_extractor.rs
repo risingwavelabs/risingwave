@@ -176,15 +176,37 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 impl SchemaFilterKeyExtractor {
     pub fn new(table_catalog: &Table) -> Self {
         let read_pattern_prefix_column = table_catalog.distribution_key.len();
-        let distribution_key_start_index_in_pk =
-            table_catalog.distribution_key_start_index_in_pk as usize;
-        assert_ne!(0, read_pattern_prefix_column);
-        // column_index in pk
+        let dist_key_indices: Vec<usize> = table_catalog
+            .distribution_key
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect();
         let pk_indices: Vec<usize> = table_catalog
             .pk
             .iter()
             .map(|col_order| col_order.index as usize)
             .collect();
+
+        let distribution_key_start_index_in_pk = match dist_key_indices.is_empty() {
+            true => 0,
+            false => dist_key_indices
+                .iter()
+                .map(|&di| {
+                    pk_indices
+                        .iter()
+                        .position(|&pi| di == pi)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "distribution key {:?} must be a subset of primary key {:?}",
+                                dist_key_indices, pk_indices
+                            )
+                        })
+                })
+                .next()
+                .unwrap(),
+        };
+        assert_ne!(0, read_pattern_prefix_column);
+        // column_index in pk
 
         let data_types = pk_indices
             .iter()
@@ -489,7 +511,6 @@ mod tests {
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,
-            distribution_key_start_index_in_pk: 1,
         }
     }
 
