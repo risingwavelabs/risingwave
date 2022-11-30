@@ -67,6 +67,7 @@ use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
     StructValue,
 };
+use crate::error::Result as RwResult;
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -796,8 +797,8 @@ pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
 impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
-    pub fn binary_format(&self) -> Bytes {
-        self.to_binary().unwrap()
+    pub fn binary_format(&self) -> RwResult<Bytes> {
+        self.to_binary().transpose().unwrap()
     }
 
     pub fn text_format(&self) -> String {
