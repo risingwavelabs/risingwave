@@ -431,10 +431,7 @@ impl StateStoreRead for HummockStorageV1 {
     ) -> Self::IterFuture<'_> {
         let iter =
             self.iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options);
-        #[cfg(not(madsim))]
-        return iter.in_span(self.tracing.new_tracer("hummock_iter"));
-        #[cfg(madsim)]
-        iter
+        iter.in_span(self.tracing.new_tracer("hummock_iter"))
     }
 }
 

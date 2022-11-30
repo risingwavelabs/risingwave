@@ -373,9 +373,29 @@
         select a1 from c
       )
     );
-  planner_error: |-
-    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
+  optimized_logical_plan: |
+    LogicalProject { exprs: [1:Int32] }
+    └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: [] }
+      ├─LogicalScan { table: a, columns: [a.a1] }
+      └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: all }
+        ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+        | └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1] }
+        |   ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+        |   | └─LogicalScan { table: a, columns: [a.a1] }
+        |   └─LogicalJoin { type: Inner, on: true, output: all }
+        |     ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+        |     | └─LogicalScan { table: a, columns: [a.a1] }
+        |     └─LogicalScan { table: b, columns: [] }
+        └─LogicalJoin { type: Inner, on: true, output: all }
+          ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+          | └─LogicalScan { table: a, columns: [a.a1] }
+          └─LogicalScan { table: c, columns: [] }
+- sql: |
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    create table c (c1 int, c2 int);
+    select 1 from a where exists (select (select a1 from c ), min(b1) from b );
+  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);

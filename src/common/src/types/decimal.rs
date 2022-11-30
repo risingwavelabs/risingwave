@@ -25,6 +25,7 @@ use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use crate::array::ArrayResult;
+use crate::error::Result as RwResult;
 use crate::types::Decimal::Normalized;
 
 #[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
@@ -67,12 +68,12 @@ impl Decimal {
 }
 
 impl ToBinary for Decimal {
-    fn to_binary(&self) -> Option<Bytes> {
+    fn to_binary(&self) -> RwResult<Option<Bytes>> {
         let mut output = BytesMut::new();
         match self {
             Decimal::Normalized(d) => {
                 d.to_sql(&Type::ANY, &mut output).unwrap();
-                return Some(output.freeze());
+                return Ok(Some(output.freeze()));
             }
             Decimal::NaN => {
                 output.reserve(8);
@@ -96,7 +97,7 @@ impl ToBinary for Decimal {
                 output.put_i16(0);
             }
         };
-        Some(output.freeze())
+        Ok(Some(output.freeze()))
     }
 }
 
@@ -519,34 +520,14 @@ impl Decimal {
         }
     }
 
-    /// TODO: 1. test whether the decimal in rust, any crate, has the same behavior as PG.
-    /// 2. support memcomparable encoding for dynamic decimal.
-    pub fn mantissa_scale_for_serialization(&self) -> (i128, u8) {
-        // Since the largest scale supported by `rust_decimal` is 28,
-        // and we first compare scale, we use 29 and 30 to denote +Inf and NaN.
-        match self {
-            Self::NegativeInf => (0, 29),
-            Self::Normalized(d) => {
-                // We remark that we do not dynamic numeric, i.e. the scale of all the numeric in
-                // the system is fixed. So we don't need to do any rescale, just use
-                // the `scale` of `rust_decimal`. However, it is possible that scale
-                // may overflow during calculation as `rust_decimal`'s max scale is
-                // 28.
-                (d.mantissa(), d.scale() as u8)
-            }
-            Self::PositiveInf => (0, 30),
-            Self::NaN => (0, 31),
-        }
-    }
-
     pub fn unordered_serialize(&self) -> [u8; 16] {
         // according to https://docs.rs/rust_decimal/1.18.0/src/rust_decimal/decimal.rs.html#665-684
         // the lower 15 bits is not used, so we can use first byte to distinguish nan and inf
         match self {
             Self::Normalized(d) => d.serialize(),
-            Self::NaN => [vec![1u8], vec![0u8; 15]].concat().try_into().unwrap(),
-            Self::PositiveInf => [vec![2u8], vec![0u8; 15]].concat().try_into().unwrap(),
-            Self::NegativeInf => [vec![3u8], vec![0u8; 15]].concat().try_into().unwrap(),
+            Self::NaN => [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            Self::PositiveInf => [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            Self::NegativeInf => [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         }
     }
 
@@ -572,6 +553,28 @@ impl Decimal {
             Self::NaN => Some(Self::NaN),
             Self::PositiveInf => Some(Self::PositiveInf),
             Self::NegativeInf => Some(Self::PositiveInf),
+        }
+    }
+}
+
+impl From<Decimal> for memcomparable::Decimal {
+    fn from(d: Decimal) -> Self {
+        match d {
+            Decimal::Normalized(d) => Self::Normalized(d),
+            Decimal::PositiveInf => Self::Inf,
+            Decimal::NegativeInf => Self::NegInf,
+            Decimal::NaN => Self::NaN,
+        }
+    }
+}
+
+impl From<memcomparable::Decimal> for Decimal {
+    fn from(d: memcomparable::Decimal) -> Self {
+        match d {
+            memcomparable::Decimal::Normalized(d) => Self::Normalized(d),
+            memcomparable::Decimal::Inf => Self::PositiveInf,
+            memcomparable::Decimal::NegInf => Self::NegativeInf,
+            memcomparable::Decimal::NaN => Self::NaN,
         }
     }
 }

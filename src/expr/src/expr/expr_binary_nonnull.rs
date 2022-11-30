@@ -681,7 +681,6 @@ pub fn new_like_default(
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
     use risingwave_common::array::interval_array::IntervalArray;
     use risingwave_common::array::*;
     use risingwave_common::types::{
@@ -802,11 +801,9 @@ mod tests {
                 target.push(None);
             } else {
                 rhs.push(Some(IntervalUnit::from_ymd(0, i, i)));
-                lhs.push(Some(NaiveDateWrapper::new(
-                    NaiveDate::from_num_days_from_ce(i),
-                )));
+                lhs.push(Some(NaiveDateWrapper::from_num_days_from_ce_uncheck(i)));
                 target.push(Some(f(
-                    NaiveDateWrapper::new(NaiveDate::from_num_days_from_ce(i)),
+                    NaiveDateWrapper::from_num_days_from_ce_uncheck(i),
                     IntervalUnit::from_ymd(0, i, i),
                 )));
             }

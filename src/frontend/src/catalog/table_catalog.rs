@@ -27,6 +27,13 @@ use crate::WithOptions;
 
 /// Includes full information about a table.
 ///
+/// Currently, it can be either:
+/// - a table or a source
+/// - a materialized view
+/// - an index
+///
+/// Use `self.kind()` to determine the type of the table.
+///
 /// # Column ID & Column Index
 ///
 /// [`ColumnId`](risingwave_common::catalog::ColumnId) (with type `i32`) is the unique identifier of
@@ -100,6 +107,14 @@ pub struct TableCatalog {
     pub handle_pk_conflict: bool,
 }
 
+pub enum TableKind {
+    /// Refer to [`crate::handler::drop_table::check_source`] for how to distinguish between a
+    /// table and a source.
+    TableOrSource,
+    Index,
+    MView,
+}
+
 impl TableCatalog {
     /// Get a reference to the table catalog's table id.
     pub fn id(&self) -> TableId {
@@ -113,6 +128,16 @@ impl TableCatalog {
 
     pub fn handle_pk_conflict(&self) -> bool {
         self.handle_pk_conflict
+    }
+
+    pub fn kind(&self) -> TableKind {
+        if self.is_index {
+            TableKind::Index
+        } else if self.associated_source_id.is_none() {
+            TableKind::MView
+        } else {
+            TableKind::TableOrSource
+        }
     }
 
     /// Get the table catalog's associated source id.
