@@ -296,7 +296,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
 
 pub async fn rpc_serve_with_store<S: MetaStore>(
     meta_store: Arc<S>,
-    mut address_info: AddressInfo,
+    address_info: AddressInfo,
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
@@ -308,6 +308,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         lease_interval_secs,
     )
     .await?;
+    let prometheus_endpoint = opts.prometheus_endpoint.clone();
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
@@ -336,12 +337,17 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
 
     #[cfg(not(madsim))]
-    if let Some(dashboard_addr) = address_info.dashboard_addr.take() {
+    if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
-            dashboard_addr,
+            dashboard_addr: *dashboard_addr,
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
             meta_store: env.meta_store_ref(),
+            prometheus_endpoint: prometheus_endpoint.clone(),
+            prometheus_client: prometheus_endpoint.as_ref().map(|x| {
+                use std::str::FromStr;
+                prometheus_http_query::Client::from_str(x).unwrap()
+            }),
         };
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
@@ -422,6 +428,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         source_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
+        barrier_manager.clone(),
     );
 
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
@@ -568,7 +575,7 @@ mod tests {
             info,
             Duration::from_secs(10),
             2,
-            MetaOpts::default(),
+            MetaOpts::test(false),
         )
         .await
         .unwrap();
@@ -582,7 +589,7 @@ mod tests {
             info2.clone(),
             Duration::from_secs(10),
             2,
-            MetaOpts::default(),
+            MetaOpts::test(false),
         )
         .await;
         assert!(ret.is_err());
@@ -594,7 +601,7 @@ mod tests {
             info2,
             Duration::from_secs(10),
             2,
-            MetaOpts::default(),
+            MetaOpts::test(false),
         )
         .await
         .unwrap();

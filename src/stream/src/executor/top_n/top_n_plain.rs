@@ -238,14 +238,14 @@ where
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
-                    self.managed_state.insert(row_ref.clone());
+                    self.managed_state.insert(row_ref);
                     self.cache
                         .insert(cache_key, row_ref, &mut res_ops, &mut res_rows)
                 }
 
                 Op::Delete | Op::UpdateDelete => {
                     // First remove the row from state store
-                    self.managed_state.delete(row_ref.clone());
+                    self.managed_state.delete(row_ref);
                     self.cache
                         .delete(
                             None,

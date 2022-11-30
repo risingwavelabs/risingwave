@@ -157,7 +157,7 @@ impl ProtobufParser {
     fn parse_inner(
         &self,
         mut payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         if self.confluent_wire_type {
             let raw_payload = resolve_pb_header(payload)?;

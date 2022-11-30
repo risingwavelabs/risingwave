@@ -54,19 +54,19 @@ impl_chrono_wrapper!(NaiveTimeWrapper, NaiveTime);
 
 impl Default for NaiveDateWrapper {
     fn default() -> Self {
-        NaiveDateWrapper(NaiveDate::from_ymd(1970, 1, 1))
+        NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
     }
 }
 
 impl Default for NaiveTimeWrapper {
     fn default() -> Self {
-        NaiveTimeWrapper(NaiveTime::from_hms(0, 0, 0))
+        NaiveTimeWrapper::from_hms_uncheck(0, 0, 0)
     }
 }
 
 impl Default for NaiveDateTimeWrapper {
     fn default() -> Self {
-        NaiveDateTimeWrapper(NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0))
+        NaiveDateWrapper::default().into()
     }
 }
 
@@ -115,8 +115,9 @@ impl ToBinary for NaiveDateTimeWrapper {
 impl NaiveDateWrapper {
     pub fn with_days(days: i32) -> memcomparable::Result<Self> {
         Ok(NaiveDateWrapper::new(
-            NaiveDate::from_num_days_from_ce_opt(days)
-                .ok_or(memcomparable::Error::InvalidNaiveDateEncoding(days))?,
+            NaiveDate::from_num_days_from_ce_opt(days).ok_or_else(|| {
+                memcomparable::Error::Message(format!("invalid date encoding: days={days}"))
+            })?,
         ))
     }
 
@@ -137,13 +138,41 @@ impl NaiveDateWrapper {
     pub fn from_protobuf(days: i32) -> ArrayResult<Self> {
         Self::with_days(days).map_err(Into::into)
     }
+
+    pub fn from_ymd_uncheck(year: i32, month: u32, day: u32) -> Self {
+        Self::new(NaiveDate::from_ymd_opt(year, month, day).unwrap())
+    }
+
+    pub fn from_num_days_from_ce_uncheck(days: i32) -> Self {
+        Self::with_days(days).unwrap()
+    }
+
+    pub fn and_hms_uncheck(self, hour: u32, min: u32, sec: u32) -> NaiveDateTimeWrapper {
+        self.and_hms_micro_uncheck(hour, min, sec, 0)
+    }
+
+    pub fn and_hms_micro_uncheck(
+        self,
+        hour: u32,
+        min: u32,
+        sec: u32,
+        micro: u32,
+    ) -> NaiveDateTimeWrapper {
+        NaiveDateTimeWrapper::new(
+            self.0
+                .and_time(NaiveTimeWrapper::from_hms_micro_uncheck(hour, min, sec, micro).0),
+        )
+    }
 }
 
 impl NaiveTimeWrapper {
     pub fn with_secs_nano(secs: u32, nano: u32) -> memcomparable::Result<Self> {
         Ok(NaiveTimeWrapper::new(
-            NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
-                .ok_or(memcomparable::Error::InvalidNaiveTimeEncoding(secs, nano))?,
+            NaiveTime::from_num_seconds_from_midnight_opt(secs, nano).ok_or_else(|| {
+                memcomparable::Error::Message(format!(
+                    "invalid time encoding: secs={secs}, nsecs={nano}"
+                ))
+            })?,
         ))
     }
 
@@ -170,15 +199,32 @@ impl NaiveTimeWrapper {
         let nano = (nano % 1_000_000_000) as u32;
         Self::with_secs_nano(secs, nano).map_err(Into::into)
     }
+
+    pub fn from_hms_uncheck(hour: u32, min: u32, sec: u32) -> Self {
+        Self::from_hms_nano_uncheck(hour, min, sec, 0)
+    }
+
+    pub fn from_hms_micro_uncheck(hour: u32, min: u32, sec: u32, micro: u32) -> Self {
+        Self::new(NaiveTime::from_hms_micro_opt(hour, min, sec, micro).unwrap())
+    }
+
+    pub fn from_hms_nano_uncheck(hour: u32, min: u32, sec: u32, nano: u32) -> Self {
+        Self::new(NaiveTime::from_hms_nano_opt(hour, min, sec, nano).unwrap())
+    }
+
+    pub fn from_num_seconds_from_midnight_uncheck(secs: u32, nano: u32) -> Self {
+        Self::new(NaiveTime::from_num_seconds_from_midnight_opt(secs, nano).unwrap())
+    }
 }
 
 impl NaiveDateTimeWrapper {
     pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> memcomparable::Result<Self> {
         Ok(NaiveDateTimeWrapper::new({
-            #[allow(clippy::unnecessary_lazy_evaluations)] // TODO: remove in toolchain bump
-            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
-                memcomparable::Error::InvalidNaiveDateTimeEncoding(secs, nsecs),
-            )?
+            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or_else(|| {
+                memcomparable::Error::Message(format!(
+                    "invalid datetime encoding: secs={secs}, nsecs={nsecs}"
+                ))
+            })?
         }))
     }
 
@@ -198,13 +244,13 @@ impl NaiveDateTimeWrapper {
     }
 
     pub fn from_protobuf(timestamp_micros: i64) -> ArrayResult<Self> {
-        let mut secs = timestamp_micros / 1_000_000;
-        let mut nsecs = (timestamp_micros % 1_000_000) * 1000;
-        if nsecs < 0 {
-            secs -= 1;
-            nsecs += 1_000_000_000;
-        }
+        let secs = timestamp_micros.div_euclid(1_000_000);
+        let nsecs = timestamp_micros.rem_euclid(1_000_000) * 1000;
         Self::with_secs_nsecs(secs, nsecs as u32).map_err(Into::into)
+    }
+
+    pub fn from_timestamp_uncheck(secs: i64, nsecs: u32) -> Self {
+        Self::new(NaiveDateTime::from_timestamp_opt(secs, nsecs).unwrap())
     }
 
     /// Truncate the timestamp to the precision of microseconds.
@@ -272,7 +318,7 @@ impl NaiveDateTimeWrapper {
     /// );
     /// ```
     pub fn truncate_minute(self) -> Self {
-        NaiveDateTimeWrapper::new(self.0.date().and_hms(self.0.hour(), self.0.minute(), 0))
+        NaiveDateWrapper::new(self.0.date()).and_hms_uncheck(self.0.hour(), self.0.minute(), 0)
     }
 
     /// Truncate the timestamp to the precision of hours.
@@ -287,7 +333,7 @@ impl NaiveDateTimeWrapper {
     /// );
     /// ```
     pub fn truncate_hour(self) -> Self {
-        NaiveDateTimeWrapper::new(self.0.date().and_hms(self.0.hour(), 0, 0))
+        NaiveDateWrapper::new(self.0.date()).and_hms_uncheck(self.0.hour(), 0, 0)
     }
 
     /// Truncate the timestamp to the precision of days.
@@ -302,7 +348,7 @@ impl NaiveDateTimeWrapper {
     /// );
     /// ```
     pub fn truncate_day(self) -> Self {
-        NaiveDateTimeWrapper::new(self.0.date().and_hms(0, 0, 0))
+        NaiveDateWrapper::new(self.0.date()).into()
     }
 
     /// Truncate the timestamp to the precision of weeks.
@@ -317,13 +363,7 @@ impl NaiveDateTimeWrapper {
     /// );
     /// ```
     pub fn truncate_week(self) -> Self {
-        NaiveDateTimeWrapper::new(
-            self.0
-                .date()
-                .week(Weekday::Mon)
-                .first_day()
-                .and_hms(0, 0, 0),
-        )
+        NaiveDateWrapper::new(self.0.date().week(Weekday::Mon).first_day()).into()
     }
 
     /// Truncate the timestamp to the precision of months.
@@ -338,7 +378,7 @@ impl NaiveDateTimeWrapper {
     /// );
     /// ```
     pub fn truncate_month(self) -> Self {
-        NaiveDateTimeWrapper::new(self.0.date().with_day(1).unwrap().and_hms(0, 0, 0))
+        NaiveDateWrapper::new(self.0.date().with_day(1).unwrap()).into()
     }
 
     /// Truncate the timestamp to the precision of quarters.
@@ -353,9 +393,7 @@ impl NaiveDateTimeWrapper {
     /// );
     /// ```
     pub fn truncate_quarter(self) -> Self {
-        NaiveDateTimeWrapper::new(
-            NaiveDate::from_ymd(self.0.year(), self.0.month0() / 3 * 3 + 1, 1).and_hms(0, 0, 0),
-        )
+        NaiveDateWrapper::from_ymd_uncheck(self.0.year(), self.0.month0() / 3 * 3 + 1, 1).into()
     }
 
     /// Truncate the timestamp to the precision of years.
@@ -370,7 +408,7 @@ impl NaiveDateTimeWrapper {
     /// );
     /// ```
     pub fn truncate_year(self) -> Self {
-        NaiveDateTimeWrapper::new(NaiveDate::from_ymd(self.0.year(), 1, 1).and_hms(0, 0, 0))
+        NaiveDateWrapper::from_ymd_uncheck(self.0.year(), 1, 1).into()
     }
 
     /// Truncate the timestamp to the precision of decades.
@@ -385,9 +423,7 @@ impl NaiveDateTimeWrapper {
     /// );
     /// ```
     pub fn truncate_decade(self) -> Self {
-        NaiveDateTimeWrapper::new(
-            NaiveDate::from_ymd(self.0.year() / 10 * 10, 1, 1).and_hms(0, 0, 0),
-        )
+        NaiveDateWrapper::from_ymd_uncheck(self.0.year() / 10 * 10, 1, 1).into()
     }
 
     /// Truncate the timestamp to the precision of centuries.
@@ -402,9 +438,7 @@ impl NaiveDateTimeWrapper {
     /// );
     /// ```
     pub fn truncate_century(self) -> Self {
-        NaiveDateTimeWrapper::new(
-            NaiveDate::from_ymd((self.0.year() - 1) / 100 * 100 + 1, 1, 1).and_hms(0, 0, 0),
-        )
+        NaiveDateWrapper::from_ymd_uncheck((self.0.year() - 1) / 100 * 100 + 1, 1, 1).into()
     }
 
     /// Truncate the timestamp to the precision of millenniums.
@@ -421,15 +455,13 @@ impl NaiveDateTimeWrapper {
     /// );
     /// ```
     pub fn truncate_millennium(self) -> Self {
-        NaiveDateTimeWrapper::new(
-            NaiveDate::from_ymd((self.0.year() - 1) / 1000 * 1000 + 1, 1, 1).and_hms(0, 0, 0),
-        )
+        NaiveDateWrapper::from_ymd_uncheck((self.0.year() - 1) / 1000 * 1000 + 1, 1, 1).into()
     }
 }
 
 impl From<NaiveDateWrapper> for NaiveDateTimeWrapper {
     fn from(date: NaiveDateWrapper) -> Self {
-        NaiveDateTimeWrapper::new(date.0.and_hms(0, 0, 0))
+        date.and_hms_uncheck(0, 0, 0)
     }
 }
 
@@ -479,7 +511,7 @@ impl CheckedAdd<IntervalUnit> for NaiveDateTimeWrapper {
             // Fix the days after changing date.
             // For example, 1970.1.31 + 1 month = 1970.2.28
             day = day.min(get_mouth_days(year, month as usize));
-            date = NaiveDate::from_ymd(year, month as u32, day as u32);
+            date = NaiveDate::from_ymd_opt(year, month as u32, day as u32)?;
         }
         let mut datetime = NaiveDateTime::new(date, self.0.time());
         datetime = datetime.checked_add_signed(Duration::days(rhs.get_days().into()))?;

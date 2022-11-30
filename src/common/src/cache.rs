@@ -319,7 +319,7 @@ impl<K: LruKey, T: LruValue> LruHandleTable<K, T> {
     }
 }
 
-type RequestQueue<K, T> = Vec<Sender<CacheableEntry<K, T>>>;
+type RequestQueue = Vec<Sender<()>>;
 pub struct LruCacheShard<K: LruKey, T: LruValue> {
     /// The dummy header node of a ring linked list. The linked list is a LRU list, holding the
     /// cache handles that are not used externally.
@@ -327,7 +327,7 @@ pub struct LruCacheShard<K: LruKey, T: LruValue> {
     table: LruHandleTable<K, T>,
     // TODO: may want to use an atomic object linked list shared by all shards.
     object_pool: Vec<Box<LruHandle<K, T>>>,
-    write_request: HashMap<K, RequestQueue<K, T>>,
+    write_request: HashMap<K, RequestQueue>,
     lru_usage: Arc<AtomicUsize>,
     usage: Arc<AtomicUsize>,
     capacity: usize,
@@ -680,7 +680,6 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
     ) -> CacheableEntry<K, T> {
         let mut to_delete = vec![];
         // Drop the entries outside lock to avoid deadlock.
-        let mut errs = vec![];
         let handle = unsafe {
             let mut shard = self.shards[self.shard(hash)].lock();
             let pending_request = shard.write_request.remove(&key);
@@ -688,13 +687,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             debug_assert!(!ptr.is_null());
             if let Some(que) = pending_request {
                 for sender in que {
-                    (*ptr).add_ref();
-                    if let Err(e) = sender.send(CacheableEntry {
-                        cache: self.clone(),
-                        handle: ptr,
-                    }) {
-                        errs.push(e);
-                    }
+                    let _ = sender.send(());
                 }
             }
             CacheableEntry {
@@ -808,9 +801,8 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
             match self.lookup_for_request(hash, key.clone()) {
                 LookupResult::Cached(entry) => return Ok(entry),
                 LookupResult::WaitPendingRequest(recv) => {
-                    if let Ok(entry) = recv.await {
-                        return Ok(entry);
-                    }
+                    let _ = recv.await;
+                    continue;
                 }
                 LookupResult::Miss => {
                     let this = self.clone();
@@ -847,7 +839,7 @@ pub struct CacheableEntry<K: LruKey, T: LruValue> {
 pub enum LookupResult<K: LruKey, T: LruValue> {
     Cached(CacheableEntry<K, T>),
     Miss,
-    WaitPendingRequest(Receiver<CacheableEntry<K, T>>),
+    WaitPendingRequest(Receiver<()>),
 }
 
 unsafe impl<K: LruKey, T: LruValue> Send for CacheableEntry<K, T> {}
@@ -1184,23 +1176,23 @@ mod tests {
             insert(&mut shard, "a", "v1");
             assert!(lookup(&mut shard, "a"));
         }
-        let ret = cache.lookup_for_request(0, "a".to_string());
-        match ret {
-            LookupResult::Cached(_) => (),
-            _ => panic!(),
-        }
-        let ret1 = cache.lookup_for_request(0, "b".to_string());
-        match ret1 {
-            LookupResult::Miss => (),
-            _ => panic!(),
-        }
+        assert!(matches!(
+            cache.lookup_for_request(0, "a".to_string()),
+            LookupResult::Cached(_)
+        ));
+        assert!(matches!(
+            cache.lookup_for_request(0, "b".to_string()),
+            LookupResult::Miss
+        ));
         let ret2 = cache.lookup_for_request(0, "b".to_string());
         match ret2 {
             LookupResult::WaitPendingRequest(mut recv) => {
                 assert!(matches!(recv.try_recv(), Err(TryRecvError::Empty)));
                 cache.insert("b".to_string(), 0, 1, "v2".to_string());
-                let v = recv.try_recv().unwrap();
-                assert_eq!(v.value(), "v2");
+                recv.try_recv().unwrap();
+                assert!(
+                    matches!(cache.lookup_for_request(0, "b".to_string()), LookupResult::Cached(v) if v.value().eq("v2"))
+                );
             }
             _ => panic!(),
         }
