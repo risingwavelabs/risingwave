@@ -156,7 +156,7 @@ impl KafkaSplitEnumerator {
                         .await?;
                     let offset = match self.start_offset {
                         KafkaEnumeratorOffset::Earliest => low_watermark - 1,
-                        KafkaEnumeratorOffset::Latest => high_watermark,
+                        KafkaEnumeratorOffset::Latest => high_watermark - 1,
                         _ => unreachable!(),
                     };
                     map.insert(*partition, Some(offset));

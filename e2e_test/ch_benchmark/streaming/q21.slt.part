@@ -1,0 +1,4 @@
+query TT rowsort
+select * from ch_benchmark_q21;
+----
+Supplier#000000011       10
