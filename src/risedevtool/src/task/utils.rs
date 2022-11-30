@@ -28,15 +28,22 @@ pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) ->
         }
 
         meta_nodes => {
-            let mut parameter = "".to_owned();
-            for meta_node in meta_nodes {
-                parameter
-                    .push_str(format!(",http://{}:{}", meta_node.address, meta_node.port).as_str());
-            }
-            cmd.arg("--meta-address").arg(parameter);
+            // FIXME: Pass all parameters to meta
+            // let mut parameter = "".to_owned();
+            // for meta_node in meta_nodes {
+            //     parameter
+            //         .push_str(format!(",http://{}:{}", meta_node.address, meta_node.port).as_str());
+            // }
+            cmd.arg("--meta-address").arg(format!(
+                "http://{}:{}",
+                meta_nodes.last().unwrap().address,
+                meta_nodes.last().unwrap().port
+            ));
             if meta_nodes.len() > 1 {
-                eprintln!("WARN: more than 1 meta node instance is detected. Using all of them.");
-                // TODO: This has to change. We are now supporting multiple meta nodes
+                eprintln!(
+                    "WARN: more than 1 meta node instance is detected. Using only the first one."
+                );
+                // FIXME: This has to change. We are now supporting multiple meta nodes
                 // According to some heruistics, the last etcd node seems always to be elected as
                 // leader. Therefore we ensure compute node can start by using the last one.
             }

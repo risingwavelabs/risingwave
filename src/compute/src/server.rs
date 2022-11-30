@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::thread;
@@ -32,6 +33,7 @@ use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
+use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_source::monitor::SourceMetrics;
@@ -89,30 +91,56 @@ pub async fn compute_node_serve(
     // Try each of the meta nodes
     // FIXME: Should we communicate with ETCD here?
 
-    let addrs: Vec<&str> = opts.meta_address.split(",").collect();
-    let mut meta_client_opt: Option<MetaClient> = None;
-    'outer: loop {
-        for addr in &addrs {
-            tracing::info!("trying {}", addr);
-            let client_res = MetaClient::register_new(
-                addr,
-                WorkerType::ComputeNode,
-                &client_addr,
-                config.streaming.worker_node_parallelism,
-            )
-            .await;
-            if client_res.is_err() {
-                tracing::info!("failed: trying {}", addr);
+    let mut client_res = MetaClient::register_new(
+        &opts.meta_address,
+        WorkerType::ComputeNode,
+        &client_addr,
+        config.streaming.worker_node_parallelism,
+    )
+    .await;
 
-                continue;
-            }
-            meta_client_opt = Some(client_res.unwrap());
-            break 'outer;
+    // FIXME: This may time out during risedev d, if compute has to wait for meta to get
+    // online/elected
+
+    // This finds the initial leader but not the next leader
+
+    tracing::info!(
+        "Trying to connect against meta node {}. May be a follower",
+        &opts.meta_address
+    );
+    let mut used_leader_addr = opts.meta_address;
+    loop {
+        if client_res.as_ref().is_ok() {
+            break;
         }
-        thread::sleep(Duration::from_millis(4000));
-    }
+        let e = client_res.as_ref().err().unwrap();
+        let e_str = e.to_string();
+        // FIXME Can we do this better? Error is:
+        // gRPC error (The operation was aborted): http://127.0.0.1:25690
+        let leader_addr = e_str
+            .split("gRPC error (The operation was aborted): ")
+            .collect::<Vec<&str>>()[1];
+        used_leader_addr = leader_addr.to_string();
 
-    let meta_client = meta_client_opt.unwrap();
+        tracing::info!(
+            "try to connect against leader meta node {}",
+            used_leader_addr,
+        );
+        thread::sleep(Duration::from_millis(5000));
+        client_res = MetaClient::register_new(
+            leader_addr,
+            WorkerType::ComputeNode,
+            &client_addr,
+            config.streaming.worker_node_parallelism,
+        )
+        .await;
+    }
+    tracing::info!(
+        "Succeeded to connect against leader meta node {}",
+        used_leader_addr,
+    );
+
+    let meta_client = client_res.unwrap();
 
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);

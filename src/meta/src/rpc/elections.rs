@@ -355,10 +355,17 @@ pub async fn run_elections<S: MetaStore>(
 
         // define all follow up elections and terms in handle
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let mut addr_port = initial_leader.get_node_address().split(":"); // TODO: replace this with an into() call
+                                                                          // TODO: MetaLeaderInfo into NodeAddr
         let (leader_tx, leader_rx) = tokio::sync::watch::channel((
             HostAddr {
-                host: "127.0.0.1".to_owned(), // TODO: add implementation
-                port: 123,
+                host: addr_port.next().unwrap().to_string(),
+                port: addr_port
+                    .next()
+                    .unwrap()
+                    .to_string()
+                    .parse::<u16>()
+                    .unwrap(),
             },
             is_initial_leader,
         ));

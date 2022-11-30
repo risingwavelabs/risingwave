@@ -484,11 +484,10 @@ struct InterceptorWrapper {
 
 impl Interceptor for InterceptorWrapper {
     fn call(&mut self, req: Request<()>) -> std::result::Result<Request<()>, Status> {
-        let (_, is_leader) = self.leader_rx.borrow().clone();
+        let (addr, is_leader) = self.leader_rx.borrow().clone();
         if !is_leader {
-            return Err(Status::aborted(
-                "Blocking request, because node is not leader",
-            ));
+            return Err(Status::aborted(format!("http://{}", addr.to_string()))); // TODO: Do this as
+                                                                                 // json
         }
         Ok(req)
     }
