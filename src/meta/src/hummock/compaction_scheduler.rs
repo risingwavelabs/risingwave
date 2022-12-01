@@ -198,7 +198,10 @@ where
 
         let cancel_state = match &schedule_status {
             ScheduleStatus::Ok => None,
-            ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
+            ScheduleStatus::NoTask | ScheduleStatus::PickFailure => {
+                self.hummock_manager.report_scale_compactor_info().await;
+                None
+            }
             ScheduleStatus::AssignFailure(task) => {
                 Some((task.clone(), TaskStatus::AssignFailCanceled))
             }

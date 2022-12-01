@@ -526,6 +526,16 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_kilobytes(
+                    "Waiting compaction bytes",
+                    "Compaction bytes which need to be schedule in new task",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compactor_waiting_compaction_bytes')})",
+                            "waiting_compaction_bytes",
+                        ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "scale compactor core count",
                     "compactor core resource need to scale out",

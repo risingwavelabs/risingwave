@@ -78,6 +78,7 @@ pub struct MetaMetrics {
 
     /// The number of compactor CPU need to be scale.
     pub scale_compactor_core_num: IntGauge,
+    pub waiting_compaction_bytes: IntGauge,
 }
 
 impl MetaMetrics {
@@ -239,6 +240,13 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let waiting_compaction_bytes = register_int_gauge_with_registry!(
+            "storage_compactor_waiting_compaction_bytes",
+            "compaction bytes to be schedule",
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -267,6 +275,7 @@ impl MetaMetrics {
 
             worker_num,
             scale_compactor_core_num,
+            waiting_compaction_bytes,
         }
     }
 
