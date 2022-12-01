@@ -19,6 +19,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
+use super::explain::NodeExplain;
 use super::generic::{self, GenericPlanNode, Project};
 use super::{
     gen_filter_and_pushdown, BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,

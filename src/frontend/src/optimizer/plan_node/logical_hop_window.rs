@@ -20,6 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
 
+use super::explain::NodeExplain;
 use super::generic::GenericPlanNode;
 use super::{
     gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, PlanBase, PlanRef,

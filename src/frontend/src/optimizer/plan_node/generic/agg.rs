@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use itertools::Itertools;
+use pretty::RcDoc;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -27,6 +28,7 @@ use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePro
 use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, InputRef, InputRefDisplay};
+use crate::optimizer::plan_node::explain::{NodeExplain, field_doc_iter};
 use crate::optimizer::property::Direction;
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -58,7 +60,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
                     plan_agg_call: agg_call,
                     input_schema: self.input.schema(),
                 };
-                let name = format!("{:?}", plan_agg_call_display);
+                let name = plan_agg_call_display.to_string();
                 Field::with_name(agg_call.return_type.clone(), name)
             }))
             .collect();
@@ -66,7 +68,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some((0..self.group_key.len()).into_iter().collect_vec())
+        Some((0..self.group_key.len()).into_iter().collect())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -350,15 +352,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         (self.agg_calls, self.group_key, self.input)
     }
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        if !self.group_key.is_empty() {
-            builder.field("group_key", &self.group_key_display());
-        }
-        builder.field("aggs", &self.agg_calls_display());
-        builder.finish()
-    }
-
     fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
         self.agg_calls
             .iter()
@@ -366,7 +359,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 plan_agg_call,
                 input_schema: self.input.schema(),
             })
-            .collect_vec()
+            .collect()
     }
 
     fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
@@ -374,7 +367,26 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .iter()
             .copied()
             .map(|i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-            .collect_vec()
+            .collect()
+    }
+}
+
+impl<'a, PlanRef: stream::StreamPlanRef> NodeExplain<'a> for Agg<PlanRef> {
+    fn distill_fields(&self) -> RcDoc<'a, ()> {
+        let mut fields = Vec::with_capacity(2);
+        if !self.group_key.is_empty() {
+            let ok = |plan_agg_call| PlanAggCallDisplay {
+                plan_agg_call,
+                input_schema: self.input.schema(),
+            };
+            fields.push(field_doc_iter("group_key", self.agg_calls.iter().map(ok)));
+        }
+        let ok = |i| FieldDisplay(self.input.schema().fields.get(i).unwrap());
+        fields.push(field_doc_iter(
+            "aggs",
+            self.group_key.iter().copied().map(ok),
+        ));
+        RcDoc::intersperse(fields, RcDoc::softline())
     }
 }
 
@@ -576,7 +588,7 @@ pub struct PlanAggCallDisplay<'a> {
     pub input_schema: &'a Schema,
 }
 
-impl fmt::Debug for PlanAggCallDisplay<'_> {
+impl fmt::Display for PlanAggCallDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let that = self.plan_agg_call;
         write!(f, "{}", that.agg_kind)?;

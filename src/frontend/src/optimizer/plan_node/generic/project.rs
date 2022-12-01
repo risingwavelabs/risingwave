@@ -15,10 +15,12 @@
 use std::fmt;
 
 use itertools::Itertools;
+use pretty::RcDoc;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprDisplay, ExprImpl};
+use crate::optimizer::plan_node::explain::{NodeExplain, field_doc_iter};
 use crate::session::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 
@@ -79,22 +81,6 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         (self.exprs, self.input)
     }
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field(
-            "exprs",
-            &self
-                .exprs
-                .iter()
-                .map(|expr| ExprDisplay {
-                    expr,
-                    input_schema: self.input.schema(),
-                })
-                .collect_vec(),
-        );
-        builder.finish()
-    }
-
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         let exprs = &self.exprs;
         let input_len = self.input.schema().len();
@@ -112,5 +98,20 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     /// column corresponds more than one out columns, mapping to any one
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.o2i_col_mapping().inverse()
+    }
+}
+
+impl<'a, PlanRef: GenericPlanRef> NodeExplain<'a> for Project<PlanRef> {
+    fn distill_fields(&self) -> RcDoc<'a, ()> {
+        RcDoc::intersperse(
+            [field_doc_iter(
+                "exprs",
+                self.exprs.iter().map(|expr| ExprDisplay {
+                    expr,
+                    input_schema: self.input.schema(),
+                }),
+            )],
+            RcDoc::line(),
+        )
     }
 }

@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
+use pretty::{RcDoc, Doc};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::super::utils::IndicesDisplay;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{InputRef, InputRefDisplay};
+use crate::optimizer::plan_node::explain::{NodeExplain, field_doc_display, field_doc_str};
 use crate::session::OptimizerContextRef;
 
 /// [`HopWindow`] implements Hop Table Function.
@@ -96,50 +96,48 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
             self.output_indices,
         )
     }
+}
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+impl<'a, PlanRef: GenericPlanRef> NodeExplain<'a> for HopWindow<PlanRef> {
+    fn distill_fields(&self) -> RcDoc<'a, ()> {
         let output_type = DataType::window_of(&self.time_col.data_type).unwrap();
-        write!(
-            f,
-            "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
-            name,
-            format_args!(
-                "{}",
-                InputRefDisplay {
-                    input_ref: &self.time_col,
-                    input_schema: self.input.schema()
-                }
-            ),
-            self.window_slide,
-            self.window_size,
-            if self
-                .output_indices
-                .iter()
-                .copied()
-                // Behavior is the same as `LogicalHopWindow::internal_column_num`
-                .eq(0..(self.input.schema().len() + 2))
-            {
-                "all".to_string()
-            } else {
-                let original_schema: Schema = self
-                    .input
-                    .schema()
-                    .clone()
-                    .into_fields()
-                    .into_iter()
-                    .chain([
-                        Field::with_name(output_type.clone(), "window_start"),
-                        Field::with_name(output_type, "window_end"),
-                    ])
-                    .collect();
-                format!(
-                    "{:?}",
-                    &IndicesDisplay {
-                        indices: &self.output_indices,
-                        input_schema: &original_schema,
-                    }
-                )
+        let mut docs = Vec::with_capacity(4);
+        docs.push(field_doc_display(
+            "time_col",
+            &InputRefDisplay {
+                input_ref: &self.time_col,
+                input_schema: self.input.schema(),
             },
-        )
+        ));
+        docs.push(field_doc_display("slide", &self.window_slide));
+        docs.push(field_doc_display("size", &self.window_size));
+        if self
+            .output_indices
+            .iter()
+            .copied()
+            // Behavior is the same as `LogicalHopWindow::internal_column_num`
+            .eq(0..(self.input.schema().len() + 2))
+        {
+            docs.push(field_doc_str("output", "all"));
+        } else {
+            let input_schema = self.input.schema().clone();
+            let original_schema: Schema = input_schema
+                .into_fields()
+                .into_iter()
+                .chain([
+                    Field::with_name(output_type.clone(), "window_start"),
+                    Field::with_name(output_type, "window_end"),
+                ])
+                .collect();
+            docs.push(field_doc_display(
+                "output",
+                &IndicesDisplay {
+                    indices: &self.output_indices,
+                    input_schema: &original_schema,
+                },
+            ));
+        }
+
+        RcDoc::intersperse(docs, Doc::line())
     }
 }

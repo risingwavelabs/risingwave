@@ -20,6 +20,7 @@ use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
+use super::explain::NodeExplain;
 use super::generic::{
     self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
 };
