@@ -362,15 +362,13 @@ impl Cluster {
             return;
         }
         join_all(nodes.iter().map(|name| async move {
-            // FIXME: sleep random time lead to panic
-            // let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
-            // tokio::time::sleep(t).await;
+            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            tokio::time::sleep(t).await;
             tracing::info!("kill {name}");
             madsim::runtime::Handle::current().kill(&name);
 
-            // let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
-            // tokio::time::sleep(t).await;
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            tokio::time::sleep(t).await;
             tracing::info!("restart {name}");
             madsim::runtime::Handle::current().restart(&name);
         }))
