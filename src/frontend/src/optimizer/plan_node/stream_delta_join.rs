@@ -102,7 +102,7 @@ impl fmt::Display for StreamDeltaJoin {
                 .copied()
                 .eq(0..self.logical.internal_column_num())
             {
-                builder.field("output", &"all");
+                builder.field("output", &format_args!("all"));
             } else {
                 builder.field(
                     "output",

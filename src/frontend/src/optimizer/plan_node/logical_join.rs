@@ -74,7 +74,7 @@ impl fmt::Display for LogicalJoin {
                 .copied()
                 .eq(0..self.internal_column_num())
             {
-                builder.field("output", &"all");
+                builder.field("output", &format_args!("all"));
             } else {
                 builder.field(
                     "output",
