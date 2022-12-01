@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::process::Command;
 
 use anyhow::Result;
@@ -23,21 +24,42 @@ pub fn compute_risectl_env(services: &HashMap<String, ServiceConfig>) -> Result<
     // Pick one of the compute node and generate risectl config
     for item in services.values() {
         if let ServiceConfig::ComputeNode(c) = item {
-            let mut cmd = Command::new("compute-node");
-            add_storage_backend(
-                "risectl",
-                c.provide_minio.as_ref().unwrap(),
-                c.provide_aws_s3.as_ref().unwrap(),
-                HummockInMemoryStrategy::Disallowed,
-                &mut cmd,
-            )?;
-            let meta_node = &c.provide_meta_node.as_ref().unwrap()[0];
-            return Ok(format!(
-                "export RW_HUMMOCK_URL=\"{}\"\nexport RW_META_ADDR=\"http://{}:{}\"",
-                cmd.get_args().nth(1).unwrap().to_str().unwrap(),
-                meta_node.address,
-                meta_node.port
-            ));
+            let mut env = String::new();
+
+            // RW_HUMMOCK_URL
+            // If the cluster is launched without a shared storage, we will skip this.
+            {
+                let mut cmd = Command::new("compute-node");
+                if add_storage_backend(
+                    "risectl",
+                    c.provide_minio.as_ref().unwrap(),
+                    c.provide_aws_s3.as_ref().unwrap(),
+                    HummockInMemoryStrategy::Disallowed,
+                    &mut cmd,
+                )
+                .is_ok()
+                {
+                    writeln!(
+                        env,
+                        "export RW_HUMMOCK_URL=\"{}\"",
+                        cmd.get_args().nth(1).unwrap().to_str().unwrap()
+                    )
+                    .unwrap();
+                }
+            }
+
+            // RW_META_ADDR
+            {
+                let meta_node = &c.provide_meta_node.as_ref().unwrap()[0];
+                writeln!(
+                    env,
+                    "export RW_META_ADDR=\"http://{}:{}\"",
+                    meta_node.address, meta_node.port
+                )
+                .unwrap();
+            }
+
+            return Ok(env);
         }
     }
     Ok("".into())
