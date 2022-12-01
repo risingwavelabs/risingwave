@@ -22,6 +22,7 @@ use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::hummock::CompactionGroup;
+use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext, Context};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
@@ -163,6 +164,7 @@ pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()
 
 async fn run_compare_result(
     hummock: &HummockStorage,
+    meta_client: Arc<MockHummockMetaClient>,
     test_range: u64,
     test_count: u64,
 ) -> Result<(), String> {
@@ -204,6 +206,12 @@ async fn run_compare_result(
         delete_range.commit(epoch).await?;
         let checkpoint = epoch % 10 == 0;
         hummock.seal_epoch(epoch, checkpoint);
+        if checkpoint {
+            let ret = hummock.sync(epoch).await.unwrap();
+            meta_client.commit_epoch(epoch, ret.uncommitted_ssts).await.unwrap();
+        } else {
+            meta_client.update_current_epoch(epoch).await.unwrap();
+        }
         hummock
             .try_wait_epoch(HummockReadEpoch::Current(epoch))
             .await

@@ -719,6 +719,14 @@ impl HummockMetaClient for MetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
+    async fn update_current_epoch(
+        &self,
+        _epoch: HummockEpoch,
+    ) -> Result<()> {
+        panic!("Only meta service can update_current_epoch in production.")
+    }
+
+
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,

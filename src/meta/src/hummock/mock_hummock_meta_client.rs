@@ -155,6 +155,17 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(())
     }
 
+    async fn update_current_epoch(
+        &self,
+        epoch: HummockEpoch,
+    ) -> Result<()> {
+        self.hummock_manager
+            .update_current_epoch(epoch)
+            .await
+            .map_err(mock_err)
+    }
+
+
     async fn subscribe_compact_tasks(
         &self,
         _max_concurrent_task_number: u64,
