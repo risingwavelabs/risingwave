@@ -85,24 +85,16 @@ pub struct LogicalProject {
 
 impl LogicalProject {
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
-        let ctx = input.ctx();
-        for expr in &exprs {
-            assert_input_ref!(expr, input.schema().fields().len());
-            assert!(!expr.has_subquery());
-            assert!(!expr.has_agg_call());
-            assert!(
-                !expr.has_table_function(),
-                "Project should not have table function."
-            );
-            assert!(
-                !expr.has_window_function(),
-                "Project should not have window function."
-            );
-        }
         let core = generic::Project::new(exprs, input.clone());
+        Self::with_core(core)
+    }
+
+    pub fn with_core(core: generic::Project<PlanRef>) -> Self {
+        let ctx = core.input.ctx();
+
         let schema = core.schema();
         let pk_indices = core.logical_pk();
-        let functional_dependency = Self::derive_fd(&core, input.functional_dependency());
+        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
 
         let base = PlanBase::new_logical(
             ctx,

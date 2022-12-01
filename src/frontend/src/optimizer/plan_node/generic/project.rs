@@ -18,7 +18,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{GenericPlanNode, GenericPlanRef};
-use crate::expr::{Expr, ExprDisplay, ExprImpl};
+use crate::expr::{
+    assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+};
 use crate::session::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 
@@ -27,6 +29,8 @@ use crate::utils::ColIndexMapping;
 pub struct Project<PlanRef> {
     pub exprs: Vec<ExprImpl>,
     pub input: PlanRef,
+    // we need some check when construct the `Project::new`
+    _private: (),
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
@@ -71,8 +75,34 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Project<PlanRef> {
+    fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
+        if expr.has_subquery() {
+            return Err("subquery");
+        }
+        if expr.has_agg_call() {
+            return Err("aggregate function");
+        }
+        if expr.has_table_function() {
+            return Err("table function");
+        }
+        if expr.has_window_function() {
+            return Err("window function");
+        }
+        Ok(())
+    }
+
     pub fn new(exprs: Vec<ExprImpl>, input: PlanRef) -> Self {
-        Project { exprs, input }
+        for expr in &exprs {
+            assert_input_ref!(expr, input.schema().fields().len());
+            Self::check_expr_type(expr)
+                .map_err(|expr| format!("{expr} should not in Project operator"))
+                .unwrap();
+        }
+        Project {
+            exprs,
+            input,
+            _private: (),
+        }
     }
 
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
