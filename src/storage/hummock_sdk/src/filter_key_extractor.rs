@@ -158,19 +158,24 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
+        match self.read_pattern_prefix_column == 0 {
+            true => full_key,
+            false => {
+                let (dist_key_start_position, dist_key_len) = self
+                    .deserializer
+                    .deserialize_dist_key_position_with_column_indices(
+                        pk,
+                        0..self.read_pattern_prefix_column
+                            + self.distribution_key_start_index_in_pk,
+                        self.distribution_key_start_index_in_pk,
+                    )
+                    .unwrap();
 
-        let (dist_key_start_position, dist_key_len) = self
-            .deserializer
-            .deserialize_dist_key_position_with_column_indices(
-                pk,
-                0..self.read_pattern_prefix_column + self.distribution_key_start_index_in_pk,
-                self.distribution_key_start_index_in_pk,
-            )
-            .unwrap();
-
-        let prefix_len = TABLE_PREFIX_LEN + VirtualNode::SIZE + dist_key_len;
-        &full_key[dist_key_start_position + TABLE_PREFIX_LEN + VirtualNode::SIZE
-            ..dist_key_start_position + prefix_len]
+                let prefix_len = TABLE_PREFIX_LEN + VirtualNode::SIZE + dist_key_len;
+                &full_key[dist_key_start_position + TABLE_PREFIX_LEN + VirtualNode::SIZE
+                    ..dist_key_start_position + prefix_len]
+            }
+        }
     }
 }
 
