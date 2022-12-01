@@ -202,7 +202,7 @@ mod tests {
             );
             assert_eq!(
                 row.value_at(6).to_owned_datum(),
-                (Some(ScalarImpl::Utf8("varchar".to_string())))
+                (Some(ScalarImpl::Utf8("varchar".into())))
             );
             assert_eq!(
                 row.value_at(7).to_owned_datum(),
@@ -345,17 +345,17 @@ mod tests {
                 Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("2022-07-13 20:48:37.07").unwrap()
                 )),
-                Some(ScalarImpl::Utf8("1732524418112319151".to_string())),
-                Some(ScalarImpl::Utf8("Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.".to_string())),
-                Some(ScalarImpl::Utf8("English".to_string())),
+                Some(ScalarImpl::Utf8("1732524418112319151".into())),
+                Some(ScalarImpl::Utf8("Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.".into())),
+                Some(ScalarImpl::Utf8("English".into())),
             ]))),
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("2018-01-29 12:19:11.07").unwrap()
                 )),
-                Some(ScalarImpl::Utf8("7772634297".to_string())),
-                Some(ScalarImpl::Utf8("Lily Frami yet".to_string())),
-                Some(ScalarImpl::Utf8("Dooley5659".to_string())),
+                Some(ScalarImpl::Utf8("7772634297".into())),
+                Some(ScalarImpl::Utf8("Lily Frami yet".into())),
+                Some(ScalarImpl::Utf8("Dooley5659".into())),
             ]) ))
         ];
         assert_eq!(row, expected);

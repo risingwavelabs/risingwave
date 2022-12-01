@@ -364,7 +364,7 @@ impl DataType {
             DataType::Float32 => ScalarImpl::Float32(OrderedF32::neg_infinity()),
             DataType::Float64 => ScalarImpl::Float64(OrderedF64::neg_infinity()),
             DataType::Boolean => ScalarImpl::Bool(false),
-            DataType::Varchar => ScalarImpl::Utf8("".to_string()),
+            DataType::Varchar => ScalarImpl::Utf8("".into()),
             DataType::Date => ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::MIN)),
             DataType::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(0, 0, 0)),
             DataType::Timestamp => {
@@ -462,7 +462,7 @@ macro_rules! for_all_scalar_variants {
             { Int64, int64, i64, i64 },
             { Float32, float32, OrderedF32, OrderedF32 },
             { Float64, float64, OrderedF64, OrderedF64 },
-            { Utf8, utf8, String, &'scalar str },
+            { Utf8, utf8, Box<str>, &'scalar str },
             { Bool, bool, bool, bool },
             { Decimal, decimal, Decimal, Decimal  },
             { Interval, interval, IntervalUnit, IntervalUnit },
@@ -719,10 +719,25 @@ impl From<f32> for ScalarImpl {
         Self::Float32(f.into())
     }
 }
-
 impl From<f64> for ScalarImpl {
     fn from(f: f64) -> Self {
         Self::Float64(f.into())
+    }
+}
+
+impl From<String> for ScalarImpl {
+    fn from(s: String) -> Self {
+        Self::Utf8(s.into_boxed_str())
+    }
+}
+impl From<&str> for ScalarImpl {
+    fn from(s: &str) -> Self {
+        Self::Utf8(s.into())
+    }
+}
+impl From<&String> for ScalarImpl {
+    fn from(s: &String) -> Self {
+        Self::Utf8(s.as_str().into())
     }
 }
 
@@ -857,7 +872,7 @@ impl ScalarImpl {
             Ty::Int64 => Self::Int64(i64::deserialize(de)?),
             Ty::Float32 => Self::Float32(f32::deserialize(de)?.into()),
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
-            Ty::Varchar => Self::Utf8(String::deserialize(de)?),
+            Ty::Varchar => Self::Utf8(Box::<str>::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
             Ty::Decimal => Self::Decimal(de.deserialize_decimal()?.into()),
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
@@ -1119,7 +1134,7 @@ mod tests {
                     ScalarImpl::NaiveDate(NaiveDateWrapper::from_ymd_uncheck(2333, 3, 3)),
                     DataType::Date,
                 ),
-                DataTypeName::Varchar => (ScalarImpl::Utf8("233".to_string()), DataType::Varchar),
+                DataTypeName::Varchar => (ScalarImpl::Utf8("233".into()), DataType::Varchar),
                 DataTypeName::Time => (
                     ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(2, 3, 3)),
                     DataType::Time,

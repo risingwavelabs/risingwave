@@ -451,7 +451,7 @@ mod tests {
     use more_asserts::assert_gt;
 
     use super::*;
-    use crate::types::{OrderedF32, OrderedF64};
+    use crate::types::{OrderedF32, OrderedF64, ScalarRef};
     use crate::{array, try_match_expand};
 
     // Empty struct is allowed in postgres.
@@ -553,18 +553,18 @@ mod tests {
     fn test_serialize_deserialize() {
         let value = StructValue::new(vec![
             Some(OrderedF32::from(3.2).to_scalar_value()),
-            Some("abcde".to_string().to_scalar_value()),
+            Some("abcde".into()),
             Some(
                 StructValue::new(vec![
                     Some(OrderedF64::from(1.3).to_scalar_value()),
-                    Some("a".to_string().to_scalar_value()),
+                    Some("a".into()),
                     None,
                     Some(StructValue::new(vec![]).to_scalar_value()),
                 ])
                 .to_scalar_value(),
             ),
             None,
-            Some("".to_string().to_scalar_value()),
+            Some("".into()),
             None,
             Some(StructValue::new(vec![]).to_scalar_value()),
             Some(12345.to_scalar_value()),
@@ -644,19 +644,16 @@ mod tests {
                 Ordering::Greater,
             ),
             (
-                StructValue::new(vec![Some("".to_string().to_scalar_value())]),
+                StructValue::new(vec![Some("".into())]),
                 StructValue::new(vec![None]),
                 vec![DataType::Varchar],
                 Ordering::Less,
             ),
             (
-                StructValue::new(vec![Some("abcd".to_string().to_scalar_value()), None]),
+                StructValue::new(vec![Some("abcd".into()), None]),
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 vec![
                     DataType::Varchar,
@@ -666,18 +663,12 @@ mod tests {
             ),
             (
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 vec![
                     DataType::Varchar,

@@ -142,7 +142,7 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{
         DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-        OrderedF32, Scalar,
+        OrderedF32, Scalar, ScalarRef,
     };
     use risingwave_common::util::sort_util::OrderType;
 
@@ -562,22 +562,22 @@ mod tests {
                 {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
-                            Some("abcd".to_string().to_scalar_value()),
+                            Some("abcd".into()),
                             Some(OrderedF32::from(-1.2).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
-                            Some("c".to_string().to_scalar_value()),
+                            Some("c".into()),
                             Some(OrderedF32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
-                        val: &StructValue::new(vec![Some("c".to_string().to_scalar_value()), None]),
+                        val: &StructValue::new(vec![Some("c".into()), None]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
-                            Some("c".to_string().to_scalar_value()),
+                            Some("c".into()),
                             Some(OrderedF32::from(0.0).to_scalar_value()),
                         ]),
                     }));
@@ -630,24 +630,24 @@ mod tests {
                 {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
-                            Some("abcd".to_string().to_scalar_value()),
+                            Some("abcd".into()),
                             Some(OrderedF32::from(-1.2).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
-                            Some("c".to_string().to_scalar_value()),
+                            Some("c".into()),
                             Some(OrderedF32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
-                            Some("c".to_string().to_scalar_value()),
+                            Some("c".into()),
                             Some(OrderedF32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
-                        val: &StructValue::new(vec![Some("c".to_string().to_scalar_value()), None]),
+                        val: &StructValue::new(vec![Some("c".into()), None]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![

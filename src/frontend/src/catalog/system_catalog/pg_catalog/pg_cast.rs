@@ -42,7 +42,7 @@ pub static PG_CAST_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
                 Some(ScalarImpl::Int32(idx as i32)),
                 Some(ScalarImpl::Int32(DataType::from(*src).to_oid())),
                 Some(ScalarImpl::Int32(DataType::from(*target).to_oid())),
-                Some(ScalarImpl::Utf8(ctx.into())),
+                Some(ScalarImpl::Utf8(ctx.to_string().into())),
             ])
         })
         .collect_vec()

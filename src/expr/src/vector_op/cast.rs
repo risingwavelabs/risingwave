@@ -179,7 +179,7 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
 }
 
 #[inline(always)]
-pub fn timestampz_to_utc_string(elem: i64) -> String {
+pub fn timestampz_to_utc_string(elem: i64) -> Box<str> {
     // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
     // from session. See #3552.
     let secs = elem.div_euclid(1_000_000);
@@ -187,7 +187,10 @@ pub fn timestampz_to_utc_string(elem: i64) -> String {
     let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     // PostgreSQL uses a space rather than `T` to separate the date and time.
     // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-OUTPUT
-    instant.format("%Y-%m-%d %H:%M:%S%.f%:z").to_string()
+    instant
+        .format("%Y-%m-%d %H:%M:%S%.f%:z")
+        .to_string()
+        .into_boxed_str()
 }
 
 pub fn timestampz_to_utc_binary(elem: i64) -> Bytes {
@@ -328,18 +331,18 @@ pub fn int32_to_bool(input: i32) -> Result<bool> {
 
 // For most of the types, cast them to varchar is similar to return their text format.
 // So we use this function to cast type to varchar.
-pub fn general_to_text<T: ToText>(elem: T) -> Result<String> {
-    Ok(elem.to_text())
+pub fn general_to_text<T: ToText>(elem: T) -> Result<Box<str>> {
+    Ok(elem.to_text().into_boxed_str())
 }
 
-pub fn bool_to_varchar(input: bool) -> Result<String> {
-    Ok(if input { "true".into() } else { "false".into() })
+pub fn bool_to_varchar(input: bool) -> Result<Box<str>> {
+    Ok(if input { "true" } else { "false" }.into())
 }
 
 /// `bool_out` is different from `general_to_string<bool>` to produce a single char. `PostgreSQL`
 /// uses different variants of bool-to-string in different situations.
-pub fn bool_out(input: bool) -> Result<String> {
-    Ok(if input { "t".into() } else { "f".into() })
+pub fn bool_out(input: bool) -> Result<Box<str>> {
+    Ok(if input { "t" } else { "f" }.into())
 }
 
 /// It accepts a macro whose input is `{ $input:ident, $cast:ident, $func:expr }` tuples
@@ -590,6 +593,7 @@ fn scalar_cast(
 #[cfg(test)]
 mod tests {
     use num_traits::FromPrimitive;
+    use risingwave_common::types::ScalarRef;
 
     use super::*;
 
@@ -643,38 +647,36 @@ mod tests {
     fn number_to_string() {
         use super::*;
 
-        assert_eq!(bool_to_varchar(true).unwrap(), "true");
-        assert_eq!(bool_to_varchar(false).unwrap(), "false");
+        macro_rules! test {
+            ($expr:expr, $right:literal) => {
+                assert_eq!($expr.unwrap().as_ref(), $right);
+            };
+        }
 
-        assert_eq!(general_to_text(32).unwrap(), "32");
-        assert_eq!(general_to_text(-32).unwrap(), "-32");
-        assert_eq!(general_to_text(i32::MIN).unwrap(), "-2147483648");
-        assert_eq!(general_to_text(i32::MAX).unwrap(), "2147483647");
+        test!(bool_to_varchar(true), "true");
+        test!(bool_to_varchar(true), "true");
+        test!(bool_to_varchar(false), "false");
 
-        assert_eq!(general_to_text(i16::MIN).unwrap(), "-32768");
-        assert_eq!(general_to_text(i16::MAX).unwrap(), "32767");
+        test!(general_to_text(32), "32");
+        test!(general_to_text(-32), "-32");
+        test!(general_to_text(i32::MIN), "-2147483648");
+        test!(general_to_text(i32::MAX), "2147483647");
 
-        assert_eq!(general_to_text(i64::MIN).unwrap(), "-9223372036854775808");
-        assert_eq!(general_to_text(i64::MAX).unwrap(), "9223372036854775807");
+        test!(general_to_text(i16::MIN), "-32768");
+        test!(general_to_text(i16::MAX), "32767");
 
-        assert_eq!(general_to_text(OrderedF64::from(32.12)).unwrap(), "32.12");
-        assert_eq!(general_to_text(OrderedF64::from(-32.14)).unwrap(), "-32.14");
+        test!(general_to_text(i64::MIN), "-9223372036854775808");
+        test!(general_to_text(i64::MAX), "9223372036854775807");
 
-        assert_eq!(
-            general_to_text(OrderedF32::from(32.12_f32)).unwrap(),
-            "32.12"
-        );
-        assert_eq!(
-            general_to_text(OrderedF32::from(-32.14_f32)).unwrap(),
-            "-32.14"
-        );
+        test!(general_to_text(OrderedF64::from(32.12)), "32.12");
+        test!(general_to_text(OrderedF64::from(-32.14)), "-32.14");
 
-        assert_eq!(
-            general_to_text(Decimal::from_f64(1.222).unwrap()).unwrap(),
-            "1.222"
-        );
+        test!(general_to_text(OrderedF32::from(32.12_f32)), "32.12");
+        test!(general_to_text(OrderedF32::from(-32.14_f32)), "-32.14");
 
-        assert_eq!(general_to_text(Decimal::NaN).unwrap(), "NaN");
+        test!(general_to_text(Decimal::from_f64(1.222).unwrap()), "1.222");
+
+        test!(general_to_text(Decimal::NaN), "NaN");
     }
 
     #[test]
@@ -837,7 +839,7 @@ mod tests {
         assert_eq!(
             struct_cast(
                 StructValue::new(vec![
-                    Some("1".to_string().to_scalar_value()),
+                    Some("1".into()),
                     Some(OrderedF32::from(0.0).to_scalar_value()),
                 ])
                 .as_scalar_ref(),
@@ -875,11 +877,11 @@ mod tests {
         let str1_utc0 = "0001-11-15 07:35:40.999999+00:00";
         let timestampz1 = str_to_timestampz(str1).unwrap();
         assert_eq!(timestampz1, -62108094259000001);
-        assert_eq!(timestampz_to_utc_string(timestampz1), str1_utc0);
+        assert_eq!(timestampz_to_utc_string(timestampz1).as_ref(), str1_utc0);
 
         let str2 = "1969-12-31 23:59:59.999999+00:00";
         let timestampz2 = str_to_timestampz(str2).unwrap();
         assert_eq!(timestampz2, -1);
-        assert_eq!(timestampz_to_utc_string(timestampz2), str2);
+        assert_eq!(timestampz_to_utc_string(timestampz2).as_ref(), str2);
     }
 }

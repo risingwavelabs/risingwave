@@ -21,7 +21,7 @@ use risingwave_common::array::{
     Utf8Array,
 };
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl, ScalarRef};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -103,7 +103,7 @@ impl RegexpMatchExpression {
                         }
                     })
                     .flatten()
-                    .map(|mat| Some(mat.as_str().to_string().to_scalar_value()))
+                    .map(|mat| Some(mat.as_str().into()))
                     .collect_vec();
                 let list = ListValue::new(list);
                 Some(list)

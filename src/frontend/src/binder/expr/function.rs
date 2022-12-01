@@ -222,7 +222,7 @@ impl Binder {
                         .get_schema_by_name(&self.db_name, schema_name)
                         .is_ok()
                     {
-                        schema_names.push(Some(schema_name.clone().to_scalar_value()));
+                        schema_names.push(Some(schema_name.into()));
                     }
                 }
 

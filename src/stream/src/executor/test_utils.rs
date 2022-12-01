@@ -152,9 +152,8 @@ impl Executor for MockSource {
 macro_rules! row_nonnull {
     [$( $value:expr ),*] => {
         {
-            use risingwave_common::types::Scalar;
             use risingwave_common::array::Row;
-            Row::new(vec![$(Some($value.to_scalar_value()), )*])
+            Row::new(vec![$(Some($value.into()), )*])
         }
     };
 }

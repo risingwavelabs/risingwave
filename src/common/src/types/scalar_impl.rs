@@ -60,11 +60,11 @@ for_all_native_types! { impl_all_native_scalar }
 
 /// Implement `Scalar` for `String`.
 /// `String` could be converted to `&str`.
-impl Scalar for String {
+impl Scalar for Box<str> {
     type ScalarRefType<'a> = &'a str;
 
     fn as_scalar_ref(&self) -> &str {
-        self.as_str()
+        self.as_ref()
     }
 
     fn to_scalar_value(self) -> ScalarImpl {
@@ -101,10 +101,10 @@ impl Scalar for ListValue {
 /// Implement `ScalarRef` for `String`.
 /// `String` could be converted to `&str`.
 impl<'a> ScalarRef<'a> for &'a str {
-    type ScalarType = String;
+    type ScalarType = Box<str>;
 
-    fn to_owned_scalar(&self) -> String {
-        self.to_string()
+    fn to_owned_scalar(&self) -> Box<str> {
+        (*self).into()
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -112,9 +112,9 @@ impl<'a> ScalarRef<'a> for &'a str {
     }
 }
 
-impl ScalarPartialOrd for String {
+impl ScalarPartialOrd for Box<str> {
     fn scalar_cmp(&self, other: &str) -> Option<std::cmp::Ordering> {
-        self.as_str().partial_cmp(other)
+        self.as_ref().partial_cmp(other)
     }
 }
 
