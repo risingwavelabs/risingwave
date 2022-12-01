@@ -32,7 +32,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
+use self::plan_node::{
+    BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
+    StreamRowIdGen,
+};
 use self::plan_visitor::{
     has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_logical_apply,
     has_logical_over_agg,
@@ -480,19 +483,40 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a create materialize view plan.
-    pub fn gen_create_mv_plan(
+    pub fn gen_materialize_plan(
         &mut self,
         mv_name: String,
         definition: String,
         col_names: Option<Vec<String>>,
         handle_pk_conflict: bool,
+        enable_dml: bool,
+        row_id_index: Option<usize>,
     ) -> Result<StreamMaterialize> {
         let out_names = if let Some(col_names) = col_names {
             col_names
         } else {
             self.out_names.clone()
         };
-        let stream_plan = self.gen_stream_plan()?;
+        let mut stream_plan = self.gen_stream_plan()?;
+        if enable_dml {
+            // Insert a dml executor after the previous exector.
+            // FIXME: Store `Field` or `Schema` in `TableSource` to avoid downcasting in the future.
+            // Or do we have a better solution to this?
+            let logical_source = self.plan.downcast_ref::<LogicalSource>().unwrap();
+            let column_descs = logical_source
+                .core
+                .catalog
+                .columns
+                .iter()
+                .map(|column_catalog| column_catalog.column_desc.clone())
+                .collect_vec();
+            stream_plan = StreamDml::new(stream_plan, column_descs).into();
+        }
+        if let Some(row_id_index) = row_id_index {
+            // Insert a row id gen eexecutor after the previous executor.
+            stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
+        }
+
         StreamMaterialize::create(
             stream_plan,
             mv_name,

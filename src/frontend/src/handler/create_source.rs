@@ -28,9 +28,7 @@ use risingwave_sqlparser::ast::{
     AvroSchema, CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema,
 };
 
-use super::create_table::{
-    bind_sql_columns, bind_sql_table_constraints, gen_materialized_source_plan,
-};
+use super::create_table::{bind_sql_columns, bind_sql_table_constraints, gen_materialize_plan};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::session::{OptimizerContext, SessionImpl};
@@ -108,6 +106,7 @@ async fn extract_protobuf_table_schema(
         .collect_vec())
 }
 
+// TODO(Yuanxin): Only create a source w/o materializing.
 pub async fn handle_create_source(
     context: OptimizerContext,
     is_materialized: bool,
@@ -256,18 +255,18 @@ pub async fn handle_create_source(
         Info::StreamSource(source_info),
     )?;
     let catalog_writer = session.env().catalog_writer();
+
+    // TODO(Yuanxin): This should be removed after unifying table and materialized source.
     if is_materialized {
         let (graph, table) = {
             let (plan, table) =
-                gen_materialized_source_plan(context.into(), source.clone(), session.user_id())?;
+                gen_materialize_plan(context.into(), source.clone(), session.user_id())?;
             let graph = build_graph(plan);
 
             (graph, table)
         };
 
-        catalog_writer
-            .create_materialized_source(source, table, graph)
-            .await?;
+        catalog_writer.create_table(source, table, graph).await?;
     } else {
         catalog_writer.create_source(source).await?;
     }
