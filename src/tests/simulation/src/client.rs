@@ -12,27 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(madsim)]
-#![feature(trait_alias)]
-#![feature(lint_reasons)]
-#![feature(once_cell)]
-
 use std::time::Duration;
 
-use anyhow::Result;
-
-pub mod cluster;
-pub mod ctl_ext;
-pub mod nexmark;
-pub mod utils;
-
-struct RisingWave {
+/// A RisingWave client.
+pub struct RisingWave {
     client: tokio_postgres::Client,
     task: tokio::task::JoinHandle<()>,
+    host: String,
+    dbname: String,
 }
 
 impl RisingWave {
-    async fn connect(host: String, dbname: String) -> Self {
+    pub async fn connect(
+        host: String,
+        dbname: String,
+    ) -> Result<Self, tokio_postgres::error::Error> {
         let (client, connection) = tokio_postgres::Config::new()
             .host(&host)
             .port(4566)
@@ -40,16 +34,50 @@ impl RisingWave {
             .user("root")
             .connect_timeout(Duration::from_secs(5))
             .connect(tokio_postgres::NoTls)
-            .await
-            .expect("Failed to connect to database");
+            .await?;
         let task = tokio::spawn(async move {
-            connection.await.expect("Postgres connection error");
+            if let Err(e) = connection.await {
+                tracing::error!("postgres connection error: {e}");
+            }
         });
-        RisingWave { client, task }
+        // for recovery
+        client
+            .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
+            .await?;
+        client
+            .simple_query("SET CREATE_COMPACTION_GROUP_FOR_MV TO true;")
+            .await?;
+        Ok(RisingWave {
+            client,
+            task,
+            host,
+            dbname,
+        })
     }
 
-    async fn run(&mut self, sql: &str) -> Result<String> {
+    /// Returns a reference of the inner Postgres client.
+    pub fn pg_client(&self) -> &tokio_postgres::Client {
+        &self.client
+    }
+}
+
+impl Drop for RisingWave {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+#[async_trait::async_trait]
+impl sqllogictest::AsyncDB for RisingWave {
+    type Error = tokio_postgres::error::Error;
+
+    async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
         use std::fmt::Write;
+
+        if self.client.is_closed() {
+            // connection error, reset the client
+            *self = Self::connect(self.host.clone(), self.dbname.clone()).await?;
+        }
 
         let mut output = String::new();
         let rows = self.client.simple_query(sql).await?;
@@ -75,8 +103,11 @@ impl RisingWave {
         Ok(output)
     }
 
-    async fn close(self) {
-        drop(self.client);
-        self.task.await.unwrap();
+    fn engine_name(&self) -> &str {
+        "risingwave"
+    }
+
+    async fn sleep(dur: Duration) {
+        tokio::time::sleep(dur).await
     }
 }

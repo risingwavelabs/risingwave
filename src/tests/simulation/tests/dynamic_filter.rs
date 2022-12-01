@@ -18,17 +18,16 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::Result;
-use itertools::Itertools;
 use madsim::time::sleep;
-use risingwave_simulation_scale::cluster::{Cluster, Configuration};
-use risingwave_simulation_scale::ctl_ext::predicate::{identity_contains, no_identity_contains};
-use risingwave_simulation_scale::utils::AssertResult;
+use risingwave_simulation::cluster::{Cluster, Configuration};
+use risingwave_simulation::ctl_ext::predicate::identity_contains;
+use risingwave_simulation::utils::AssertResult;
 
 const SELECT: &str = "select * from mv1 order by v1;";
 
 #[madsim::test]
 async fn test_dynamic_filter() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::default()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
     cluster.run("create table t1 (v1 int);").await?;
     cluster.run("create table t2 (v2 int);").await?;
