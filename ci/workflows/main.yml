@@ -183,7 +183,7 @@ steps:
           environment:
             - GITHUB_TOKEN
             - BUILDKITE_TAG
-    timeout_in_minutes: 20
+    timeout_in_minutes: 60
     retry: *auto-retry
 
   - label: "release docker image: amd64"
@@ -198,7 +198,7 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
-    timeout_in_minutes: 25
+    timeout_in_minutes: 60
     retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
@@ -213,7 +213,7 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
-    timeout_in_minutes: 25
+    timeout_in_minutes: 60
     retry: *auto-retry
     agents:
       queue: "linux-arm64"
