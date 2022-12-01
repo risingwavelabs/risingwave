@@ -23,6 +23,7 @@ use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, IntervalUnit};
 use crate::array::ArrayResult;
+use crate::error::Result;
 use crate::util::value_encoding;
 use crate::util::value_encoding::error::ValueEncodingError;
 
@@ -89,26 +90,26 @@ impl ToText for NaiveDateTimeWrapper {
 }
 
 impl ToBinary for NaiveDateWrapper {
-    fn to_binary(&self) -> Option<Bytes> {
+    fn to_binary(&self) -> Result<Option<Bytes>> {
         let mut output = BytesMut::new();
         self.0.to_sql(&Type::ANY, &mut output).unwrap();
-        Some(output.freeze())
+        Ok(Some(output.freeze()))
     }
 }
 
 impl ToBinary for NaiveTimeWrapper {
-    fn to_binary(&self) -> Option<Bytes> {
+    fn to_binary(&self) -> Result<Option<Bytes>> {
         let mut output = BytesMut::new();
         self.0.to_sql(&Type::ANY, &mut output).unwrap();
-        Some(output.freeze())
+        Ok(Some(output.freeze()))
     }
 }
 
 impl ToBinary for NaiveDateTimeWrapper {
-    fn to_binary(&self) -> Option<Bytes> {
+    fn to_binary(&self) -> Result<Option<Bytes>> {
         let mut output = BytesMut::new();
         self.0.to_sql(&Type::ANY, &mut output).unwrap();
-        Some(output.freeze())
+        Ok(Some(output.freeze()))
     }
 }
 
