@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprDisplay, ExprImpl};
-use crate::optimizer::plan_node::explain::{NodeExplain, field_doc_iter};
+use crate::optimizer::plan_node::explain::{field_doc_iter, NodeExplain};
 use crate::session::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 

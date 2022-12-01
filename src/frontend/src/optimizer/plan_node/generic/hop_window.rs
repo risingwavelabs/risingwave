@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use pretty::{RcDoc, Doc};
+use pretty::{Doc, RcDoc};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::super::utils::IndicesDisplay;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{InputRef, InputRefDisplay};
-use crate::optimizer::plan_node::explain::{NodeExplain, field_doc_display, field_doc_str};
+use crate::optimizer::plan_node::explain::{field_doc_display, field_doc_str, NodeExplain};
 use crate::session::OptimizerContextRef;
 
 /// [`HopWindow`] implements Hop Table Function.

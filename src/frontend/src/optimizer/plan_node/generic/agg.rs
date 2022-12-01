@@ -28,7 +28,7 @@ use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePro
 use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, InputRef, InputRefDisplay};
-use crate::optimizer::plan_node::explain::{NodeExplain, field_doc_iter};
+use crate::optimizer::plan_node::explain::{field_doc_iter, NodeExplain};
 use crate::optimizer::property::Direction;
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;

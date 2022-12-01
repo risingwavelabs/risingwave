@@ -15,7 +15,8 @@
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
-use crate::{session::OptimizerContextRef, optimizer::plan_node::explain::{NodeExplain, field_doc_display}};
+use crate::optimizer::plan_node::explain::{field_doc_display, NodeExplain};
+use crate::session::OptimizerContextRef;
 
 /// `Union` returns the union of the rows of its inputs.
 /// If `all` is false, it needs to eliminate duplicates.
