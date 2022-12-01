@@ -5128,6 +5128,7 @@ dependencies = [
  "crc32fast",
  "criterion",
  "darwin-libproc",
+ "derivative",
  "either",
  "enum-as-inner",
  "fixedbitset",

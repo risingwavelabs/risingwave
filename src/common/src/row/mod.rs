@@ -20,6 +20,7 @@ mod owned_row;
 mod project;
 mod repeat_n;
 
+use std::alloc::{Allocator, Global};
 use std::cmp::Ordering;
 use std::hash::{BuildHasher, Hasher};
 
@@ -69,7 +70,17 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     /// Prefer `into_owned_row` if the row is already owned.
     #[inline]
     fn to_owned_row(&self) -> Row {
-        Row::new(self.iter().map(|d| d.to_owned_datum()).collect())
+        self.to_owned_row_in(Global)
+    }
+
+    /// Converts the row into an owned [`Row`] with the given allocator.
+    #[inline]
+    fn to_owned_row_in<A: Allocator>(&self, alloc: A) -> Row<A> {
+        let mut row = Vec::new_in(alloc);
+        self.iter()
+            .map(|d| d.to_owned_datum())
+            .collect_into(&mut row);
+        Row::new(row)
     }
 
     /// Consumes `self` and converts it into an owned [`Row`].
@@ -170,6 +181,10 @@ macro_rules! deref_forward_row {
 
         fn to_owned_row(&self) -> Row {
             (**self).to_owned_row()
+        }
+
+        fn to_owned_row_in<A: Allocator>(&self, alloc: A) -> Row<A> {
+            (**self).to_owned_row_in(alloc)
         }
 
         fn value_serialize_into(&self, buf: impl BufMut) {

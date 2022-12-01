@@ -14,7 +14,10 @@
 
 //! An owned row type with a `Vec<Datum>`.
 
+use std::alloc::{Allocator, Global};
 use std::ops;
+
+use derivative::Derivative;
 
 use super::{Row2, RowExt};
 use crate::collection::estimate_size::EstimateSize;
@@ -24,11 +27,23 @@ use crate::util::value_encoding;
 use crate::util::value_encoding::deserialize_datum;
 
 /// TODO(row trait): rename to `OwnedRow`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Row(Vec<Datum>); // made private to avoid abuse
+#[derive(Clone, Derivative)]
+#[derivative(
+    Debug(bound = ""),
+    Hash(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = "")
+)]
+pub struct Row<A: Allocator = Global>(Vec<Datum, A>); // made private to avoid abuse
+
+impl Default for Row {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
 
 /// Do not implement `IndexMut` to make it immutable.
-impl ops::Index<usize> for Row {
+impl<A: Allocator> ops::Index<usize> for Row<A> {
     type Output = Datum;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -36,7 +51,7 @@ impl ops::Index<usize> for Row {
     }
 }
 
-impl PartialOrd for Row {
+impl<A: Allocator> PartialOrd for Row<A> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         if self.0.len() != other.0.len() {
             return None;
@@ -45,7 +60,7 @@ impl PartialOrd for Row {
     }
 }
 
-impl Ord for Row {
+impl<A: Allocator> Ord for Row<A> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.partial_cmp(other).unwrap_or_else(|| {
             panic!("cannot compare rows with different lengths:\n left: {self:?}\nright: {other:?}")
@@ -53,22 +68,14 @@ impl Ord for Row {
     }
 }
 
-impl Row {
-    pub fn new(values: Vec<Datum>) -> Self {
+impl<A: Allocator> Row<A> {
+    pub fn new(values: Vec<Datum, A>) -> Self {
         Self(values)
     }
 
     /// Retrieve the underlying [`Vec<Datum>`].
-    pub fn into_inner(self) -> Vec<Datum> {
+    pub fn into_inner(self) -> Vec<Datum, A> {
         self.0
-    }
-
-    /// Returns a reference to an empty row.
-    ///
-    /// Note: use [`empty`](super::empty) if possible.
-    pub fn empty<'a>() -> &'a Self {
-        static EMPTY_ROW: Row = Row(Vec::new());
-        &EMPTY_ROW
     }
 
     /// Serialize part of the row into memcomparable bytes.
@@ -85,6 +92,16 @@ impl Row {
     }
 }
 
+impl Row {
+    /// Returns a reference to an empty row.
+    ///
+    /// Note: use [`empty`](super::empty) if possible.
+    pub fn empty<'a>() -> &'a Self {
+        static EMPTY_ROW: Row = Row(Vec::new());
+        &EMPTY_ROW
+    }
+}
+
 impl EstimateSize for Row {
     fn estimated_heap_size(&self) -> usize {
         // FIXME(bugen): this is not accurate now as the heap size of some `Scalar` is not counted.
@@ -92,7 +109,7 @@ impl EstimateSize for Row {
     }
 }
 
-impl Row2 for Row {
+impl<A: Allocator> Row2 for Row<A> {
     type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
@@ -118,13 +135,8 @@ impl Row2 for Row {
     }
 
     #[inline]
-    fn to_owned_row(&self) -> Row {
-        self.clone()
-    }
-
-    #[inline]
-    fn into_owned_row(self) -> Row {
-        self
+    fn to_owned_row_in<A1: Allocator>(&self, alloc: A1) -> Row<A1> {
+        Row(self.0.to_vec_in(alloc))
     }
 }
 
