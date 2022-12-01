@@ -839,7 +839,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any())]
     fn test_serialize_deserialize() {
         let value = ListValue::new(vec![
             Some("abcd".into()),
