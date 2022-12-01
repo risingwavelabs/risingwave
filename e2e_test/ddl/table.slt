@@ -37,6 +37,9 @@ explain select v2 from ddl_t;
 statement ok
 explain create sink sink_t from ddl_t with ( connector = 'kafka' );
 
+statement ok
+explain create sink sink_as as select sum(v2) as sum from ddl_t with ( connector = 'kafka' );
+
 # Create a mview with duplicated name.
 statement error
 create materialized view ddl_mv as select v2 from ddl_t;
