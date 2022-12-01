@@ -140,7 +140,7 @@ pub struct SchemaFilterKeyExtractor {
     /// from storage key.
 
     /// distribution_key does not need to be the prefix of pk.
-    distribution_key_start_index_in_pk: usize,
+    distribution_key_start_index_in_pk: Option<usize>,
     read_pattern_prefix_column: usize,
     deserializer: OrderedRowSerde,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
@@ -158,16 +158,18 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
-        match self.read_pattern_prefix_column == 0 {
-            true => full_key,
-            false => {
+        match self.read_pattern_prefix_column != 0
+            && self.distribution_key_start_index_in_pk.is_some()
+        {
+            false => &[],
+            true => {
                 let (dist_key_start_position, dist_key_len) = self
                     .deserializer
                     .deserialize_dist_key_position_with_column_indices(
                         pk,
                         0..self.read_pattern_prefix_column
-                            + self.distribution_key_start_index_in_pk,
-                        self.distribution_key_start_index_in_pk,
+                            + self.distribution_key_start_index_in_pk.unwrap(),
+                        self.distribution_key_start_index_in_pk.unwrap(),
                     )
                     .unwrap();
 
@@ -207,12 +209,16 @@ impl SchemaFilterKeyExtractor {
                     })
             })
             .collect_vec();
-        let distribution_key_start_index_in_pk = match dist_key_indices.is_empty() {
-            true => 0,
-            false => {
+
+        let distribution_key_start_index_in_pk = match !dist_key_indices.is_empty()
+            && *dist_key_in_pk_indices.iter().min().unwrap() + dist_key_in_pk_indices.len() - 1
+                == *dist_key_in_pk_indices.iter().max().unwrap()
+        {
+            true => {
                 let min = dist_key_in_pk_indices.iter().min().unwrap();
-                *min
+                Some(*min)
             }
+            false => None,
         };
         assert_ne!(0, read_pattern_prefix_column);
         // column_index in pk

@@ -31,7 +31,6 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_hummock_sdk::HummockReadEpoch;
-use tracing::log::warn;
 use tracing::trace;
 
 use super::iter_utils;
@@ -80,7 +79,7 @@ pub struct StorageTable<S: StateStore> {
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
-    distribution_key_start_index_in_pk: usize,
+    distribution_key_start_index_in_pk: Option<usize>,
 
     /// Virtual nodes that the table is partitioned into.
     ///
@@ -200,12 +199,15 @@ impl<S: StateStore> StorageTable<S> {
                     })
             })
             .collect_vec();
-        let distribution_key_start_index_in_pk = match dist_key_in_pk_indices.is_empty() {
-            true => 0,
-            false => {
+        let distribution_key_start_index_in_pk = match !dist_key_indices.is_empty()
+            && *dist_key_in_pk_indices.iter().min().unwrap() + dist_key_in_pk_indices.len() - 1
+                == *dist_key_in_pk_indices.iter().max().unwrap()
+        {
+            true => {
                 let min = dist_key_in_pk_indices.iter().min().unwrap();
-                *min
+                Some(*min)
             }
+            false => None,
         };
         Self {
             table_id,
@@ -264,13 +266,10 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
         let check_bloom_filter = !self.dist_key_indices.is_empty()
+            && self.distribution_key_start_index_in_pk.is_some()
             && is_subset(self.dist_key_indices.clone(), key_indices.clone())
-            && self.dist_key_indices.len() + self.distribution_key_start_index_in_pk
-                <= key_indices.len()
-            && *self.dist_key_in_pk_indices.iter().min().unwrap()
-                + self.dist_key_in_pk_indices.len()
-                - 1
-                == *self.dist_key_in_pk_indices.iter().max().unwrap();
+            && self.dist_key_indices.len() + self.distribution_key_start_index_in_pk.unwrap()
+                <= key_indices.len();
         let read_options = ReadOptions {
             dist_key_hint: None,
             check_bloom_filter,
@@ -455,8 +454,9 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
         let dist_key_hint = if self.dist_key_indices.is_empty()
+            || self.distribution_key_start_index_in_pk.is_none()
             || !is_subset(self.dist_key_indices.clone(), pk_prefix_indices.clone())
-            || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk
+            || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk.unwrap()
                 > pk_prefix.len()
         {
             trace!(
@@ -468,28 +468,15 @@ impl<S: StateStore> StorageTable<S> {
             );
             None
         } else {
-            // todo(wcy-fdu): handle dist_key_in_pk_indices discontinuous case
-            let dist_key_min_index_in_pk = self.dist_key_in_pk_indices.iter().min().unwrap();
-            let dist_key_max_index_in_pk = self.dist_key_in_pk_indices.iter().max().unwrap();
-            match *dist_key_min_index_in_pk + self.dist_key_in_pk_indices.len() - 1
-                == *dist_key_max_index_in_pk
-            {
-                true => {
-                    let distribution_key_end_index_in_pk =
-                        self.distribution_key_start_index_in_pk + self.dist_key_indices.len();
-                    let dist_key_serializer = self.pk_serializer.dist_key_serde(
-                        self.distribution_key_start_index_in_pk,
-                        distribution_key_end_index_in_pk,
-                    );
-                    let dist_key = (&pk_prefix).project(&self.dist_key_in_pk_indices);
-                    let serialized_dist_key = serialize_pk(&dist_key, &dist_key_serializer);
-                    Some(serialized_dist_key)
-                }
-                false => {
-                    warn!("distribution key indices in pk is discontinuous");
-                    None
-                }
-            }
+            let distribution_key_end_index_in_pk =
+                self.distribution_key_start_index_in_pk.unwrap() + self.dist_key_indices.len();
+            let dist_key_serializer = self.pk_serializer.dist_key_serde(
+                self.distribution_key_start_index_in_pk.unwrap(),
+                distribution_key_end_index_in_pk,
+            );
+            let dist_key = (&pk_prefix).project(&self.dist_key_in_pk_indices);
+            let serialized_dist_key = serialize_pk(&dist_key, &dist_key_serializer);
+            Some(serialized_dist_key)
         };
 
         trace!(
