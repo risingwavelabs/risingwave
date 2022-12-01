@@ -98,7 +98,10 @@ impl TierCompactionPicker {
                 });
             }
 
-            if compact_file_count < self.config.level0_tier_compact_file_number as usize {
+            if compact_file_count < self.config.level0_tier_compact_file_number as usize
+                && (level.level_type == non_overlapping_type
+                    || compaction_bytes < max_compaction_bytes)
+            {
                 continue;
             }
 
