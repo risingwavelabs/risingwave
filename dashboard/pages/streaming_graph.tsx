@@ -31,12 +31,13 @@ const SIDEBAR_WIDTH = "200px"
 
 function buildMvDependencyAsEdges(mvList: RwTable[]): ActorPoint[] {
   const edges = []
+  const mvSet = new Set(mvList.map((mv) => mv.id))
   for (const mv of reverse(sortBy(mvList, "id"))) {
     if (!mv.name.startsWith("__")) {
       edges.push({
         id: mv.id.toString(),
         name: mv.name,
-        parentIds: mv.dependentRelations.map((r) => r.toString()),
+        parentIds: mv.dependentRelations.filter((r) => mvSet.has(r)).map((r) => r.toString()),
         order: mv.id,
       })
     }
