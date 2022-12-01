@@ -324,16 +324,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .await
             .unwrap(),
     );
-    let hummock_manager = Arc::new(
-        hummock::HummockManager::new(
-            env.clone(),
-            cluster_manager.clone(),
-            meta_metrics.clone(),
-            compactor_manager.clone(),
-        )
-        .await
-        .unwrap(),
-    );
+    let hummock_manager = hummock::HummockManager::new(
+        env.clone(),
+        cluster_manager.clone(),
+        meta_metrics.clone(),
+        compactor_manager.clone(),
+    )
+    .await
+    .unwrap();
 
     #[cfg(not(madsim))]
     if let Some(ref dashboard_addr) = address_info.dashboard_addr {
@@ -422,6 +420,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         source_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
+        barrier_manager.clone(),
     );
 
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
@@ -447,7 +446,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         vacuum_trigger.clone(),
         fragment_manager.clone(),
     );
-    let notification_manager = env.notification_manager_ref();
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
         catalog_manager,
@@ -470,15 +468,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
-    let mut sub_tasks = hummock::start_hummock_workers(
-        hummock_manager.clone(),
-        compactor_manager,
-        vacuum_trigger,
-        notification_manager,
-        compaction_scheduler,
-        &env.opts,
-    )
-    .await;
+    let mut sub_tasks =
+        hummock::start_hummock_workers(vacuum_trigger, compaction_scheduler, &env.opts);
     sub_tasks.push(
         ClusterManager::start_worker_num_monitor(
             cluster_manager.clone(),

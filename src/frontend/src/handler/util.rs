@@ -25,6 +25,7 @@ use pgwire::types::Row;
 use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
+use risingwave_common::error::Result as RwResult;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_expr::vector_op::cast::{timestampz_to_utc_binary, timestampz_to_utc_string};
 
@@ -70,9 +71,10 @@ where
             Poll::Pending => Poll::Pending,
             Poll::Ready(chunk) => match chunk {
                 Some(chunk_result) => match chunk_result {
-                    Ok(chunk) => {
-                        Poll::Ready(Some(Ok(to_pg_rows(this.column_types, chunk, *this.format))))
-                    }
+                    Ok(chunk) => Poll::Ready(Some(
+                        to_pg_rows(this.column_types, chunk, *this.format)
+                            .map_err(|err| err.into()),
+                    )),
                     Err(err) => Poll::Ready(Some(Err(err))),
                 },
                 None => Poll::Ready(None),
@@ -82,34 +84,39 @@ where
 }
 
 /// Format scalars according to postgres convention.
-fn pg_value_format(data_type: &DataType, d: ScalarRefImpl<'_>, format: bool) -> Bytes {
+fn pg_value_format(data_type: &DataType, d: ScalarRefImpl<'_>, format: bool) -> RwResult<Bytes> {
     // format == false means TEXT format
     // format == true means BINARY format
     if !format {
         match (data_type, d) {
-            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => timestampz_to_utc_string(us).into(),
-            _ => d.text_format().into(),
+            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => {
+                Ok(timestampz_to_utc_string(us).into())
+            }
+            _ => Ok(d.text_format().into()),
         }
     } else {
         match (data_type, d) {
-            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => timestampz_to_utc_binary(us),
+            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => Ok(timestampz_to_utc_binary(us)),
             _ => d.binary_format(),
         }
     }
 }
 
-fn to_pg_rows(column_types: &[DataType], chunk: DataChunk, format: bool) -> Vec<Row> {
+fn to_pg_rows(column_types: &[DataType], chunk: DataChunk, format: bool) -> RwResult<Vec<Row>> {
     chunk
         .rows()
         .map(|r| {
-            Row::new(
-                r.values()
-                    .zip_eq(column_types)
-                    .map(|(data, t)| data.map(|data| pg_value_format(t, data, format)))
-                    .collect_vec(),
-            )
+            let row = r
+                .values()
+                .zip_eq(column_types)
+                .map(|(data, t)| match data {
+                    Some(data) => Some(pg_value_format(t, data, format)).transpose(),
+                    None => Ok(None),
+                })
+                .try_collect()?;
+            Ok(Row::new(row))
         })
-        .collect_vec()
+        .try_collect()
 }
 
 /// Convert column descs to rows which conclude name and type
@@ -191,6 +198,7 @@ mod tests {
             vec![Some("4".into()), None, None, None],
         ];
         let vec = rows
+            .unwrap()
             .into_iter()
             .map(|r| r.values().iter().cloned().collect_vec())
             .collect_vec();
@@ -202,7 +210,7 @@ mod tests {
     fn test_value_format() {
         use {DataType as T, ScalarRefImpl as S};
 
-        let f = pg_value_format;
+        let f = |t, d, f| pg_value_format(t, d, f).unwrap();
         assert_eq!(&f(&T::Float32, S::Float32(1_f32.into()), false), "1");
         assert_eq!(&f(&T::Float32, S::Float32(f32::NAN.into()), false), "NaN");
         assert_eq!(&f(&T::Float64, S::Float64(f64::NAN.into()), false), "NaN");
