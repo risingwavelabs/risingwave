@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
@@ -105,6 +106,47 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         }
     }
 
+    /// Creates a `Project` which select some columns from the input.
+    ///
+    /// `mapping` should maps from `(0..input_fields.len())` to a consecutive range starting from 0.
+    ///
+    /// This is useful in column pruning when we want to add a project to ensure the output schema
+    /// is correct.
+    pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
+        if mapping.target_size() == 0 {
+            // The mapping is empty, so the parent actually doesn't need the output of the input.
+            // This can happen when the parent node only selects constant expressions.
+            return Self::new(vec![], input);
+        };
+        let mut input_refs = vec![None; mapping.target_size()];
+        for (src, tar) in mapping.mapping_pairs() {
+            assert_eq!(input_refs[tar], None);
+            input_refs[tar] = Some(src);
+        }
+        let input_schema = input.schema();
+        let exprs: Vec<ExprImpl> = input_refs
+            .into_iter()
+            .map(|i| i.unwrap())
+            .map(|i| InputRef::new(i, input_schema.fields()[i].data_type()).into())
+            .collect();
+
+        Self::new(exprs, input)
+    }
+
+    /// Creates a `Project` which select some columns from the input.
+    pub fn with_out_fields(input: PlanRef, out_fields: &FixedBitSet) -> Self {
+        Self::with_out_col_idx(input, out_fields.ones())
+    }
+
+    /// Creates a `Project` which select some columns from the input.
+    pub fn with_out_col_idx(input: PlanRef, out_fields: impl Iterator<Item = usize>) -> Self {
+        let input_schema = input.schema();
+        let exprs = out_fields
+            .map(|index| InputRef::new(index, input_schema[index].data_type()).into())
+            .collect();
+        Self::new(exprs, input)
+    }
+
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
         (self.exprs, self.input)
     }
@@ -142,5 +184,28 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     /// column corresponds more than one out columns, mapping to any one
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.o2i_col_mapping().inverse()
+    }
+
+    pub fn is_identity(&self) -> bool {
+        self.exprs.len() == self.input.schema().len()
+        && self
+            .exprs
+            .iter()
+            .zip_eq(self.input.schema().fields())
+            .enumerate()
+            .all(|(i, (expr, field))| {
+                matches!(expr, ExprImpl::InputRef(input_ref) if **input_ref == InputRef::new(i, field.data_type()))
+            })
+    }
+
+    pub fn try_as_projection(&self) -> Option<Vec<usize>> {
+        self.exprs
+            .iter()
+            .enumerate()
+            .map(|(_i, expr)| match expr {
+                ExprImpl::InputRef(input_ref) => Some(input_ref.index),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
     }
 }

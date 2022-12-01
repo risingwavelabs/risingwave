@@ -84,6 +84,10 @@ pub struct LogicalProject {
 }
 
 impl LogicalProject {
+    pub fn create(input: PlanRef, exprs: Vec<ExprImpl>) -> PlanRef {
+        Self::new(input, exprs).into()
+    }
+
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
         let core = generic::Project::new(exprs, input.clone());
         Self::with_core(core)
@@ -113,10 +117,6 @@ impl LogicalProject {
         self.core.i2o_col_mapping()
     }
 
-    pub fn create(input: PlanRef, exprs: Vec<ExprImpl>) -> PlanRef {
-        Self::new(input, exprs).into()
-    }
-
     /// Map the order of the input to use the updated indices
     pub fn get_out_column_index_order(&self) -> Order {
         self.i2o_col_mapping()
@@ -130,38 +130,17 @@ impl LogicalProject {
     /// This is useful in column pruning when we want to add a project to ensure the output schema
     /// is correct.
     pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
-        if mapping.target_size() == 0 {
-            // The mapping is empty, so the parent actually doesn't need the output of the input.
-            // This can happen when the parent node only selects constant expressions.
-            return LogicalProject::new(input, vec![]);
-        };
-        let mut input_refs = vec![None; mapping.target_size()];
-        for (src, tar) in mapping.mapping_pairs() {
-            assert_eq!(input_refs[tar], None);
-            input_refs[tar] = Some(src);
-        }
-        let input_schema = input.schema();
-        let exprs: Vec<ExprImpl> = input_refs
-            .into_iter()
-            .map(|i| i.unwrap())
-            .map(|i| InputRef::new(i, input_schema.fields()[i].data_type()).into())
-            .collect();
-
-        LogicalProject::new(input, exprs)
+        Self::with_core(generic::Project::with_mapping(input, mapping))
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
     pub fn with_out_fields(input: PlanRef, out_fields: &FixedBitSet) -> Self {
-        LogicalProject::with_out_col_idx(input, out_fields.ones())
+        Self::with_core(generic::Project::with_out_fields(input, out_fields))
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
     pub fn with_out_col_idx(input: PlanRef, out_fields: impl Iterator<Item = usize>) -> Self {
-        let input_schema = input.schema();
-        let exprs = out_fields
-            .map(|index| InputRef::new(index, input_schema[index].data_type()).into())
-            .collect();
-        LogicalProject::new(input, exprs)
+        Self::with_core(generic::Project::with_out_col_idx(input, out_fields))
     }
 
     fn derive_fd(
@@ -187,26 +166,11 @@ impl LogicalProject {
     }
 
     pub fn is_identity(&self) -> bool {
-        self.schema().len() == self.input().schema().len()
-            && self
-                .exprs()
-                .iter()
-                .zip_eq(self.input().schema().fields())
-                .enumerate()
-                .all(|(i, (expr, field))| {
-                    matches!(expr, ExprImpl::InputRef(input_ref) if **input_ref == InputRef::new(i, field.data_type()))
-                })
+        self.core.is_identity()
     }
 
     pub fn try_as_projection(&self) -> Option<Vec<usize>> {
-        self.exprs()
-            .iter()
-            .enumerate()
-            .map(|(_i, expr)| match expr {
-                ExprImpl::InputRef(input_ref) => Some(input_ref.index),
-                _ => None,
-            })
-            .collect::<Option<Vec<_>>>()
+        self.core.try_as_projection()
     }
 
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
