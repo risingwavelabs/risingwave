@@ -147,28 +147,24 @@ impl Drop for GlobalCollector {
 #[must_use = "TraceSpan Lifetime is important"]
 #[derive(Clone)]
 pub struct TraceSpan {
-    tx: Option<UnboundedSender<RecordMsg>>,
-    id: Option<RecordId>,
-    storage_type: Option<StorageType>,
+    tx: UnboundedSender<RecordMsg>,
+    id: RecordId,
+    storage_type: StorageType,
 }
 
 impl TraceSpan {
     pub fn new(tx: UnboundedSender<RecordMsg>, id: RecordId, storage_type: StorageType) -> Self {
         Self {
-            tx: Some(tx),
-            id: Some(id),
-            storage_type: Some(storage_type),
+            tx,
+            id,
+            storage_type,
         }
     }
 
     pub fn send(&self, op: Operation) {
-        match &self.tx {
-            Some(tx) => {
-                tx.send(Some(Record::new(self.storage_type(), self.id(), op)))
-                    .expect("failed to log record");
-            }
-            None => {}
-        }
+        self.tx
+            .send(Some(Record::new(self.storage_type(), self.id(), op)))
+            .expect("failed to log record");
     }
 
     pub fn send_result(&self, res: OperationResult) {
@@ -176,17 +172,15 @@ impl TraceSpan {
     }
 
     pub fn finish(&self) {
-        if self.tx.is_some() {
-            self.send(Operation::Finish);
-        }
+        self.send(Operation::Finish);
     }
 
     pub fn id(&self) -> RecordId {
-        self.id.unwrap()
+        self.id
     }
 
     fn storage_type(&self) -> StorageType {
-        self.storage_type.unwrap()
+        self.storage_type
     }
 
     /// Create a span and send operation to the `GLOBAL_COLLECTOR`
@@ -194,14 +188,6 @@ impl TraceSpan {
         let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next(), storage_type);
         span.send(op);
         span
-    }
-
-    pub fn none() -> Self {
-        TraceSpan {
-            tx: None,
-            id: None,
-            storage_type: None,
-        }
     }
 
     #[cfg(test)]
