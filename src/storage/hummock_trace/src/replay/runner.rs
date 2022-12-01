@@ -62,9 +62,8 @@ impl<R: TraceReader> HummockReplay<R> {
             };
         }
 
-        worker_scheduler.shutdown().await;
-
         println!("Replay finished, totally {} operations", total_ops);
+        worker_scheduler.shutdown().await;
         println!("Total time {} seconds", time.elapsed().as_secs());
         Ok(())
     }
