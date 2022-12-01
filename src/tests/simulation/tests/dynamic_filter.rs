@@ -27,7 +27,7 @@ const SELECT: &str = "select * from mv1 order by v1;";
 
 #[madsim::test]
 async fn test_dynamic_filter() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::default()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
     cluster.run("create table t1 (v1 int);").await?;
     cluster.run("create table t2 (v2 int);").await?;

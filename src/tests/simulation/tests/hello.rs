@@ -20,7 +20,7 @@ use risingwave_simulation::utils::AssertResult;
 
 #[madsim::test]
 async fn test_hello() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::default()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     cluster
         .run("select concat_ws(', ', 'hello', 'world');")
         .await?

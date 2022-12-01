@@ -47,7 +47,7 @@ const RESULT: &str = r#"
 
 async fn init() -> Result<NexmarkCluster> {
     let mut cluster =
-        NexmarkCluster::new(Configuration::default(), 6, Some(20 * THROUGHPUT)).await?;
+        NexmarkCluster::new(Configuration::for_scale(), 6, Some(20 * THROUGHPUT)).await?;
     cluster.run(CREATE).await?;
     Ok(cluster)
 }

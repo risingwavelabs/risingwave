@@ -94,6 +94,10 @@ pub struct Args {
     #[clap(long)]
     kafka_datadir: Option<String>,
 
+    /// Path to configuration file.
+    #[clap(long)]
+    config_path: Option<String>,
+
     /// The number of sqlsmith test cases to generate.
     ///
     /// If this argument is set, the `files` argument refers to a directory containing sqlsmith
@@ -113,6 +117,7 @@ async fn main() {
 
     let args = Args::parse();
     let config = Configuration {
+        config_path: args.config_path.unwrap_or_default(),
         frontend_nodes: args.frontend_nodes,
         compute_nodes: args.compute_nodes,
         compactor_nodes: args.compactor_nodes,

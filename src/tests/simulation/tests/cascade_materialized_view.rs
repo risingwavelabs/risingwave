@@ -32,7 +32,7 @@ const MV5: &str = "create materialized view m5 as select * from m4;";
 
 #[madsim::test]
 async fn test_simple_cascade_materialized_view() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::default()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
     cluster.run(ROOT_TABLE_CREATE).await?;
     cluster.run(MV1).await?;
@@ -116,7 +116,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
 
 #[madsim::test]
 async fn test_diamond_cascade_materialized_view() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::default()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
     cluster.run(ROOT_TABLE_CREATE).await?;
     cluster.run(MV1).await?;
