@@ -96,9 +96,9 @@ impl InsertExecutor {
 
             // No need to check for duplicate columns. This is already validated in binder
             if !&self.column_idxs.is_sorted() {
-                let mut ordered_cols: Vec<Column> = Vec::with_capacity(len);
-                for idx in &self.column_idxs {
-                    ordered_cols.push(columns[*idx].clone());
+                let mut ordered_cols: Vec<Column> = columns.clone();
+                for (i, idx) in self.column_idxs.iter().enumerate() {
+                    ordered_cols[*idx] = columns[i].clone()
                 }
                 columns = ordered_cols
             }

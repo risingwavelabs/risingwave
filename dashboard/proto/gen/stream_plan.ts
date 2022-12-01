@@ -329,6 +329,7 @@ export interface SourceNode {
   pkColumnIds: number[];
   properties: { [key: string]: string };
   info: SourceInfo | undefined;
+  sourceName: string;
 }
 
 export interface SourceNode_PropertiesEntry {
@@ -689,6 +690,14 @@ export interface SortNode {
   sortColumnIndex: number;
 }
 
+/** Merges two streams from streaming and batch for data manipulation. */
+export interface DmlNode {
+  /** Id of the table on which DML performs. */
+  tableId: number;
+  /** Column descriptions of the table. */
+  columnDescs: ColumnDesc[];
+}
+
 export interface RowIdGenNode {
   rowIdIndex: number;
 }
@@ -722,6 +731,7 @@ export interface StreamNode {
     | { $case: "groupTopN"; groupTopN: GroupTopNNode }
     | { $case: "sort"; sort: SortNode }
     | { $case: "watermarkFilter"; watermarkFilter: WatermarkFilterNode }
+    | { $case: "dml"; dml: DmlNode }
     | { $case: "rowIdGen"; rowIdGen: RowIdGenNode };
   /**
    * The id for the operator. This is local per mview.
@@ -1618,6 +1628,7 @@ function createBaseSourceNode(): SourceNode {
     pkColumnIds: [],
     properties: {},
     info: undefined,
+    sourceName: "",
   };
 }
 
@@ -1636,6 +1647,7 @@ export const SourceNode = {
         }, {})
         : {},
       info: isSet(object.info) ? SourceInfo.fromJSON(object.info) : undefined,
+      sourceName: isSet(object.sourceName) ? String(object.sourceName) : "",
     };
   },
 
@@ -1663,6 +1675,7 @@ export const SourceNode = {
       });
     }
     message.info !== undefined && (obj.info = message.info ? SourceInfo.toJSON(message.info) : undefined);
+    message.sourceName !== undefined && (obj.sourceName = message.sourceName);
     return obj;
   },
 
@@ -1689,6 +1702,7 @@ export const SourceNode = {
     message.info = (object.info !== undefined && object.info !== null)
       ? SourceInfo.fromPartial(object.info)
       : undefined;
+    message.sourceName = object.sourceName ?? "";
     return message;
   },
 };
@@ -3023,6 +3037,37 @@ export const SortNode = {
   },
 };
 
+function createBaseDmlNode(): DmlNode {
+  return { tableId: 0, columnDescs: [] };
+}
+
+export const DmlNode = {
+  fromJSON(object: any): DmlNode {
+    return {
+      tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      columnDescs: Array.isArray(object?.columnDescs) ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: DmlNode): unknown {
+    const obj: any = {};
+    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    if (message.columnDescs) {
+      obj.columnDescs = message.columnDescs.map((e) => e ? ColumnDesc.toJSON(e) : undefined);
+    } else {
+      obj.columnDescs = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DmlNode>, I>>(object: I): DmlNode {
+    const message = createBaseDmlNode();
+    message.tableId = object.tableId ?? 0;
+    message.columnDescs = object.columnDescs?.map((e) => ColumnDesc.fromPartial(e)) || [];
+    return message;
+  },
+};
+
 function createBaseRowIdGenNode(): RowIdGenNode {
   return { rowIdIndex: 0 };
 }
@@ -3106,6 +3151,8 @@ export const StreamNode = {
         ? { $case: "sort", sort: SortNode.fromJSON(object.sort) }
         : isSet(object.watermarkFilter)
         ? { $case: "watermarkFilter", watermarkFilter: WatermarkFilterNode.fromJSON(object.watermarkFilter) }
+        : isSet(object.dml)
+        ? { $case: "dml", dml: DmlNode.fromJSON(object.dml) }
         : isSet(object.rowIdGen)
         ? { $case: "rowIdGen", rowIdGen: RowIdGenNode.fromJSON(object.rowIdGen) }
         : undefined,
@@ -3184,6 +3231,8 @@ export const StreamNode = {
     message.nodeBody?.$case === "watermarkFilter" && (obj.watermarkFilter = message.nodeBody?.watermarkFilter
       ? WatermarkFilterNode.toJSON(message.nodeBody?.watermarkFilter)
       : undefined);
+    message.nodeBody?.$case === "dml" &&
+      (obj.dml = message.nodeBody?.dml ? DmlNode.toJSON(message.nodeBody?.dml) : undefined);
     message.nodeBody?.$case === "rowIdGen" &&
       (obj.rowIdGen = message.nodeBody?.rowIdGen ? RowIdGenNode.toJSON(message.nodeBody?.rowIdGen) : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
@@ -3393,6 +3442,9 @@ export const StreamNode = {
         $case: "watermarkFilter",
         watermarkFilter: WatermarkFilterNode.fromPartial(object.nodeBody.watermarkFilter),
       };
+    }
+    if (object.nodeBody?.$case === "dml" && object.nodeBody?.dml !== undefined && object.nodeBody?.dml !== null) {
+      message.nodeBody = { $case: "dml", dml: DmlNode.fromPartial(object.nodeBody.dml) };
     }
     if (
       object.nodeBody?.$case === "rowIdGen" &&

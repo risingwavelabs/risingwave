@@ -80,8 +80,8 @@ pub struct ComputeNodeOpts {
     pub file_cache_dir: String,
 
     /// Endpoint of the connector node
-    #[clap(long, default_value = "127.0.0.1:60061")]
-    pub connector_source_endpoint: String,
+    #[clap(long, env = "CONNECTOR_RPC_ENDPOINT")]
+    pub connector_rpc_endpoint: Option<String>,
 }
 
 use std::future::Future;
@@ -122,7 +122,6 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct ComputeNodeConfig {
     // For connection
     #[serde(default)]

@@ -27,13 +27,13 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
-memcomparable = { path = "../utils/memcomparable" }
 mime_guess = "2"
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prometheus = "0.13"
+prometheus-http-query = "0.6"
 prost = "0.11"
 rand = "0.8"
 reqwest = "0.11"
@@ -60,6 +60,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
+toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"

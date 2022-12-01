@@ -70,13 +70,13 @@ impl Relation {
         }
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn is_correlated(&self, depth: Depth) -> bool {
         match self {
-            Relation::Subquery(subquery) => subquery.query.is_correlated(),
+            Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
             Relation::Join(join) => {
-                join.cond.has_correlated_input_ref_by_depth()
-                    || join.left.is_correlated()
-                    || join.right.is_correlated()
+                join.cond.has_correlated_input_ref_by_depth(depth)
+                    || join.left.is_correlated(depth)
+                    || join.right.is_correlated(depth)
             }
             _ => false,
         }
@@ -246,7 +246,7 @@ impl Binder {
     /// - a table/source/materialized view
     /// - a reference to a CTE
     /// - a logical view
-    pub(super) fn bind_relation_by_name(
+    pub fn bind_relation_by_name(
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,

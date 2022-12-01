@@ -1,3 +1,13 @@
+# `src/risedevtool/risedev-schema.json` defines the schema for risedev.yml
+#
+# You can add the following section to `.vscode/settings.json` to get hover support in VS Code:
+#
+# ```
+#     "yaml.schemas": {
+#         "src/risedevtool/risedev-schema.json": "risedev.yml"
+#     }
+# ```
+
 risedev:
   #########################################
   ### Configurations used by developers ###
@@ -22,6 +32,9 @@ risedev:
       unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend
+
+    # If you want to create CDC source, uncomment the following line
+    # - use: connector-node
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
     # - use: compactor
@@ -98,7 +111,6 @@ risedev:
       bucket: some-bucket # configure a valid bucket name
     - use: etcd
     - use: meta-node
-      periodic-compaction-interval-sec: 99999
       enable-compaction-deterministic: true
     - use: compute-node
     - use: frontend
@@ -171,17 +183,6 @@ risedev:
       max-idle-secs-to-exit: 1800
     - use: compute-node
     - use: frontend
-
-  playground-test:
-    - use: meta-node
-      unsafe-disable-recovery: true
-      max-idle-secs-to-exit: 1800
-      vacuum-interval-sec: 1
-      collect-gc-watermark-spin-interval-sec: 1
-      min-sst-retention-time-sec: 0
-    - use: compute-node
-    - use: frontend
-    - use: compactor
 
   playground-3cn:
     - use: meta-node
@@ -454,6 +455,19 @@ risedev:
       exporter-port: 2224
       health-check-port: 6788
 
+  ci-pubsub:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+      enable-tiered-cache: true
+    - use: frontend
+    - use: compactor
+    - use: pubsub
+      persist-data: true
+
   ci-kafka:
     - use: minio
     - use: etcd
@@ -467,6 +481,23 @@ risedev:
     - use: zookeeper
       persist-data: true
     - use: kafka
+      persist-data: true
+
+  ci-kafka-plus-pubsub:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+      enable-tiered-cache: true
+    - use: frontend
+    - use: compactor
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
+    - use: pubsub
       persist-data: true
 
   ci-redis:
@@ -487,7 +518,6 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
-      periodic-compaction-interval-sec: 99999
       enable-compaction-deterministic: true
     - use: compute-node
       enable-tiered-cache: true
@@ -583,8 +613,8 @@ template:
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
 
-    # RPC endpoint for source connector node
-    connector-source-endpoint: "127.0.0.1:60061"
+    # RPC endpoint for connector node
+    connector-rpc-endpoint: "127.0.0.1:60061"
 
     # Minio instances used by this compute node
     provide-minio: "minio*"
@@ -641,24 +671,14 @@ template:
     # Whether to disable recovery mode
     unsafe-disable-recovery: false
 
-    # Interval of GC stale metadata and SST
-    vacuum-interval-sec: 30
-
-    # Interval of periodical compaction
-    periodic-compaction-interval-sec: 60
-
     # Whether run in compaction deterministic test mode
     enable-compaction-deterministic: false
 
-    # The spin interval when collecting global GC watermark in hummock
-    collect-gc-watermark-spin-interval-sec: 5
-
-    # Threshold used by worker node to filter out new SSTs when scanning object store, during full SST GC.
-    # 7 days by default.
-    min-sst-retention-time-sec: 604800
-
     # Enable sanity check when SSTs are committed. Disabled by default.
     enable-committed-sst-sanity-check: false
+
+    # Prometheus nodes used by dashboard service
+    provide-prometheus: "prometheus*"
 
   prometheus:
     # Advertise address of Prometheus
@@ -759,6 +779,16 @@ template:
     # Hint used by meta node
     max-concurrent-task-number: 15
 
+  connector-node:
+    # Connector node advertise address
+    address: "127.0.0.1"
+
+    # Connector node listen port
+    port: 60061
+
+    # Id of this instance
+    id: connector-${port}
+
   grafana:
     # Listen address of Grafana
     listen-address: ${address}
@@ -823,6 +853,16 @@ template:
 
     # Kafka broker id. If there are multiple instances of Kafka, we will need to set.
     broker-id: 0
+
+  # Google pubsub emulator service
+  pubsub:
+    id: pubsub-${port}
+
+    address: "127.0.0.1"
+
+    port: 5980
+
+    persist-data: true
 
   # Apache ZooKeeper service
   zookeeper:
