@@ -45,7 +45,7 @@ pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) ->
         let mut columns = Vec::new();
         for data_type in data_types {
             let mut data_gen =
-                FieldGeneratorImpl::with_random(data_type.clone(), None, None, None, None, SEED)
+                FieldGeneratorImpl::with_number_random(data_type.clone(), None, None, SEED)
                     .unwrap();
             let mut array_builder = data_type.create_array_builder(batch_size);
             for j in 0..batch_size {
@@ -66,7 +66,7 @@ pub fn gen_sorted_data(
     start: String,
     step: u64,
 ) -> Vec<DataChunk> {
-    let mut data_gen = FieldGeneratorImpl::with_sequence(
+    let mut data_gen = FieldGeneratorImpl::with_number_sequence(
         DataType::Int64,
         Some(start),
         Some(i64::MAX.to_string()),
@@ -100,7 +100,7 @@ pub fn gen_projected_data(
     expr: BoxedExpression,
 ) -> Vec<DataChunk> {
     let mut data_gen =
-        FieldGeneratorImpl::with_random(DataType::Int64, None, None, None, None, SEED).unwrap();
+        FieldGeneratorImpl::with_number_random(DataType::Int64, None, None, SEED).unwrap();
     let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
 
     for i in 0..batch_num {

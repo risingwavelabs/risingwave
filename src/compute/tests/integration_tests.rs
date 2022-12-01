@@ -48,6 +48,8 @@ use risingwave_stream::executor::{
 };
 use tokio::sync::mpsc::unbounded_channel;
 
+const MOCK_SOURCE_NAME: &str = "mock_source";
+
 struct SingleChunkExecutor {
     chunk: Option<DataChunk>,
     schema: Schema,
@@ -138,6 +140,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         ActorContext::create(0x3f3f3f),
         source_builder,
         source_table_id,
+        MOCK_SOURCE_NAME.to_string(),
         vnodes,
         state_table,
         all_column_ids.clone(),

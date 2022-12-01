@@ -693,6 +693,7 @@ pub fn to_stream_prost_body(
             let me = &me.core.catalog;
             ProstNode::Source(SourceNode {
                 source_id: me.id,
+                source_name: me.name.clone(),
                 state_table: Some(
                     generic::Source::infer_internal_table_catalog(base)
                         .with_id(state.gen_table_id_wrapped())

@@ -295,7 +295,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
 
 pub async fn rpc_serve_with_store<S: MetaStore>(
     meta_store: Arc<S>,
-    mut address_info: AddressInfo,
+    address_info: AddressInfo,
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
@@ -307,6 +307,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         lease_interval_secs,
     )
     .await?;
+    let prometheus_endpoint = opts.prometheus_endpoint.clone();
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
@@ -323,24 +324,27 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .await
             .unwrap(),
     );
-    let hummock_manager = Arc::new(
-        hummock::HummockManager::new(
-            env.clone(),
-            cluster_manager.clone(),
-            meta_metrics.clone(),
-            compactor_manager.clone(),
-        )
-        .await
-        .unwrap(),
-    );
+    let hummock_manager = hummock::HummockManager::new(
+        env.clone(),
+        cluster_manager.clone(),
+        meta_metrics.clone(),
+        compactor_manager.clone(),
+    )
+    .await
+    .unwrap();
 
     #[cfg(not(madsim))]
-    if let Some(dashboard_addr) = address_info.dashboard_addr.take() {
+    if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
-            dashboard_addr,
+            dashboard_addr: *dashboard_addr,
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
             meta_store: env.meta_store_ref(),
+            prometheus_endpoint: prometheus_endpoint.clone(),
+            prometheus_client: prometheus_endpoint.as_ref().map(|x| {
+                use std::str::FromStr;
+                prometheus_http_query::Client::from_str(x).unwrap()
+            }),
         };
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
@@ -416,6 +420,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         source_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
+        barrier_manager.clone(),
     );
 
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
@@ -441,7 +446,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         vacuum_trigger.clone(),
         fragment_manager.clone(),
     );
-    let notification_manager = env.notification_manager_ref();
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
         catalog_manager,
@@ -464,15 +468,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
-    let mut sub_tasks = hummock::start_hummock_workers(
-        hummock_manager.clone(),
-        compactor_manager,
-        vacuum_trigger,
-        notification_manager,
-        compaction_scheduler,
-        &env.opts,
-    )
-    .await;
+    let mut sub_tasks =
+        hummock::start_hummock_workers(vacuum_trigger, compaction_scheduler, &env.opts);
     sub_tasks.push(
         ClusterManager::start_worker_num_monitor(
             cluster_manager.clone(),

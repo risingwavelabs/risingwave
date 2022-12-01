@@ -24,7 +24,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use moka::future::Cache;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
-use risingwave_storage::hummock::{HummockError, HummockResult, LookupResult, LruCache};
+use risingwave_storage::hummock::{HummockError, HummockResult, LruCache};
 use tokio::runtime::{Builder, Runtime};
 
 pub struct Block {
@@ -101,22 +101,16 @@ impl CacheBase for LruCacheImpl {
         sst_id.hash(&mut hasher);
         block_idx.hash(&mut hasher);
         let h = hasher.finish();
-        match self.inner.lookup_for_request(h, key) {
-            LookupResult::Cached(entry) => {
-                let block = entry.value().clone();
-                Ok(block)
-            }
-            LookupResult::WaitPendingRequest(recv) => {
-                let entry = recv.await.map_err(HummockError::other)?;
-                Ok(entry.value().clone())
-            }
-            LookupResult::Miss => {
-                let block =
-                    Arc::new(get_fake_block(sst_id, block_idx, self.fake_io_latency).await?);
-                self.inner.insert(key, h, 1, block.clone());
-                Ok(block)
-            }
-        }
+        let latency = self.fake_io_latency;
+        let entry = self
+            .inner
+            .lookup_with_request_dedup(h, key, || async move {
+                get_fake_block(sst_id, block_idx, latency)
+                    .await
+                    .map(|block| (Arc::new(block), 1))
+            })
+            .await?;
+        Ok(entry.value().clone())
     }
 }
 

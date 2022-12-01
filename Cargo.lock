@@ -3313,14 +3313,14 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
 name = "memcomparable"
-version = "0.2.0-alpha"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e3dd02b54456b9372f039971b5cfa505e0f53e00227184096deca7dceeddaf5"
 dependencies = [
  "bytes",
- "rand 0.8.5",
  "rust_decimal",
  "serde",
  "thiserror",
- "workspace-hack",
 ]
 
 [[package]]
@@ -3568,13 +3568,12 @@ dependencies = [
 [[package]]
 name = "nexmark"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3de99e4067a851c593a5731569f7a13f0bce1da9f5effcf017b9435ed46eb67"
 dependencies = [
- "clap 3.2.23",
- "criterion",
  "lazy_static",
  "rand 0.8.5",
  "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -4480,6 +4479,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus-http-query"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "544213c26792ce82b2d01e5b0aca35cd70761a0eb4d635ca3f86f6ad372ecd4a"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "time 0.3.15",
+ "url",
+]
+
+[[package]]
 name = "prost"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4989,7 +5001,6 @@ dependencies = [
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
- "memcomparable",
  "minitrace",
  "num-traits",
  "parking_lot 0.12.1",
@@ -5214,6 +5225,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_rt",
  "risingwave_storage",
+ "risingwave_tracing",
  "serde",
  "toml",
  "tracing",
@@ -5269,7 +5281,6 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
- "memcomparable",
  "num-traits",
  "parking_lot 0.12.1",
  "paste",
@@ -5340,7 +5351,6 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
- "memcomparable",
  "mysql_async",
  "nexmark",
  "num-traits",
@@ -5397,6 +5407,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "risingwave_stream",
+ "risingwave_tracing",
  "serde_json",
  "size",
  "tracing",
@@ -5422,7 +5433,6 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "md5",
- "memcomparable",
  "num-traits",
  "parse-display",
  "paste",
@@ -5572,13 +5582,13 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
- "memcomparable",
  "mime_guess",
  "num-integer",
  "num-traits",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
+ "prometheus-http-query",
  "prost 0.11.2",
  "rand 0.8.5",
  "reqwest",
@@ -5806,7 +5816,6 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
- "memcomparable",
  "moka",
  "num-traits",
  "parking_lot 0.12.1",
@@ -5919,7 +5928,6 @@ dependencies = [
  "lz4",
  "madsim-tokio",
  "madsim-tonic",
- "memcomparable",
  "minitrace",
  "minstant",
  "moka",
@@ -6042,6 +6050,8 @@ dependencies = [
  "futures",
  "madsim-tokio",
  "minitrace",
+ "minitrace-jaeger",
+ "rand 0.8.5",
  "tracing",
  "workspace-hack",
 ]
@@ -6063,6 +6073,7 @@ dependencies = [
  "bytes",
  "num-traits",
  "postgres",
+ "rand 0.8.5",
  "serde",
  "tokio-postgres",
 ]

@@ -67,6 +67,7 @@ use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
     StructValue,
 };
+use crate::error::Result as RwResult;
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -796,8 +797,8 @@ pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
 impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
-    pub fn binary_format(&self) -> Bytes {
-        self.to_binary().unwrap()
+    pub fn binary_format(&self) -> RwResult<Bytes> {
+        self.to_binary().transpose().unwrap()
     }
 
     pub fn text_format(&self) -> String {
@@ -817,17 +818,16 @@ impl ScalarRefImpl<'_> {
             Self::Float64(v) => v.serialize(ser)?,
             Self::Utf8(v) => v.serialize(ser)?,
             Self::Bool(v) => v.serialize(ser)?,
-            Self::Decimal(v) => {
-                let (mantissa, scale) = v.mantissa_scale_for_serialization();
-                ser.serialize_decimal(mantissa, scale)?;
-            }
+            Self::Decimal(v) => ser.serialize_decimal((*v).into())?,
             Self::Interval(v) => v.serialize(ser)?,
-            Self::NaiveDate(v) => ser.serialize_naivedate(v.0.num_days_from_ce())?,
+            Self::NaiveDate(v) => v.0.num_days_from_ce().serialize(ser)?,
             Self::NaiveDateTime(v) => {
-                ser.serialize_naivedatetime(v.0.timestamp(), v.0.timestamp_subsec_nanos())?
+                v.0.timestamp().serialize(&mut *ser)?;
+                v.0.timestamp_subsec_nanos().serialize(ser)?;
             }
             Self::NaiveTime(v) => {
-                ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
+                v.0.num_seconds_from_midnight().serialize(&mut *ser)?;
+                v.0.nanosecond().serialize(ser)?;
             }
             Self::Struct(v) => v.serialize(ser)?,
             Self::List(v) => v.serialize(ser)?,
@@ -859,27 +859,21 @@ impl ScalarImpl {
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
             Ty::Varchar => Self::Utf8(String::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
-            Ty::Decimal => Self::Decimal({
-                let (mantissa, scale) = de.deserialize_decimal()?;
-                match scale {
-                    29 => Decimal::NegativeInf,
-                    30 => Decimal::PositiveInf,
-                    31 => Decimal::NaN,
-                    _ => Decimal::from_i128_with_scale(mantissa, scale as u32),
-                }
-            }),
+            Ty::Decimal => Self::Decimal(de.deserialize_decimal()?.into()),
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
             Ty::Time => Self::NaiveTime({
-                let (secs, nano) = de.deserialize_naivetime()?;
+                let secs = u32::deserialize(&mut *de)?;
+                let nano = u32::deserialize(de)?;
                 NaiveTimeWrapper::with_secs_nano(secs, nano)?
             }),
             Ty::Timestamp => Self::NaiveDateTime({
-                let (secs, nsecs) = de.deserialize_naivedatetime()?;
+                let secs = i64::deserialize(&mut *de)?;
+                let nsecs = u32::deserialize(de)?;
                 NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)?
             }),
             Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
             Ty::Date => Self::NaiveDate({
-                let days = de.deserialize_naivedate()?;
+                let days = i32::deserialize(de)?;
                 NaiveDateWrapper::with_days(days)?
             }),
             Ty::Struct(t) => StructValue::deserialize(&t.fields, de)?.to_scalar_value(),
@@ -915,16 +909,19 @@ impl ScalarImpl {
                     DataType::Boolean => size_of::<u8>(),
                     // IntervalUnit is serialized as (i32, i32, i64)
                     DataType::Interval => size_of::<(i32, i32, i64)>(),
-                    DataType::Decimal => deserializer.read_decimal_len()?,
+                    DataType::Decimal => {
+                        deserializer.deserialize_decimal()?;
+                        0 // the len is not used since decimal is not a fixed length type
+                    }
                     // these two types is var-length and should only be determine at runtime.
                     // TODO: need some test for this case (e.g. e2e test)
-                    DataType::List { .. } => deserializer.read_bytes_len()?,
+                    DataType::List { .. } => deserializer.skip_bytes()?,
                     DataType::Struct(t) => t
                         .fields
                         .iter()
                         .map(|field| Self::encoding_data_size(field, deserializer))
                         .try_fold(0, |a, b| b.map(|b| a + b))?,
-                    DataType::Varchar => deserializer.read_bytes_len()?,
+                    DataType::Varchar => deserializer.skip_bytes()?,
                 };
 
                 // consume offset of fixed_type
