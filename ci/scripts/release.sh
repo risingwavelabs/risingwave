@@ -24,7 +24,7 @@ yum install -y llvm-toolset-7.0-lld
 source /opt/rh/llvm-toolset-7.0/enable
 
 echo "--- Release create"
-gh release create "${BUILDKITE_TAG}" --generate-notes -d -p
+gh release create "${BUILDKITE_TAG}" --notes "release ${BUILDKITE_TAG}" -d -p
 
 echo "--- Build release asset"
 cargo build -p risingwave_cmd_all --features "static-link static-log-level" --profile release
