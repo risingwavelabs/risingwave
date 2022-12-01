@@ -28,7 +28,7 @@ pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 mod traced_store;
 use futures::Future;
 #[cfg(all(not(madsim), hm_trace))]
-use risingwave_hummock_trace::{CONCURRENT_ID, LOCAL_ID};
+use risingwave_hummock_trace::hummock_trace_scope;
 #[cfg(hm_trace)]
 pub use traced_store::*;
 
@@ -38,7 +38,7 @@ pub trait HummockTraceFutureExt: Sized + Future {
 }
 
 impl<F: Future> HummockTraceFutureExt for F {
-    type TraceOutput = impl Future<Output = <Self as Future>::Output>;
+    type TraceOutput = impl Future<Output = F::Output>;
 
     fn may_trace_hummock(self) -> Self::TraceOutput {
         #[cfg(any(madsim, not(hm_trace)))]
@@ -47,8 +47,7 @@ impl<F: Future> HummockTraceFutureExt for F {
         }
         #[cfg(all(not(madsim), hm_trace))]
         {
-            let id = CONCURRENT_ID.next();
-            LOCAL_ID.scope(id, self)
+            hummock_trace_scope(self)
         }
     }
 }
