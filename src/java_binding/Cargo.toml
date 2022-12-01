@@ -1,0 +1,14 @@
+[package]
+name = "risingwave_java_binding"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+jni = "0.20.0"
+thiserror = "1"
+#risingwave_storage = { path = "../../storage" }
+#tokio = { version = "0.2"}
+
+
+[lib]
+crate_type = ["cdylib"]
