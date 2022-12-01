@@ -340,7 +340,12 @@ export interface SourceNode_PropertiesEntry {
 export interface SinkNode {
   tableId: number;
   columnIds: number[];
-  table: Table | undefined;
+  properties: { [key: string]: string };
+}
+
+export interface SinkNode_PropertiesEntry {
+  key: string;
+  value: string;
 }
 
 export interface ProjectNode {
@@ -1727,7 +1732,7 @@ export const SourceNode_PropertiesEntry = {
 };
 
 function createBaseSinkNode(): SinkNode {
-  return { tableId: 0, columnIds: [], table: undefined };
+  return { tableId: 0, columnIds: [], properties: {} };
 }
 
 export const SinkNode = {
@@ -1735,7 +1740,12 @@ export const SinkNode = {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       columnIds: Array.isArray(object?.columnIds) ? object.columnIds.map((e: any) => Number(e)) : [],
-      table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
+      properties: isObject(object.properties)
+        ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+          acc[key] = String(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
@@ -1747,7 +1757,12 @@ export const SinkNode = {
     } else {
       obj.columnIds = [];
     }
-    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    obj.properties = {};
+    if (message.properties) {
+      Object.entries(message.properties).forEach(([k, v]) => {
+        obj.properties[k] = v;
+      });
+    }
     return obj;
   },
 
@@ -1755,7 +1770,39 @@ export const SinkNode = {
     const message = createBaseSinkNode();
     message.tableId = object.tableId ?? 0;
     message.columnIds = object.columnIds?.map((e) => e) || [];
-    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
+    message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[key] = String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseSinkNode_PropertiesEntry(): SinkNode_PropertiesEntry {
+  return { key: "", value: "" };
+}
+
+export const SinkNode_PropertiesEntry = {
+  fromJSON(object: any): SinkNode_PropertiesEntry {
+    return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
+  },
+
+  toJSON(message: SinkNode_PropertiesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = message.key);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SinkNode_PropertiesEntry>, I>>(object: I): SinkNode_PropertiesEntry {
+    const message = createBaseSinkNode_PropertiesEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
     return message;
   },
 };
