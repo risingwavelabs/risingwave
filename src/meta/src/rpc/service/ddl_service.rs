@@ -557,7 +557,7 @@ where
             | StreamingJob::Index(_, table)
             | StreamingJob::MaterializedSource(_, table) => creating_tables.push(table.clone()),
 
-            StreamingJob::Sink(_sink) => {
+            StreamingJob::Sink(_) => {
                 // No need to mark it as creating. Do nothing.
             }
         }
