@@ -37,7 +37,9 @@ function buildMvDependencyAsEdges(mvList: RwTable[]): ActorPoint[] {
       edges.push({
         id: mv.id.toString(),
         name: mv.name,
-        parentIds: mv.dependentRelations.filter((r) => mvSet.has(r)).map((r) => r.toString()),
+        parentIds: mv.dependentRelations
+          .filter((r) => mvSet.has(r))
+          .map((r) => r.toString()),
         order: mv.id,
       })
     }
