@@ -77,7 +77,7 @@ impl StreamNode for StreamSink {
         ProstStreamNode::Sink(SinkNode {
             table_id: self.sink_catalog.id().into(),
             column_ids: vec![], // TODO(nanderstabel): fix empty Vector
-            table: Some(self.sink_catalog.to_internal_table_prost()),
+            properties: self.sink_catalog.properties.inner().clone(),
         })
     }
 }

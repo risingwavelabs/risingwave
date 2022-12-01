@@ -681,7 +681,7 @@ pub fn to_stream_prost_body(
             ProstNode::Sink(SinkNode {
                 table_id: me.table.id().into(),
                 column_ids: vec![], // TODO(nanderstabel): fix empty Vector
-                table: Some(me.table.to_internal_table_prost()),
+                properties: me.table.properties.inner().clone(),
             })
         }
         Node::Source(me) => {

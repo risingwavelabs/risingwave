@@ -21,7 +21,6 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
 use risingwave_connector::ConnectorParams;
-use risingwave_pb::catalog::Table;
 use risingwave_storage::StateStore;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
@@ -55,11 +54,10 @@ impl<S: StateStore> SinkExecutor<S> {
         materialize_executor: BoxedExecutor,
         _store: S,
         metrics: Arc<StreamingMetrics>,
-        table: Table,
+        mut properties: HashMap<String, String>,
         executor_id: u64,
         connector_params: ConnectorParams,
     ) -> Self {
-        let mut properties = table.get_properties().clone();
         // This field can be used to distinguish a specific actor in parallelism to prevent
         // transaction execution errors
         properties.insert("identifier".to_string(), format!("sink-{:?}", executor_id));
@@ -193,11 +191,6 @@ mod test {
         "user".into() => "root".into()
         };
 
-        let table = Table {
-            properties,
-            ..Default::default()
-        };
-
         // Mock `child`
         let mock = MockSource::with_messages(
             Schema::new(vec![
@@ -223,7 +216,7 @@ mod test {
             Box::new(mock),
             MemoryStateStore::new(),
             Arc::new(StreamingMetrics::unused()),
-            table,
+            properties,
             0,
             Default::default(),
         );

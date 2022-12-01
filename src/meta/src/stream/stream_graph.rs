@@ -811,10 +811,6 @@ impl ActorGraphBuilder {
             }
             if let NodeBody::Sink(sink_node) = node_body {
                 sink_node.table_id = ctx.table_id.table_id;
-                sink_node.table.as_mut().unwrap().id = ctx.table_id.table_id;
-                sink_node.table.as_mut().unwrap().database_id = ctx.database_id;
-                sink_node.table.as_mut().unwrap().schema_id = ctx.schema_id;
-                sink_node.table.as_mut().unwrap().fragment_id = ctx.fragment_id;
                 mview_count += 1;
             }
             for input in &mut stream_node.input {
@@ -1132,9 +1128,6 @@ impl ActorGraphBuilder {
                 vec![node.table.as_ref().unwrap().id]
             }
             NodeBody::TopN(node) => {
-                vec![node.table.as_ref().unwrap().id]
-            }
-            NodeBody::Sink(node) => {
                 vec![node.table.as_ref().unwrap().id]
             }
             _ => {
