@@ -105,6 +105,14 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
         buf
     }
 
+    /// Serializes the row with value encoding and returns the bytes.
+    #[inline]
+    fn value_serialize_in<A: Allocator>(&self, alloc: A) -> Vec<u8, A> {
+        let mut buf = Vec::with_capacity_in(self.len(), alloc); // each datum is at least 1 byte
+        self.value_serialize_into(&mut buf);
+        buf
+    }
+
     /// Returns the hash code of the row.
     #[inline]
     fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
@@ -127,6 +135,8 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
         this.iter().cmp(other.iter())
     }
 }
+
+impl BufMut for Vec<
 
 const fn assert_row<R: Row2>(r: R) -> R {
     r

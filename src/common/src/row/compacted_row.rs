@@ -12,16 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::alloc::{Allocator, Global};
+
+use derivative::Derivative;
+
 use super::Row2;
 
 /// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
 /// Executors need to serialize Row into `CompactedRow` before writing into cache.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct CompactedRow {
-    pub row: Vec<u8>,
+#[derive(Clone, Derivative)]
+#[derivative(
+    Debug(bound = ""),
+    Hash(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = "")
+)]
+pub struct CompactedRow<A: Allocator = Global> {
+    pub row: Vec<u8, A>,
 }
 
-impl<R: Row2> From<R> for CompactedRow {
+impl<A: Allocator, R: Row2> From<R> for CompactedRow<A> {
     fn from(row: R) -> Self {
         Self {
             row: row.value_serialize(),
