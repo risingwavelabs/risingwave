@@ -79,13 +79,10 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
                     f,
                     "{delim}ORDER BY {}",
                     window_function.order_by.iter().format_with(", ", |e, f| {
-                        f(&format_args!(
-                            "{:?}",
-                            PlanAggOrderByFieldDisplay {
-                                plan_agg_order_by_field: e,
-                                input_schema: self.input_schema,
-                            }
-                        ))
+                        f(&PlanAggOrderByFieldDisplay {
+                            plan_agg_order_by_field: e,
+                            input_schema: self.input_schema,
+                        })
                     })
                 )?;
             }
