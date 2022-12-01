@@ -52,13 +52,10 @@ impl fmt::Display for StreamExchange {
         builder
             .field(
                 "dist",
-                &format_args!(
-                    "{:?}",
-                    DistributionDisplay {
-                        distribution: &self.base.dist,
-                        input_schema: self.input.schema()
-                    }
-                ),
+                &DistributionDisplay {
+                    distribution: &self.base.dist,
+                    input_schema: self.input.schema(),
+                },
             )
             .finish()
     }
