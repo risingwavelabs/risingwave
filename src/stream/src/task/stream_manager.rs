@@ -15,6 +15,7 @@
 use core::time::Duration;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::io::Write;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -178,6 +179,7 @@ impl LocalStreamManager {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
                 let mut core = self.core.lock().await;
+                let mut o = std::io::stdout().lock();
 
                 for (k, trace) in core
                     .stack_trace_manager
@@ -185,7 +187,7 @@ impl LocalStreamManager {
                     .expect("async stack trace not enabled")
                     .get_all()
                 {
-                    println!(">> Actor {}\n\n{}", k, &*trace);
+                    writeln!(o, ">> Actor {}\n\n{}", k, &*trace).ok();
                 }
             }
         })
@@ -195,13 +197,15 @@ impl LocalStreamManager {
     pub fn spawn_print_trace_on_interrupt(self: Arc<Self>) -> JoinHandle<()> {
         tokio::spawn(async move {
             let Ok(_) = tokio::signal::ctrl_c().await else { return };
+
             let mut core = self.core.lock().await;
             if let Some(m) = &mut core.stack_trace_manager {
                 let mut traces = m.get_all().peekable();
                 if traces.peek().is_some() {
-                    println!("\n\n*** async stack trace of all actors ***\n");
+                    let mut o = std::io::stdout().lock();
+                    writeln!(o, "\n\n*** async stack trace of all actors ***\n").ok();
                     for (k, trace) in traces {
-                        println!(">> Actor {}\n\n{}", k, &*trace);
+                        writeln!(o, ">> Actor {}\n\n{}", k, &*trace).ok();
                     }
                 }
             }
