@@ -142,9 +142,12 @@ macro_rules! trace_result {
 macro_rules! new_global_span {
     ($op:expr, $storage_type:expr) => {
         if risingwave_hummock_trace::should_use_trace() {
-            risingwave_hummock_trace::TraceSpan::new_to_global($op, $storage_type)
+            Some(risingwave_hummock_trace::TraceSpan::new_to_global(
+                $op,
+                $storage_type,
+            ))
         } else {
-            risingwave_hummock_trace::TraceSpan::none()
+            None
         }
     };
 }
@@ -152,8 +155,8 @@ macro_rules! new_global_span {
 #[macro_export]
 macro_rules! send_result {
     ($span:expr, $result:expr) => {
-        if risingwave_hummock_trace::should_use_trace() {
-            $span.send_result($result);
+        if let Some(span) = &$span {
+            span.send_result($result);
         }
     };
 }

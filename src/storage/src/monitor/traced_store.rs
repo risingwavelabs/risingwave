@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     init_collector, should_use_trace, trace, trace_result, ConcurrentId, Operation,
-    OperationResult, RecordId, StorageType, TraceResult, TraceSpan, LOCAL_ID,
+    OperationResult, StorageType, TraceResult, TraceSpan, LOCAL_ID,
 };
 
 use crate::error::StorageResult;
@@ -69,14 +69,13 @@ impl<S: StateStoreRead> TracedStateStore<S> {
     async fn traced_iter<'a, I>(
         &self,
         iter: I,
-        record_id: RecordId,
-        span: TraceSpan,
+        span: Option<TraceSpan>,
     ) -> StorageResult<TracedStateStoreIter<S::Iter>>
     where
         I: Future<Output = StorageResult<S::Iter>>,
     {
         let inner = iter.await?;
-        Ok(TracedStateStoreIter::new(inner, record_id, span))
+        Ok(TracedStateStoreIter::new(inner, span))
     }
 }
 
@@ -128,7 +127,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
-            let span: TraceSpan = trace!(GET, key, epoch, read_options, self.storage_type);
+            let span = trace!(GET, key, epoch, read_options, self.storage_type);
             let res: StorageResult<Option<Bytes>> = self.inner.get(key, epoch, read_options).await;
             trace_result!(GET, span, res);
             res
@@ -142,13 +141,9 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
         async move {
-            let span: TraceSpan = trace!(ITER, key_range, epoch, read_options, self.storage_type);
+            let span = trace!(ITER, key_range, epoch, read_options, self.storage_type);
             let iter = self
-                .traced_iter(
-                    self.inner.iter(key_range, epoch, read_options),
-                    span.id(),
-                    span,
-                )
+                .traced_iter(self.inner.iter(key_range, epoch, read_options), span)
                 .await;
             iter
         }
@@ -170,7 +165,7 @@ impl<S: StateStoreWrite> StateStoreWrite for TracedStateStore<S> {
                 return Ok(0);
             }
 
-            let span: TraceSpan = trace!(
+            let span = trace!(
                 INGEST,
                 kv_pairs,
                 delete_ranges,
@@ -199,18 +194,15 @@ impl TracedStateStore<HummockStorage> {
 
 pub struct TracedStateStoreIter<I> {
     inner: I,
-    record_id: RecordId,
-    span: TraceSpan,
+    span: Option<TraceSpan>,
 }
 
 impl<I> TracedStateStoreIter<I> {
-    fn new(inner: I, record_id: RecordId, span: TraceSpan) -> Self {
-        span.send_result(OperationResult::Iter(TraceResult::Ok(())));
-        TracedStateStoreIter {
-            inner,
-            record_id,
-            span,
+    fn new(inner: I, span: Option<TraceSpan>) -> Self {
+        if let Some(span) = &span {
+            span.send_result(OperationResult::Iter(TraceResult::Ok(())));
         }
+        TracedStateStoreIter { inner, span }
     }
 }
 
@@ -224,8 +216,8 @@ where
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            if should_use_trace() {
-                self.span.send(Operation::IterNext(self.record_id));
+            if let Some(span) = &self.span {
+                span.send(Operation::IterNext(span.id()));
             }
             let kv_pair: _ = self.inner.next().await?;
             trace_result!(ITER_NEXT, self.span, kv_pair);
