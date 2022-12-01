@@ -18,11 +18,10 @@ create materialized source products ( id INT,
 statement ok
 create materialized view products_cnt as select count(*) as cnt from products;
 
-# Since timestamp type cannot parse properly, use bigint for order_date instead
 statement ok
 create materialized source orders (
    order_id int,
-   order_date bigint,
+   order_date timestamp,
    customer_name string,
    price decimal,
    product_id int,

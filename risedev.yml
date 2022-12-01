@@ -524,6 +524,17 @@ risedev:
     - use: frontend
     - use: compactor
 
+  ci-1cn-1fe-with-recovery:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      enable-committed-sst-sanity-check: true
+    - use: compute-node
+      enable-tiered-cache: true
+    - use: frontend
+    - use: compactor
+
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
