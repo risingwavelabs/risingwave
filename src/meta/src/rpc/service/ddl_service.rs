@@ -507,14 +507,14 @@ where
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
             | StreamingJob::MaterializedSource(_, table) => {
-                table.fragment_id = actor_graph_builder.fill_mview_id(
+                table.fragment_id = actor_graph_builder.fill_mview_or_sink_id(
                     table.database_id,
                     table.schema_id,
                     table.id.into(),
                 );
             }
             StreamingJob::Sink(sink) => {
-                actor_graph_builder.fill_mview_id(sink.database_id, sink.schema_id, sink.id.into());
+                actor_graph_builder.fill_mview_or_sink_id(sink.database_id, sink.schema_id, sink.id.into());
             }
         }
 

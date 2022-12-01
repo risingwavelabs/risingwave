@@ -785,7 +785,7 @@ impl ActorGraphBuilder {
         })
     }
 
-    pub fn fill_mview_id(
+    pub fn fill_mview_or_sink_id(
         &mut self,
         database_id: DatabaseId,
         schema_id: SchemaId,
@@ -798,7 +798,7 @@ impl ActorGraphBuilder {
             table_id: TableId,
             fragment_id: FragmentId,
         }
-        fn fill_mview_id_inner(stream_node: &mut StreamNode, ctx: &FillIdContext) -> usize {
+        fn fill_mview_or_sink_id_inner(stream_node: &mut StreamNode, ctx: &FillIdContext) -> usize {
             let mut mview_count = 0;
             let node_body = stream_node.node_body.as_mut().unwrap();
             if let NodeBody::Materialize(materialize_node) = node_body {
@@ -818,7 +818,7 @@ impl ActorGraphBuilder {
                 mview_count += 1;
             }
             for input in &mut stream_node.input {
-                mview_count += fill_mview_id_inner(input, ctx);
+                mview_count += fill_mview_or_sink_id_inner(input, ctx);
             }
             mview_count
         }
@@ -826,7 +826,7 @@ impl ActorGraphBuilder {
         let mut mview_count = 0;
         let mut fragment_id = 0;
         for fragment in self.fragment_graph.fragments_mut().values_mut() {
-            let delta = fill_mview_id_inner(
+            let delta = fill_mview_or_sink_id_inner(
                 fragment.node.as_mut().unwrap(),
                 &FillIdContext {
                     database_id,

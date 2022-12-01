@@ -63,7 +63,7 @@ pub(super) fn get_column_names(
     Ok(col_names)
 }
 
-pub(super) fn check_column_names(col_names: &Vec<String>, plan_root: &PlanRoot) -> Result<()> {
+pub(super) fn check_column_names(col_names: &[String], plan_root: &PlanRoot) -> Result<()> {
     // calculate the number of unhidden columns
     let unhidden_len = plan_root
         .schema()
