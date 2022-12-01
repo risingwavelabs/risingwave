@@ -1336,8 +1336,7 @@ where
 
                     commit_meta!(self, sinks, users)?;
 
-                    // sink table and sink.
-                    user_core.decrease_ref_count(sink.owner, 2);
+                    user_core.decrease_ref(sink.owner);
 
                     for user in users_need_update {
                         self.notify_frontend(Operation::Update, Info::User(user))
