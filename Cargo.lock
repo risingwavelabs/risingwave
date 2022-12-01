@@ -5754,7 +5754,6 @@ dependencies = [
  "tempfile",
  "tokio-postgres",
  "tracing",
- "workspace-hack",
 ]
 
 [[package]]
