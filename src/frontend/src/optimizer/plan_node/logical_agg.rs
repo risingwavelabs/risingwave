@@ -571,7 +571,7 @@ impl ExprRewriter for LogicalAggBuilder {
     }
 
     fn rewrite_subquery(&mut self, subquery: crate::expr::Subquery) -> ExprImpl {
-        if subquery.is_correlated() {
+        if subquery.is_correlated(0) {
             self.error = Some(ErrorCode::NotImplemented(
                 "correlated subquery in HAVING or SELECT with agg".into(),
                 2275.into(),
@@ -718,7 +718,7 @@ impl LogicalAgg {
         Self::new(agg_calls, group_key, input)
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         self.core.fmt_with_name(f, name)
     }
 }

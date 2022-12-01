@@ -54,7 +54,7 @@ fn generate_hash_values(
     chunk: &DataChunk,
     consistent_hash_info: &ConsistentHashInfo,
 ) -> BatchResult<Vec<usize>> {
-    let hasher_builder = Crc32FastBuilder {};
+    let hasher_builder = Crc32FastBuilder;
 
     let hash_values = chunk
         .get_hash_values(

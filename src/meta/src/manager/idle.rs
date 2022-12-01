@@ -99,8 +99,11 @@ impl IdleManager {
                     break;
                 }
             }
-            tracing::info!("Idle checker found the server is idle");
-            tracing::info!("Idle checker is stopped");
+            tracing::warn!(
+                "Idle checker found the server is already idle for {:?}",
+                idle_manager.get_config_max_idle()
+            );
+            tracing::warn!("Idle checker is shutting down the server");
             let _ = idle_send.send(());
         });
         (join_handle, shutdown_tx)

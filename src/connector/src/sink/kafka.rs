@@ -173,7 +173,7 @@ impl KafkaSink {
                     "schema": schema_to_json(schema),
                     "payload": {
                         "before": null,
-                        "after": record_to_json(row.clone(), schema.fields.clone())?,
+                        "after": record_to_json(row, schema.fields.clone())?,
                         "op": "c",
                         "ts_ms": ts_ms,
                     }
@@ -181,14 +181,14 @@ impl KafkaSink {
                 Op::Delete => Some(json!({
                     "schema": schema_to_json(schema),
                     "payload": {
-                        "before": record_to_json(row.clone(), schema.fields.clone())?,
+                        "before": record_to_json(row, schema.fields.clone())?,
                         "after": null,
                         "op": "d",
                         "ts_ms": ts_ms,
                     }
                 })),
                 Op::UpdateDelete => {
-                    update_cache = Some(record_to_json(row.clone(), schema.fields.clone())?);
+                    update_cache = Some(record_to_json(row, schema.fields.clone())?);
                     continue;
                 }
                 Op::UpdateInsert => {
@@ -197,7 +197,7 @@ impl KafkaSink {
                             "schema": schema_to_json(schema),
                             "payload": {
                                 "before": before,
-                                "after": record_to_json(row.clone(), schema.fields.clone())?,
+                                "after": record_to_json(row, schema.fields.clone())?,
                                 "op": "u",
                                 "ts_ms": ts_ms,
                             }

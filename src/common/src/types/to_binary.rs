@@ -16,10 +16,10 @@ use bytes::{Bytes, BytesMut};
 use postgres_types::{ToSql, Type};
 
 use super::{DatumRef, ScalarRefImpl};
-
+use crate::error::Result;
 // Used to convert ScalarRef to text format
 pub trait ToBinary {
-    fn to_binary(&self) -> Option<Bytes>;
+    fn to_binary(&self) -> Result<Option<Bytes>>;
 }
 
 // implement use to_sql
@@ -27,10 +27,10 @@ macro_rules! implement_using_to_sql {
     ($({ $scalar_type:ty } ),*) => {
         $(
             impl ToBinary for $scalar_type {
-                fn to_binary(&self) -> Option<Bytes> {
+                fn to_binary(&self) -> Result<Option<Bytes>> {
                     let mut output = BytesMut::new();
                     self.to_sql(&Type::ANY, &mut output).unwrap();
-                    Some(output.freeze())
+                    Ok(Some(output.freeze()))
                 }
             }
         )*
@@ -48,7 +48,7 @@ implement_using_to_sql! {
 }
 
 impl ToBinary for ScalarRefImpl<'_> {
-    fn to_binary(&self) -> Option<Bytes> {
+    fn to_binary(&self) -> Result<Option<Bytes>> {
         match self {
             ScalarRefImpl::Int16(v) => v.to_binary(),
             ScalarRefImpl::Int32(v) => v.to_binary(),
@@ -69,7 +69,10 @@ impl ToBinary for ScalarRefImpl<'_> {
 }
 
 impl ToBinary for DatumRef<'_> {
-    fn to_binary(&self) -> Option<Bytes> {
-        self.map(|v| v.to_binary().unwrap())
+    fn to_binary(&self) -> Result<Option<Bytes>> {
+        match self {
+            Some(scalar) => scalar.to_binary(),
+            None => Ok(None),
+        }
     }
 }

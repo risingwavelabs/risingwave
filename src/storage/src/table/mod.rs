@@ -82,8 +82,8 @@ pub trait TableIter: Send {
         for _ in 0..chunk_size.unwrap_or(usize::MAX) {
             match self.next_row().await? {
                 Some(row) => {
-                    for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
-                        builder.append_datum(&datum);
+                    for (datum, builder) in row.iter().zip_eq(builders.iter_mut()) {
+                        builder.append_datum(datum);
                     }
                     row_count += 1;
                 }
@@ -112,7 +112,7 @@ pub fn compute_vnode(row: impl Row2, indices: &[usize], vnodes: &Bitmap) -> Virt
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {
-        let vnode = (&row).project(indices).hash(Crc32FastBuilder {}).to_vnode();
+        let vnode = (&row).project(indices).hash(Crc32FastBuilder).to_vnode();
         check_vnode_is_set(vnode, vnodes);
         vnode
     };
@@ -132,7 +132,7 @@ pub fn compute_chunk_vnode(
         vec![DEFAULT_VNODE; chunk.capacity()]
     } else {
         chunk
-            .get_hash_values(indices, Crc32FastBuilder {})
+            .get_hash_values(indices, Crc32FastBuilder)
             .into_iter()
             .zip_eq(chunk.vis().iter())
             .map(|(h, vis)| {

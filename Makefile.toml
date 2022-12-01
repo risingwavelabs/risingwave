@@ -5,6 +5,7 @@ extend = [
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/jaeger.toml" },
   { path = "src/risedevtool/kafka.toml" },
+  { path = "src/risedevtool/gcloud-pubsub.toml"},
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/connector.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
@@ -363,6 +364,7 @@ dependencies = [
   "download-prometheus",
   "download-jaeger",
   "download-kafka",
+  "download-pubsub",
   "download-redis",
   "download-connector",
   "build-risingwave",
@@ -394,10 +396,6 @@ category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
 script = '''
 #!/bin/bash
-
-set -e
-
-echo "Use \`./risedev d\` instead if you want to start a full cluster."
 
 set -ex
 
@@ -584,7 +582,7 @@ script = """
 set -e
 
 cargo nextest run \
-  -p risingwave_simulation_scale \
+  -p risingwave_simulation \
   "$@"
 """
 
@@ -598,7 +596,7 @@ script = """
 set -e
 
 cargo nextest archive \
-  -p risingwave_simulation_scale \
+  -p risingwave_simulation \
   --archive-file scale-test.tar.zst \
   "$@"
 """

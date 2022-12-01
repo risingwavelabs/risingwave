@@ -23,6 +23,7 @@ use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, IntervalUnit};
 use crate::array::ArrayResult;
+use crate::error::Result;
 use crate::util::value_encoding;
 use crate::util::value_encoding::error::ValueEncodingError;
 
@@ -89,34 +90,35 @@ impl ToText for NaiveDateTimeWrapper {
 }
 
 impl ToBinary for NaiveDateWrapper {
-    fn to_binary(&self) -> Option<Bytes> {
+    fn to_binary(&self) -> Result<Option<Bytes>> {
         let mut output = BytesMut::new();
         self.0.to_sql(&Type::ANY, &mut output).unwrap();
-        Some(output.freeze())
+        Ok(Some(output.freeze()))
     }
 }
 
 impl ToBinary for NaiveTimeWrapper {
-    fn to_binary(&self) -> Option<Bytes> {
+    fn to_binary(&self) -> Result<Option<Bytes>> {
         let mut output = BytesMut::new();
         self.0.to_sql(&Type::ANY, &mut output).unwrap();
-        Some(output.freeze())
+        Ok(Some(output.freeze()))
     }
 }
 
 impl ToBinary for NaiveDateTimeWrapper {
-    fn to_binary(&self) -> Option<Bytes> {
+    fn to_binary(&self) -> Result<Option<Bytes>> {
         let mut output = BytesMut::new();
         self.0.to_sql(&Type::ANY, &mut output).unwrap();
-        Some(output.freeze())
+        Ok(Some(output.freeze()))
     }
 }
 
 impl NaiveDateWrapper {
     pub fn with_days(days: i32) -> memcomparable::Result<Self> {
         Ok(NaiveDateWrapper::new(
-            NaiveDate::from_num_days_from_ce_opt(days)
-                .ok_or(memcomparable::Error::InvalidNaiveDateEncoding(days))?,
+            NaiveDate::from_num_days_from_ce_opt(days).ok_or_else(|| {
+                memcomparable::Error::Message(format!("invalid date encoding: days={days}"))
+            })?,
         ))
     }
 
@@ -167,8 +169,11 @@ impl NaiveDateWrapper {
 impl NaiveTimeWrapper {
     pub fn with_secs_nano(secs: u32, nano: u32) -> memcomparable::Result<Self> {
         Ok(NaiveTimeWrapper::new(
-            NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
-                .ok_or(memcomparable::Error::InvalidNaiveTimeEncoding(secs, nano))?,
+            NaiveTime::from_num_seconds_from_midnight_opt(secs, nano).ok_or_else(|| {
+                memcomparable::Error::Message(format!(
+                    "invalid time encoding: secs={secs}, nsecs={nano}"
+                ))
+            })?,
         ))
     }
 
@@ -216,10 +221,11 @@ impl NaiveTimeWrapper {
 impl NaiveDateTimeWrapper {
     pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> memcomparable::Result<Self> {
         Ok(NaiveDateTimeWrapper::new({
-            #[allow(clippy::unnecessary_lazy_evaluations)] // TODO: remove in toolchain bump
-            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
-                memcomparable::Error::InvalidNaiveDateTimeEncoding(secs, nsecs),
-            )?
+            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or_else(|| {
+                memcomparable::Error::Message(format!(
+                    "invalid datetime encoding: secs={secs}, nsecs={nsecs}"
+                ))
+            })?
         }))
     }
 
