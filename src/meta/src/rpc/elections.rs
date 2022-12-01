@@ -15,6 +15,10 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
+use mockall::automock;
+#[cfg(test)]
+use mockall::predicate::*;
 use prost::Message;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -177,8 +181,8 @@ fn s_to_ha(s: &str) -> HostAddress {
 /// None, if the operation failed
 ///
 /// ## Arguments
-/// `leader_info`: Info of the node that tries to acquire/renew the lease
-/// `lease_time_sec`: Time for which the lease should be extended
+/// `leader_info`: Info of the node that trie
+/// s to acquire/renew the lease
 /// `meta_store`: Store which holds the lease
 ///
 /// Returns true if node was leader and was able to renew/acquire the lease
@@ -502,4 +506,31 @@ async fn manage_term<S: MetaStore>(
     }
     // lease exists and leader continues term
     Some(true)
+}
+
+#[cfg(test)]
+mod tests {
+
+    use mockall::mock;
+
+    use super::*;
+    use crate::storage::{MetaStore, MetaStoreError, MockMetaStore, Transaction};
+
+    #[automock]
+    trait Foo {
+        fn foo(&self, x: u32);
+    }
+
+    impl Clone for MockMetaStore {
+        fn clone(&self) -> Self {
+            Self::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_infos_empty() {
+        let mock_meta_store = MockMetaStore::new();
+    }
+
+    fn test_s_to_ha() {}
 }

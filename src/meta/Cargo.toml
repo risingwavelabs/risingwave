@@ -8,6 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
+mockall = "0.11.3"
 anyhow = "1"
 arc-swap = "1"
 assert_matches = "1"
