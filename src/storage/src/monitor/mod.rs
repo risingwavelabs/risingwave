@@ -51,3 +51,13 @@ impl<F: Future> HummockTraceFutureExt for F {
         }
     }
 }
+
+#[macro_export]
+macro_rules! hummock_trace {
+    ($ident:ident, $($params:tt)*) => {
+        #[cfg(all(not(madsim), hm_trace))]
+        risingwave_hummock_trace::trace!($ident, $($params)*)
+    };
+}
+
+pub use hummock_trace;

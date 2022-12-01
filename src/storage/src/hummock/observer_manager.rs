@@ -20,8 +20,6 @@ use risingwave_common_service::observer_manager::{ObserverState, SubscribeHummoc
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
 };
-#[cfg(hm_trace)]
-use risingwave_hummock_trace::trace;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -29,6 +27,7 @@ use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::hummock::event_handler::HummockEvent;
+use crate::monitor::hummock_trace;
 
 pub struct HummockObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
@@ -45,9 +44,8 @@ impl ObserverState for HummockObserverNode {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
-
-        #[cfg(hm_trace)]
-        trace!(METAMSG, resp);
+        // used for hummock trace, do nothing if tracing is not enabled
+        hummock_trace!(METAMSG, resp);
 
         assert!(
             resp.version > self.version,
@@ -81,8 +79,8 @@ impl ObserverState for HummockObserverNode {
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
-        #[cfg(hm_trace)]
-        trace!(METAMSG, resp);
+        // used for hummock trace, do nothing if tracing is not enabled
+        hummock_trace!(METAMSG, resp);
 
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
