@@ -18,7 +18,6 @@
 //! section in `risingwave.toml`.
 
 use std::fs;
-use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +35,7 @@ where
         tracing::warn!("risingwave.toml not found, using default config.");
         return RwConfig::default();
     }
-    let config_str = fs::read_to_string(PathBuf::from(path.to_owned()))
+    let config_str = fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
     toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
 }

@@ -87,12 +87,7 @@ impl ConfigExpander {
                         .map(|s| s.to_string())
                         .ok_or_else(|| anyhow!("expect `config-path` to be a string"))?;
                     risingwave_config_path = Some(config_path.clone());
-
-                    let path = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
-
-                    // Override the content in `path` with the content in provided `config_path`.
-                    let config = std::fs::read_to_string(config_path)?;
-                    std::fs::write(path, config)?;
+                    update_config(config_path)?;
                 }
 
                 let v = map
@@ -181,5 +176,106 @@ impl ConfigExpander {
             }
         }
         Ok(config)
+    }
+}
+
+fn update_config(provided_path: impl AsRef<Path>) -> Result<()> {
+    let base_path = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
+
+    // Update the content in `base_path` with *additional* content in `provided_path`.
+    let mut config: toml::Value = toml::from_str(&std::fs::read_to_string(&base_path)?)?;
+    let provided_config: toml::Value = toml::from_str(&std::fs::read_to_string(&provided_path)?)?;
+    merge_toml(&mut config, &provided_config);
+
+    std::fs::write(base_path, config.to_string())?;
+
+    Ok(())
+}
+
+/// * For tables, we recursively update or insert new values for each key.
+/// * For other types, (including array/array of tables), we simply replace the old with the new
+///   one.
+fn merge_toml(base: &mut toml::Value, provided: &toml::Value) {
+    match (base, provided) {
+        (toml::Value::Table(base_table), toml::Value::Table(provided_table)) => {
+            for (k, v) in provided_table.iter() {
+                match base_table.get_mut(k) {
+                    Some(x) => merge_toml(x, v),
+                    None => {
+                        let _ = base_table.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+        (base, provided) => *base = provided.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_merge_toml() {
+        let mut base: toml::Value = toml::from_str(
+            r#"
+[foo]
+foo = 0
+a = 1
+b = [1, 2, 3]
+
+[bar]
+c = { c1 = "a", c2 = "b" }
+
+[foo.bar]
+d = 114514
+
+[[foobar]]
+e = 1919810
+
+[[foobar]]
+f = 810
+"#,
+        )
+        .unwrap();
+
+        let provided: toml::Value = toml::from_str(
+            r#"
+[foo]
+a = 2
+b = "3"
+
+[bar]
+c = { c1 = 0, c3 = 'd' }
+
+[foo.bar]
+e = "abc"
+
+[[foobar]]
+boom = 0
+"#,
+        )
+        .unwrap();
+
+        let expected: toml::Value = toml::from_str(
+            r#"
+[foo]
+foo = 0
+a = 2
+b = "3"
+
+[bar]
+c = { c1 = 0, c2 = "b", c3 = 'd' }
+
+[foo.bar]
+d = 114514
+e = "abc"
+
+[[foobar]]
+boom = 0
+"#,
+        )
+        .unwrap();
+
+        super::merge_toml(&mut base, &provided);
+        assert_eq!(base, expected);
     }
 }

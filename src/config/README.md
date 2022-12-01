@@ -14,18 +14,14 @@ The config files defined here are mainly used for testing and development purpos
 >
 > Its value is different from the default values defined in `src/common/src/config.rs` , which is used when the configuration file is not present.
 
-Each folder contains a `risingwave.toml` file for a different scene. It can be used in `risedev.yml` like:
+Other toml file contains a config file for a different scene. It will be *merged together* with the base config `./risingwave.toml` . It can be used in `risedev.yml` like:
 
 ```yaml
 risedev:
   profile-name:
-    config-path: src/config/ci/risingwave.toml
+    config-path: src/config/ci.toml
     steps:
       - use: ...
 ```
 
 It will be copied to `.risingwave/config/risingwave.toml` , which is the `config-path` arg passed to risingwave nodes by risedev.
-
-> **Note**
->
-> You may want to copy the content of `./risingwave.toml` when you want to define a configuration where some values are modified but the others are the same as the default file instead of the default values defined in `src/common/src/config.rs` .
