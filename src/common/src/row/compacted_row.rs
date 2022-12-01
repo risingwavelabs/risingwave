@@ -28,13 +28,35 @@ use super::Row2;
     Eq(bound = "")
 )]
 pub struct CompactedRow<A: Allocator = Global> {
+    // TODO: make this private, so that we don't rely on the internal representation is the same as
+    // a value-serialized row.
     pub row: Vec<u8, A>,
 }
 
-impl<R: Row2> From<R> for CompactedRow {
-    fn from(row: R) -> Self {
+impl<A: Allocator> CompactedRow<A> {
+    /// Create a new compacted row from a value-serialized row.
+    pub fn from_value_serialized(serialized: Vec<u8, A>) -> Self {
+        Self { row: serialized }
+    }
+
+    /// Create a new compacted row from a row, with the given allocator.
+    pub fn new_in(row: impl Row2, alloc: A) -> Self {
         Self {
-            row: row.value_serialize(),
+            row: row.value_serialize_in(alloc),
         }
+    }
+}
+
+impl<A: Allocator + Default> CompactedRow<A> {
+    /// Create a new compacted row from a row.
+    pub fn new(row: impl Row2) -> Self {
+        Self::new_in(row, A::default())
+    }
+}
+
+impl<A: Allocator + Default, R: Row2> From<R> for CompactedRow<A> {
+    // TODO: remove this and use explicit `new` or `new_in`.
+    fn from(row: R) -> Self {
+        Self::new(row)
     }
 }

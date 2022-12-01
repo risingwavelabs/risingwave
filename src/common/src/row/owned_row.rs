@@ -153,12 +153,21 @@ impl RowDeserializer {
     }
 
     /// Deserialize the row from value encoding bytes.
-    pub fn deserialize(&self, mut data: impl bytes::Buf) -> value_encoding::Result<Row> {
-        let mut values = Vec::with_capacity(self.data_types.len());
+    pub fn deserialize(&self, data: impl bytes::Buf) -> value_encoding::Result<Row> {
+        self.deserialize_in(data, Global)
+    }
+
+    // Deserialize the row from value encoding bytes.
+    pub fn deserialize_in<A: Allocator>(
+        &self,
+        mut data: impl bytes::Buf,
+        alloc: A,
+    ) -> value_encoding::Result<Row<A>> {
+        let mut values = Vec::with_capacity_in(self.data_types.len(), alloc);
         for typ in &self.data_types {
             values.push(deserialize_datum(&mut data, typ)?);
         }
-        Ok(Row(values))
+        Ok(Row::new(values))
     }
 
     pub fn data_types(&self) -> &[DataType] {

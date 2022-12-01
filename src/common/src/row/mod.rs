@@ -100,15 +100,13 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     /// Serializes the row with value encoding and returns the bytes.
     #[inline]
     fn value_serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(self.len()); // each datum is at least 1 byte
-        self.value_serialize_into(&mut buf);
-        buf
+        self.value_serialize_in(Global)
     }
 
-    /// Serializes the row with value encoding and returns the bytes.
+    /// Serializes the row with value encoding and returns the bytes, in the given allocator.
     #[inline]
     fn value_serialize_in<A: Allocator>(&self, alloc: A) -> Vec<u8, A> {
-        let mut buf = Vec::with_capacity_in(self.len(), alloc); // each datum is at least 1 byte
+        let mut buf = Vec::with_capacity_in(self.len(), alloc); // each datum is at least 1 byte (NULL)
         self.value_serialize_into(&mut buf);
         buf
     }
@@ -201,6 +199,10 @@ macro_rules! deref_forward_row {
 
         fn value_serialize(&self) -> Vec<u8> {
             (**self).value_serialize()
+        }
+
+        fn value_serialize_in<A: Allocator>(&self, alloc: A) -> Vec<u8, A> {
+            (**self).value_serialize_in(alloc)
         }
 
         fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
