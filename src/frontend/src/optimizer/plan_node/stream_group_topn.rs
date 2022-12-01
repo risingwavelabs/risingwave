@@ -111,7 +111,7 @@ impl fmt::Display for StreamGroupTopN {
             .field("offset", &self.offset())
             .field("group_key", &self.group_key());
         if self.with_ties() {
-            builder.field("with_ties", &"true");
+            builder.field("with_ties", &format_args!("{}", "true"));
         }
         builder.finish()
     }
