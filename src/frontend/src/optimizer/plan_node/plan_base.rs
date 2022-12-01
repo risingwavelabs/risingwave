@@ -126,7 +126,19 @@ impl PlanBase {
             functional_dependency,
         }
     }
+
+    pub fn derive_stream_plan_base(plan_node: &PlanRef) -> Self {
+        PlanBase::new_stream(
+            plan_node.ctx(),
+            plan_node.schema().clone(),
+            plan_node.logical_pk().to_vec(),
+            plan_node.functional_dependency().clone(),
+            plan_node.distribution().clone(),
+            plan_node.append_only(),
+        )
+    }
 }
+
 macro_rules! impl_base_delegate {
     ($( { $convention:ident, $name:ident }),*) => {
         $(paste! {

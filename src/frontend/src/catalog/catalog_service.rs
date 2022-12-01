@@ -69,7 +69,7 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
     ) -> Result<()>;
 
-    async fn create_materialized_source(
+    async fn create_table(
         &self,
         source: ProstSource,
         table: ProstTable,
@@ -170,7 +170,7 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_materialized_source(
+    async fn create_table(
         &self,
         source: ProstSource,
         table: ProstTable,
