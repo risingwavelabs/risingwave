@@ -20,9 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{GenericPlanNode, GenericPlanRef};
-use crate::expr::{
-    assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
-};
+use crate::expr::{assert_input_ref, Expr, ExprDisplay, ExprImpl, InputRef};
 use crate::session::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 
@@ -203,8 +201,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     pub fn try_as_projection(&self) -> Option<Vec<usize>> {
         self.exprs
             .iter()
-            .enumerate()
-            .map(|(_i, expr)| match expr {
+            .map(|expr| match expr {
                 ExprImpl::InputRef(input_ref) => Some(input_ref.index),
                 _ => None,
             })
