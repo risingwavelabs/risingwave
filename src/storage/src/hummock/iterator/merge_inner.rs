@@ -219,13 +219,9 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
                 }
             };
             loop {
-                // We don't use `while let` or `if let` here because the current borrow checker is
-                // not smart enough.
-                let node = self.heap.peek_mut();
-                if node.is_none() {
+                let Some(mut node) = self.heap.peek_mut() else {
                     break;
-                }
-                let mut node = node.expect("should find");
+                };
                 // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places
                 // of return. Once the iterator enters an invalid state, we should
                 // remove it from heap before returning.
