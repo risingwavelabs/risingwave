@@ -15,7 +15,7 @@
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
-use crate::session::OptimizerContextRef;
+use crate::{session::OptimizerContextRef, optimizer::plan_node::explain::{NodeExplain, field_doc_display}};
 
 /// `Union` returns the union of the rows of its inputs.
 /// If `all` is false, it needs to eliminate duplicates.
@@ -52,5 +52,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.inputs[0].ctx()
+    }
+}
+
+impl<'a, PlanRef> NodeExplain<'a> for Union<PlanRef> {
+    fn distill_fields(&self) -> pretty::RcDoc<'a, ()> {
+        field_doc_display("all", &self.all)
     }
 }

@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 
+use super::explain::NodeExplain;
 use super::{ColPrunable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
@@ -67,7 +68,7 @@ impl LogicalUnion {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(f, "{} {{ all: {} }}", name, self.core.all)
+        self.core.fmt_with_name(f, name)
     }
 
     pub fn all(&self) -> bool {
