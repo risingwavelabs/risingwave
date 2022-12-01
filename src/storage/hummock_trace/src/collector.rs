@@ -19,8 +19,10 @@ use std::path::Path;
 use std::sync::atomic::AtomicU64;
 
 use bincode::{Decode, Encode};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::Mutex;
+use parking_lot::Mutex;
+use tokio::sync::mpsc::{
+    unbounded_channel as channel, UnboundedReceiver as Receiver, UnboundedSender as Sender,
+};
 use tokio::task_local;
 
 use crate::write::{TraceWriter, TraceWriterImpl};
@@ -77,57 +79,48 @@ pub fn init_collector() {
             .expect("failed to open log file");
         let writer = BufWriter::with_capacity(WRITER_BUFFER_SIZE, f);
         let writer = TraceWriterImpl::new_bincode(writer).unwrap();
-        GlobalCollector::run(writer).await;
+        GlobalCollector::run(writer);
     });
 }
 
 /// `GlobalCollector` collects traced hummock operations.
 /// It starts a collector thread and writer thread.
 struct GlobalCollector {
-    tx: UnboundedSender<RecordMsg>,
-    rx: Mutex<UnboundedReceiver<RecordMsg>>,
+    tx: Sender<RecordMsg>,
+    rx: Mutex<Option<Receiver<RecordMsg>>>,
 }
 
 impl GlobalCollector {
     fn new() -> Self {
-        let (tx, rx) = unbounded_channel();
+        let (tx, rx) = channel();
         Self {
             tx,
-            rx: Mutex::new(rx),
+            rx: Mutex::new(Some(rx)),
         }
     }
 
-    async fn run(mut writer: impl TraceWriter + Send + 'static) {
-        let (writer_tx, mut writer_rx) = unbounded_channel();
-
+    fn run(mut writer: impl TraceWriter + Send + 'static) -> tokio::task::JoinHandle<()> {
         tokio::task::spawn_blocking(move || {
-            while let Some(Some(r)) = writer_rx.blocking_recv() {
-                writer.write(r).expect("failed to write log");
-            }
-            writer.flush().expect("failed to flush log file");
-        });
-
-        {
-            let mut rx = GLOBAL_COLLECTOR.rx.lock().await;
-            while let Some(r) = rx.recv().await {
+            let mut rx = GLOBAL_COLLECTOR.rx.lock().take().unwrap();
+            while let Some(r) = rx.blocking_recv() {
                 match r {
                     Some(r) => {
-                        writer_tx.send(Some(r)).expect("failed to send writer log");
+                        writer.write(r).expect("failed to write hummock trace");
                     }
                     None => {
-                        writer_tx.send(None).expect("failed to send writer log");
+                        writer.flush().expect("failed to flush hummock trace");
                         break;
                     }
                 }
             }
-        }
+        })
     }
 
     fn finish(&self) {
         self.tx.send(None).expect("failed to finish worker");
     }
 
-    fn tx(&self) -> UnboundedSender<RecordMsg> {
+    fn tx(&self) -> Sender<RecordMsg> {
         self.tx.clone()
     }
 }
@@ -147,13 +140,13 @@ impl Drop for GlobalCollector {
 #[must_use = "TraceSpan Lifetime is important"]
 #[derive(Clone)]
 pub struct TraceSpan {
-    tx: UnboundedSender<RecordMsg>,
+    tx: Sender<RecordMsg>,
     id: RecordId,
     storage_type: StorageType,
 }
 
 impl TraceSpan {
-    pub fn new(tx: UnboundedSender<RecordMsg>, id: RecordId, storage_type: StorageType) -> Self {
+    pub fn new(tx: Sender<RecordMsg>, id: RecordId, storage_type: StorageType) -> Self {
         Self {
             tx,
             id,
@@ -192,7 +185,7 @@ impl TraceSpan {
 
     #[cfg(test)]
     pub fn new_op(
-        tx: UnboundedSender<RecordMsg>,
+        tx: Sender<RecordMsg>,
         id: RecordId,
         op: Operation,
         storage_type: StorageType,
@@ -233,35 +226,6 @@ mod tests {
     use crate::{MockTraceWriter, TracedBytes};
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_global_new_span() {
-        let mut rx = GLOBAL_COLLECTOR.rx.lock().await;
-
-        let op1 = Operation::Sync(0);
-        let op2 = Operation::Seal(0, false);
-
-        let record1 = Record::new(StorageType::Global, 0, op1.clone());
-        let record2 = Record::new(StorageType::Global, 1, op2.clone());
-
-        let _span1 = TraceSpan::new_to_global(op1, StorageType::Global);
-        let _span2 = TraceSpan::new_to_global(op2, StorageType::Global);
-
-        let msg1 = rx.recv().await.unwrap();
-        let msg2 = rx.recv().await.unwrap();
-
-        assert_eq!(msg1, Some(record1));
-        assert_eq!(msg2, Some(record2));
-
-        drop(_span1);
-        drop(_span2);
-
-        let msg1 = rx.recv().await.unwrap();
-        let msg2 = rx.recv().await.unwrap();
-
-        assert_eq!(msg1, Some(Record::new_local_none(0, Operation::Finish)));
-        assert_eq!(msg2, Some(Record::new_local_none(1, Operation::Finish)));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
     async fn test_new_spans_concurrent() {
         let count = 200;
 
@@ -292,7 +256,7 @@ mod tests {
             handle.await.unwrap();
         }
 
-        let mut rx = collector.rx.lock().await;
+        let mut rx = collector.rx.lock().take().unwrap();
         let mut rx_count = 0;
         rx.close();
         while rx.recv().await.is_some() {
@@ -323,7 +287,7 @@ mod tests {
             .returning(|_| Ok(0));
         mock_writer.expect_flush().times(1).returning(|| Ok(()));
 
-        let runner_handle = tokio::spawn(GlobalCollector::run(mock_writer));
+        let runner_handle = GlobalCollector::run(mock_writer);
 
         let mut handles = Vec::with_capacity(count);
 
