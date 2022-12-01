@@ -19,6 +19,13 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+cleanup() {
+    echo "Dumping trace logs..."
+    timeout 10s cargo make ctl trace > .risingwave/log/ctl_trace.log || true
+    echo "Done"
+}
+trap 'cleanup' SIGTERM
+
 echo "--- Download artifacts"
 mkdir -p target/debug
 buildkite-agent artifact download risingwave-"$profile" target/debug/

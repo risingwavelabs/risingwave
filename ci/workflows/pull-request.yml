@@ -94,8 +94,9 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+          graceful-shutdown: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 2
+    timeout_in_minutes: 1
     retry: *auto-retry
 
   - label: "end-to-end test (parallel)"
