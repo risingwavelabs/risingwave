@@ -483,9 +483,17 @@ impl<S: StateStore> StateTable<S> {
                     .map(|index| self.pk_indices[index])
                     .collect_vec();
 
+                let check_bloom_filter = !self.dist_key_indices.is_empty()
+                    && is_subset(self.dist_key_indices.clone(), key_indices.clone())
+                    && self.dist_key_indices.len() + self.distribution_key_start_index_in_pk
+                        <= key_indices.len()
+                    && *self.dist_key_in_pk_indices.iter().min().unwrap()
+                        + self.dist_key_in_pk_indices.len()
+                        - 1
+                        == *self.dist_key_in_pk_indices.iter().max().unwrap();
                 let read_options = ReadOptions {
                     dist_key_hint: None,
-                    check_bloom_filter: is_subset(self.dist_key_indices.clone(), key_indices),
+                    check_bloom_filter,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,
@@ -1053,8 +1061,10 @@ impl<S: StateStore> StateTable<S> {
                                 .to_vec(),
                         )
                     }
-                    // discontinuous
-                    false => None,
+                    false => {
+                        warn!("distribution key indices in pk is discontinuous");
+                        None
+                    }
                 }
             }
         };

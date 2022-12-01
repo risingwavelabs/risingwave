@@ -31,6 +31,7 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use tracing::log::warn;
 use tracing::trace;
 
 use super::iter_utils;
@@ -262,9 +263,17 @@ impl<S: StateStore> StorageTable<S> {
             .into_iter()
             .map(|index| self.pk_indices[index])
             .collect_vec();
+        let check_bloom_filter = !self.dist_key_indices.is_empty()
+            && is_subset(self.dist_key_indices.clone(), key_indices.clone())
+            && self.dist_key_indices.len() + self.distribution_key_start_index_in_pk
+                <= key_indices.len()
+            && *self.dist_key_in_pk_indices.iter().min().unwrap()
+                + self.dist_key_in_pk_indices.len()
+                - 1
+                == *self.dist_key_in_pk_indices.iter().max().unwrap();
         let read_options = ReadOptions {
             dist_key_hint: None,
-            check_bloom_filter: is_subset(self.dist_key_indices.clone(), key_indices),
+            check_bloom_filter,
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
@@ -476,8 +485,10 @@ impl<S: StateStore> StorageTable<S> {
                     let serialized_dist_key = serialize_pk(&dist_key, &dist_key_serializer);
                     Some(serialized_dist_key)
                 }
-                // discontinuous
-                false => None,
+                false => {
+                    warn!("distribution key indices in pk is discontinuous");
+                    None
+                }
             }
         };
 
