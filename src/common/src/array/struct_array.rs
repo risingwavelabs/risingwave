@@ -451,7 +451,7 @@ mod tests {
     use more_asserts::assert_gt;
 
     use super::*;
-    use crate::types::{OrderedF32, OrderedF64, ScalarRef};
+    use crate::types::{OrderedF32, OrderedF64};
     use crate::{array, try_match_expand};
 
     // Empty struct is allowed in postgres.

@@ -21,7 +21,7 @@ use risingwave_common::array::{
     Utf8Array,
 };
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl, ScalarRef};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;

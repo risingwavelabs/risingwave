@@ -593,7 +593,6 @@ fn scalar_cast(
 #[cfg(test)]
 mod tests {
     use num_traits::FromPrimitive;
-    use risingwave_common::types::ScalarRef;
 
     use super::*;
 

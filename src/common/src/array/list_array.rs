@@ -547,7 +547,6 @@ mod tests {
     use more_asserts::{assert_gt, assert_lt};
 
     use super::*;
-    use crate::types::ScalarRef;
     use crate::{array, empty_array, try_match_expand};
 
     #[test]

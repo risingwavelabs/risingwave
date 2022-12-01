@@ -251,7 +251,7 @@ mod tests {
     use std::vec;
 
     use risingwave_common::array::{ArrayImpl, DataChunk, Utf8Array};
-    use risingwave_common::types::{Scalar, ScalarRef};
+    use risingwave_common::types::Scalar;
     use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};

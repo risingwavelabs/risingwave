@@ -160,7 +160,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::row::Row;
-    use risingwave_common::types::{Datum, Scalar, ScalarRef};
+    use risingwave_common::types::Datum;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;
