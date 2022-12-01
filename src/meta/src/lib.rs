@@ -63,7 +63,7 @@ enum Backend {
     Etcd,
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Clone, Parser)]
 pub struct MetaNodeOpts {
     // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:5690")]

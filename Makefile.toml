@@ -582,7 +582,7 @@ script = """
 set -e
 
 cargo nextest run \
-  -p risingwave_simulation_scale \
+  -p risingwave_simulation \
   "$@"
 """
 
@@ -596,7 +596,7 @@ script = """
 set -e
 
 cargo nextest archive \
-  -p risingwave_simulation_scale \
+  -p risingwave_simulation \
   --archive-file scale-test.tar.zst \
   "$@"
 """
