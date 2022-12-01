@@ -14,17 +14,15 @@ docker build -f docker/Dockerfile -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" -
 echo "--- docker images"
 docker images
 
-if [ "$PUSH" = true ]; then
-  echo "--- ghcr login"
-  echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+echo "--- ghcr login"
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
-  echo "--- dockerhub login"
-  echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
+echo "--- dockerhub login"
+echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
 
-  echo "--- docker push to ghcr"
-  docker push "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
+echo "--- docker push to ghcr"
+docker push "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
 
-  echo "--- docker push to dockerhub"
-  docker tag "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
-  docker push "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
-fi
+echo "--- docker push to dockerhub"
+docker tag "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
+docker push "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
