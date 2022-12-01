@@ -51,10 +51,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         epoch: HummockEpoch,
         sstables: Vec<LocalSstableInfo>,
     ) -> Result<()>;
-    async fn update_current_epoch(
-        &self,
-        epoch: HummockEpoch,
-    ) -> Result<()>;
+    async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()>;
 
     async fn subscribe_compact_tasks(
         &self,

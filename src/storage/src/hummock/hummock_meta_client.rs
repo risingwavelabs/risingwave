@@ -165,4 +165,8 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .trigger_full_gc(sst_retention_time_sec)
             .await
     }
+
+    async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+        self.meta_client.update_current_epoch(epoch).await
+    }
 }

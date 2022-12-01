@@ -155,16 +155,11 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(())
     }
 
-    async fn update_current_epoch(
-        &self,
-        epoch: HummockEpoch,
-    ) -> Result<()> {
+    async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         self.hummock_manager
             .update_current_epoch(epoch)
-            .await
             .map_err(mock_err)
     }
-
 
     async fn subscribe_compact_tasks(
         &self,
@@ -200,7 +195,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
         _progress: Vec<CompactTaskProgress>,
     ) -> Result<()> {
-        unimplemented!()
+        Ok(())
     }
 
     async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> Result<()> {

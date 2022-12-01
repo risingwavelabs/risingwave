@@ -3,7 +3,6 @@ use std::future::Future;
 use std::ops::Bound;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -12,7 +11,9 @@ use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_test::get_test_notification_client;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -21,7 +22,7 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::hummock::CompactionGroup;
+use risingwave_pb::hummock::{CompactionConfig, CompactionGroup};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext, Context};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
@@ -66,19 +67,35 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
         }
     })
 }
-
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
-    let config = CompactionConfigBuilder::new().build();
+    tracing::info!("Started embedded Meta");
+    let config: TestToolConfig = load_config(&opts.config_path).unwrap();
+    let mut storage_config = config.storage;
+    storage_config.enable_state_store_v1 = false;
+    let compaction_config = CompactionConfigBuilder::new().build();
+    compaction_test(
+        compaction_config,
+        storage_config,
+        &opts.state_store,
+        1000000,
+        1000000,
+    )
+    .await
+}
+
+async fn compaction_test(
+    compaction_config: CompactionConfig,
+    storage_config: StorageConfig,
+    state_store_type: &str,
+    test_range: u64,
+    test_count: u64,
+) -> anyhow::Result<()> {
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env_with_config(8080, config).await;
+        setup_compute_env_with_config(8080, compaction_config.clone()).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-
-    // Wait for meta starts
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    tracing::info!("Started embedded Meta");
 
     let delete_key_table = ProstTable {
         id: 1,
@@ -108,14 +125,14 @@ pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()
         id: 0,
         parent_id: 0,
         member_table_ids: vec![1],
-        compaction_config: None,
+        compaction_config: Some(compaction_config.clone()),
         table_id_to_options: Default::default(),
     };
     let group2 = CompactionGroup {
         id: 0,
         parent_id: 0,
         member_table_ids: vec![2],
-        compaction_config: None,
+        compaction_config: Some(compaction_config.clone()),
         table_id_to_options: Default::default(),
     };
     hummock_manager_ref
@@ -124,16 +141,15 @@ pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()
             vec![group1, group2],
         )
         .await?;
-    let mut config: TestToolConfig = load_config(&opts.config_path).unwrap();
-    config.storage.enable_state_store_v1 = false;
-    let config = Arc::new(config.storage.clone());
+
+    let config = Arc::new(storage_config);
 
     let state_store_metrics = Arc::new(StateStoreMetrics::unused());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
     let remote_object_store = parse_remote_object_store(
-        opts.state_store.strip_prefix("hummock+").unwrap(),
+        state_store_type.strip_prefix("hummock+").unwrap(),
         object_store_metrics.clone(),
-        config.object_store_use_batch_delete,
+        false,
     )
     .await;
     let sstable_store = Arc::new(SstableStore::new(
@@ -153,10 +169,30 @@ pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()
     )
     .await
     .unwrap();
+    let filter_key_extractor_manager = store.filter_key_extractor_manager().clone();
+    filter_key_extractor_manager.update(
+        1,
+        Arc::new(FilterKeyExtractorImpl::FullKey(
+            FullKeyFilterKeyExtractor {},
+        )),
+    );
+    filter_key_extractor_manager.update(
+        2,
+        Arc::new(FilterKeyExtractorImpl::FullKey(
+            FullKeyFilterKeyExtractor {},
+        )),
+    );
 
-    let (compactor_thrd, compactor_shutdown_tx) =
-        run_compactor_thread(config, sstable_store, meta_client, state_store_metrics);
-    run_compare_result(&store, 100000, 100000).await.unwrap();
+    let (compactor_thrd, compactor_shutdown_tx) = run_compactor_thread(
+        config,
+        sstable_store,
+        meta_client.clone(),
+        filter_key_extractor_manager,
+        state_store_metrics,
+    );
+    run_compare_result(&store, meta_client, test_range, test_count)
+        .await
+        .unwrap();
     compactor_shutdown_tx.send(()).unwrap();
     compactor_thrd.await.unwrap();
     Ok(())
@@ -197,21 +233,20 @@ async fn run_compare_result(
                 assert!(a.eq(&b));
             } else {
                 let key = format!("{:06}", start_key);
-                let val = epoch.to_le_bytes();
-                normal.insert(key.as_bytes(), &val);
-                delete_range.insert(key.as_bytes(), &val);
+                let val = format!("val-{:16}", epoch);
+                normal.insert(key.as_bytes(), val.as_bytes());
+                delete_range.insert(key.as_bytes(), val.as_bytes());
             }
         }
         normal.commit(epoch).await?;
         delete_range.commit(epoch).await?;
-        let checkpoint = epoch % 10 == 0;
-        hummock.seal_epoch(epoch, checkpoint);
-        if checkpoint {
-            let ret = hummock.sync(epoch).await.unwrap();
-            meta_client.commit_epoch(epoch, ret.uncommitted_ssts).await.unwrap();
-        } else {
-            meta_client.update_current_epoch(epoch).await.unwrap();
-        }
+        // let checkpoint = epoch % 10 == 0;
+        let ret = hummock.seal_and_sync_epoch(epoch).await.unwrap();
+        meta_client
+            .commit_epoch(epoch, ret.uncommitted_ssts)
+            .await
+            .unwrap();
+        // meta_client.update_current_epoch(epoch).await.unwrap();
         hummock
             .try_wait_epoch(HummockReadEpoch::Current(epoch))
             .await
@@ -439,12 +474,12 @@ fn run_compactor_thread(
     config: Arc<StorageConfig>,
     sstable_store: SstableStoreRef,
     meta_client: Arc<MockHummockMetaClient>,
+    filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
     state_store_metrics: Arc<StateStoreMetrics>,
 ) -> (
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
 ) {
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let compact_sstable_store = Arc::new(CompactorSstableStore::new(
         sstable_store.clone(),
         MemoryLimiter::unlimit(),
@@ -474,4 +509,32 @@ fn run_compactor_thread(
         compactor_context,
         meta_client,
     )
+}
+
+#[cfg(test)]
+mod tests {
+
+    use risingwave_common::config::StorageConfig;
+    use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
+
+    use super::compaction_test;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+    async fn test_small_data() {
+        let mut storage_config = StorageConfig::default();
+        storage_config.enable_state_store_v1 = false;
+        let mut compaction_config = CompactionConfigBuilder::new().build();
+        compaction_config.max_sub_compaction = 2;
+        compaction_config.max_bytes_for_level_base = 4 * 1024 * 1024;
+        compaction_config.sub_level_max_compaction_bytes = 1024 * 1024;
+        compaction_test(
+            compaction_config,
+            storage_config,
+            "hummock+memory",
+            1000,
+            1000,
+        )
+        .await
+        .unwrap();
+    }
 }
