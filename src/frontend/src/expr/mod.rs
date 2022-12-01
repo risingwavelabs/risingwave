@@ -270,7 +270,7 @@ impl ExprImpl {
     /// This is the core logic that supports [`crate::binder::BoundQuery::is_correlated`]. Check the
     /// doc of it for examples of `depth` being equal, less or greater.
     // We need to traverse inside subqueries.
-    pub fn has_correlated_input_ref_by_depth(&self) -> bool {
+    pub fn has_correlated_input_ref_by_depth(&self, depth: Depth) -> bool {
         struct Has {
             depth: usize,
         }
@@ -301,7 +301,11 @@ impl ExprImpl {
                 let mut has = false;
                 match set_expr {
                     BoundSetExpr::Select(select) => {
-                        select.exprs().for_each(|expr| has |= self.visit_expr(expr))
+                        select.exprs().for_each(|expr| has |= self.visit_expr(expr));
+                        has |= match select.from.as_ref() {
+                            Some(from) => from.is_correlated(self.depth),
+                            None => false,
+                        };
                     }
                     BoundSetExpr::Values(values) => {
                         values.exprs().for_each(|expr| has |= self.visit_expr(expr))
@@ -320,7 +324,7 @@ impl ExprImpl {
             }
         }
 
-        let mut visitor = Has { depth: 1 };
+        let mut visitor = Has { depth };
         visitor.visit_expr(self)
     }
 
@@ -406,7 +410,15 @@ impl ExprImpl {
             fn visit_bound_set_expr(&mut self, set_expr: &mut BoundSetExpr) {
                 match set_expr {
                     BoundSetExpr::Select(select) => {
-                        select.exprs_mut().for_each(|expr| self.visit_expr(expr))
+                        select.exprs_mut().for_each(|expr| self.visit_expr(expr));
+                        if let Some(from) = select.from.as_mut() {
+                            self.correlated_indices.extend(
+                                from.collect_correlated_indices_by_depth_and_assign_id(
+                                    self.depth,
+                                    self.correlated_id,
+                                ),
+                            );
+                        };
                     }
                     BoundSetExpr::Values(values) => {
                         values.exprs_mut().for_each(|expr| self.visit_expr(expr))
