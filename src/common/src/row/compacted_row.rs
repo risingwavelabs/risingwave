@@ -31,7 +31,7 @@ pub struct CompactedRow<A: Allocator = Global> {
     pub row: Vec<u8, A>,
 }
 
-impl<A: Allocator, R: Row2> From<R> for CompactedRow<A> {
+impl<R: Row2> From<R> for CompactedRow {
     fn from(row: R) -> Self {
         Self {
             row: row.value_serialize(),

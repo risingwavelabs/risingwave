@@ -109,6 +109,7 @@ opt-level = 2
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]
+bytes = { git = "https://github.com/BugenZhao/bytes.git", rev = "2956a67" }
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "a819877" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "cc95ee3" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }

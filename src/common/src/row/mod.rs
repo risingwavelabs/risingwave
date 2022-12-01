@@ -136,8 +136,6 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     }
 }
 
-impl BufMut for Vec<
-
 const fn assert_row<R: Row2>(r: R) -> R {
     r
 }
