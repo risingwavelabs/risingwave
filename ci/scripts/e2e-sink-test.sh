@@ -62,7 +62,7 @@ psql -h db -U postgres -d test -c "CREATE TABLE t4 (id serial PRIMARY KEY, name 
 cargo make ci-start ci-1cn-1fe
 
 # start connector node service
-nohup java -jar ./connector-service.jar > .risingwave/log/connector-source.log 2>&1 &
+java -jar ./connector-service.jar &
 sleep 1
 
 # test remote sink
