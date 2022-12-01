@@ -65,11 +65,11 @@ impl BoundSelect {
             .chain(self.having.iter_mut())
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn is_correlated(&self, depth: Depth) -> bool {
         self.exprs()
-            .any(|expr| expr.has_correlated_input_ref_by_depth())
+            .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
             || match self.from.as_ref() {
-                Some(relation) => relation.is_correlated(),
+                Some(relation) => relation.is_correlated(depth),
                 None => false,
             }
     }

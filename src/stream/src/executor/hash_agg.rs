@@ -31,7 +31,9 @@ use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorage};
-use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
+use super::{
+    expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult, Watermark,
+};
 use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
@@ -117,6 +119,12 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
 
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
+
+    /// Map group key column idx to its position in group keys.
+    group_key_invert_idx: Vec<Option<usize>>,
+
+    /// Buffer watermarks on group keys received since last barrier.
+    buffered_watermarks: Vec<Option<Watermark>>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -157,6 +165,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
 
+        let mut group_key_invert_idx = vec![None; input.info().schema.len()];
+        for (group_key_seq, group_key_idx) in group_key_indices.iter().enumerate() {
+            group_key_invert_idx[*group_key_idx] = Some(group_key_seq);
+        }
+
         Ok(Self {
             input,
             extra: HashAggExecutorExtra {
@@ -178,6 +191,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 total_lookup_count: AtomicU64::new(0),
                 metrics,
                 chunk_size,
+                group_key_invert_idx,
+                buffered_watermarks: Vec::default(),
             },
             _phantom: PhantomData,
         })
@@ -381,11 +396,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref total_lookup_count,
             ref metrics,
             ref chunk_size,
+            buffered_watermarks: ref _buffered_watermarks,
             ..
         }: &'a mut HashAggExecutorExtra<K, S>,
         agg_groups: &'a mut AggGroupMap<K, S>,
         epoch: EpochPair,
     ) {
+        // TODO("https://github.com/risingwavelabs/risingwave/issues/6112"): use buffered_watermarks[0] do some state cleaning
         let actor_id_str = ctx.id.to_string();
         metrics
             .agg_lookup_miss_count
@@ -512,12 +529,18 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         yield Message::Barrier(barrier);
 
+        extra.buffered_watermarks = vec![None; extra.group_key_indices.len()];
+
         #[for_await]
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                Message::Watermark(mut watermark) => {
+                    let group_key_seq = extra.group_key_invert_idx[watermark.col_idx];
+                    if let Some(group_key_seq) = group_key_seq {
+                        watermark.col_idx = group_key_seq;
+                        extra.buffered_watermarks[group_key_seq] = Some(watermark);
+                    }
                 }
 
                 Message::Chunk(chunk) => {
@@ -527,6 +550,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     #[for_await]
                     for chunk in Self::flush_data(&mut extra, &mut agg_states, barrier.epoch) {
                         yield Message::Chunk(chunk?);
+                    }
+
+                    for buffered_watermark in &mut extra.buffered_watermarks {
+                        if let Some(watermark) = buffered_watermark.take() {
+                            yield Message::Watermark(watermark);
+                        }
                     }
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.

@@ -12,27 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::catalog::Sink as ProstSink;
+#![cfg(madsim)]
+#![feature(trait_alias)]
+#![feature(lint_reasons)]
+#![feature(once_cell)]
 
-use super::SinkId;
-use crate::WithOptions;
-
-#[derive(Clone, Debug)]
-pub struct SinkCatalog {
-    pub id: SinkId,
-    pub name: String,
-
-    pub properties: WithOptions,
-    pub owner: u32,
-}
-
-impl From<&ProstSink> for SinkCatalog {
-    fn from(sink: &ProstSink) -> Self {
-        SinkCatalog {
-            id: sink.id,
-            name: sink.name.clone(),
-            properties: WithOptions::new(sink.properties.clone()),
-            owner: sink.owner,
-        }
-    }
-}
+pub mod client;
+pub mod cluster;
+pub mod ctl_ext;
+mod kafka;
+pub mod nexmark;
+pub mod slt;
+pub mod utils;

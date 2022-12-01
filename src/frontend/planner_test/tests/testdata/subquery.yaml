@@ -295,3 +295,42 @@
           ├─LogicalAgg { group_key: [a.a1], aggs: [] }
           | └─LogicalScan { table: a, columns: [a.a1] }
           └─LogicalScan { table: c, columns: [] }
+- sql: |
+    create table a(a1 int, a2 int);
+    create table b(b1 int, b2 int);
+    select * from a where a1 = (select min(b1) from b where b2 = (select min(b1) from (select b1 from b where b1 = a1) as z ) );
+  logical_plan: |
+    LogicalProject { exprs: [a.a1, a.a2] }
+    └─LogicalFilter { predicate: (a.a1 = min(b.b1)) }
+      └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+        ├─LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id] }
+        └─LogicalProject { exprs: [min(b.b1)] }
+          └─LogicalAgg { aggs: [min(b.b1)] }
+            └─LogicalProject { exprs: [b.b1] }
+              └─LogicalFilter { predicate: (b.b2 = min(b.b1)) }
+                └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
+                  ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+                  └─LogicalProject { exprs: [min(b.b1)] }
+                    └─LogicalAgg { aggs: [min(b.b1)] }
+                      └─LogicalProject { exprs: [b.b1] }
+                        └─LogicalProject { exprs: [b.b1] }
+                          └─LogicalFilter { predicate: (b.b1 = CorrelatedInputRef { index: 0, correlated_id: 1 }) }
+                            └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a1, a.a1) AND (a.a1 = min(b.b1)), output: [a.a1, a.a2] }
+    ├─LogicalScan { table: a, columns: [a.a1, a.a2] }
+    └─LogicalAgg { group_key: [a.a1], aggs: [min(b.b1)] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1, b.b1] }
+        ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+        | └─LogicalScan { table: a, columns: [a.a1] }
+        └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1, b.b1] }
+          ├─LogicalJoin { type: Inner, on: (b.b2 = min(b.b1)), output: [b.b1, a.a1] }
+          | ├─LogicalScan { table: b, columns: [b.b1, b.b2] }
+          | └─LogicalAgg { group_key: [a.a1], aggs: [min(b.b1)] }
+          |   └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, b.b1), output: [a.a1, b.b1] }
+          |     ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+          |     | └─LogicalScan { table: a, columns: [a.a1] }
+          |     └─LogicalProject { exprs: [b.b1, b.b1] }
+          |       └─LogicalScan { table: b, output_columns: [b.b1], required_columns: [b1], predicate: IsNotNull(b.b1) }
+          └─LogicalAgg { group_key: [a.a1], aggs: [] }
+            └─LogicalScan { table: a, columns: [a.a1] }
