@@ -199,23 +199,12 @@ impl<S: StateStore> StorageTable<S> {
                     })
             })
             .collect_vec();
-        let distribution_key_start_index_in_pk = match dist_key_indices.is_empty() {
+        let distribution_key_start_index_in_pk = match dist_key_in_pk_indices.is_empty() {
             true => 0,
-            false => dist_key_indices
-                .iter()
-                .map(|&di| {
-                    pk_indices
-                        .iter()
-                        .position(|&pi| di == pi)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "distribution key {:?} must be a subset of primary key {:?}",
-                                dist_key_indices, pk_indices
-                            )
-                        })
-                })
-                .next()
-                .unwrap(),
+            false => {
+                let min = dist_key_in_pk_indices.iter().min().unwrap();
+                *min
+            }
         };
         Self {
             table_id,
@@ -470,15 +459,26 @@ impl<S: StateStore> StorageTable<S> {
             );
             None
         } else {
-            let distribution_key_end_index_in_pk =
-                self.distribution_key_start_index_in_pk + self.dist_key_indices.len();
-            let dist_key_serializer = self.pk_serializer.dist_key_serde(
-                self.distribution_key_start_index_in_pk,
-                distribution_key_end_index_in_pk,
-            );
-            let dist_key = (&pk_prefix).project(&self.dist_key_in_pk_indices);
-            let serialized_dist_key = serialize_pk(&dist_key, &dist_key_serializer);
-            Some(serialized_dist_key)
+            // todo(wcy-fdu): handle dist_key_in_pk_indices discontinuous case
+            let dist_key_min_index_in_pk = self.dist_key_in_pk_indices.iter().min().unwrap();
+            let dist_key_max_index_in_pk = self.dist_key_in_pk_indices.iter().max().unwrap();
+            match *dist_key_min_index_in_pk + self.dist_key_in_pk_indices.len() - 1
+                == *dist_key_max_index_in_pk
+            {
+                true => {
+                    let distribution_key_end_index_in_pk =
+                        self.distribution_key_start_index_in_pk + self.dist_key_indices.len();
+                    let dist_key_serializer = self.pk_serializer.dist_key_serde(
+                        self.distribution_key_start_index_in_pk,
+                        distribution_key_end_index_in_pk,
+                    );
+                    let dist_key = (&pk_prefix).project(&self.dist_key_in_pk_indices);
+                    let serialized_dist_key = serialize_pk(&dist_key, &dist_key_serializer);
+                    Some(serialized_dist_key)
+                }
+                // discontinuous
+                false => None,
+            }
         };
 
         trace!(

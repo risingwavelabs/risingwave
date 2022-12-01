@@ -192,23 +192,12 @@ impl<S: StateStore> StateTable<S> {
             None => Distribution::fallback(),
         };
 
-        let distribution_key_start_index_in_pk = match dist_key_indices.is_empty() {
+        let distribution_key_start_index_in_pk = match dist_key_in_pk_indices.is_empty() {
             true => 0,
-            false => dist_key_indices
-                .iter()
-                .map(|&di| {
-                    pk_indices
-                        .iter()
-                        .position(|&pi| di == pi)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "distribution key {:?} must be a subset of primary key {:?}",
-                                dist_key_indices, pk_indices
-                            )
-                        })
-                })
-                .next()
-                .unwrap(),
+            false => {
+                let min = dist_key_in_pk_indices.iter().min().unwrap();
+                *min
+            }
         };
         let vnode_col_idx_in_pk = table_catalog
             .vnode_col_idx
@@ -1043,17 +1032,30 @@ impl<S: StateStore> StateTable<S> {
             {
                 None
             } else {
-                let (dist_key_start_position, dist_key_len) = self
-                    .pk_serde
-                    .deserialize_dist_key_position_with_column_indices(
-                        &encoded_prefix,
-                        0..self.dist_key_indices().len() + self.distribution_key_start_index_in_pk,
-                        self.distribution_key_start_index_in_pk,
-                    )?;
-                Some(
-                    encoded_prefix[dist_key_start_position..dist_key_len + dist_key_start_position]
-                        .to_vec(),
-                )
+                // todo(wcy-fdu): handle dist_key_in_pk_indices discontinuous case
+                let dist_key_min_index_in_pk = self.dist_key_in_pk_indices.iter().min().unwrap();
+                let dist_key_max_index_in_pk = self.dist_key_in_pk_indices.iter().max().unwrap();
+                match *dist_key_min_index_in_pk + self.dist_key_in_pk_indices.len() - 1
+                    == *dist_key_max_index_in_pk
+                {
+                    true => {
+                        let (dist_key_start_position, dist_key_len) = self
+                            .pk_serde
+                            .deserialize_dist_key_position_with_column_indices(
+                                &encoded_prefix,
+                                0..self.dist_key_indices().len()
+                                    + self.distribution_key_start_index_in_pk,
+                                self.distribution_key_start_index_in_pk,
+                            )?;
+                        Some(
+                            encoded_prefix
+                                [dist_key_start_position..dist_key_len + dist_key_start_position]
+                                .to_vec(),
+                        )
+                    }
+                    // discontinuous
+                    false => None,
+                }
             }
         };
 
