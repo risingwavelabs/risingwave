@@ -14,7 +14,13 @@
 
 #[cfg(test)]
 mod test {
+    use std::future::{pending, poll_fn, Future};
+    use std::iter::once;
     use std::sync::Arc;
+    use std::task::Poll;
+
+    use futures::{pin_mut, FutureExt};
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
@@ -30,6 +36,8 @@ mod test {
     };
     use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
     use crate::hummock::value::HummockValue;
+    use crate::hummock::HummockResult;
+    use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
     async fn test_merge_basic() {
@@ -316,5 +324,68 @@ mod test {
         }
 
         assert_eq!(count, TEST_KEYS_COUNT);
+    }
+
+    struct CancellationTestIterator {}
+
+    impl HummockIterator for CancellationTestIterator {
+        type Direction = Forward;
+
+        type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+        type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+        type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
+        fn next(&mut self) -> Self::NextFuture<'_> {
+            async { pending::<HummockResult<()>>().await }
+        }
+
+        fn key(&self) -> FullKey<&[u8]> {
+            FullKey {
+                user_key: UserKey {
+                    table_id: Default::default(),
+                    table_key: TableKey(&b"test_key"[..]),
+                },
+                epoch: 0,
+            }
+        }
+
+        fn value(&self) -> HummockValue<&[u8]> {
+            HummockValue::delete()
+        }
+
+        fn is_valid(&self) -> bool {
+            true
+        }
+
+        fn rewind(&mut self) -> Self::RewindFuture<'_> {
+            async { Ok(()) }
+        }
+
+        fn seek<'a>(&'a mut self, _key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+            async { Ok(()) }
+        }
+
+        fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+    }
+
+    #[tokio::test]
+    async fn test_merge_iter_cancel() {
+        let mut merge_iter = UnorderedMergeIteratorInner::new(vec![
+            OrderedMergeIteratorInner::new(once(CancellationTestIterator {})),
+            OrderedMergeIteratorInner::new(once(CancellationTestIterator {})),
+        ]);
+        merge_iter.rewind().await.unwrap();
+        let future = merge_iter.next();
+
+        pin_mut!(future);
+
+        for _ in 0..10 {
+            assert!(poll_fn(|cx| { Poll::Ready(future.poll_unpin(cx)) })
+                .await
+                .is_pending());
+        }
+
+        // Dropping the future will panic if the OrderedMergeIteratorInner is not cancellation safe.
+        // See https://github.com/risingwavelabs/risingwave/issues/6637
     }
 }

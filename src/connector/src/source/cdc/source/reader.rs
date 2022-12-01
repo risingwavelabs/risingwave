@@ -20,8 +20,8 @@ use futures::pin_mut;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::cdc_service::{DbConnectorProperties, GetEventStreamResponse};
-use risingwave_rpc_client::CdcClient;
+use risingwave_pb::connector_service::{DbConnectorProperties, GetEventStreamResponse};
+use risingwave_rpc_client::ConnectorClient;
 
 use crate::source::base::{SourceMessage, SplitReader};
 use crate::source::cdc::CdcProperties;
@@ -66,7 +66,8 @@ impl CdcSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(self) {
         let props = &self.props;
-        let cdc_client = CdcClient::new(HostAddr::from_str(&props.connector_node_addr)?).await?;
+        let cdc_client =
+            ConnectorClient::new(HostAddr::from_str(&props.connector_node_addr)?).await?;
         let cdc_stream = cdc_client
             .get_event_stream(
                 self.source_id,

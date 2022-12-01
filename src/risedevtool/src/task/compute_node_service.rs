@@ -60,8 +60,8 @@ impl ComputeNodeService {
             .arg("1")
             .arg("--async-stack-trace")
             .arg(&config.async_stack_trace)
-            .arg("--connector-source-endpoint")
-            .arg(&config.connector_source_endpoint);
+            .arg("--connector-rpc-endpoint")
+            .arg(&config.connector_rpc_endpoint);
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {

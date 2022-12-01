@@ -718,7 +718,7 @@ impl LogicalAgg {
         Self::new(agg_calls, group_key, input)
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         self.core.fmt_with_name(f, name)
     }
 }
