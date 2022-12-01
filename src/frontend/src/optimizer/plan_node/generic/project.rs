@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -24,6 +25,22 @@ use crate::expr::{
 };
 use crate::session::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
+
+fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
+    if expr.has_subquery() {
+        return Err("subquery");
+    }
+    if expr.has_agg_call() {
+        return Err("aggregate function");
+    }
+    if expr.has_table_function() {
+        return Err("table function");
+    }
+    if expr.has_window_function() {
+        return Err("window function");
+    }
+    Ok(())
+}
 
 /// [`Project`] computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
@@ -76,26 +93,10 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Project<PlanRef> {
-    fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
-        if expr.has_subquery() {
-            return Err("subquery");
-        }
-        if expr.has_agg_call() {
-            return Err("aggregate function");
-        }
-        if expr.has_table_function() {
-            return Err("table function");
-        }
-        if expr.has_window_function() {
-            return Err("window function");
-        }
-        Ok(())
-    }
-
     pub fn new(exprs: Vec<ExprImpl>, input: PlanRef) -> Self {
         for expr in &exprs {
             assert_input_ref!(expr, input.schema().fields().len());
-            Self::check_expr_type(expr)
+            check_expr_type(expr)
                 .map_err(|expr| format!("{expr} should not in Project operator"))
                 .unwrap();
         }
@@ -207,5 +208,39 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
                 _ => None,
             })
             .collect::<Option<Vec<_>>>()
+    }
+}
+
+/// Construct a `Project` and dedup expressions.
+/// expressions
+#[derive(Default)]
+pub struct ProjectBuilder {
+    exprs: Vec<ExprImpl>,
+    exprs_index: HashMap<ExprImpl, usize>,
+}
+
+impl ProjectBuilder {
+    /// add an expression to the `LogicalProject` and return the column index of the project's
+    /// output
+    pub fn add_expr(&mut self, expr: &ExprImpl) -> std::result::Result<usize, &'static str> {
+        check_expr_type(expr)?;
+        if let Some(idx) = self.exprs_index.get(expr) {
+            Ok(*idx)
+        } else {
+            let index = self.exprs.len();
+            self.exprs.push(expr.clone());
+            self.exprs_index.insert(expr.clone(), index);
+            Ok(index)
+        }
+    }
+
+    pub fn expr_index(&self, expr: &ExprImpl) -> Option<usize> {
+        check_expr_type(expr).ok()?;
+        self.exprs_index.get(expr).copied()
+    }
+
+    /// build the `LogicalProject` from `LogicalProjectBuilder`
+    pub fn build<PlanRef: GenericPlanRef>(self, input: PlanRef) -> Project<PlanRef> {
+        Project::new(self.exprs, input)
     }
 }

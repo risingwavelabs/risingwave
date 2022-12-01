@@ -29,53 +29,6 @@ use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
-/// Construct a `LogicalProject` and dedup expressions.
-/// expressions
-#[derive(Default)]
-pub struct LogicalProjectBuilder {
-    exprs: Vec<ExprImpl>,
-    exprs_index: HashMap<ExprImpl, usize>,
-}
-
-impl LogicalProjectBuilder {
-    /// add an expression to the `LogicalProject` and return the column index of the project's
-    /// output
-    pub fn add_expr(&mut self, expr: &ExprImpl) -> std::result::Result<usize, &'static str> {
-        if expr.has_subquery() {
-            return Err("subquery");
-        }
-        if expr.has_agg_call() {
-            return Err("aggregate function");
-        }
-        if expr.has_table_function() {
-            return Err("table function");
-        }
-        if expr.has_window_function() {
-            return Err("window function");
-        }
-        if let Some(idx) = self.exprs_index.get(expr) {
-            Ok(*idx)
-        } else {
-            let index = self.exprs.len();
-            self.exprs.push(expr.clone());
-            self.exprs_index.insert(expr.clone(), index);
-            Ok(index)
-        }
-    }
-
-    pub fn expr_index(&self, expr: &ExprImpl) -> Option<usize> {
-        if expr.has_subquery() {
-            return None;
-        }
-        self.exprs_index.get(expr).copied()
-    }
-
-    /// build the `LogicalProject` from `LogicalProjectBuilder`
-    pub fn build(self, input: PlanRef) -> LogicalProject {
-        LogicalProject::new(input, self.exprs)
-    }
-}
-
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
