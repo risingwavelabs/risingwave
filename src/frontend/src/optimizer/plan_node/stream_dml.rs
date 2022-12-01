@@ -29,7 +29,6 @@ pub struct StreamDml {
 
 impl StreamDml {
     pub fn new(input: PlanRef, column_descs: Vec<ColumnDesc>) -> Self {
-        // TODO: Extract this as a function.
         let base = PlanBase::derive_stream_plan_base(&input);
         Self {
             base,
