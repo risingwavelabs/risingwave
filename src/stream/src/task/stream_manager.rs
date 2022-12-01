@@ -193,25 +193,6 @@ impl LocalStreamManager {
         })
     }
 
-    /// Print the traces of all actors after receiving an interrupt signal, used for debugging only.
-    pub fn spawn_print_trace_on_interrupt(self: Arc<Self>) -> JoinHandle<()> {
-        tokio::spawn(async move {
-            let Ok(_) = tokio::signal::ctrl_c().await else { return };
-
-            let mut core = self.core.lock().await;
-            if let Some(m) = &mut core.stack_trace_manager {
-                let mut traces = m.get_all().peekable();
-                if traces.peek().is_some() {
-                    let mut o = std::io::stdout().lock();
-                    writeln!(o, "\n\n*** async stack trace of all actors ***\n").ok();
-                    for (k, trace) in traces {
-                        writeln!(o, ">> Actor {}\n\n{}", k, &*trace).ok();
-                    }
-                }
-            }
-        })
-    }
-
     /// Get stack trace reports for all actors.
     pub async fn get_actor_traces(&self) -> HashMap<ActorId, StackTraceReport> {
         let mut core = self.core.lock().await;

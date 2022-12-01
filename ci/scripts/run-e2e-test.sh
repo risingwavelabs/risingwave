@@ -19,14 +19,6 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-cleanup() {
-    echo "Dumping trace logs..."
-    cargo make ctl trace > ctl_trace.log || true
-    buildkite-agent artifact upload ctl_trace.log
-    echo "Done"
-}
-trap 'cleanup' SIGTERM
-
 echo "--- Download artifacts"
 mkdir -p target/debug
 buildkite-agent artifact download risingwave-"$profile" target/debug/

@@ -23,7 +23,6 @@ use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::env_var::is_ci;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_pb::common::WorkerType;
@@ -259,10 +258,6 @@ pub async fn compute_node_serve(
     // TODO: may optionally enable based on the features
     #[cfg(any())]
     stream_mgr.clone().spawn_print_trace();
-
-    if cfg!(debug_assertions) && is_ci() {
-        stream_mgr.clone().spawn_print_trace_on_interrupt();
-    }
 
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);

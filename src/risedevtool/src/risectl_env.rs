@@ -27,6 +27,7 @@ pub fn compute_risectl_env(services: &HashMap<String, ServiceConfig>) -> Result<
             let mut env = String::new();
 
             // RW_HUMMOCK_URL
+            // If the cluster is launched without a shared storage, we will skip this.
             {
                 let mut cmd = Command::new("compute-node");
                 if add_storage_backend(
