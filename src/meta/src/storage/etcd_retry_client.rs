@@ -48,7 +48,9 @@ impl EtcdRetryClient {
     #[inline(always)]
     fn should_retry(err: &Error) -> bool {
         match err {
-            Error::GRpcStatus(status) => status.code() == tonic::Code::Unavailable,
+            Error::GRpcStatus(status) => {
+                status.code() == tonic::Code::Unavailable || status.code() == tonic::Code::Unknown
+            }
             _ => false,
         }
     }
