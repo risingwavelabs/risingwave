@@ -58,8 +58,8 @@ macro_rules! impl_all_native_scalar {
 
 for_all_native_types! { impl_all_native_scalar }
 
-/// Implement `Scalar` for `String`.
-/// `String` could be converted to `&str`.
+/// Implement `Scalar` for `Box<str>`.
+/// `Box<str>` could be converted to `&str`.
 impl Scalar for Box<str> {
     type ScalarRefType<'a> = &'a str;
 
@@ -98,8 +98,8 @@ impl Scalar for ListValue {
     }
 }
 
-/// Implement `ScalarRef` for `String`.
-/// `String` could be converted to `&str`.
+/// Implement `ScalarRef` for `Box<str>`.
+/// `Box<str>` could be converted to `&str`.
 impl<'a> ScalarRef<'a> for &'a str {
     type ScalarType = Box<str>;
 
@@ -143,8 +143,7 @@ impl Scalar for bool {
     }
 }
 
-/// Implement `Scalar` and `ScalarRef` for `String`.
-/// `String` could be converted to `&str`.
+/// Implement `ScalarRef` for `bool`.
 impl<'a> ScalarRef<'a> for bool {
     type ScalarType = bool;
 

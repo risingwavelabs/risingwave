@@ -713,7 +713,7 @@ macro_rules! impl_convert {
 
 for_all_scalar_variants! { impl_convert }
 
-// Implement `From<raw float>` for `ScalarImpl` manually
+// Implement `From<raw float>` for `ScalarImpl::Float` as a sugar.
 impl From<f32> for ScalarImpl {
     fn from(f: f32) -> Self {
         Self::Float32(f.into())
@@ -725,6 +725,7 @@ impl From<f64> for ScalarImpl {
     }
 }
 
+// Implement `From<string like>` for `ScalarImpl::Utf8` as a sugar.
 impl From<String> for ScalarImpl {
     fn from(s: String) -> Self {
         Self::Utf8(s.into_boxed_str())
