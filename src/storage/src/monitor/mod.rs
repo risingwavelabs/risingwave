@@ -27,24 +27,28 @@ pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 #[cfg(hm_trace)]
 mod traced_store;
 use futures::Future;
+#[cfg(all(not(madsim), hm_trace))]
+use risingwave_hummock_trace::{CONCURRENT_ID, LOCAL_ID};
 #[cfg(hm_trace)]
 pub use traced_store::*;
-#[cfg(all(not(madsim), hm_trace))]
-use {
-    risingwave_hummock_trace::{ConcurrentId, CONCURRENT_ID, LOCAL_ID},
-    tokio::task::futures::TaskLocalFuture,
-};
 
-pub trait HummockTraceFuture: Sized + Future {
-    #[cfg(any(madsim, not(hm_trace)))]
-    fn may_trace_hummock(self) -> Self {
-        self
-    }
-    #[cfg(all(not(madsim), hm_trace))]
-    fn may_trace_hummock(self) -> TaskLocalFuture<ConcurrentId, Self> {
-        let id = CONCURRENT_ID.next();
-        LOCAL_ID.scope(id, self)
-    }
+pub trait HummockTraceFutureExt: Sized + Future {
+    type TraceOutput;
+    fn may_trace_hummock(self) -> Self::TraceOutput;
 }
 
-impl<F: Future> HummockTraceFuture for F {}
+impl<F: Future> HummockTraceFutureExt for F {
+    type TraceOutput = impl Future<Output = <Self as Future>::Output>;
+
+    fn may_trace_hummock(self) -> Self::TraceOutput {
+        #[cfg(any(madsim, not(hm_trace)))]
+        {
+            self
+        }
+        #[cfg(all(not(madsim), hm_trace))]
+        {
+            let id = CONCURRENT_ID.next();
+            LOCAL_ID.scope(id, self)
+        }
+    }
+}
