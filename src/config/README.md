@@ -12,7 +12,7 @@ The config files defined here are mainly used for testing and development purpos
 
 > **Note**
 >
-> It's value is different from the default values defined in `src/common/src/config.rs` , which is used when the configuration file is not present.
+> Its value is different from the default values defined in `src/common/src/config.rs` , which is used when the configuration file is not present.
 
 Each folder contains a `risingwave.toml` file for a different scene. It can be used in `risedev.yml` like:
 
