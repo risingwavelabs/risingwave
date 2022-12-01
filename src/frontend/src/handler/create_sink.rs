@@ -12,40 +12,64 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
-
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
-use risingwave_pb::catalog::Sink as ProstSink;
-use risingwave_sqlparser::ast::CreateSinkStatement;
+use risingwave_pb::catalog::{Sink as ProstSink, Table};
+use risingwave_sqlparser::ast::{
+    CreateSink, CreateSinkStatement, ObjectName, Query, Select, SelectItem, SetExpr, TableFactor,
+    TableWithJoins,
+};
 
+use super::create_mv::{check_column_names, get_column_names};
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::{DatabaseId, SchemaId};
-use crate::optimizer::plan_node::{LogicalScan, StreamSink, StreamTableScan};
 use crate::optimizer::PlanRef;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::build_graph;
-use crate::WithOptions;
+use crate::Planner;
 
-fn make_prost_sink(
-    database_id: DatabaseId,
-    schema_id: SchemaId,
-    name: String,
-    associated_table_id: u32,
-    properties: &WithOptions,
-    owner: u32,
-) -> ProstSink {
+fn into_sink_prost(table: Table) -> ProstSink {
     ProstSink {
         id: 0,
-        schema_id,
-        database_id,
-        name,
-        associated_table_id,
-        properties: properties.inner().clone(),
-        owner,
-        dependent_relations: vec![],
+        schema_id: table.schema_id,
+        database_id: table.database_id,
+        name: table.name,
+        columns: table.columns,
+        pk: table.pk,
+        dependent_relations: table.dependent_relations,
+        distribution_key: table.distribution_key,
+        stream_key: table.stream_key,
+        appendonly: table.appendonly,
+        properties: table.properties,
+        owner: table.owner,
+        definition: table.definition,
     }
+}
+
+pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
+    let table_factor = TableFactor::Table {
+        name: from_name,
+        alias: None,
+    };
+    let from = vec![TableWithJoins {
+        relation: table_factor,
+        joins: vec![],
+    }];
+    let select = Select {
+        from,
+        projection: vec![SelectItem::Wildcard],
+        ..Default::default()
+    };
+    let body = SetExpr::Select(Box::new(select));
+    Ok(Query {
+        with: None,
+        body,
+        order_by: vec![],
+        limit: None,
+        offset: None,
+        fetch: None,
+    })
 }
 
 pub fn gen_sink_plan(
@@ -54,42 +78,80 @@ pub fn gen_sink_plan(
     stmt: CreateSinkStatement,
 ) -> Result<(PlanRef, ProstSink)> {
     let db_name = session.database();
-    let (schema_name, associated_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, stmt.materialized_view.clone())?;
+    let (sink_schema_name, sink_table_name) =
+        Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
 
-    let (database_id, schema_id, associated_table_catalog) =
-        session.get_table_catalog_for_create(schema_name, &associated_table_name)?;
+    let (query, sink_col_names) = match stmt.sink_from {
+        CreateSink::From(from_name) => {
+            let (from_schema_name, from_table_name) =
+                Binder::resolve_schema_qualified_name(db_name, from_name.clone())?;
+            let (_, _, from_catalog) =
+                session.get_table_catalog_for_create(from_schema_name, &from_table_name)?;
+            let from_col_names = from_catalog
+                .columns()
+                .iter()
+                .filter_map(|catalog| {
+                    (!catalog.is_hidden()).then_some(catalog.column_desc.name.clone())
+                })
+                .collect_vec();
+            (
+                Box::new(gen_sink_query_from_name(from_name)?),
+                Some(from_col_names),
+            )
+        }
+        CreateSink::AsQuery(query) => (query, None),
+    };
 
-    let sink_name = Binder::resolve_sink_name(stmt.sink_name)?;
+    let (sink_database_id, sink_schema_id) =
+        session.get_database_and_schema_id_for_create(sink_schema_name)?;
+
+    let definition = query.to_string();
+
+    let bound = {
+        let mut binder = Binder::new(session);
+        binder.bind_query(*query)?
+    };
+
+    // If colume names not specified, use the name in materialized view.
+    let col_names = get_column_names(&bound, session, stmt.columns)?.or(sink_col_names);
+
     let properties = context.inner().with_options.clone();
-    let sink = make_prost_sink(
-        database_id,
-        schema_id,
-        sink_name,
-        associated_table_catalog.id().table_id,
-        &properties,
-        session.user_id(),
-    );
 
-    let scan_node = StreamTableScan::new(LogicalScan::create(
-        associated_table_name,
-        false,
-        Rc::new(associated_table_catalog.table_desc()),
-        vec![],
-        context,
-    ))
-    .into();
+    let mut plan_root = Planner::new(context).plan_query(bound)?;
+    let col_names = if let Some(col_names) = col_names {
+        // Check the col_names match number of columns in the query.
+        check_column_names(&col_names, &plan_root)?;
+        col_names
+    } else {
+        plan_root
+            .schema()
+            .fields()
+            .iter()
+            .cloned()
+            .map(|field| field.name)
+            .collect()
+    };
 
-    let plan: PlanRef = StreamSink::new(scan_node, properties).into();
+    let sink_plan =
+        plan_root.gen_create_sink_plan(sink_table_name, definition, col_names, properties)?;
 
-    let ctx = plan.ctx();
+    let sink_catalog_prost = sink_plan
+        .sink_catalog()
+        .to_prost(sink_schema_id, sink_database_id);
+
+    let sink_prost = into_sink_prost(sink_catalog_prost);
+
+    let sink_plan: PlanRef = sink_plan.into();
+
+    let ctx = sink_plan.ctx();
+
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Sink:");
-        ctx.trace(plan.explain_to_string().unwrap());
+        ctx.trace(sink_plan.explain_to_string().unwrap());
     }
 
-    Ok((plan, sink))
+    Ok((sink_plan, sink_prost))
 }
 
 pub async fn handle_create_sink(

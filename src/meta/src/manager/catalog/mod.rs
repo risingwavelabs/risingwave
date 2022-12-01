@@ -1157,6 +1157,10 @@ where
         user_core.ensure_user_id(index.owner)?;
         assert_eq!(index.owner, index_table.owner);
 
+        // `dependent_relations` should contains 1 and only 1 item that is the `primary_table_id`
+        assert_eq!(index_table.dependent_relations.len(), 1);
+        assert_eq!(index.primary_table_id, index_table.dependent_relations[0]);
+
         if database_core.has_in_progress_creation(&key) {
             bail!("index already in creating procedure");
         } else {
@@ -1239,7 +1243,10 @@ where
         let user_core = &mut core.user;
         database_core.ensure_database_id(sink.database_id)?;
         database_core.ensure_schema_id(sink.schema_id)?;
-        database_core.ensure_table_id(sink.associated_table_id)?;
+        for dependent_id in &sink.dependent_relations {
+            // TODO(zehua): refactor when using SourceId.
+            database_core.ensure_table_or_source_id(dependent_id)?;
+        }
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         database_core.check_relation_name_duplicated(&key)?;
         #[cfg(not(test))]
@@ -1264,8 +1271,9 @@ where
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
+
+        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
         if !sinks.contains_key(&sink.id)
             && database_core.in_progress_creation_tracker.contains(&key)
         {
@@ -1275,6 +1283,7 @@ where
                 .remove(&sink.id);
 
             sinks.insert(sink.id, sink.clone());
+
             commit_meta!(self, sinks)?;
 
             let version = self
@@ -1297,6 +1306,9 @@ where
         {
             database_core.unmark_creating(&key);
             database_core.unmark_creating_streaming_job(sink.id);
+            for &dependent_relation_id in &sink.dependent_relations {
+                database_core.decrease_ref_count(dependent_relation_id);
+            }
             user_core.decrease_ref(sink.owner);
             Ok(())
         } else {
@@ -1309,21 +1321,39 @@ where
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
         let sink = sinks.remove(sink_id);
         if let Some(sink) = sink {
-            commit_meta!(self, sinks)?;
+            match database_core.relation_ref_count.get(&sink_id).cloned() {
+                Some(_) => bail!("No relation should depend on Sink"),
+                None => {
+                    let dependent_relations = sink.dependent_relations.clone();
 
-            user_core.decrease_ref(sink.owner);
+                    let objects = &[Object::SinkId(sink.id)];
 
-            for &dependent_relation_id in &sink.dependent_relations {
-                database_core.decrease_ref_count(dependent_relation_id);
+                    let users_need_update = Self::update_user_privileges(&mut users, objects);
+
+                    commit_meta!(self, sinks, users)?;
+
+                    user_core.decrease_ref(sink.owner);
+
+                    for user in users_need_update {
+                        self.notify_frontend(Operation::Update, Info::User(user))
+                            .await;
+                    }
+
+                    for dependent_relation_id in dependent_relations {
+                        database_core.decrease_ref_count(dependent_relation_id);
+                    }
+
+                    let version = self
+                        .notify_frontend(Operation::Delete, Info::Sink(sink))
+                        .await;
+
+                    Ok(version)
+                }
             }
-
-            let version = self
-                .notify_frontend(Operation::Delete, Info::Sink(sink))
-                .await;
-
-            Ok(version)
         } else {
             Err(MetaError::catalog_id_not_found("sink", sink_id))
         }
@@ -1810,7 +1840,7 @@ where
     }
 
     /// `update_user_privileges` removes the privileges with given object from given users, it will
-    /// be called when a database/schema/table/source is dropped.
+    /// be called when a database/schema/table/source/sink is dropped.
     #[inline(always)]
     fn update_user_privileges(
         users: &mut BTreeMapTransaction<'_, UserId, UserInfo>,
