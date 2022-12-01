@@ -5,7 +5,7 @@ statement ok
 create materialized view mv4 as select * from t4;
 
 statement ok
-CREATE SINK s2 FROM mv4 WITH (
+CREATE SINK s4 FROM mv4 WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://localhost:5432/test?user=test&password=connector',
     table.name='t4'
@@ -30,7 +30,7 @@ statement ok
 FLUSH;
 
 statement ok
-DROP SINK s2;
+DROP SINK s4;
 
 statement ok
 DROP MATERIALIZED VIEW mv4;

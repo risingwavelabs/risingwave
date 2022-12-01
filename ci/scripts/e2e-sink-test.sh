@@ -67,6 +67,7 @@ sleep 1
 
 # test remote sink
 sqllogictest -p 4566 -d dev './e2e_test/sink/*.slt'
+sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/remote.load.slt'
 sleep 1
 
