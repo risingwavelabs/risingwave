@@ -1,0 +1,27 @@
+statement ok
+create table tmp(id1 int, id2 int);
+
+query TIII
+select a.attname, a.atttypid, a.attlen, a.attnum from pg_catalog.pg_class t
+    join pg_catalog.pg_attribute a on t.oid = a.attrelid 
+    where t.relname = 'tmp' order by a.attnum;
+----
+id1 23 4 1
+id2 23 4 2
+
+statement ok
+create view view1 as select id2 from tmp;
+
+query TIII
+select a.attname, a.atttypid, a.attlen, a.attnum from pg_catalog.pg_class t
+    join pg_catalog.pg_attribute a on t.oid = a.attrelid 
+    where t.relname = 'view1';
+----
+id2 23 4 1
+
+
+statement ok
+drop view view1;
+
+statement ok
+drop table tmp;

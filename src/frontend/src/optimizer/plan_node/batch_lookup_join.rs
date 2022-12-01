@@ -91,6 +91,10 @@ impl BatchLookupJoin {
         batch_lookup_join.distributed_lookup = distributed_lookup;
         batch_lookup_join
     }
+
+    pub fn lookup_prefix_len(&self) -> usize {
+        self.lookup_prefix_len
+    }
 }
 
 impl fmt::Display for BatchLookupJoin {

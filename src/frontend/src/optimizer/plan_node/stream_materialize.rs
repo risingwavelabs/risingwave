@@ -47,27 +47,9 @@ pub struct StreamMaterialize {
 }
 
 impl StreamMaterialize {
-    fn derive_plan_base(input: &PlanRef) -> Result<PlanBase> {
-        let ctx = input.ctx();
-
-        let schema = input.schema().clone();
-        let pk_indices = input.logical_pk();
-
-        // Materialize executor won't change the append-only behavior of the stream, so it depends
-        // on input's `append_only`.
-        Ok(PlanBase::new_stream(
-            ctx,
-            schema,
-            pk_indices.to_vec(),
-            input.functional_dependency().clone(),
-            input.distribution().clone(),
-            input.append_only(),
-        ))
-    }
-
     #[must_use]
     pub fn new(input: PlanRef, table: TableCatalog) -> Self {
-        let base = Self::derive_plan_base(&input).unwrap();
+        let base = PlanBase::derive_stream_plan_base(&input);
         Self { base, input, table }
     }
 
@@ -105,7 +87,7 @@ impl StreamMaterialize {
         };
 
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
-        let base = Self::derive_plan_base(&input)?;
+        let base = PlanBase::derive_stream_plan_base(&input);
         let schema = &base.schema;
         let pk_indices = &base.logical_pk;
 

@@ -108,7 +108,8 @@ pub fn gen_create_mv_plan(
     if let Some(col_names) = &col_names {
         check_column_names(col_names, &plan_root)?
     }
-    let materialize = plan_root.gen_create_mv_plan(table_name, definition, col_names, false)?;
+    let materialize =
+        plan_root.gen_materialize_plan(table_name, definition, col_names, false, false, None)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(

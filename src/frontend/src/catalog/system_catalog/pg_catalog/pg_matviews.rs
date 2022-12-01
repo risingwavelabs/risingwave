@@ -16,15 +16,18 @@ use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-/// The catalog `pg_matviews_info` contains the information about the matviews.
-pub const PG_MATVIEWS_INFO_TABLE_NAME: &str = "pg_matviews_info";
-pub const PG_MATVIEWS_INFO_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "matviewid"),
+/// The view `pg_matviews` provides access to useful information about each materialized view in the
+/// database.
+/// Ref: [`https://www.postgresql.org/docs/current/view-pg-matviews.html`]
+pub const PG_MATVIEWS_TABLE_NAME: &str = "pg_matviews";
+pub const PG_MATVIEWS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
+    (DataType::Varchar, "schemaname"),
     (DataType::Varchar, "matviewname"),
-    (DataType::Varchar, "matviewschema"),
     (DataType::Int32, "matviewowner"),
     // TODO: add index back when open create index doc again.
     // (DataType::Boolean, "hasindexes"),
-    (DataType::Varchar, "matviewgraph"), // materialized view graph is json encoded fragment infos.
     (DataType::Varchar, "definition"),
+    // Below are some columns that PostgreSQL doesn't have.
+    (DataType::Int32, "matviewid"),
+    (DataType::Varchar, "matviewgraph"), // materialized view graph is json encoded fragment infos.
 ];
