@@ -15,12 +15,12 @@
 #![cfg(madsim)]
 
 use anyhow::Result;
-use risingwave_simulation_scale::cluster::{Cluster, Configuration};
-use risingwave_simulation_scale::utils::AssertResult;
+use risingwave_simulation::cluster::{Cluster, Configuration};
+use risingwave_simulation::utils::AssertResult;
 
 #[madsim::test]
 async fn test_hello() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::default()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     cluster
         .run("select concat_ws(', ', 'hello', 'world');")
         .await?

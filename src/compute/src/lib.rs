@@ -36,7 +36,7 @@ pub enum AsyncStackTraceOption {
 }
 
 /// Command-line arguments for compute-node.
-#[derive(Parser, Debug)]
+#[derive(Parser, Clone, Debug)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:5688")]

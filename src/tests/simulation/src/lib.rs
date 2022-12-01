@@ -12,20 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::env;
-use std::ffi::OsStr;
+#![cfg(madsim)]
+#![feature(trait_alias)]
+#![feature(lint_reasons)]
+#![feature(once_cell)]
 
-/// Returns whether the environment variable `key` is set to `true` or `1`.
-pub fn env_var_is_true(key: impl AsRef<OsStr>) -> bool {
-    env::var(key)
-        .map(|value| {
-            let value = value.to_lowercase();
-            value == "1" || value == "true"
-        })
-        .unwrap_or(false)
-}
-
-/// Returns whether the environment variable indicating that we're running in CI is set.
-pub fn is_ci() -> bool {
-    env_var_is_true("RISINGWAVE_CI")
-}
+pub mod client;
+pub mod cluster;
+pub mod ctl_ext;
+mod kafka;
+pub mod nexmark;
+pub mod slt;
+pub mod utils;
