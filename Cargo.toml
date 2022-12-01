@@ -31,7 +31,6 @@ members = [
   "src/tests/compaction_test",
   "src/tests/regress",
   "src/tests/simulation",
-  "src/tests/simulation_scale",
   "src/tests/sqlsmith",
   "src/tracing",
   "src/utils/async_stack_trace",

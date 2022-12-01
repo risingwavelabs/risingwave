@@ -18,17 +18,17 @@ use std::time::Duration;
 
 use anyhow::Result;
 use madsim::time::sleep;
-use risingwave_simulation_scale::cluster::Configuration;
-use risingwave_simulation_scale::ctl_ext::predicate::identity_contains;
-use risingwave_simulation_scale::nexmark::{NexmarkCluster, THROUGHPUT};
-use risingwave_simulation_scale::utils::AssertResult;
+use risingwave_simulation::cluster::Configuration;
+use risingwave_simulation::ctl_ext::predicate::identity_contains;
+use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
+use risingwave_simulation::utils::AssertResult;
 
 /// Check that the number of generated events is correct after scaling of source executor.
 #[madsim::test]
 async fn nexmark_source() -> Result<()> {
     let events = 20 * THROUGHPUT;
 
-    let mut cluster = NexmarkCluster::new(Configuration::default(), 6, Some(events)).await?;
+    let mut cluster = NexmarkCluster::new(Configuration::for_scale(), 6, Some(events)).await?;
 
     for table in ["person", "auction", "bid"] {
         cluster

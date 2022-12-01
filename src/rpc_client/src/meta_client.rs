@@ -110,7 +110,12 @@ impl MetaClient {
             host: Some(addr.to_protobuf()),
             worker_node_parallelism: worker_node_parallelism as u64,
         };
-        let resp = grpc_meta_client.add_worker_node(request).await?;
+        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+        let resp = tokio_retry::Retry::spawn(retry_strategy, || async {
+            let request = request.clone();
+            grpc_meta_client.add_worker_node(request).await
+        })
+        .await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
         Ok(Self {
             worker_id: worker_node.id,
@@ -814,6 +819,12 @@ impl GrpcMetaClient {
     const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
     // See `Endpoint::keep_alive_timeout`
     const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
+    // Max retry times for request to meta server.
+    const REQUEST_RETRY_BASE_INTERVAL_MS: u64 = 50;
+    // Max retry times for connecting to meta server.
+    const REQUEST_RETRY_MAX_ATTEMPTS: usize = 10;
+    // Max retry interval in ms for request to meta server.
+    const REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
@@ -860,6 +871,14 @@ impl GrpcMetaClient {
             user_client,
             scale_client,
         })
+    }
+
+    /// Return retry strategy for retrying meta requests.
+    pub fn retry_strategy_for_request() -> impl Iterator<Item = Duration> {
+        ExponentialBackoff::from_millis(Self::REQUEST_RETRY_BASE_INTERVAL_MS)
+            .max_delay(Duration::from_millis(Self::REQUEST_RETRY_MAX_INTERVAL_MS))
+            .map(jitter)
+            .take(Self::REQUEST_RETRY_MAX_ATTEMPTS)
     }
 }
 
