@@ -21,7 +21,8 @@ shift $((OPTIND -1))
 
 cleanup() {
     echo "Dumping trace logs..."
-    timeout 10s cargo make ctl trace > .risingwave/log/ctl_trace.log || true
+    cargo make ctl trace > ctl_trace.log || true
+    buildkite-agent artifact upload ctl_trace.log
     echo "Done"
 }
 trap 'cleanup' SIGTERM
