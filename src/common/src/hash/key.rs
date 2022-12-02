@@ -40,7 +40,7 @@ use crate::hash::vnode::VirtualNode;
 use crate::row::Row;
 use crate::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum,
+    OrderedF32, OrderedF64, ScalarRef,
 };
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
@@ -139,23 +139,10 @@ pub trait HashKey:
             .collect()
     }
 
-    #[inline(always)]
-    fn deserialize(self, data_types: &[DataType]) -> ArrayResult<Row> {
-        let mut builders: Vec<_> = data_types
-            .iter()
-            .map(|dt| dt.create_array_builder(1))
-            .collect();
-
-        self.deserialize_to_builders(&mut builders, data_types)?;
-        builders
-            .into_iter()
-            .map(|builder| Ok::<_, ArrayError>(builder.finish().value_at(0).to_owned_datum()))
-            .try_collect()
-            .map(Row::new)
-    }
+    fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<Row>;
 
     fn deserialize_to_builders(
-        self,
+        &self,
         array_builders: &mut [ArrayBuilderImpl],
         data_types: &[DataType],
     ) -> ArrayResult<()>;
@@ -681,12 +668,27 @@ impl ArrayBuilderImpl {
 impl<const N: usize> HashKey for FixedSizeKey<N> {
     type S = FixedSizeKeySerializer<N>;
 
+    fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<Row> {
+        let mut builders: Vec<_> = data_types
+            .iter()
+            .map(|dt| dt.create_array_builder(1))
+            .collect();
+
+        self.deserialize_to_builders(&mut builders, data_types)?;
+        Ok(Row::new(
+            builders
+                .into_iter()
+                .map(|builder| builder.finish().to_datum())
+                .collect(),
+        ))
+    }
+
     fn deserialize_to_builders(
-        self,
+        &self,
         array_builders: &mut [ArrayBuilderImpl],
         _data_types: &[DataType],
     ) -> ArrayResult<()> {
-        let mut deserializer = FixedSizeKeyDeserializer::<N>::from_hash_key(self);
+        let mut deserializer = FixedSizeKeyDeserializer::<N>::from_hash_key(self.clone());
         for array_builder in array_builders.iter_mut() {
             array_builder.deserialize_from_hash_key(&mut deserializer)?;
         }
@@ -701,8 +703,17 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
 impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
+    fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<Row> {
+        let mut key_buffer = self.key.as_slice();
+        let mut values = Vec::with_capacity(data_types.len());
+        for ty in data_types {
+            values.push(deserialize_datum(&mut key_buffer, ty).map_err(ArrayError::internal)?);
+        }
+        Ok(Row::new(values))
+    }
+
     fn deserialize_to_builders(
-        self,
+        &self,
         array_builders: &mut [ArrayBuilderImpl],
         data_types: &[DataType],
     ) -> ArrayResult<()> {
@@ -715,6 +726,10 @@ impl HashKey for SerializedKey {
             array_builder.append_datum(&datum_result.map_err(ArrayError::internal)?);
         }
         Ok(())
+    }
+
+    fn has_null(&self) -> bool {
+        !self.null_bitmap().is_clear()
     }
 
     fn null_bitmap(&self) -> &FixedBitSet {

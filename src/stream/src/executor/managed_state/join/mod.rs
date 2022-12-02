@@ -16,10 +16,10 @@ mod iter_utils;
 mod join_entry_state;
 
 use std::alloc::Global;
-use std::ops::{Deref, DerefMut, Index};
+use std::borrow::Cow;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use anyhow::Context;
 use fixedbitset::FixedBitSet;
 use futures::future::try_join;
 use futures_async_stream::for_await;
@@ -29,7 +29,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::row::{CompactedRow, Row, Row2, RowDeserializer, RowExt};
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -54,21 +54,21 @@ pub fn build_degree_row(order_key: impl Row2, degree: DegreeType) -> Row {
 
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
-pub struct JoinRow {
-    pub row: Row,
+pub struct JoinRow<R: Row2 = Row> {
+    pub row: R,
     degree: DegreeType,
 }
 
-impl Index<usize> for JoinRow {
-    type Output = Datum;
+// impl Index<usize> for JoinRow {
+//     type Output = Datum;
 
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.row[index]
-    }
-}
+//     fn index(&self, index: usize) -> &Self::Output {
+//         &self.row[index]
+//     }
+// }
 
-impl JoinRow {
-    pub fn new(row: Row, degree: DegreeType) -> Self {
+impl<R: Row2> JoinRow<R> {
+    pub fn new(row: R, degree: DegreeType) -> Self {
         Self { row, degree }
     }
 
@@ -96,7 +96,8 @@ impl JoinRow {
     pub fn into_table_rows(self, state_order_key_indices: &[usize]) -> (Row, Row) {
         let order_key = (&self.row).project(state_order_key_indices);
         let degree = build_degree_row(order_key, self.degree);
-        (self.row, degree)
+        // TODO:
+        (self.row.to_owned_row(), degree)
     }
 
     pub fn encode(&self) -> EncodedJoinRow {
@@ -396,13 +397,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
     /// Will return a empty `JoinEntryState` even when state does not exist in remote.
     async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
-        let key = key.clone().deserialize(&self.join_key_data_types)?;
-
-        let table_iter_fut = self.state.table.iter_key_and_val(&key);
+        let key = key.deserialize(&self.join_key_data_types)?;
 
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
+            let table_iter_fut = self.state.table.iter_key_and_val(&key);
             let degree_table_iter_fut = self.degree_state.table.iter_key_and_val(&key);
 
             let (table_iter, degree_table_iter) =
@@ -435,29 +435,30 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             #[for_await]
             for row_and_degree in zipped_iter {
-                let (row, degree) = row_and_degree?;
+                let (row, degree): (Cow<'_, Row>, Cow<'_, Row>) = row_and_degree?;
                 let pk = row
-                    .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
-                let degree_i64: ScalarImpl = degree
-                    .iter()
-                    .last()
-                    .context("Empty row")?
-                    .context("Fail to fetch a degree")?
-                    .into_scalar_impl();
+                    .as_ref()
+                    .project(&self.state.pk_indices)
+                    .memcmp_serialize(&self.pk_serializer);
+                let degree_i64 = degree
+                    .datum_at(degree.len() - 1)
+                    .expect("degree should not be NULL");
                 entry_state.insert(
                     pk,
-                    JoinRow::new(row.into_owned(), *degree_i64.as_int64() as u64).encode(),
+                    JoinRow::new(row, degree_i64.into_int64() as u64).encode(),
                 );
             }
         } else {
-            let table_iter = table_iter_fut.await?;
+            let table_iter = self.state.table.iter_with_pk_prefix(&key).await?;
 
             #[for_await]
             for row in table_iter {
-                let row = row?.1;
+                let row: Cow<'_, Row> = row?;
                 let pk = row
-                    .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
-                entry_state.insert(pk, JoinRow::new(row.into_owned(), 0).encode());
+                    .as_ref()
+                    .project(&self.state.pk_indices)
+                    .memcmp_serialize(&self.pk_serializer);
+                entry_state.insert(pk, JoinRow::new(row, 0).encode());
             }
         };
 
