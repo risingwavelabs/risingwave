@@ -475,6 +475,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 _ => return Err(new_err().into()),
             }
         }
+        AstDataType::Bytea => DataType::Bytea,
         _ => return Err(new_err().into()),
     };
     Ok(data_type)

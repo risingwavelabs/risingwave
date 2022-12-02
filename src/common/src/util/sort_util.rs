@@ -177,7 +177,8 @@ pub fn compare_rows(lhs: &Row, rhs: &Row, order_pairs: &[OrderPair]) -> Result<O
                 NaiveDateTime,
                 NaiveTime,
                 Struct,
-                List
+                List,
+                Bytea
             ]
         );
 
