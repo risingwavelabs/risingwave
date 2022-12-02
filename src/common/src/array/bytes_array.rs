@@ -36,7 +36,7 @@ pub struct BytesArray {
 impl Array for BytesArray {
     type Builder = BytesArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
-    type OwnedItem = Vec<u8>;
+    type OwnedItem = Box<[u8]>;
     type RefItem<'a> = &'a [u8];
 
     fn value_at(&self, idx: usize) -> Option<&[u8]> {

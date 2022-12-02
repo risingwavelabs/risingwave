@@ -56,13 +56,14 @@ impl RandValue for Box<str> {
     }
 }
 
-impl RandValue for Vec<u8> {
+impl RandValue for Box<[u8]> {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         let len = rand.gen_range(1..=10);
         (0..len)
             .map(|_| rand.gen::<char>())
             .collect::<String>()
             .into_bytes()
+            .into()
     }
 }
 

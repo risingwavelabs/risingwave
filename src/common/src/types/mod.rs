@@ -373,7 +373,7 @@ impl DataType {
             DataType::Float64 => ScalarImpl::Float64(OrderedF64::neg_infinity()),
             DataType::Boolean => ScalarImpl::Bool(false),
             DataType::Varchar => ScalarImpl::Utf8("".into()),
-            DataType::Bytea => ScalarImpl::Bytea("".into()),
+            DataType::Bytea => ScalarImpl::Bytea("".to_string().into_bytes().into()),
             DataType::Date => ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::MIN)),
             DataType::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(0, 0, 0)),
             DataType::Timestamp => {
@@ -480,7 +480,7 @@ macro_rules! for_all_scalar_variants {
             { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
             { Struct, struct, StructValue, StructRef<'scalar> },
             { List, list, ListValue, ListRef<'scalar> },
-            { Bytea, bytea, Vec<u8>, &'scalar [u8] }
+            { Bytea, bytea, Box<[u8]>, &'scalar [u8] }
         }
     };
 }
@@ -906,7 +906,7 @@ impl ScalarImpl {
             Ty::Struct(t) => StructValue::deserialize(&t.fields, de)?.to_scalar_value(),
             Ty::List { datatype } => ListValue::deserialize(datatype, de)?.to_scalar_value(),
             // TODO: Consider directly use get bytes
-            Ty::Bytea => Self::Bytea(Bytes::deserialize(de)?.into()),
+            Ty::Bytea => Self::Bytea(Bytes::deserialize(de)?.to_vec().into()),
         })
     }
 
@@ -1099,8 +1099,8 @@ mod tests {
         // TODO: try to reduce the memory usage of `Decimal`, `ScalarImpl` and `Datum`.
         assert_item_size_eq!(DecimalArray, 20);
 
-        const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 32);
-        const_assert_eq!(std::mem::size_of::<Datum>(), 32);
+        const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 24);
+        const_assert_eq!(std::mem::size_of::<Datum>(), 24);
     }
 
     #[test]
@@ -1166,7 +1166,10 @@ mod tests {
                     DataType::Date,
                 ),
                 DataTypeName::Varchar => (ScalarImpl::Utf8("233".into()), DataType::Varchar),
-                DataTypeName::Bytea => (ScalarImpl::Bytea("\\x233".into()), DataType::Bytea),
+                DataTypeName::Bytea => (
+                    ScalarImpl::Bytea("\\x233".as_bytes().into()),
+                    DataType::Bytea,
+                ),
                 DataTypeName::Time => (
                     ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(2, 3, 3)),
                     DataType::Time,

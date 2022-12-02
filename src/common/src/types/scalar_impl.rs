@@ -75,7 +75,7 @@ impl Scalar for Box<str> {
 }
 
 /// Implement `Scalar` for `Bytes`.
-impl Scalar for Vec<u8> {
+impl Scalar for Box<[u8]> {
     type ScalarRefType<'a> = &'a [u8];
 
     fn as_scalar_ref(&self) -> &[u8] {
@@ -128,10 +128,10 @@ impl<'a> ScalarRef<'a> for &'a str {
 }
 
 impl<'a> ScalarRef<'a> for &'a [u8] {
-    type ScalarType = Vec<u8>;
+    type ScalarType = Box<[u8]>;
 
-    fn to_owned_scalar(&self) -> Vec<u8> {
-        self.to_vec()
+    fn to_owned_scalar(&self) -> Box<[u8]> {
+        self.to_vec().into()
     }
 
     fn hash_scalar<H: Hasher>(&self, state: &mut H) {

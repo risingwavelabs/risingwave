@@ -180,14 +180,14 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
 }
 
 #[inline(always)]
-pub fn str_to_bytea(elem: &str) -> Result<Vec<u8>> {
+pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
     // Padded with whitespace str is not allowed.
     if elem.starts_with(' ') && elem.trim().starts_with("\\x") {
         Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA))
     } else if let Some(remainder) = elem.strip_prefix(r"\x") {
-        Ok(parse_bytes_hex(remainder)?)
+        Ok(parse_bytes_hex(remainder)?.into())
     } else {
-        Ok(parse_bytes_traditional(elem)?)
+        Ok(parse_bytes_traditional(elem)?.into())
     }
 }
 
