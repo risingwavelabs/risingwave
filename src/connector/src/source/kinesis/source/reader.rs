@@ -121,18 +121,33 @@ impl KinesisSplitReader {
                     yield chunk;
                 }
                 Err(SdkError::ServiceError { err, .. }) if err.is_expired_iterator_exception() => {
-                    tracing::warn!("stream {:?} shard {:?} iterator expired, renew it", self.stream_name, self.shard_id);
+                    tracing::warn!(
+                        "stream {:?} shard {:?} iterator expired, renew it",
+                        self.stream_name,
+                        self.shard_id
+                    );
                     self.new_shard_iter().await?;
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
                 }
-                Err(SdkError::ServiceError { err, .. }) if err.is_provisioned_throughput_exceeded_exception() => {
-                    tracing::warn!("stream {:?} shard {:?} throughput exceeded, retry", self.stream_name, self.shard_id);
+                Err(SdkError::ServiceError { err, .. })
+                    if err.is_provisioned_throughput_exceeded_exception() =>
+                {
+                    tracing::warn!(
+                        "stream {:?} shard {:?} throughput exceeded, retry",
+                        self.stream_name,
+                        self.shard_id
+                    );
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
                 }
                 Err(SdkError::DispatchFailure(e)) => {
-                    tracing::warn!("stream {:?} shard {:?} dispatch failure: {:?}", self.stream_name, self.shard_id, e);
+                    tracing::warn!(
+                        "stream {:?} shard {:?} dispatch failure: {:?}",
+                        self.stream_name,
+                        self.shard_id,
+                        e
+                    );
                     continue;
                 }
                 Err(e) => return Err(anyhow!(e)),
