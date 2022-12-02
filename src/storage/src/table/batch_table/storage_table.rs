@@ -265,11 +265,10 @@ impl<S: StateStore> StorageTable<S> {
             .into_iter()
             .map(|index| self.pk_indices[index])
             .collect_vec();
-        let check_bloom_filter = self.dist_key_indices.clone() == key_indices.clone();
 
         let read_options = ReadOptions {
             dist_key_hint: None,
-            check_bloom_filter,
+            check_bloom_filter: is_subset(self.dist_key_indices.clone(), key_indices),
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
