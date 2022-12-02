@@ -1046,11 +1046,35 @@ impl Parser {
         };
 
         if let Some(op) = regular_binary_operator {
-            Ok(Expr::BinaryOp {
-                left: Box::new(expr),
-                op,
-                right: Box::new(self.parse_subexpr(precedence)?),
-            })
+            if let Some(keyword) =
+                self.parse_one_of_keywords(&[Keyword::ANY, Keyword::ALL, Keyword::SOME])
+            {
+                self.expect_token(&Token::LParen)?;
+                let right = self.parse_expr()?;
+                self.expect_token(&Token::RParen)?;
+
+                if let Expr::Subquery(_) = &right {
+                    parser_err!("ANY/SOME/ALL(Subquery) is not implemented")?;
+                }
+
+                let right = match keyword {
+                    Keyword::ALL => Box::new(Expr::AllOp(Box::new(right))),
+                    Keyword::ANY | Keyword::SOME => Box::new(Expr::SomeOp(Box::new(right))),
+                    _ => unreachable!(),
+                };
+
+                Ok(Expr::BinaryOp {
+                    left: Box::new(expr),
+                    op,
+                    right,
+                })
+            } else {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(expr),
+                    op,
+                    right: Box::new(self.parse_subexpr(precedence)?),
+                })
+            }
         } else if let Token::Word(w) = &tok {
             match w.keyword {
                 Keyword::IS => {
