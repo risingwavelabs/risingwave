@@ -15,10 +15,6 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-#[cfg(test)]
-use mockall::automock;
-#[cfg(test)]
-use mockall::predicate::*;
 use prost::Message;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -525,22 +521,36 @@ mod tests {
     use mockall::mock;
 
     use super::*;
-    use crate::storage::{MetaStore, MetaStoreError, MockMetaStore, Transaction};
-
-    #[automock]
-    trait Foo {
-        fn foo(&self, x: u32);
-    }
-
-    impl Clone for MockMetaStore {
-        fn clone(&self) -> Self {
-            Self::default()
-        }
-    }
+    use crate::storage::MemStore;
 
     #[tokio::test]
-    async fn test_get_infos_empty() {
-        let mock_meta_store = MockMetaStore::new();
+    async fn test_get_infos() {
+        // no impfo present should give empty results or default objects
+        let mock_meta_store = Arc::new(MemStore::new());
+        let (leader, lease) = get_infos(&mock_meta_store).await.unwrap();
+        assert!(leader.is_empty() && lease.is_empty());
+        let (leader, lease) = get_infos_obj(&mock_meta_store).await.unwrap();
+        assert!(leader.eq(&MetaLeaderInfo::default()));
+        assert!(lease.eq(&MetaLeaseInfo::default()));
+
+        // get_info should retrieve old leader info
+        let test_leader = MetaLeaderInfo {
+            node_address: "some_address".into(),
+            lease_id: 123 as u64,
+        };
+        let res = mock_meta_store
+            .put_cf(
+                META_CF_NAME,
+                META_LEADER_KEY.as_bytes().to_vec(),
+                test_leader.encode_to_vec(),
+            )
+            .await;
+        assert!(res.is_ok(), "unable to send leader info to mock store");
+        let (leader, _) = get_infos_obj(&mock_meta_store).await.unwrap();
+        assert!(
+            leader.eq(&test_leader),
+            "leader_info retrieved != leader_info send"
+        );
     }
 
     fn test_s_to_ha() {}

@@ -14,7 +14,6 @@
 
 use async_trait::async_trait;
 #[cfg(test)]
-use mockall::automock;
 use thiserror::Error;
 
 use crate::storage::transaction::Transaction;
@@ -23,7 +22,6 @@ use crate::storage::{Key, Value};
 pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
 #[async_trait]
-#[cfg_attr(test, automock)]
 pub trait Snapshot: Sync + Send + 'static {
     async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>>;
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>>;
@@ -31,7 +29,6 @@ pub trait Snapshot: Sync + Send + 'static {
 
 /// `MetaStore` defines the functions used to operate metadata.
 #[async_trait]
-#[cfg_attr(test, automock(type Snapshot=EtcdSnapshot;))]
 pub trait MetaStore: Clone + Sync + Send + 'static {
     type Snapshot: Snapshot;
 
