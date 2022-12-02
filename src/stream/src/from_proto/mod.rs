@@ -31,6 +31,7 @@ mod lookup;
 mod lookup_union;
 mod merge;
 mod mview;
+mod now;
 mod project;
 mod project_set;
 mod row_id_gen;
@@ -64,6 +65,7 @@ use self::lookup::*;
 use self::lookup_union::*;
 use self::merge::*;
 use self::mview::*;
+use self::now::NowExecutorBuilder;
 use self::project::*;
 use self::project_set::*;
 use self::row_id_gen::RowIdGenExecutorBuilder;
@@ -143,5 +145,6 @@ pub async fn create_executor(
         NodeBody::WatermarkFilter => WatermarkFilterBuilder,
         NodeBody::Dml => DmlExecutorBuilder,
         NodeBody::RowIdGen => RowIdGenExecutorBuilder,
+        NodeBody::Now => NowExecutorBuilder,
     }
 }

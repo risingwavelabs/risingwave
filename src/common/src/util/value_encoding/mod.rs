@@ -179,11 +179,13 @@ fn deserialize_list(item_type: &DataType, data: &mut impl Buf) -> Result<ScalarI
     Ok(ScalarImpl::List(ListValue::new(values)))
 }
 
-fn deserialize_str(data: &mut impl Buf) -> Result<String> {
+fn deserialize_str(data: &mut impl Buf) -> Result<Box<str>> {
     let len = data.get_u32_le();
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
-    String::from_utf8(bytes).map_err(ValueEncodingError::InvalidUtf8)
+    String::from_utf8(bytes)
+        .map(String::into_boxed_str)
+        .map_err(ValueEncodingError::InvalidUtf8)
 }
 
 fn deserialize_bool(data: &mut impl Buf) -> Result<bool> {

@@ -159,7 +159,7 @@ impl TableFunction {
                 if let Some(flag) = args.get(2) {
                     if let ExprImpl::Literal(lit) = flag &&
                       let Some(ScalarImpl::Utf8(flag)) = lit.get_data() {
-                        if flag != "g" {
+                        if flag.as_ref() != "g" {
                             return Err(ErrorCode::NotImplemented(
                                 "flag in regexp_matches".to_string(),
                                 4545.into()
