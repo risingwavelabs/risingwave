@@ -81,13 +81,15 @@ mod tests {
 
     #[test]
     fn test_project_row() {
-        let r0 = Row((0..=8).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r0 = Row::new((0..=8).map(|i| Some(ScalarImpl::Int64(i))).collect());
         let indices = vec![1, 1, 4, 5, 1, 4];
 
-        let r_expected = Row(indices
-            .iter()
-            .map(|&i| Some(ScalarImpl::Int64(i as _)))
-            .collect());
+        let r_expected = Row::new(
+            indices
+                .iter()
+                .map(|&i| Some(ScalarImpl::Int64(i as _)))
+                .collect(),
+        );
 
         let r = r0.project(&indices);
         assert_eq!(r.len(), 6);

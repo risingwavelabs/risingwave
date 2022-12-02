@@ -17,10 +17,10 @@ use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, SeqAccess, VariantAccess, Visitor,
 };
 
+#[cfg(feature = "decimal")]
+use crate::decimal::Decimal;
 use crate::error::{Error, Result};
 
-const DECIMAL_FLAG_LOW_BOUND: u8 = 0x6;
-const DECIMAL_FLAG_UP_BOUND: u8 = 0x23;
 const BYTES_CHUNK_SIZE: usize = 8;
 const BYTES_CHUNK_UNIT_SIZE: usize = BYTES_CHUNK_SIZE + 1;
 
@@ -107,10 +107,6 @@ impl<B: Buf> MaybeFlip<B> {
 
     def_method!(get_u64, u64);
 
-    def_method!(get_i32, i32);
-
-    def_method!(get_i64, i64);
-
     fn copy_to_slice(&mut self, dst: &mut [u8]) {
         self.input.copy_to_slice(dst);
         if self.flip {
@@ -145,91 +141,22 @@ impl<B: Buf> Deserializer<B> {
         }
     }
 
-    fn read_decimal(&mut self) -> Result<Vec<u8>> {
-        let flag = self.input.get_u8();
-        if !(DECIMAL_FLAG_LOW_BOUND..=DECIMAL_FLAG_UP_BOUND).contains(&flag) {
-            return Err(Error::InvalidBytesEncoding(flag));
-        }
-        let mut byte_array = vec![flag];
-        loop {
-            let byte = self.input.get_u8();
-            if byte == 0 {
-                break;
-            }
-            byte_array.push(byte);
-        }
-        Ok(byte_array)
-    }
-
-    /// Read bytes_len without copy, it will consume offset
-    pub fn read_bytes_len(&mut self) -> Result<usize> {
-        use core::cmp;
-        let mut result: usize = 0;
-
+    /// Skip the next bytes. Return the length of bytes.
+    pub fn skip_bytes(&mut self) -> Result<usize> {
         match self.input.get_u8() {
             0 => return Ok(0), // empty slice
             1 => {}            // non-empty slice
             v => return Err(Error::InvalidBytesEncoding(v)),
         }
-
+        let mut total_len = 0;
         loop {
-            {
-                // calc advance
-                let mut offset = 0;
-                while offset < BYTES_CHUNK_SIZE {
-                    let src = self.input.input.chunk();
-                    let cnt = cmp::min(src.len(), BYTES_CHUNK_SIZE - offset);
-                    offset += cnt;
-                    self.advance(cnt);
-                }
-            }
-
-            let chunk_len = if self.input.flip {
-                !self.input.input.chunk()[0]
-            } else {
-                self.input.input.chunk()[0]
-            };
-            self.advance(1);
-
-            match chunk_len {
-                len @ 1..=8 => {
-                    result += len as usize;
-                    // self.advance(len as usize);
-                    return Ok(result);
-                }
-                9 => {
-                    result += 8;
-                }
+            self.advance(BYTES_CHUNK_SIZE);
+            match self.input.get_u8() {
+                len @ 1..=8 => return Ok(total_len + len as usize),
+                9 => total_len += 8,
                 v => return Err(Error::InvalidBytesEncoding(v)),
             }
         }
-    }
-
-    /// Read decimal_len without copy, it will consume offset
-    pub fn read_decimal_len(&mut self) -> Result<usize> {
-        let mut len: usize = 0;
-
-        let flag = self.input.get_u8();
-        if !(DECIMAL_FLAG_LOW_BOUND..=DECIMAL_FLAG_UP_BOUND).contains(&flag) {
-            return Err(Error::InvalidBytesEncoding(flag));
-        }
-        loop {
-            let byte = self.input.get_u8();
-            if byte == 0 {
-                break;
-            }
-
-            len += 1;
-        }
-
-        Ok(len)
-    }
-
-    /// Read struct_and_list without copy, it will consume offset
-    pub fn read_struct_and_list_len(&mut self) -> Result<usize> {
-        let len = self.input.get_u32() as usize;
-        self.advance(len);
-        Ok(len)
     }
 }
 
@@ -585,69 +512,43 @@ impl<'de, 'a, B: Buf + 'de> VariantAccess<'de> for &'a mut Deserializer<B> {
 }
 
 impl<B: Buf> Deserializer<B> {
-    /// Deserialize a decimal value. Returns `(mantissa, scale)`.
-    pub fn deserialize_decimal(&mut self) -> Result<(i128, u8)> {
-        let mut byte_array = self.read_decimal()?;
-
-        // indicate the beginning position of mantissa in `byte_array`.
-        let mut begin: usize = 2;
-        // whether the decimal is negative or not.
-        let mut neg: bool = false;
-        let exponent = match byte_array[0] {
-            DECIMAL_FLAG_LOW_BOUND => {
-                // NaN
-                return Ok((0, 31));
-            }
-            0x07 => {
-                // Negative INF
-                return Ok((0, 29));
-            }
-            0x08 => {
-                neg = true;
-                !byte_array[1] as i8
-            }
-            0x09..=0x13 => {
-                begin -= 1;
-                neg = true;
-                (0x13 - byte_array[0]) as i8
-            }
-            0x14 => {
-                neg = true;
-                -(byte_array[1] as i8)
-            }
-            0x15 => {
-                return Ok((0, 0));
-            }
-            0x16 => -!(byte_array[1] as i8),
-            0x17..=0x21 => {
-                begin -= 1;
-                (byte_array[0] - 0x17) as i8
-            }
-            0x22 => byte_array[1] as i8,
-            DECIMAL_FLAG_UP_BOUND => {
-                // Positive INF
-                return Ok((0, 30));
-            }
-            invalid_byte => {
-                return Err(Error::InvalidBytesEncoding(invalid_byte));
-            }
+    /// Deserialize a decimal value.
+    #[cfg(feature = "decimal")]
+    pub fn deserialize_decimal(&mut self) -> Result<Decimal> {
+        // decode exponent
+        let flag = self.input.get_u8();
+        let exponent = match flag {
+            0x06 => return Ok(Decimal::NaN),
+            0x07 => return Ok(Decimal::NegInf),
+            0x08 => !self.input.get_u8() as i8,
+            0x09..=0x13 => (0x13 - flag) as i8,
+            0x14 => -(self.input.get_u8() as i8),
+            0x15 => return Ok(Decimal::ZERO),
+            0x16 => -!(self.input.get_u8() as i8),
+            0x17..=0x21 => (flag - 0x17) as i8,
+            0x22 => self.input.get_u8() as i8,
+            0x23 => return Ok(Decimal::Inf),
+            b => return Err(Error::InvalidDecimalEncoding(b)),
         };
-        if neg {
-            byte_array = byte_array.into_iter().map(|item| !item).collect();
-        }
-
-        // decode mantissa.
+        // decode mantissa
+        let neg = (0x07..0x15).contains(&flag);
         let mut mantissa: i128 = 0;
-        let bytes_len = byte_array.len() - begin;
-        let mut exp = bytes_len;
-        for item in byte_array.iter().skip(begin) {
-            exp -= 1;
-            mantissa += ((item - 1) / 2) as i128 * 100i128.pow(exp as u32);
+        let mut mlen = 0i8;
+        loop {
+            let mut b = self.input.get_u8();
+            if neg {
+                b = !b;
+            }
+            let x = b / 2;
+            mantissa = mantissa * 100 + x as i128;
+            mlen += 1;
+            if b & 1 == 0 {
+                break;
+            }
         }
-        mantissa += 1;
 
         // get scale
-        let mut scale = (bytes_len as i8 - exponent) * 2;
+        let mut scale = (mlen - exponent) * 2;
         if scale <= 0 {
             // e.g. 1(mantissa) + 2(exponent) (which is 100).
             for _i in 0..-scale {
@@ -664,44 +565,12 @@ impl<B: Buf> Deserializer<B> {
         if neg {
             mantissa = -mantissa;
         }
-        Ok((mantissa, scale as u8))
-    }
-
-    /// Deserialize a NaiveDateWrapper value. Returns `days`.
-    pub fn deserialize_naivedate(&mut self) -> Result<i32> {
-        let days = self.input.get_i32() ^ (1 << 31);
-        Ok(days)
-    }
-
-    /// Deserialize a NaiveTimeWrapper value. Returns `(secs, nano)`.
-    pub fn deserialize_naivetime(&mut self) -> Result<(u32, u32)> {
-        let secs = self.input.get_u32();
-        let nano = self.input.get_u32();
-        Ok((secs, nano))
-    }
-
-    /// Deserialize a NaiveDateTimeWrapper value. Returns `(secs, nsecs)`.
-    pub fn deserialize_naivedatetime(&mut self) -> Result<(i64, u32)> {
-        let secs = self.input.get_i64() ^ (1 << 63);
-        let nsecs = self.input.get_u32();
-        Ok((secs, nsecs))
-    }
-
-    /// Deserialize struct and list value. Returns `bytes`.
-    pub fn deserialize_struct_or_list(&mut self) -> Result<Vec<u8>> {
-        let len = self.input.get_u32();
-        let mut bytes = vec![0; len as usize];
-        self.input.copy_to_slice(&mut bytes);
-        Ok(bytes)
+        Ok(rust_decimal::Decimal::from_i128_with_scale(mantissa, scale as u32).into())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::iter::zip;
-    use std::str::FromStr;
-
-    use rust_decimal::Decimal;
     use serde::Deserialize;
 
     use super::*;
@@ -844,102 +713,47 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "decimal")]
     fn test_decimal() {
         // Notice: decimals like 100.00 will be decoding as 100.
 
-        // Test: -1234_5678_9012_3456_7890_1234, -12_3456_7890.1234, -0.001, 0.001, 100, 0.01111,
-        // 12345, 1234_5678_9012_3456_7890_1234, -233.3, 50
-        let mantissas: Vec<i128> = vec![
-            -1234_5678_9012_3456_7890_1234,
-            -12_3456_7890_1234,
-            -1,
-            1,
-            100,
-            1111,
-            12345,
-            1234_5678_9012_3456_7890_1234,
-            -2333,
-            50,
+        let decimals = [
+            "nan",
+            "-inf",
+            "-123456789012345678901234",
+            "-1234567890.1234",
+            "-233.3",
+            "-0.001",
+            "0",
+            "0.001",
+            "0.01111",
+            "50",
+            "100",
+            "12345",
+            "41721.900909090909090909090909",
+            "123456789012345678901234",
+            "inf",
         ];
-        let scales: Vec<u8> = vec![0, 4, 3, 3, 0, 5, 0, 0, 1, 0];
-        for (mantissa, scale) in zip(mantissas, scales) {
-            assert_eq!(
-                (mantissa, scale),
-                deserialize_decimal(&serialize_decimal(mantissa, scale))
-            );
+        let mut last_encoding = vec![];
+        for s in decimals {
+            let decimal: Decimal = s.parse().unwrap();
+            let encoding = serialize_decimal(decimal);
+            assert_eq!(deserialize_decimal(&encoding), decimal);
+            assert!(encoding > last_encoding);
+            last_encoding = encoding;
         }
     }
 
-    #[test]
-    fn test_decimal_2() {
-        let d = Decimal::from_str("41721.900909090909090909090909").unwrap();
-        let (mantissa, scale) = (d.mantissa(), d.scale() as u8);
-        let (mantissa0, scale0) = deserialize_decimal(&serialize_decimal(mantissa, scale));
-        assert_eq!((mantissa, scale), (mantissa0, scale0));
-    }
-
-    fn serialize_decimal(mantissa: i128, scale: u8) -> Vec<u8> {
+    #[cfg(feature = "decimal")]
+    fn serialize_decimal(decimal: impl Into<Decimal>) -> Vec<u8> {
         let mut serializer = crate::Serializer::new(vec![]);
-        serializer.serialize_decimal(mantissa, scale).unwrap();
+        serializer.serialize_decimal(decimal.into()).unwrap();
         serializer.into_inner()
     }
 
-    fn deserialize_decimal(bytes: &[u8]) -> (i128, u8) {
+    #[cfg(feature = "decimal")]
+    fn deserialize_decimal(bytes: &[u8]) -> Decimal {
         let mut deserializer = Deserializer::new(bytes);
         deserializer.deserialize_decimal().unwrap()
-    }
-
-    #[test]
-    fn test_naivedate() {
-        let days = 12_3456;
-        let days0 = deserialize_naivedate(&serialize_naivedate(days));
-        assert_eq!(days, days0);
-    }
-
-    fn serialize_naivedate(days: i32) -> Vec<u8> {
-        let mut serializer = crate::Serializer::new(vec![]);
-        serializer.serialize_naivedate(days).unwrap();
-        serializer.into_inner()
-    }
-
-    fn deserialize_naivedate(bytes: &[u8]) -> i32 {
-        let mut deserializer = Deserializer::new(bytes);
-        deserializer.deserialize_naivedate().unwrap()
-    }
-
-    #[test]
-    fn test_naivetime() {
-        let (secs, nano) = (23 * 3600 + 59 * 60 + 59, 1234_5678);
-        let (secs0, nano0) = deserialize_naivetime(&serialize_naivetime(secs, nano));
-        assert_eq!((secs, nano), (secs0, nano0));
-    }
-
-    fn serialize_naivetime(secs: u32, nano: u32) -> Vec<u8> {
-        let mut serializer = crate::Serializer::new(vec![]);
-        serializer.serialize_naivetime(secs, nano).unwrap();
-        serializer.into_inner()
-    }
-
-    fn deserialize_naivetime(bytes: &[u8]) -> (u32, u32) {
-        let mut deserializer = Deserializer::new(bytes);
-        deserializer.deserialize_naivetime().unwrap()
-    }
-
-    #[test]
-    fn test_naivedatetime() {
-        let (secs, nsecs) = (12_3456_7890_1234, 1234_5678);
-        let (secs0, nsecs0) = deserialize_naivedatetime(&serialize_naivedatetime(secs, nsecs));
-        assert_eq!((secs, nsecs), (secs0, nsecs0));
-    }
-
-    fn serialize_naivedatetime(secs: i64, nsecs: u32) -> Vec<u8> {
-        let mut serializer = crate::Serializer::new(vec![]);
-        serializer.serialize_naivedatetime(secs, nsecs).unwrap();
-        serializer.into_inner()
-    }
-
-    fn deserialize_naivedatetime(bytes: &[u8]) -> (i64, u32) {
-        let mut deserializer = Deserializer::new(bytes);
-        deserializer.deserialize_naivedatetime().unwrap()
     }
 }

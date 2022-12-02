@@ -42,6 +42,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
+use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
@@ -122,9 +123,12 @@ pub struct TaskConfig {
     pub cache_policy: CachePolicy,
     pub gc_delete_keys: bool,
     pub watermark: u64,
+    /// `stats_target_table_ids` decides whether a dropped key should be counted as table stats
+    /// change. For an divided SST as input, a dropped key shouldn't be counted if its table id
+    /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
+    pub stats_target_table_ids: Option<HashSet<u32>>,
 }
 
-#[derive(Clone)]
 /// Implementation of Hummock compaction.
 pub struct Compactor {
     /// The context of the compactor.
@@ -134,7 +138,7 @@ pub struct Compactor {
     get_id_time: Arc<AtomicU64>,
 }
 
-pub type CompactOutput = (usize, Vec<LocalSstableInfo>);
+pub type CompactOutput = (usize, Vec<LocalSstableInfo>, TableStatsMap);
 
 impl Compactor {
     /// Handles a compaction task and reports its status to hummock manager.
@@ -276,8 +280,8 @@ impl Compactor {
                 }
                 future_result = buffered.next() => {
                     match future_result {
-                        Some(Ok(Ok((split_index, ssts)))) => {
-                            output_ssts.push((split_index, ssts));
+                        Some(Ok(Ok((split_index, ssts, table_stats_map)))) => {
+                            output_ssts.push((split_index, ssts, table_stats_map));
                         }
                         Some(Ok(Err(e))) => {
                             task_status = TaskStatus::ExecuteFailed;
@@ -304,7 +308,7 @@ impl Compactor {
         }
 
         // Sort by split/key range index.
-        output_ssts.sort_by_key(|(split_index, _)| *split_index);
+        output_ssts.sort_by_key(|(split_index, ..)| *split_index);
 
         sync_point::sync_point!("BEFORE_COMPACT_REPORT");
         // After a compaction is done, mutate the compaction task.
@@ -332,12 +336,14 @@ impl Compactor {
         output_ssts: Vec<CompactOutput>,
         task_status: TaskStatus,
     ) {
+        let mut table_stats_map = TableStatsMap::default();
         compact_task.set_task_status(task_status);
         compact_task
             .sorted_output_ssts
             .reserve(compact_task.splits.len());
         let mut compaction_write_bytes = 0;
-        for (_, ssts) in output_ssts {
+        for (_, ssts, table_stats_change) in output_ssts {
+            add_table_stats_map(&mut table_stats_map, &table_stats_change);
             for sst_info in ssts {
                 compaction_write_bytes += sst_info.file_size();
                 compact_task.sorted_output_ssts.push(sst_info.sst_info);
@@ -359,7 +365,7 @@ impl Compactor {
 
         if let Err(e) = context
             .hummock_meta_client
-            .report_compaction_task(compact_task.clone())
+            .report_compaction_task(compact_task.clone(), table_stats_map)
             .await
         {
             tracing::warn!(
@@ -533,7 +539,7 @@ impl Compactor {
         stats: Arc<StateStoreMetrics>,
         mut iter: impl HummockIterator<Direction = Forward>,
         mut compaction_filter: impl CompactionFilter,
-    ) -> HummockResult<()>
+    ) -> HummockResult<TableStatsMap>
     where
         F: TableBuilderFactory,
     {
@@ -560,6 +566,10 @@ impl Compactor {
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
 
+        // Keep table stats changes due to dropping KV.
+        let mut table_stats_drop = TableStatsMap::default();
+        let mut last_table_stats = TableStats::default();
+        let mut last_table_id = None;
         while iter.is_valid() {
             let iter_key = iter.key();
 
@@ -573,7 +583,6 @@ impl Compactor {
                 if !max_key.is_empty() && iter_key >= max_key {
                     break;
                 }
-
                 last_key.set(iter_key);
                 watermark_can_see_last_key = false;
                 if value.is_delete() {
@@ -582,6 +591,16 @@ impl Compactor {
             } else {
                 local_stats.skip_multi_version_key_count += 1;
             }
+
+            if last_table_id.map_or(true, |last_table_id| {
+                last_table_id != last_key.user_key.table_id.table_id
+            }) {
+                if let Some(last_table_id) = last_table_id.take() {
+                    table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
+                }
+                last_table_id = Some(last_key.user_key.table_id.table_id);
+            }
+
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
             // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
             // key which satisfies `epoch` < `watermark`
@@ -603,8 +622,18 @@ impl Compactor {
             if epoch <= task_config.watermark {
                 watermark_can_see_last_key = true;
             }
-
             if drop {
+                let should_count = match task_config.stats_target_table_ids.as_ref() {
+                    Some(target_table_ids) => {
+                        target_table_ids.contains(&last_key.user_key.table_id.table_id)
+                    }
+                    None => true,
+                };
+                if should_count {
+                    last_table_stats.total_key_count -= 1;
+                    last_table_stats.total_key_size -= last_key.encoded_len() as i64;
+                    last_table_stats.total_value_size -= iter.value().encoded_len() as i64;
+                }
                 iter.next().await?;
                 continue;
             }
@@ -616,9 +645,12 @@ impl Compactor {
 
             iter.next().await?;
         }
+        if let Some(last_table_id) = last_table_id.take() {
+            table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
+        }
         iter.collect_local_statistic(&mut local_stats);
         local_stats.report(stats.as_ref());
-        Ok(())
+        Ok(table_stats_drop)
     }
 }
 
@@ -631,6 +663,7 @@ impl Compactor {
         cache_policy: CachePolicy,
         gc_delete_keys: bool,
         watermark: u64,
+        stats_target_table_ids: Option<HashSet<u32>>,
     ) -> Self {
         Self {
             context,
@@ -640,6 +673,7 @@ impl Compactor {
                 cache_policy,
                 gc_delete_keys,
                 watermark,
+                stats_target_table_ids,
             },
             get_id_time: Arc::new(AtomicU64::new(0)),
         }
@@ -656,7 +690,7 @@ impl Compactor {
         del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
-    ) -> HummockResult<Vec<LocalSstableInfo>> {
+    ) -> HummockResult<(Vec<LocalSstableInfo>, TableStatsMap)> {
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
             self.context.stats.write_build_l0_sst_duration.start_timer()
@@ -664,7 +698,7 @@ impl Compactor {
             self.context.stats.compact_sst_duration.start_timer()
         };
 
-        let split_table_outputs = if self.options.capacity as u64
+        let (split_table_outputs, table_stats_map) = if self.options.capacity as u64
             > self.context.options.min_sst_size_for_streaming_upload
         {
             self.compact_key_range_impl(
@@ -734,7 +768,7 @@ impl Compactor {
         debug_assert!(ssts
             .iter()
             .all(|table_info| table_info.sst_info.get_table_ids().is_sorted()));
-        Ok(ssts)
+        Ok((ssts, table_stats_map))
     }
 
     async fn compact_key_range_impl<F: SstableWriterFactory>(
@@ -745,7 +779,7 @@ impl Compactor {
         del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
-    ) -> HummockResult<Vec<SplitTableOutput>> {
+    ) -> HummockResult<(Vec<SplitTableOutput>, TableStatsMap)> {
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
             limiter: self.context.read_memory_limiter.clone(),
@@ -763,7 +797,7 @@ impl Compactor {
             del_agg,
             self.task_config.key_range.clone(),
         );
-        Compactor::compact_and_build_sst(
+        let table_stats_map = Compactor::compact_and_build_sst(
             &mut sst_builder,
             &self.task_config,
             self.context.stats.clone(),
@@ -771,7 +805,8 @@ impl Compactor {
             compaction_filter,
         )
         .await?;
-        sst_builder.finish().await
+        let ssts = sst_builder.finish().await?;
+        Ok((ssts, table_stats_map))
     }
 }
 

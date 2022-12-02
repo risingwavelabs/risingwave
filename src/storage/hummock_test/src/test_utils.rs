@@ -31,7 +31,6 @@ use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::event_handler::HummockEvent;
@@ -95,21 +94,26 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
     async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
+        let worker_key = WorkerKey(self.addr.to_protobuf());
+        self.notification_manager
+            .insert_sender(subscribe_type, worker_key.clone(), tx.clone())
+            .await;
+
+        let hummock_version = self
+            .hummock_manager
+            .get_read_guard()
+            .await
+            .current_version
+            .clone();
         let meta_snapshot = MetaSnapshot {
-            hummock_version: Some(hummock_manager_guard.current_version.clone()),
+            hummock_version: Some(hummock_version),
+            version: Some(Default::default()),
             ..Default::default()
         };
-        tx.send(Ok(SubscribeResponse {
-            status: None,
-            operation: Operation::Snapshot as i32,
-            info: Some(Info::Snapshot(meta_snapshot)),
-            version: self.notification_manager.current_version().await,
-        }))
-        .unwrap();
+
         self.notification_manager
-            .insert_sender(subscribe_type, WorkerKey(self.addr.to_protobuf()), tx)
-            .await;
+            .notify_snapshot(worker_key, meta_snapshot);
+
         Ok(TestChannel(rx))
     }
 }
@@ -143,7 +147,7 @@ pub async fn prepare_first_valid_version(
         HummockObserverNode::new(Arc::new(FilterKeyExtractorManager::default()), tx.clone()),
     )
     .await;
-    let _ = observer_manager.start().await.unwrap();
+    let _ = observer_manager.start().await;
     let hummock_version = match rx.recv().await {
         Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(
             version,
@@ -296,9 +300,9 @@ where
 }
 
 impl<G: StateStore> LocalGlobalStateStoreHolder<G::Local, G> {
-    pub(crate) async fn new(state_store: G) -> Self {
+    pub(crate) async fn new(state_store: G, table_id: TableId) -> Self {
         LocalGlobalStateStoreHolder {
-            local: state_store.new_local(TEST_TABLE_ID).await,
+            local: state_store.new_local(table_id).await,
             global: state_store,
         }
     }
@@ -343,6 +347,7 @@ pub(crate) async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHumm
         meta_client.clone(),
         get_test_notification_client(env, hummock_manager_ref, worker_node),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(risingwave_tracing::RwTracingService::disabled()),
     )
     .await
     .unwrap();
@@ -350,9 +355,8 @@ pub(crate) async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHumm
     (hummock_storage, meta_client)
 }
 
-pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
-
 pub(crate) async fn with_hummock_storage_v2(
+    table_id: TableId,
 ) -> (HummockV2MixedStateStore, Arc<MockHummockMetaClient>) {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
@@ -373,7 +377,7 @@ pub(crate) async fn with_hummock_storage_v2(
     .unwrap();
 
     (
-        HummockV2MixedStateStore::new(hummock_storage).await,
+        HummockV2MixedStateStore::new(hummock_storage, table_id).await,
         meta_client,
     )
 }

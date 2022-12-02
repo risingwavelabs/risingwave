@@ -27,6 +27,7 @@
 #![feature(is_sorted)]
 #![recursion_limit = "256"]
 #![feature(let_chains)]
+#![feature(bound_map)]
 
 mod error;
 pub mod exchange_source;

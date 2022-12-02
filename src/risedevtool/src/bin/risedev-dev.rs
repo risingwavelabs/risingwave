@@ -27,9 +27,10 @@ use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
-    ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService,
-    GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService,
-    RedisService, ServiceConfig, Task, ZooKeeperService, RISEDEV_SESSION_NAME,
+    ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
+    FrontendService, GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService,
+    PrometheusService, PubsubService, RedisService, ServiceConfig, Task, ZooKeeperService,
+    RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -111,10 +112,12 @@ fn task_main(
             ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
             ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Pubsub(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
             ServiceConfig::RedPanda(_) => None,
+            ServiceConfig::ConnectorNode(c) => Some((c.port, c.id.clone())),
         };
 
         if let Some(x) = listen_info {
@@ -209,9 +212,12 @@ fn task_main(
                 writeln!(
                     log_buffer,
                     "* Run {} to start Postgres interactive shell.",
-                    style(format!("psql -h localhost -p {} -d dev -U root", c.port))
-                        .blue()
-                        .bold()
+                    style(format_args!(
+                        "psql -h localhost -p {} -d dev -U root",
+                        c.port
+                    ))
+                    .blue()
+                    .bold()
                 )?;
             }
             ServiceConfig::Compactor(c) => {
@@ -296,6 +302,16 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("kafka {}:{}", c.address, c.port));
             }
+            ServiceConfig::Pubsub(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = PubsubService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task = risedev::PubsubReadyTaskCheck::new(c.clone())?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("pubsub {}:{}", c.address, c.port));
+            }
             ServiceConfig::RedPanda(_) => {
                 return Err(anyhow!("redpanda is only supported in RiseDev compose."));
             }
@@ -308,6 +324,17 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("redis {}:{}", c.address, c.port));
+            }
+            ServiceConfig::ConnectorNode(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = ConnectorNodeService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("connector grpc://{}:{}", c.address, c.port));
             }
         }
 

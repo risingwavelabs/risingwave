@@ -14,7 +14,6 @@
 use std::clone::Clone;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Instant;
 
 use async_stack_trace::StackTrace;
 use bytes::{Buf, BufMut, Bytes};
@@ -340,7 +339,7 @@ impl SstableStore {
                     size: (sst.file_size - sst.meta_offset) as usize,
                 };
                 async move {
-                    let now = Instant::now();
+                    let now = minstant::Instant::now();
                     let buf = store
                         .read(&meta_path, Some(loc))
                         .await
@@ -355,12 +354,6 @@ impl SstableStore {
             })
             .verbose_stack_trace("meta_cache_lookup")
             .await
-            .map_err(|e| {
-                HummockError::other(format!(
-                    "meta cache lookup request dedup get cancel: {:?}",
-                    e,
-                ))
-            })?
     }
 
     pub async fn list_ssts_from_object_store(&self) -> HummockResult<Vec<ObjectMetadata>> {

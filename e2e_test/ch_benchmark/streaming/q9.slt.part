@@ -1,0 +1,4 @@
+query TTR rowsort
+select * from ch_benchmark_q9;
+----
+ GERMANY    2015           0

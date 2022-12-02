@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::fmt::{Debug, Formatter};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -227,6 +228,12 @@ pub struct MemoryLimiterGeneric<const ALLOW_EXCEED: bool> {
 pub struct MemoryTrackerGeneric<const ALLOW_EXCEED: bool> {
     limiter: Arc<MemoryLimiterInner<ALLOW_EXCEED>>,
     quota: u64,
+}
+
+impl<const ALLOW_EXCEED: bool> Debug for MemoryTrackerGeneric<ALLOW_EXCEED> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("quota").field("quota", &self.quota).finish()
+    }
 }
 
 pub type MemoryLimiter = MemoryLimiterGeneric<false>;

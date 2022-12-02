@@ -17,15 +17,15 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-#[cfg(not(madsim))]
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{map_table_key_range, FullKey, TableKey, TableKeyRange};
 use tokio::sync::mpsc;
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
-use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
 use crate::hummock::iterator::{
     ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
     UnorderedMergeIteratorInner, UserIterator,
@@ -33,8 +33,6 @@ use crate::hummock::iterator::{
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
-#[cfg(any(test, feature = "test"))]
-use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::utils::LooseMemoryLimiter;
 use crate::hummock::SstableIterator;
@@ -52,6 +50,7 @@ use crate::{
 pub struct HummockStorageCore {
     /// Mutable memtable.
     // memtable: Memtable,
+    instance_guard: LocalInstanceGuard,
 
     /// Read handle.
     read_version: Arc<RwLock<HummockReadVersion>>,
@@ -66,8 +65,6 @@ pub struct HummockStorageCore {
 
 pub struct LocalHummockStorage {
     core: Arc<HummockStorageCore>,
-
-    #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
@@ -77,7 +74,6 @@ impl Clone for LocalHummockStorage {
     fn clone(&self) -> Self {
         Self {
             core: self.core.clone(),
-            #[cfg(not(madsim))]
             tracing: self.tracing.clone(),
         }
     }
@@ -85,12 +81,14 @@ impl Clone for LocalHummockStorage {
 
 impl HummockStorageCore {
     pub fn new(
+        instance_guard: LocalInstanceGuard,
         read_version: Arc<RwLock<HummockReadVersion>>,
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<LooseMemoryLimiter>,
     ) -> Self {
         Self {
+            instance_guard,
             read_version,
             event_sender,
             memory_limiter,
@@ -168,10 +166,7 @@ impl StateStoreRead for LocalHummockStorage {
         let iter = self
             .core
             .iter_inner(map_table_key_range(key_range), epoch, read_options);
-        #[cfg(not(madsim))]
-        return iter.in_span(self.tracing.new_tracer("hummock_iter"));
-        #[cfg(madsim)]
-        iter
+        iter.in_span(self.tracing.new_tracer("hummock_iter"))
     }
 }
 
@@ -231,30 +226,16 @@ impl StateStoreWrite for LocalHummockStorage {
 impl LocalStateStore for LocalHummockStorage {}
 
 impl LocalHummockStorage {
-    #[cfg(any(test, feature = "test"))]
-    pub fn for_test(
-        sstable_store: SstableStoreRef,
-        read_version: Arc<RwLock<HummockReadVersion>>,
-        event_sender: mpsc::UnboundedSender<HummockEvent>,
-    ) -> Self {
-        Self::new(
-            read_version,
-            HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused())),
-            event_sender,
-            LooseMemoryLimiter::unlimit(),
-            #[cfg(not(madsim))]
-            Arc::new(risingwave_tracing::RwTracingService::new()),
-        )
-    }
-
     pub fn new(
+        instance_guard: LocalInstanceGuard,
         read_version: Arc<RwLock<HummockReadVersion>>,
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<LooseMemoryLimiter>,
-        #[cfg(not(madsim))] tracing: Arc<risingwave_tracing::RwTracingService>,
+        tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> Self {
         let storage_core = HummockStorageCore::new(
+            instance_guard,
             read_version,
             hummock_version_reader,
             event_sender,
@@ -263,7 +244,6 @@ impl LocalHummockStorage {
 
         Self {
             core: Arc::new(storage_core),
-            #[cfg(not(madsim))]
             tracing,
         }
     }
@@ -275,6 +255,14 @@ impl LocalHummockStorage {
 
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
         self.core.read_version.clone()
+    }
+
+    pub fn table_id(&self) -> TableId {
+        self.core.instance_guard.table_id
+    }
+
+    pub fn instance_id(&self) -> u64 {
+        self.core.instance_guard.instance_id
     }
 }
 

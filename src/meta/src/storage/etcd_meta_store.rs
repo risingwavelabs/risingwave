@@ -122,7 +122,7 @@ struct ListViewer {
 }
 
 impl SnapshotViewer for ListViewer {
-    type Output = Vec<Vec<u8>>;
+    type Output = Vec<(Vec<u8>, Vec<u8>)>;
 
     type OutputFuture<'a> = impl Future<Output = MetaStoreResult<(i64, Self::Output)>> + 'a;
 
@@ -141,15 +141,19 @@ impl SnapshotViewer for ListViewer {
                     "Etcd response missing header"
                 )));
             };
-            let value = res.kvs().iter().map(|kv| kv.value().to_vec()).collect();
-            Ok((new_revision, value))
+            let kv = res
+                .kvs()
+                .iter()
+                .map(|kv| (kv.key().to_vec(), kv.value().to_vec()))
+                .collect();
+            Ok((new_revision, kv))
         }
     }
 }
 
 #[async_trait]
 impl Snapshot for EtcdSnapshot {
-    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<Vec<u8>>> {
+    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>> {
         let view = ListViewer {
             key: encode_etcd_key(cf, &[]),
         };

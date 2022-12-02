@@ -24,8 +24,8 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, Row, Row2, RowDeserializer, RowExt};
-use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
@@ -313,7 +313,7 @@ impl<S: StateStore> StorageTable<S> {
                 .iter()
                 .enumerate()
                 .filter(|&(_, set)| set)
-                .map(|(i, _)| i as VirtualNode),
+                .map(|(i, _)| VirtualNode::from_index(i)),
         };
 
         // For each vnode, construct an iterator.
@@ -363,26 +363,24 @@ impl<S: StateStore> StorageTable<S> {
         Ok(iter)
     }
 
-    /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds of
-    /// the next primary key column in `next_col_bounds`.
-    // TODO: support multiple datums or `Row` for `next_col_bounds`.
+    /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds.
     async fn iter_with_pk_bounds(
         &self,
         epoch: HummockReadEpoch,
         pk_prefix: impl Row2,
-        next_col_bounds: impl RangeBounds<Datum>,
+        range_bounds: impl RangeBounds<Row>,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerde,
             pk_prefix: impl Row2,
-            next_col_bound: Bound<&Datum>,
+            range_bound: Bound<&Row>,
             is_start_bound: bool,
         ) -> Bound<Vec<u8>> {
-            match next_col_bound {
+            match range_bound {
                 Included(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + 1);
-                    let key = pk_prefix.chain(row::once(k));
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.len());
+                    let key = pk_prefix.chain(k);
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
                         Included(serialized_key)
@@ -393,15 +391,17 @@ impl<S: StateStore> StorageTable<S> {
                     }
                 }
                 Excluded(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + 1);
-                    let key = pk_prefix.chain(row::once(k));
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.len());
+                    let key = pk_prefix.chain(k);
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
-                        // storage doesn't support excluded begin key yet, so transform it to
-                        // included
-                        // FIXME: What if `serialized_key` is `\xff\xff..`? Should the frontend
-                        // reject this?
-                        Included(next_key(&serialized_key))
+                        // Storage doesn't support excluded begin key yet, so transform it to
+                        // included.
+                        // We always serialize a u8 for null of datum which is not equal to '\xff',
+                        // so we can assert that the next_key would never be empty.
+                        let next_serialized_key = next_key(&serialized_key);
+                        assert!(!next_serialized_key.is_empty());
+                        Included(next_serialized_key)
                     } else {
                         Excluded(serialized_key)
                     }
@@ -423,13 +423,13 @@ impl<S: StateStore> StorageTable<S> {
         let start_key = serialize_pk_bound(
             &self.pk_serializer,
             &pk_prefix,
-            next_col_bounds.start_bound(),
+            range_bounds.start_bound(),
             true,
         );
         let end_key = serialize_pk_bound(
             &self.pk_serializer,
             &pk_prefix,
-            next_col_bounds.end_bound(),
+            range_bounds.end_bound(),
             false,
         );
 
@@ -482,9 +482,9 @@ impl<S: StateStore> StorageTable<S> {
         &self,
         epoch: HummockReadEpoch,
         pk_prefix: impl Row2,
-        next_col_bounds: impl RangeBounds<Datum>,
+        range_bounds: impl RangeBounds<Row>,
     ) -> StorageResult<StorageTableIter<S>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, true)
+        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, true)
             .await
     }
 

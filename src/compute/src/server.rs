@@ -32,6 +32,7 @@ use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
+use risingwave_source::dml_manager::DmlManager;
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::TableSourceManager;
 use risingwave_storage::hummock::compactor::{
@@ -119,6 +120,16 @@ pub async fn compute_node_serve(
         state_store_metrics.clone(),
         object_store_metrics,
         TieredCacheMetricsBuilder::new(registry.clone()),
+        if opts.enable_jaeger_tracing {
+            Arc::new(
+                risingwave_tracing::RwTracingService::new(risingwave_tracing::TracingConfig::new(
+                    "127.0.0.1:6831".to_string(),
+                ))
+                .unwrap(),
+            )
+        } else {
+            Arc::new(risingwave_tracing::RwTracingService::disabled())
+        },
     )
     .await
     .unwrap();
@@ -207,6 +218,7 @@ pub async fn compute_node_serve(
         stream_config.developer.stream_connector_message_buffer_size,
     ));
     let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
+    let dml_mgr = Arc::new(DmlManager::default());
 
     // Initialize batch environment.
     let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
@@ -219,16 +231,22 @@ pub async fn compute_node_serve(
         state_store.clone(),
         batch_task_metrics.clone(),
         client_pool,
+        dml_mgr.clone(),
     );
 
+    let connector_params = risingwave_connector::ConnectorParams {
+        connector_source_endpoint: opts.connector_source_endpoint,
+        connector_sink_endpoint: opts.connector_sink_endpoint,
+    };
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
         source_mgr,
         client_addr.clone(),
-        opts.connector_source_endpoint,
+        connector_params,
         stream_config,
         worker_id,
         state_store,
+        dml_mgr,
     );
 
     // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if

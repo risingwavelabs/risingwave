@@ -58,6 +58,7 @@ pub trait TopNExecutorBase: Send + 'static {
         unreachable!()
     }
 
+    fn evict(&mut self) {}
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 }
 
@@ -120,7 +121,7 @@ where
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
-
+                    self.inner.evict();
                     yield Message::Barrier(barrier)
                 }
             };
@@ -137,12 +138,8 @@ pub fn generate_output(
         let mut data_chunk_builder = DataChunkBuilder::new(schema.data_types(), new_rows.len() + 1);
         let row_deserializer = RowDeserializer::new(schema.data_types());
         for compacted_row in new_rows {
-            let res = data_chunk_builder.append_one_row_from_datums(
-                row_deserializer
-                    .deserialize(compacted_row.row.as_ref())?
-                    .0
-                    .iter(),
-            );
+            let res = data_chunk_builder
+                .append_one_row(row_deserializer.deserialize(compacted_row.row.as_ref())?);
             debug_assert!(res.is_none());
         }
         // since `new_rows` is not empty, we unwrap directly
@@ -187,7 +184,8 @@ pub fn serialize_pk_to_cache_key(
     order_by_len: usize,
     cache_key_serde: &(OrderedRowSerde, OrderedRowSerde),
 ) -> CacheKey {
-    let (cache_key_first, cache_key_second) = pk.0.split_at(order_by_len);
+    let pk = pk.into_inner();
+    let (cache_key_first, cache_key_second) = pk.split_at(order_by_len);
     let mut cache_key_first_bytes = vec![];
     let mut cache_key_second_bytes = vec![];
     cache_key_serde.0.serialize(

@@ -41,6 +41,7 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
+use crate::optimizer::plan_visitor::has_batch_source;
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
@@ -359,8 +360,9 @@ impl PlanRoot {
         assert_eq!(plan.distribution(), &Distribution::Single);
 
         !has_batch_exchange(plan.clone()) // there's no (single) exchange
-            && has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
-            && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table()) // and it's not a system table
+            && ((has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
+            && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table())) // and it's not a system table
+            || has_batch_source(plan.clone())) // or there's a source
 
         // TODO: join between a normal table and a system table is not supported yet
     }
@@ -438,7 +440,7 @@ impl PlanRoot {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
-        let mut plan = match self.plan.convention() {
+        let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan()?;
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
@@ -465,13 +467,14 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
-        // Rewrite joins with index to delta join
-        plan = self.optimize_by_rules(
-            plan,
-            "To IndexDeltaJoin".to_string(),
-            vec![IndexDeltaJoinRule::create()],
-            ApplyOrder::BottomUp,
-        );
+        // TODO: enable delta join
+        // // Rewrite joins with index to delta join
+        // plan = self.optimize_by_rules(
+        //     plan,
+        //     "To IndexDeltaJoin".to_string(),
+        //     vec![IndexDeltaJoinRule::create()],
+        //     ApplyOrder::BottomUp,
+        // );
 
         Ok(plan)
     }
