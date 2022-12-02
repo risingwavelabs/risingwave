@@ -95,11 +95,11 @@ mod tests {
     fn test_encode_row() {
         let v10 = Some(ScalarImpl::Int32(42));
         let v10_cloned = v10.clone();
-        let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v11 = Some(ScalarImpl::Utf8("hello".into()));
         let v11_cloned = v11.clone();
         let v12 = Some(ScalarImpl::Float32(4.0.into()));
         let v20 = Some(ScalarImpl::Int32(42));
-        let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
+        let v21 = Some(ScalarImpl::Utf8("hell".into()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
         let row1 = Row::new(vec![v10, v11, v12]);
@@ -133,10 +133,10 @@ mod tests {
     #[test]
     fn test_encode_chunk() {
         let v10 = Some(ScalarImpl::Int32(42));
-        let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v11 = Some(ScalarImpl::Utf8("hello".into()));
         let v12 = Some(ScalarImpl::Float32(4.0.into()));
         let v20 = Some(ScalarImpl::Int32(42));
-        let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
+        let v21 = Some(ScalarImpl::Utf8("hell".into()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
         let row1 = Row::new(vec![v10, v11, v12]);

@@ -42,14 +42,14 @@ impl SysCatalogReaderImpl {
                 let view_rows = schema.iter_view().flat_map(|view| {
                     view.columns.iter().enumerate().map(|(index, column)| {
                         Row::new(vec![
-                            Some(ScalarImpl::Utf8(self.auth_context.database.clone())),
-                            Some(ScalarImpl::Utf8(schema.name())),
-                            Some(ScalarImpl::Utf8(view.name().to_string())),
-                            Some(ScalarImpl::Utf8(column.name.clone())),
+                            Some(ScalarImpl::Utf8(self.auth_context.database.clone().into())),
+                            Some(ScalarImpl::Utf8(schema.name().into())),
+                            Some(ScalarImpl::Utf8(view.name().into())),
+                            Some(ScalarImpl::Utf8(column.name.clone().into())),
                             Some(ScalarImpl::Int32(index as i32 + 1)),
                             // TODO: refactor when we support "NOT NULL".
-                            Some(ScalarImpl::Utf8("YES".to_string())),
-                            Some(ScalarImpl::Utf8(column.data_type().to_string())),
+                            Some(ScalarImpl::Utf8("YES".into())),
+                            Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
                         ])
                     })
                 });
@@ -64,14 +64,16 @@ impl SysCatalogReaderImpl {
                             .filter(|(_, column)| !column.is_hidden())
                             .map(|(index, column)| {
                                 Row::new(vec![
-                                    Some(ScalarImpl::Utf8(self.auth_context.database.clone())),
-                                    Some(ScalarImpl::Utf8(schema.name())),
-                                    Some(ScalarImpl::Utf8(table_name.to_string())),
-                                    Some(ScalarImpl::Utf8(column.name().to_string())),
+                                    Some(ScalarImpl::Utf8(
+                                        self.auth_context.database.clone().into(),
+                                    )),
+                                    Some(ScalarImpl::Utf8(schema.name().into())),
+                                    Some(ScalarImpl::Utf8(table_name.into())),
+                                    Some(ScalarImpl::Utf8(column.name().into())),
                                     Some(ScalarImpl::Int32(index as i32 + 1)),
                                     // TODO: refactor when we support "NOT NULL".
-                                    Some(ScalarImpl::Utf8("YES".to_string())),
-                                    Some(ScalarImpl::Utf8(column.data_type().to_string())),
+                                    Some(ScalarImpl::Utf8("YES".into())),
+                                    Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
                                 ])
                             })
                     })
@@ -88,38 +90,38 @@ impl SysCatalogReaderImpl {
             .flat_map(|schema| {
                 let table_rows = schema.iter_table().map(|table| {
                     Row::new(vec![
-                        Some(ScalarImpl::Utf8(self.auth_context.database.clone())),
-                        Some(ScalarImpl::Utf8(schema.name())),
-                        Some(ScalarImpl::Utf8(table.name().to_string())),
-                        Some(ScalarImpl::Utf8("BASE TABLE".to_string())),
-                        Some(ScalarImpl::Utf8("YES".to_string())),
+                        Some(ScalarImpl::Utf8(self.auth_context.database.clone().into())),
+                        Some(ScalarImpl::Utf8(schema.name().into())),
+                        Some(ScalarImpl::Utf8(table.name().into())),
+                        Some(ScalarImpl::Utf8("BASE TABLE".into())),
+                        Some(ScalarImpl::Utf8("YES".into())),
                     ])
                 });
                 let sys_table_rows = schema.iter_system_tables().map(|table| {
                     Row::new(vec![
-                        Some(ScalarImpl::Utf8(self.auth_context.database.clone())),
-                        Some(ScalarImpl::Utf8(schema.name())),
-                        Some(ScalarImpl::Utf8(table.name().to_string())),
-                        Some(ScalarImpl::Utf8("SYSTEM TABLE".to_string())),
-                        Some(ScalarImpl::Utf8("NO".to_string())),
+                        Some(ScalarImpl::Utf8(self.auth_context.database.clone().into())),
+                        Some(ScalarImpl::Utf8(schema.name().into())),
+                        Some(ScalarImpl::Utf8(table.name().into())),
+                        Some(ScalarImpl::Utf8("SYSTEM TABLE".into())),
+                        Some(ScalarImpl::Utf8("NO".into())),
                     ])
                 });
                 let mv_rows = schema.iter_mv().map(|mv| {
                     Row::new(vec![
-                        Some(ScalarImpl::Utf8(self.auth_context.database.clone())),
-                        Some(ScalarImpl::Utf8(schema.name())),
-                        Some(ScalarImpl::Utf8(mv.name().to_string())),
-                        Some(ScalarImpl::Utf8("MATERIALIZED VIEW".to_string())),
-                        Some(ScalarImpl::Utf8("NO".to_string())),
+                        Some(ScalarImpl::Utf8(self.auth_context.database.clone().into())),
+                        Some(ScalarImpl::Utf8(schema.name().into())),
+                        Some(ScalarImpl::Utf8(mv.name().into())),
+                        Some(ScalarImpl::Utf8("MATERIALIZED VIEW".into())),
+                        Some(ScalarImpl::Utf8("NO".into())),
                     ])
                 });
                 let view_rows = schema.iter_view().map(|view| {
                     Row::new(vec![
-                        Some(ScalarImpl::Utf8(self.auth_context.database.clone())),
-                        Some(ScalarImpl::Utf8(schema.name())),
-                        Some(ScalarImpl::Utf8(view.name().to_string())),
-                        Some(ScalarImpl::Utf8("VIEW".to_string())),
-                        Some(ScalarImpl::Utf8("NO".to_string())),
+                        Some(ScalarImpl::Utf8(self.auth_context.database.clone().into())),
+                        Some(ScalarImpl::Utf8(schema.name().into())),
+                        Some(ScalarImpl::Utf8(view.name().into())),
+                        Some(ScalarImpl::Utf8("VIEW".into())),
+                        Some(ScalarImpl::Utf8("NO".into())),
                     ])
                 });
 

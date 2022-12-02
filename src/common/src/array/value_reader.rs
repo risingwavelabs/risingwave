@@ -18,7 +18,9 @@ use std::str::from_utf8;
 use byteorder::{BigEndian, ReadBytesExt};
 
 use super::ArrayResult;
-use crate::array::{Array, ArrayBuilder, PrimitiveArrayItemType, Utf8ArrayBuilder};
+use crate::array::{
+    Array, ArrayBuilder, BytesArrayBuilder, PrimitiveArrayItemType, Utf8ArrayBuilder,
+};
 use crate::types::{Decimal, OrderedF32, OrderedF64};
 
 /// Reads an encoded buffer into a value.
@@ -71,5 +73,13 @@ impl VarSizedValueReader<Utf8ArrayBuilder> for Utf8ValueReader {
             Ok(s) => Ok(s),
             Err(e) => bail!("failed to read utf8 string from bytes: {}", e),
         }
+    }
+}
+
+pub struct BytesValueReader;
+
+impl VarSizedValueReader<BytesArrayBuilder> for BytesValueReader {
+    fn read(buf: &[u8]) -> ArrayResult<&[u8]> {
+        Ok(buf)
     }
 }

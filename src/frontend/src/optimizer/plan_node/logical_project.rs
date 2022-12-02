@@ -122,6 +122,10 @@ impl LogicalProject {
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
         self.core.decompose()
     }
+
+    pub fn is_all_inputref(&self) -> bool {
+        self.core.is_all_inputref()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalProject {
