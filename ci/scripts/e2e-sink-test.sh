@@ -5,9 +5,6 @@ set -euo pipefail
 
 source ci/scripts/common.env.sh
 
-# prepare environment
-export CONNECTOR_RPC_ENDPOINT="localhost:50051"
-
 while getopts 'p:' opt; do
     case ${opt} in
         p )
@@ -60,7 +57,7 @@ psql -h db -U postgres -d test -c "CREATE TABLE t4 (id serial PRIMARY KEY, name 
 
 echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe
-java -jar ./connector-service.jar  &
+java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-source.log 2>&1 &
 sleep 1
 
 echo "--- testing sinks"
