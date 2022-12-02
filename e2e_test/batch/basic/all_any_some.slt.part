@@ -1,0 +1,64 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query T
+select 1 = SOME(null);
+----
+NULL
+
+query T
+select 2 < ANY(array[null::integer]);
+----
+NULL
+
+query T
+select 3 >= ALL(array[1, 2, null])
+----
+NULL
+
+query T
+select 'a' not like ANY(array['a', null]);
+----
+NULL
+
+query T
+select 'a' not like SOME(array['b', null]);
+----
+t
+
+query T
+select 1 < SOME(array[1] || array[2]);
+----
+t
+
+query T
+select 1 = ALL((select array[1]) || array[2]);
+----
+f
+
+query T
+select 1 = ANY((select array[1]) || array[2]);
+----
+t
+
+# `current_schemas(null)` will return null.
+query T
+select 1 < ANY(current_schemas(null)::integer[]);
+----
+NULL
+
+query T
+select 1 <> ANY(array[1, 2]);
+----
+t
+
+query T
+select 1 <> ALL(array[1, 2]);
+----
+t
+
+statement error
+select 1 = SOME(1);
+
+statement error
+select 1 < ANY(array[null])

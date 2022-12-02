@@ -30,6 +30,7 @@ mod expr_literal;
 mod expr_nested_construct;
 mod expr_quaternary_bytes;
 mod expr_regexp;
+mod expr_some_all;
 mod expr_ternary_bytes;
 mod expr_to_char_const_tmpl;
 pub mod expr_unary;
@@ -128,6 +129,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         DateTrunc => build_date_trunc_expr(prost),
 
         // Dedicated types
+        All | Some => build_some_all_expr_prost(prost),
         In => InExpression::try_from(prost).map(Expression::boxed),
         Case => CaseExpression::try_from(prost).map(Expression::boxed),
         Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
