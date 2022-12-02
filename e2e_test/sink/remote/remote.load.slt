@@ -7,7 +7,7 @@ create materialized view mv4 as select * from t4;
 statement ok
 CREATE SINK s4 FROM mv4 WITH (
     connector='jdbc',
-    jdbc.url='jdbc:postgresql://localhost:5432/test?user=test&password=connector',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
     table.name='t4'
 );
 
