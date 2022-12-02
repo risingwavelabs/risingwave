@@ -58,14 +58,12 @@ psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector'
 createdb -h db -U postgres test
 psql -h db -U postgres -d test -c "CREATE TABLE t4 (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
 
-# start risingwave cluster
+echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe
-
-# start connector node service
-java -jar ./connector-service.jar &
+java -jar ./connector-service.jar  &
 sleep 1
 
-# test remote sink
+echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/*.slt'
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/remote.load.slt'
