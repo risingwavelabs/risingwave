@@ -290,6 +290,7 @@ fn gen_rand_lease_id() -> u64 {
     rand::thread_rng().gen_range(0..std::u64::MAX)
 }
 
+// TODO: rewrite all doc strings
 /// Used to manage single leader setup. `run_elections` will continuously run elections to determine
 /// which nodes are **leaders** and which are **followers**.
 ///
@@ -472,6 +473,8 @@ async fn manage_term<S: MetaStore>(
             None => return Some(false),
             Some(val) => {
                 if val {
+                    // TODO: should this be true or this be None?
+                    return Some(true);
                     return None; // node is leader and lease was renewed
                 }
             }
@@ -498,7 +501,7 @@ async fn manage_term<S: MetaStore>(
         );
         txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
         match meta_store.txn(txn).await {
-            Err(e) => tracing::warn!("Unable to update lease. Error {}", e),
+            Err(e) => tracing::warn!("Unable to update lease. Error {:?}", e),
             Ok(_) => tracing::info!("Deleted leader and lease"),
         }
         return Some(false);
@@ -520,6 +523,8 @@ async fn manage_term<S: MetaStore>(
 
 #[cfg(test)]
 mod tests {
+
+    use core::panic;
 
     use mockall::mock;
 
@@ -579,4 +584,105 @@ mod tests {
         };
         assert!(addr.eq(&s_to_ha("127.0.0.1:123")));
     }
+
+    async fn put_lease_info<S: MetaStore>(lease: &MetaLeaseInfo, meta_store: &Arc<S>) {
+        let mut txn = Transaction::default();
+        txn.put(
+            META_CF_NAME.to_string(),
+            META_LEASE_KEY.as_bytes().to_vec(),
+            lease.encode_to_vec(),
+        );
+        if meta_store.txn(txn).await.is_err() {
+            panic!("Putting test lease failed");
+        }
+    }
+
+    async fn put_leader_info<S: MetaStore>(leader: &MetaLeaderInfo, meta_store: &Arc<S>) {
+        let mut txn = Transaction::default();
+        txn.put(
+            META_CF_NAME.to_string(),
+            META_LEADER_KEY.as_bytes().to_vec(),
+            leader.encode_to_vec(),
+        );
+        if meta_store.txn(txn).await.is_err() {
+            panic!("Putting test leader failed");
+        }
+    }
+
+    async fn put_leader_lease<S: MetaStore>(
+        leader: &MetaLeaderInfo,
+        lease: &MetaLeaseInfo,
+        meta_store: &Arc<S>,
+    ) {
+        put_leader_info(leader, meta_store).await;
+        put_lease_info(lease, meta_store).await;
+    }
+
+    #[tokio::test]
+    async fn test_manage_term() {
+        let mock_meta_store = Arc::new(MemStore::new());
+        let lease_timeout = 10;
+
+        // TODO: Is this expected behavior?
+        // If nobody was elected leader renewing lease fails and leader is marked as failed
+        let now = since_epoch();
+        let leader_info = MetaLeaderInfo {
+            node_address: "localhost:1234".into(),
+            lease_id: 123 as u64,
+        };
+        assert!(
+            !manage_term(true, &leader_info, lease_timeout, &mock_meta_store)
+                .await
+                .unwrap()
+        );
+
+        // if node is leader lease should be renewed
+        let lease_info = MetaLeaseInfo {
+            leader: Some(leader_info.clone()),
+            lease_register_time: now.as_secs(),
+            lease_expire_time: now.as_secs(),
+        };
+        put_leader_lease(&leader_info, &lease_info, &mock_meta_store).await;
+        assert!(
+            manage_term(true, &leader_info, lease_timeout, &mock_meta_store)
+                .await
+                .unwrap(),
+            "Leader should still be in power if leader extends lease"
+        );
+        let (_, new_lease_info) = get_infos_obj(&mock_meta_store).await.unwrap();
+        assert_eq!(
+            lease_info.get_lease_expire_time() + lease_timeout,
+            new_lease_info.get_lease_expire_time(),
+            "Lease was not extended by {}s, but by {}",
+            lease_timeout,
+            new_lease_info.get_lease_expire_time() - lease_info.get_lease_expire_time()
+        );
+
+        // If node is NOT a leader, lease should not be renewed
+        let lease_info = MetaLeaseInfo {
+            leader: Some(leader_info.clone()),
+            lease_register_time: now.as_secs(),
+            lease_expire_time: now.as_secs(),
+        };
+        put_leader_lease(&leader_info, &lease_info, &mock_meta_store).await;
+        assert!(
+            manage_term(false, &leader_info, lease_timeout, &mock_meta_store)
+                .await
+                .unwrap(),
+            "Leader should still be in power if follower fails to renew lease"
+        );
+        let (_, new_lease_info) = get_infos_obj(&mock_meta_store).await.unwrap();
+        assert_eq!(
+            lease_info.get_lease_expire_time(),
+            new_lease_info.get_lease_expire_time(),
+            "Lease should not be extended by follower, but was extended by by {}s",
+            new_lease_info.get_lease_expire_time() - lease_info.get_lease_expire_time()
+        );
+
+        // if lease is outdated, lease should get deleted
+
+        // more test cases?
+    }
+
+    // test renew_lease function
 }
