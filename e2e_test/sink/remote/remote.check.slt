@@ -1,7 +1,7 @@
 # the check is run on sink destination postgres database
 
 query I
-select * from t4 order by id;
+select * from t_remote order by id;
 ----
 1 Alex
 3 Carl

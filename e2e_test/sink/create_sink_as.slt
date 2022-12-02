@@ -7,7 +7,7 @@ CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM t4;
 statement ok
 CREATE SINK s4 AS select mv4.v1 as v1, mv4.v2 as v2 from mv4 WITH (
     connector = 'mysql',
-    endpoint = '127.0.0.1:3306',
+    endpoint = 'mysql:3306',
     user = 'root',
     database = 'test',
     table = 't4'

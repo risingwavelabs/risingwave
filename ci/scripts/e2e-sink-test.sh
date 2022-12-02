@@ -53,7 +53,7 @@ apt-get -y install postgresql-client
 export PGPASSWORD=postgres
 psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';"
 createdb -h db -U postgres test
-psql -h db -U postgres -d test -c "CREATE TABLE t4 (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
+psql -h db -U postgres -d test -c "CREATE TABLE t_remote (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
 
 echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe
