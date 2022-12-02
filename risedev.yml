@@ -527,7 +527,6 @@ risedev:
   ci-1cn-1fe-with-recovery:
     - use: minio
     - use: etcd
-      unsafe-no-fsync: true
     - use: meta-node
       enable-committed-sst-sanity-check: true
     - use: compute-node

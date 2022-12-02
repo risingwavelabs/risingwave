@@ -67,15 +67,17 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
 # kill cluster
 cargo make kill
-# start cluster again
-cargo make ci-start ci-1cn-1fe-with-recovery
+# start cluster w/o clean-data
+cargo make dev ci-1cn-1fe-with-recovery
 echo "wait for recovery finish"
-sleep 15
+sleep 6
 echo "check mviews after cluster recovery"
 # check snapshot
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
+# wait cdc ingesting
+sleep 4
 # check new results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
