@@ -44,7 +44,8 @@ implement_using_to_sql! {
     { &str },
     { crate::types::OrderedF32 },
     { crate::types::OrderedF64 },
-    { bool }
+    { bool },
+    { &[u8] }
 }
 
 impl ToBinary for ScalarRefImpl<'_> {
@@ -64,7 +65,7 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::NaiveTime(v) => v.to_binary(),
             ScalarRefImpl::Struct(_) => todo!(),
             ScalarRefImpl::List(_) => todo!(),
-            ScalarRefImpl::Bytea(_) => todo!(),
+            ScalarRefImpl::Bytea(v) => v.to_binary(),
         }
     }
 }

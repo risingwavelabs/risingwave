@@ -480,7 +480,7 @@ macro_rules! for_all_scalar_variants {
             { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
             { Struct, struct, StructValue, StructRef<'scalar> },
             { List, list, ListValue, ListRef<'scalar> },
-            { Bytea, bytea, Bytes, &'scalar [u8] }
+            { Bytea, bytea, Vec<u8>, &'scalar [u8] }
         }
     };
 }
@@ -905,7 +905,8 @@ impl ScalarImpl {
             }),
             Ty::Struct(t) => StructValue::deserialize(&t.fields, de)?.to_scalar_value(),
             Ty::List { datatype } => ListValue::deserialize(datatype, de)?.to_scalar_value(),
-            Ty::Bytea => Self::Bytea(Bytes::deserialize(de)?),
+            // TODO: Consider directly use get bytes
+            Ty::Bytea => Self::Bytea(Bytes::deserialize(de)?.into()),
         })
     }
 
@@ -1098,8 +1099,8 @@ mod tests {
         // TODO: try to reduce the memory usage of `Decimal`, `ScalarImpl` and `Datum`.
         assert_item_size_eq!(DecimalArray, 20);
 
-        const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 24);
-        const_assert_eq!(std::mem::size_of::<Datum>(), 24);
+        const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 32);
+        const_assert_eq!(std::mem::size_of::<Datum>(), 32);
     }
 
     #[test]

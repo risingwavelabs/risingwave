@@ -15,7 +15,7 @@
 //! Value encoding is an encoding format which converts the data into a binary form (not
 //! memcomparable).
 
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
@@ -190,11 +190,11 @@ fn deserialize_str(data: &mut impl Buf) -> Result<Box<str>> {
         .map_err(ValueEncodingError::InvalidUtf8)
 }
 
-fn deserialize_bytea(data: &mut impl Buf) -> Bytes {
+fn deserialize_bytea(data: &mut impl Buf) -> Vec<u8> {
     let len = data.get_u32_le();
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
-    Bytes::from(bytes)
+    bytes
 }
 
 fn deserialize_bool(data: &mut impl Buf) -> Result<bool> {

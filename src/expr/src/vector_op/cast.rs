@@ -180,17 +180,18 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
 }
 
 #[inline(always)]
-pub fn str_to_bytea(elem: &str) -> Result<Bytes> {
+pub fn str_to_bytea(elem: &str) -> Result<Vec<u8>> {
     // Padded with whitespace str is not allowed.
     if elem.starts_with(' ') && elem.trim().starts_with("\\x") {
         Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA))
     } else if let Some(remainder) = elem.strip_prefix(r"\x") {
-        Ok(parse_bytes_hex(remainder)?.into())
+        Ok(parse_bytes_hex(remainder)?)
     } else {
-        Ok(parse_bytes_traditional(elem).unwrap().into())
+        Ok(parse_bytes_traditional(elem)?)
     }
 }
 
+// Refer to Materialize: https://github.com/MaterializeInc/materialize/blob/1766ab3978bc90abf75eb9b1fbadfcc95eca1993/src/repr/src/strconv.rs#L623
 pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
     // Can't use `hex::decode` here, as it doesn't tolerate whitespace
     // between encoded bytes.
@@ -218,6 +219,7 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
+// Refer to https://github.com/MaterializeInc/materialize/blob/1766ab3978bc90abf75eb9b1fbadfcc95eca1993/src/repr/src/strconv.rs#L650
 pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
     // Bytes are interpreted literally, save for the special escape sequences
     // "\\", which represents a single backslash, and "\NNN", where each N

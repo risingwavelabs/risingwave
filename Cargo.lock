@@ -5419,7 +5419,6 @@ dependencies = [
  "either",
  "hex",
  "itertools",
- "lazy_static",
  "madsim-tokio",
  "madsim-tonic",
  "md5",

@@ -15,7 +15,6 @@
 use std::iter;
 use std::mem::size_of;
 
-use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
@@ -37,7 +36,7 @@ pub struct BytesArray {
 impl Array for BytesArray {
     type Builder = BytesArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
-    type OwnedItem = Bytes;
+    type OwnedItem = Vec<u8>;
     type RefItem<'a> = &'a [u8];
 
     fn value_at(&self, idx: usize) -> Option<&[u8]> {
@@ -71,7 +70,7 @@ impl Array for BytesArray {
             .offset
             .iter()
             // length of offset is n + 1 while the length
-            // of null_bitmap is n, chain iterator of null_bitmap
+            // of null_bitmap is n, chain iterator of null_bitmapƒ
             // with one single true here to push the end of offset
             // to offset_buffer
             .zip_eq(self.null_bitmap().iter().chain(iter::once(true)))
