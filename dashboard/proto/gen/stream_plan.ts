@@ -329,6 +329,7 @@ export interface SourceNode {
   pkColumnIds: number[];
   properties: { [key: string]: string };
   info: SourceInfo | undefined;
+  sourceName: string;
 }
 
 export interface SourceNode_PropertiesEntry {
@@ -1633,6 +1634,7 @@ function createBaseSourceNode(): SourceNode {
     pkColumnIds: [],
     properties: {},
     info: undefined,
+    sourceName: "",
   };
 }
 
@@ -1651,6 +1653,7 @@ export const SourceNode = {
         }, {})
         : {},
       info: isSet(object.info) ? SourceInfo.fromJSON(object.info) : undefined,
+      sourceName: isSet(object.sourceName) ? String(object.sourceName) : "",
     };
   },
 
@@ -1678,6 +1681,7 @@ export const SourceNode = {
       });
     }
     message.info !== undefined && (obj.info = message.info ? SourceInfo.toJSON(message.info) : undefined);
+    message.sourceName !== undefined && (obj.sourceName = message.sourceName);
     return obj;
   },
 
@@ -1704,6 +1708,7 @@ export const SourceNode = {
     message.info = (object.info !== undefined && object.info !== null)
       ? SourceInfo.fromPartial(object.info)
       : undefined;
+    message.sourceName = object.sourceName ?? "";
     return message;
   },
 };

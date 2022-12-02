@@ -5,6 +5,9 @@ set -euo pipefail
 
 source ci/scripts/common.env.sh
 
+# prepare environment
+export CONNECTOR_RPC_ENDPOINT="localhost:60061"
+
 while getopts 'p:' opt; do
     case ${opt} in
         p )
@@ -55,7 +58,7 @@ mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cd
 # start risingwave cluster
 cargo make ci-start ci-1cn-1fe
 # start cdc connector node
-nohup java -cp ./connector-service.jar com.risingwave.sourcenode.service.SourceServiceMain > .risingwave/log/connector-source.log 2>&1 &
+nohup java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-source.log 2>&1 &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 # wait for cdc loading
@@ -66,12 +69,13 @@ echo "--- Kill cluster"
 pkill -f connector-service.jar
 cargo make ci-kill
 
-echo "--- e2e test w/ Rust frontend - source with kafka"
+echo "--- e2e test w/ Rust frontend - source with kafka and pubsub"
 cargo make clean-data
-cargo make ci-start ci-kafka
+cargo make ci-start ci-kafka-plus-pubsub
 ./scripts/source/prepare_ci_kafka.sh
+cargo run --bin prepare_ci_pubsub
 sqllogictest -p 4566 -d dev  './e2e_test/source/basic/*.slt'
 
-
 echo "--- Run CH-benCHmark"
-./risedev slt -p 4566 -d dev ./e2e_test/ch-benchmark/ch_benchmark.slt
+./risedev slt -p 4566 -d dev './e2e_test/ch_benchmark/batch/ch_benchmark.slt'
+./risedev slt -p 4566 -d dev './e2e_test/ch_benchmark/streaming/*.slt'

@@ -125,6 +125,7 @@ message SourceNode {
   repeated int32 pk_column_ids = 5;
   map<string, string> properties = 6;
   catalog.SourceInfo info = 7;
+  string source_name = 8;
 }
 
 message SinkNode {
@@ -312,6 +313,7 @@ enum ChainType {
   // BACKFILL is corresponding to the backfill executor.
   BACKFILL = 3;
 }
+
 // ChainNode is used for mv on mv.
 // ChainNode is like a "UNION" on mv snapshot and streaming. So it takes two inputs with fixed order:
 //   1. MergeNode (as a placeholder) for streaming read.

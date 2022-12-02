@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::server::compactor_serve;
 
 /// Command-line arguments for compute-node.
-#[derive(Parser, Debug)]
+#[derive(Parser, Clone, Debug)]
 pub struct CompactorOpts {
     // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:6660")]

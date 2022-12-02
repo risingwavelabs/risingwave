@@ -13,21 +13,19 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use risingwave_common::array::{StringWriter, WrittenGuard};
 
 use crate::Result;
 
 macro_rules! gen_trim {
     ($( { $func_name:ident, $method:ident }),*) => {
         $(#[inline(always)]
-        pub fn $func_name(s: &str, characters: &str, writer: BytesWriter) -> Result<BytesGuard> {
+        pub fn $func_name(s: &str, characters: &str, writer: StringWriter<'_>) -> Result<WrittenGuard> {
             let slices = characters.chars().collect_vec();
             // We remark that feeding a &str and a slice of chars into trim_left/right_matches
             // means different, one is matching with the entire string and the other one is matching
             // with any char in the slice.
-            writer
-                .write_ref(s.$method(&slices[..]))
-                .map_err(Into::into)
+            Ok(writer.write_ref(s.$method(&slices[..])))
         })*
     }
 }
@@ -59,10 +57,10 @@ mod tests {
         ];
 
         for (s, characters, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
+            let mut builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
-            let guard = trim_characters(s, characters, writer).unwrap();
-            let array = guard.into_inner().finish();
+            let _guard = trim_characters(s, characters, writer).unwrap();
+            let array = builder.finish();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }
@@ -77,10 +75,10 @@ mod tests {
         ];
 
         for (s, characters, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
+            let mut builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
-            let guard = ltrim_characters(s, characters, writer).unwrap();
-            let array = guard.into_inner().finish();
+            let _guard = ltrim_characters(s, characters, writer).unwrap();
+            let array = builder.finish();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }
@@ -95,10 +93,10 @@ mod tests {
         ];
 
         for (s, characters, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
+            let mut builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
-            let guard = rtrim_characters(s, characters, writer).unwrap();
-            let array = guard.into_inner().finish();
+            let _guard = rtrim_characters(s, characters, writer).unwrap();
+            let array = builder.finish();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }

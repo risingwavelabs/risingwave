@@ -27,9 +27,7 @@ use risingwave_meta::hummock::compaction::ManualCompactionOption;
 use risingwave_meta::hummock::test_utils::{
     add_ssts, setup_compute_env, setup_compute_env_with_config,
 };
-use risingwave_meta::hummock::{
-    start_local_notification_receiver, HummockManagerRef, MockHummockMetaClient,
-};
+use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;
@@ -154,12 +152,6 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
 async fn test_syncpoints_test_local_notification_receiver() {
     let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let (join_handle, shutdown_sender) = start_local_notification_receiver(
-        hummock_manager.clone(),
-        hummock_manager.compactor_manager_ref_for_test(),
-        env.notification_manager_ref(),
-    )
-    .await;
 
     // Test cancel compaction task
     let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
@@ -194,9 +186,6 @@ async fn test_syncpoints_test_local_notification_receiver() {
     )
     .await
     .unwrap();
-
-    shutdown_sender.send(()).unwrap();
-    join_handle.await.unwrap();
 }
 
 pub async fn compact_once(
@@ -245,12 +234,14 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
+    let existing_table_id: u32 = 1;
+
     let storage = get_hummock_storage(
         hummock_meta_client.clone(),
         get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+        TableId::from(existing_table_id),
     )
     .await;
-    let existing_table_id: u32 = 1;
     let compact_ctx = Arc::new(
         prepare_compactor_and_filter(
             &storage,

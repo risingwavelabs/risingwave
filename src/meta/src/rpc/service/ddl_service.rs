@@ -25,6 +25,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
 
+use crate::barrier::BarrierManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
     MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, TableId,
@@ -34,7 +35,7 @@ use crate::storage::MetaStore;
 use crate::stream::{
     ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef, SourceManagerRef,
 };
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 #[derive(Clone)]
 pub struct DdlServiceImpl<S: MetaStore> {
@@ -45,6 +46,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
     source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
+    barrier_manager: BarrierManagerRef<S>,
 }
 
 impl<S> DdlServiceImpl<S>
@@ -59,6 +61,7 @@ where
         source_manager: SourceManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        barrier_manager: BarrierManagerRef<S>,
     ) -> Self {
         Self {
             env,
@@ -67,6 +70,7 @@ where
             source_manager,
             cluster_manager,
             fragment_manager,
+            barrier_manager,
         }
     }
 }
@@ -97,6 +101,7 @@ where
         &self,
         request: Request<DropDatabaseRequest>,
     ) -> Result<Response<DropDatabaseResponse>, Status> {
+        self.check_barrier_manager_status().await?;
         let req = request.into_inner();
         let database_id = req.get_database_id();
 
@@ -222,6 +227,7 @@ where
         &self,
         request: Request<DropSinkRequest>,
     ) -> Result<Response<DropSinkResponse>, Status> {
+        self.check_barrier_manager_status().await?;
         let sink_id = request.into_inner().sink_id;
 
         // 1. Drop sink in catalog.
@@ -263,6 +269,7 @@ where
         &self,
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
+        self.check_barrier_manager_status().await?;
         self.env.idle_manager().record_activity();
 
         let request = request.into_inner();
@@ -314,6 +321,7 @@ where
         &self,
         request: Request<DropIndexRequest>,
     ) -> Result<Response<DropIndexResponse>, Status> {
+        self.check_barrier_manager_status().await?;
         self.env.idle_manager().record_activity();
 
         let index_id = request.into_inner().index_id;
@@ -360,6 +368,7 @@ where
         &self,
         request: Request<DropMaterializedSourceRequest>,
     ) -> Result<Response<DropMaterializedSourceResponse>, Status> {
+        self.check_barrier_manager_status().await?;
         let request = request.into_inner();
         let source_id = request.source_id;
         let table_id = request.table_id;
@@ -418,12 +427,25 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
+    /// `check_barrier_manager_status` checks the status of the barrier manager, return unavailable
+    /// when it's not running.
+    async fn check_barrier_manager_status(&self) -> MetaResult<()> {
+        if !self.barrier_manager.is_running().await {
+            return Err(MetaError::unavailable(
+                "The cluster is starting or recovering".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// `create_stream_job` creates a stream job and returns the version of the catalog.
     async fn create_stream_job(
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<NotificationVersion> {
+        self.check_barrier_manager_status().await?;
+
         let (mut ctx, table_fragments) =
             self.prepare_stream_job(stream_job, fragment_graph).await?;
         match self
@@ -503,11 +525,23 @@ where
         .await?;
 
         // fill correct table id in fragment graph and fill fragment id in table.
-        if let StreamingJob::MaterializedView(table)
-        | StreamingJob::Index(_, table)
-        | StreamingJob::MaterializedSource(_, table) = stream_job
-        {
-            actor_graph_builder.fill_mview_id(table);
+        match stream_job {
+            StreamingJob::MaterializedView(table)
+            | StreamingJob::Index(_, table)
+            | StreamingJob::MaterializedSource(_, table) => {
+                table.fragment_id = actor_graph_builder.fill_mview_or_sink_id(
+                    table.database_id,
+                    table.schema_id,
+                    table.id.into(),
+                );
+            }
+            StreamingJob::Sink(sink) => {
+                actor_graph_builder.fill_mview_or_sink_id(
+                    sink.database_id,
+                    sink.schema_id,
+                    sink.id.into(),
+                );
+            }
         }
 
         let graph = actor_graph_builder
@@ -522,7 +556,10 @@ where
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
             | StreamingJob::MaterializedSource(_, table) => creating_tables.push(table.clone()),
-            _ => {}
+
+            StreamingJob::Sink(_) => {
+                // No need to mark it as creating. Do nothing.
+            }
         }
 
         self.catalog_manager
@@ -619,12 +656,15 @@ where
         Ok(version)
     }
 
+    // TODO(Yuanxin): Use this function for both `CREATE TABLE` and `CREATE TABLE WITH CONNECTOR`.
     async fn create_materialized_source_inner(
         &self,
         mut source: Source,
         mut mview: Table,
         mut fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<(SourceId, TableId, CatalogVersion)> {
+        self.check_barrier_manager_status().await?;
+
         // Generate source id.
         let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: use source category
         source.id = source_id;
