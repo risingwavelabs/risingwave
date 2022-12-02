@@ -44,6 +44,7 @@ const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expe
 const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
 const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
+const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
 
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
@@ -176,6 +177,72 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
         E17.. => Ok(t / 1_000),      // ns
         _ => Err(ExprError::Parse(ERROR_INT_TO_TIMESTAMP)),
     }
+}
+
+#[inline(always)]
+pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
+    // Padded with whitespace str is not allowed.
+    if elem.starts_with(' ') && elem.trim().starts_with("\\x") {
+        Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA))
+    } else if let Some(remainder) = elem.strip_prefix(r"\x") {
+        Ok(parse_bytes_hex(remainder)?.into())
+    } else {
+        Ok(parse_bytes_traditional(elem)?.into())
+    }
+}
+
+// Refer to Materialize: https://github.com/MaterializeInc/materialize/blob/1766ab3978bc90abf75eb9b1fbadfcc95eca1993/src/repr/src/strconv.rs#L623
+pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
+    // Can't use `hex::decode` here, as it doesn't tolerate whitespace
+    // between encoded bytes.
+
+    let decode_nibble = |b| match b {
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        b'A'..=b'F' => Ok(b - b'A' + 10),
+        b'0'..=b'9' => Ok(b - b'0'),
+        _ => Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+    };
+
+    let mut buf = vec![];
+    let mut nibbles = s.as_bytes().iter().copied();
+    while let Some(n) = nibbles.next() {
+        if let b' ' | b'\n' | b'\t' | b'\r' = n {
+            continue;
+        }
+        let n = decode_nibble(n)?;
+        let n2 = match nibbles.next() {
+            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            Some(n2) => decode_nibble(n2)?,
+        };
+        buf.push((n << 4) | n2);
+    }
+    Ok(buf)
+}
+
+// Refer to https://github.com/MaterializeInc/materialize/blob/1766ab3978bc90abf75eb9b1fbadfcc95eca1993/src/repr/src/strconv.rs#L650
+pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
+    // Bytes are interpreted literally, save for the special escape sequences
+    // "\\", which represents a single backslash, and "\NNN", where each N
+    // is an octal digit, which represents the byte whose octal value is NNN.
+    let mut out = Vec::new();
+    let mut bytes = s.as_bytes().iter().fuse();
+    while let Some(&b) = bytes.next() {
+        if b != b'\\' {
+            out.push(b);
+            continue;
+        }
+        match bytes.next() {
+            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            Some(b'\\') => out.push(b'\\'),
+            b => match (b, bytes.next(), bytes.next()) {
+                (Some(d2 @ b'0'..=b'3'), Some(d1 @ b'0'..=b'7'), Some(d0 @ b'0'..=b'7')) => {
+                    out.push(((d2 - b'0') << 6) + ((d1 - b'0') << 3) + (d0 - b'0'));
+                }
+                _ => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            },
+        }
+    }
+    Ok(out)
 }
 
 #[inline(always)]
@@ -367,6 +434,7 @@ macro_rules! for_all_cast_variants {
             { varchar, float64, str_parse },
             { varchar, decimal, str_parse },
             { varchar, boolean, str_to_bool },
+            { varchar, bytea, str_to_bytea },
             // `str_to_list` requires `target_elem_type` and is handled elsewhere
 
             { boolean, varchar, bool_to_varchar },
@@ -592,7 +660,9 @@ fn scalar_cast(
 
 #[cfg(test)]
 mod tests {
+
     use num_traits::FromPrimitive;
+    use risingwave_common::types::to_text::format_bytes;
 
     use super::*;
 
@@ -831,6 +901,38 @@ mod tests {
         assert!(str_to_list("{}}", &DataType::Int32).is_err());
         assert!(str_to_list("{{1, 2, 3}, {4, 5, 6}", &DataType::Int32).is_err());
         assert!(str_to_list("{{1, 2, 3}, 4, 5, 6}}", &DataType::Int32).is_err());
+    }
+
+    #[test]
+    fn test_bytea() {
+        assert_eq!(format_bytes(&str_to_bytea("fgo").unwrap()), r"\x66676f");
+        assert_eq!(
+            format_bytes(&str_to_bytea(r"\xDeadBeef").unwrap()),
+            r"\xdeadbeef"
+        );
+        assert_eq!(format_bytes(&str_to_bytea("12CD").unwrap()), r"\x31324344");
+        assert_eq!(format_bytes(&str_to_bytea("1234").unwrap()), r"\x31323334");
+        assert_eq!(format_bytes(&str_to_bytea(r"\x12CD").unwrap()), r"\x12cd");
+        assert_eq!(
+            format_bytes(&str_to_bytea(r"\x De Ad Be Ef ").unwrap()),
+            r"\xdeadbeef"
+        );
+        assert_eq!(
+            format_bytes(&str_to_bytea("x De Ad Be Ef ").unwrap()),
+            r"\x7820446520416420426520456620"
+        );
+        assert_eq!(
+            format_bytes(&str_to_bytea(r"De\\123dBeEf").unwrap()),
+            r"\x44655c3132336442654566"
+        );
+        assert_eq!(
+            format_bytes(&str_to_bytea(r"De\123dBeEf").unwrap()),
+            r"\x4465536442654566"
+        );
+        assert_eq!(
+            format_bytes(&str_to_bytea(r"De\\000dBeEf").unwrap()),
+            r"\x44655c3030306442654566"
+        );
     }
 
     #[test]

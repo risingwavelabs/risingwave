@@ -56,6 +56,17 @@ impl RandValue for Box<str> {
     }
 }
 
+impl RandValue for Box<[u8]> {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        let len = rand.gen_range(1..=10);
+        (0..len)
+            .map(|_| rand.gen::<char>())
+            .collect::<String>()
+            .into_bytes()
+            .into()
+    }
+}
+
 impl RandValue for Decimal {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         Decimal::from_f64((rand.gen::<u32>() as f64) + 0.1f64).unwrap()
