@@ -267,10 +267,10 @@ mod tests {
     #[test]
     fn test_compare_rows() {
         let v10 = Some(ScalarImpl::Int32(42));
-        let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v11 = Some(ScalarImpl::Utf8("hello".into()));
         let v12 = Some(ScalarImpl::Float32(4.0.into()));
         let v20 = Some(ScalarImpl::Int32(42));
-        let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
+        let v21 = Some(ScalarImpl::Utf8("hell".into()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
         let row1 = Row::new(vec![v10, v11, v12]);
@@ -293,10 +293,10 @@ mod tests {
     #[test]
     fn test_compare_rows_in_chunk() {
         let v10 = Some(ScalarImpl::Int32(42));
-        let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v11 = Some(ScalarImpl::Utf8("hello".into()));
         let v12 = Some(ScalarImpl::Float32(4.0.into()));
         let v20 = Some(ScalarImpl::Int32(42));
-        let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
+        let v21 = Some(ScalarImpl::Utf8("hell".into()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
         let row1 = Row::new(vec![v10, v11, v12]);
@@ -328,7 +328,7 @@ mod tests {
             Some(ScalarImpl::Int64(64)),
             Some(ScalarImpl::Float32(3.2.into())),
             Some(ScalarImpl::Float64(6.4.into())),
-            Some(ScalarImpl::Utf8("hello".to_string())),
+            Some(ScalarImpl::Utf8("hello".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Decimal(10.into())),
             Some(ScalarImpl::Interval(Default::default())),
@@ -350,7 +350,7 @@ mod tests {
             Some(ScalarImpl::Int64(64)),
             Some(ScalarImpl::Float32(3.2.into())),
             Some(ScalarImpl::Float64(6.4.into())),
-            Some(ScalarImpl::Utf8("hello".to_string())),
+            Some(ScalarImpl::Utf8("hello".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Decimal(10.into())),
             Some(ScalarImpl::Interval(Default::default())),
