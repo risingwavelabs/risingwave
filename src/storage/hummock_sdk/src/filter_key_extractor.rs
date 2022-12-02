@@ -141,7 +141,7 @@ pub struct SchemaFilterKeyExtractor {
 
     /// distribution_key does not need to be the prefix of pk.
     distribution_key_start_index_in_pk: Option<usize>,
-    read_pattern_prefix_column: usize,
+    distribution_key_end_index_in_pk: usize,
     deserializer: OrderedRowSerde,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
     // prefix_key)
@@ -158,7 +158,7 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
-        match self.read_pattern_prefix_column != 0
+        match self.distribution_key_end_index_in_pk != 0
             && self.distribution_key_start_index_in_pk.is_some()
         {
             false => &[],
@@ -167,8 +167,7 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
                     .deserializer
                     .deserialize_dist_key_position_with_column_indices(
                         pk,
-                        0..self.read_pattern_prefix_column
-                            + self.distribution_key_start_index_in_pk.unwrap(),
+                        0..self.distribution_key_end_index_in_pk,
                         self.distribution_key_start_index_in_pk.unwrap(),
                     )
                     .unwrap();
@@ -183,7 +182,6 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
 impl SchemaFilterKeyExtractor {
     pub fn new(table_catalog: &Table) -> Self {
-        let read_pattern_prefix_column = table_catalog.distribution_key.len();
         let dist_key_indices: Vec<usize> = table_catalog
             .distribution_key
             .iter()
@@ -220,7 +218,9 @@ impl SchemaFilterKeyExtractor {
             }
             false => None,
         };
-        assert_ne!(0, read_pattern_prefix_column);
+
+        let distribution_key_end_index_in_pk =
+            table_catalog.distribution_key.len() + distribution_key_start_index_in_pk.unwrap_or(0);
         // column_index in pk
 
         let data_types = pk_indices
@@ -241,7 +241,7 @@ impl SchemaFilterKeyExtractor {
 
         Self {
             distribution_key_start_index_in_pk,
-            read_pattern_prefix_column,
+            distribution_key_end_index_in_pk,
             deserializer: OrderedRowSerde::new(data_types, order_types),
         }
     }
