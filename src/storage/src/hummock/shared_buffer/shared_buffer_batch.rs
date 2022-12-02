@@ -29,9 +29,9 @@ use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
     HummockIteratorDirection,
 };
-use crate::hummock::utils::{range_overlap, MemoryTracker};
+use crate::hummock::utils::{range_overlap, LooseMemoryTracker};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{DeleteRangeTombstone, HummockEpoch, HummockResult, MemoryLimiter};
+use crate::hummock::{DeleteRangeTombstone, HummockEpoch, HummockResult};
 use crate::storage_value::StorageValue;
 
 /// The key is `table_key`, which does not contain table id or epoch.
@@ -43,7 +43,7 @@ pub(crate) struct SharedBufferBatchInner {
     range_tombstone_list: Vec<DeleteRangeTombstone>,
     largest_table_key: Vec<u8>,
     size: usize,
-    _tracker: Option<MemoryTracker>,
+    _tracker: Option<LooseMemoryTracker>,
     batch_id: SharedBufferBatchId,
 }
 
@@ -52,7 +52,7 @@ impl SharedBufferBatchInner {
         payload: Vec<SharedBufferItem>,
         mut range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
-        _tracker: Option<MemoryTracker>,
+        _tracker: Option<LooseMemoryTracker>,
     ) -> Self {
         let mut largest_table_key = vec![];
         if !range_tombstone_list.is_empty() {
@@ -290,14 +290,14 @@ impl SharedBufferBatch {
             .collect()
     }
 
-    pub async fn build_shared_buffer_batch(
+    pub fn build_shared_buffer_batch(
         epoch: HummockEpoch,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
+        sorted_items: Vec<SharedBufferItem>,
+        size: usize,
         delete_ranges: Vec<(Bytes, Bytes)>,
         table_id: TableId,
-        memory_limit: Option<&MemoryLimiter>,
+        tracker: Option<LooseMemoryTracker>,
     ) -> Self {
-        let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs);
         let delete_range_tombstones = delete_ranges
             .into_iter()
             .map(|(start_table_key, end_table_key)| {
@@ -313,12 +313,6 @@ impl SharedBufferBatch {
         {
             Self::check_tombstone_prefix(table_id, &delete_range_tombstones);
         }
-        let size = Self::measure_batch_size(&sorted_items);
-        let tracker = if let Some(limiter) = memory_limit {
-            limiter.require_memory(size as u64).await
-        } else {
-            None
-        };
         let inner =
             SharedBufferBatchInner::new(sorted_items, delete_range_tombstones, size, tracker);
         SharedBufferBatch {
@@ -749,7 +743,7 @@ mod tests {
     #[tokio::test]
     async fn test_shared_buffer_batch_delete_range() {
         let epoch = 1;
-        let shared_buffer_items = vec![
+        let delete_ranges = vec![
             (Bytes::from(b"aaa".to_vec()), Bytes::from(b"bbb".to_vec())),
             (Bytes::from(b"ccc".to_vec()), Bytes::from(b"ddd".to_vec())),
             (Bytes::from(b"ddd".to_vec()), Bytes::from(b"eee".to_vec())),
@@ -757,11 +751,11 @@ mod tests {
         let shared_buffer_batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
             vec![],
-            shared_buffer_items,
+            0,
+            delete_ranges,
             Default::default(),
             None,
-        )
-        .await;
+        );
         assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"aaa")));
         assert!(!shared_buffer_batch.check_delete_by_range(TableKey(b"bbb")));
         assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"ddd")));

@@ -35,9 +35,8 @@ use super::{
     TieredCacheValue,
 };
 use crate::hummock::multi_builder::UploadJoinHandle;
-use crate::hummock::{
-    BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache, MemoryLimiter,
-};
+use crate::hummock::utils::LooseMemoryLimiter;
+use crate::hummock::{BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache};
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
 const MAX_META_CACHE_SHARD_BITS: usize = 2;
@@ -395,11 +394,11 @@ pub type SstableStoreRef = Arc<SstableStore>;
 
 pub struct HummockMemoryCollector {
     sstable_store: SstableStoreRef,
-    limiter: Arc<MemoryLimiter>,
+    limiter: Arc<LooseMemoryLimiter>,
 }
 
 impl HummockMemoryCollector {
-    pub fn new(sstable_store: SstableStoreRef, limiter: Arc<MemoryLimiter>) -> Self {
+    pub fn new(sstable_store: SstableStoreRef, limiter: Arc<LooseMemoryLimiter>) -> Self {
         Self {
             sstable_store,
             limiter,

@@ -36,7 +36,8 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 #[cfg(any(test, feature = "test"))]
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
-use crate::hummock::{MemoryLimiter, SstableIterator};
+use crate::hummock::utils::LooseMemoryLimiter;
+use crate::hummock::SstableIterator;
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::{
@@ -58,7 +59,7 @@ pub struct HummockStorageCore {
     /// Event sender.
     event_sender: mpsc::UnboundedSender<HummockEvent>,
 
-    memory_limiter: Arc<MemoryLimiter>,
+    memory_limiter: Arc<LooseMemoryLimiter>,
 
     hummock_version_reader: HummockVersionReader,
 }
@@ -87,7 +88,7 @@ impl HummockStorageCore {
         read_version: Arc<RwLock<HummockReadVersion>>,
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
-        memory_limiter: Arc<MemoryLimiter>,
+        memory_limiter: Arc<LooseMemoryLimiter>,
     ) -> Self {
         Self {
             read_version,
@@ -191,14 +192,27 @@ impl StateStoreWrite for LocalHummockStorage {
             let epoch = write_options.epoch;
             let table_id = write_options.table_id;
 
+            let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
+            let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+            let limiter = self.core.memory_limiter.as_ref();
+            let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
+                tracker
+            } else {
+                self.core
+                    .event_sender
+                    .send(HummockEvent::BufferMayFlush)
+                    .expect("should be able to send");
+                limiter.require_memory(size as u64).await
+            };
+
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
-                kv_pairs,
+                sorted_items,
+                size,
                 delete_ranges,
                 table_id,
-                Some(self.core.memory_limiter.as_ref()),
-            )
-            .await;
+                Some(tracker),
+            );
             let imm_size = imm.size();
             self.core
                 .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
@@ -227,7 +241,7 @@ impl LocalHummockStorage {
             read_version,
             HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused())),
             event_sender,
-            MemoryLimiter::unlimit(),
+            LooseMemoryLimiter::unlimit(),
             #[cfg(not(madsim))]
             Arc::new(risingwave_tracing::RwTracingService::new()),
         )
@@ -237,7 +251,7 @@ impl LocalHummockStorage {
         read_version: Arc<RwLock<HummockReadVersion>>,
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
-        memory_limiter: Arc<MemoryLimiter>,
+        memory_limiter: Arc<LooseMemoryLimiter>,
         #[cfg(not(madsim))] tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> Self {
         let storage_core = HummockStorageCore::new(
