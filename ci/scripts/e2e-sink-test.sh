@@ -6,7 +6,7 @@ set -euo pipefail
 source ci/scripts/common.env.sh
 
 # prepare environment
-export CONNECTOR_SINK_ENDPOINT="localhost:50051"
+export CONNECTOR_RPC_ENDPOINT="localhost:50051"
 
 while getopts 'p:' opt; do
     case ${opt} in
@@ -49,7 +49,7 @@ cargo make link-all-in-one-binaries
 apt-get -y install mysql-client
 mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE DATABASE IF NOT EXISTS test;"
 
-echo "--- installing postgresql"
+echo "--- preparing postgresql"
 
 # set up PG sink destination
 apt-get -y install postgresql-client
