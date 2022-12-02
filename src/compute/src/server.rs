@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use async_stack_trace::StackTraceManager;
 use risingwave_batch::executor::BatchTaskMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
@@ -251,14 +252,15 @@ pub async fn compute_node_serve(
         state_store.clone(),
         streaming_metrics.clone(),
         config.streaming.clone(),
-        async_stack_trace_config.clone(),
+        async_stack_trace_config,
         config.streaming.developer.stream_enable_managed_cache,
     ));
     let source_mgr = Arc::new(TableSourceManager::new(
         source_metrics,
         stream_config.developer.stream_connector_message_buffer_size,
     ));
-    let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
+    let grpc_stack_trace_mgr = async_stack_trace_config
+        .map(|config| GrpcStackTraceManagerRef::new(StackTraceManager::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::default());
 
     // Initialize batch environment.
@@ -314,7 +316,7 @@ pub async fn compute_node_serve(
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .tcp_nodelay(true)
             .layer(StackTraceMiddlewareLayer::new_optional(
-                async_stack_trace_config.map(|c| (grpc_stack_trace_mgr, c)),
+                grpc_stack_trace_mgr,
             ))
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))

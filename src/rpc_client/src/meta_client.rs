@@ -94,7 +94,12 @@ impl MetaClient {
             host: Some(self.host_addr.to_protobuf()),
             worker_id: self.worker_id(),
         };
-        self.inner.subscribe(request).await
+        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+        tokio_retry::Retry::spawn(retry_strategy, || async {
+            let request = request.clone();
+            self.inner.subscribe(request).await
+        })
+        .await
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
@@ -131,7 +136,13 @@ impl MetaClient {
         let request = ActivateWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
         };
-        self.inner.activate_worker_node(request).await?;
+        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+        tokio_retry::Retry::spawn(retry_strategy, || async {
+            let request = request.clone();
+            self.inner.activate_worker_node(request).await
+        })
+        .await?;
+
         Ok(())
     }
 

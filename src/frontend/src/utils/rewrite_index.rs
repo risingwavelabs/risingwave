@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::env;
-use std::ffi::OsStr;
+use super::ColIndexMapping;
+use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 
-/// Returns whether the environment variable `key` is set to `true` or `1`.
-pub fn env_var_is_true(key: impl AsRef<OsStr>) -> bool {
-    env::var(key)
-        .map(|value| {
-            let value = value.to_lowercase();
-            value == "1" || value == "true"
-        })
-        .unwrap_or(false)
+pub struct IndexRewriter {
+    pub mapping: ColIndexMapping,
 }
 
-/// Returns whether the environment variable indicating that we're running in CI is set.
-pub fn is_ci() -> bool {
-    env_var_is_true("RISINGWAVE_CI")
+impl ExprRewriter for IndexRewriter {
+    fn rewrite_input_ref(&mut self, mut input_ref: InputRef) -> ExprImpl {
+        input_ref.index = self.mapping.map(input_ref.index);
+
+        ExprImpl::InputRef(Box::new(input_ref))
+    }
 }

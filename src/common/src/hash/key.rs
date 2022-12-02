@@ -406,6 +406,21 @@ impl<'a> HashKeySerDe<'a> for &'a str {
     }
 }
 
+/// Same as str.
+impl<'a> HashKeySerDe<'a> for &'a [u8] {
+    type S = Vec<u8>;
+
+    /// This should never be called
+    fn serialize(self) -> Self::S {
+        panic!("Should not serialize bytes for hash!")
+    }
+
+    /// This should never be called
+    fn deserialize<R: Read>(_source: &mut R) -> Self {
+        panic!("Should not serialize bytes for hash!")
+    }
+}
+
 impl HashKeySerDe<'_> for NaiveDateWrapper {
     type S = [u8; 4];
 

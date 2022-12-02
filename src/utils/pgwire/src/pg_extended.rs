@@ -397,7 +397,7 @@ impl PreparedStatement {
         let place_hodler = Type::ANY;
         for (type_oid, raw_param) in zip_eq(type_description.iter(), raw_params.iter()) {
             let str = match type_oid {
-                DataType::Varchar => {
+                DataType::Varchar | DataType::Bytea => {
                     format!("'{}'", cstr_to_str(raw_param).unwrap())
                 }
                 DataType::Boolean => {
@@ -531,6 +531,7 @@ impl PreparedStatement {
                 DataType::Int32 => params.push("0::INT".to_string()),
                 DataType::Float32 => params.push("0::FLOAT4".to_string()),
                 DataType::Float64 => params.push("0::FLOAT8".to_string()),
+                DataType::Bytea => params.push("'\\x0'".to_string()),
                 DataType::Varchar => params.push("'0'".to_string()),
                 DataType::Date => params.push("'2021-01-01'::DATE".to_string()),
                 DataType::Time => params.push("'00:00:00'::TIME".to_string()),
