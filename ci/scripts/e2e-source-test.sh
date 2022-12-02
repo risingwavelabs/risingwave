@@ -69,6 +69,9 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 cargo make kill
 # start cluster again
 cargo make ci-start ci-1cn-1fe-with-recovery
+echo "wait for recovery finish"
+sleep 15
+echo "check mviews after cluster recovery"
 # check snapshot
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 # insert new rows
