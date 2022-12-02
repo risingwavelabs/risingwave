@@ -2,16 +2,26 @@ package com.risingwave.binding;
 
 public class Iterator implements AutoCloseable {
     final long pointer;
+    boolean isClosed;
+
     public Iterator() {
         this.pointer = Binding.iteratorNew();
+        this.isClosed = false;
     }
 
-    public NextResult next() {
-        return Binding.iteratorNext(pointer);
+    public Record next() {
+        long pointer = Binding.iteratorNext(this.pointer);
+        if (pointer == 0) {
+            return null;
+        }
+        return new Record(pointer);
     }
 
     @Override
     public void close() {
-        Binding.iteratorClose(pointer);
+        if (!isClosed) {
+            isClosed = true;
+            Binding.iteratorClose(pointer);
+        }
     }
 }

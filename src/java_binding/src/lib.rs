@@ -5,8 +5,8 @@ use std::backtrace::Backtrace;
 use std::marker::PhantomData;
 use std::panic::{catch_unwind, UnwindSafe};
 
-use jni::objects::{JClass, JObject, JValue};
-use jni::sys::{jlong, jobject};
+use jni::objects::{JClass, JObject};
+use jni::sys::{jbyteArray, jlong};
 use jni::JNIEnv;
 use thiserror::Error;
 
@@ -23,9 +23,28 @@ enum BindingError {
 type Result<T> = std::result::Result<T, BindingError>;
 
 #[repr(transparent)]
+#[derive(Default)]
+pub struct ByteArray<'a>(JObject<'a>);
+
+impl<'a> From<jbyteArray> for ByteArray<'a> {
+    fn from(inner: jbyteArray) -> Self {
+        unsafe { Self(JObject::from_raw(inner)) }
+    }
+}
+
+#[repr(transparent)]
 pub struct Pointer<'a, T> {
     pointer: jlong,
     _phantom: PhantomData<&'a T>,
+}
+
+impl<'a, T> Default for Pointer<'a, T> {
+    fn default() -> Self {
+        Self {
+            pointer: 0,
+            _phantom: Default::default(),
+        }
+    }
 }
 
 impl<T> From<T> for Pointer<'static, T> {
@@ -74,9 +93,9 @@ where
             match e {
                 BindingError::JniError {
                     error: jni::errors::Error::JavaException,
-                    ..
+                    backtrace,
                 } => {
-                    // TODO: add log here
+                    tracing::error!("get JavaException thrown from: {:?}", backtrace);
                     // the exception is already thrown. No need to throw again
                 }
                 _ => {
@@ -107,8 +126,11 @@ pub extern "system" fn Java_com_risingwave_binding_Binding_iteratorNext<'a>(
     env: JNIEnv<'a>,
     _class: JClass<'a>,
     mut pointer: Pointer<'a, Iterator>,
-) -> NextResult<'a> {
-    execute_and_catch(env.clone(), move || pointer.as_mut().next(env))
+) -> Pointer<'static, Record> {
+    execute_and_catch(env, move || match pointer.as_mut().next() {
+        None => Ok(Pointer::null()),
+        Some(record) => Ok(record.into()),
+    })
 }
 
 #[no_mangle]
@@ -120,46 +142,66 @@ pub extern "system" fn Java_com_risingwave_binding_Binding_iteratorClose(
     pointer.drop();
 }
 
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_binding_Binding_recordGetKey<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    pointer: Pointer<'a, Record>,
+) -> ByteArray<'a> {
+    execute_and_catch(env.clone(), move || {
+        Ok(ByteArray::from(
+            env.byte_array_from_slice(pointer.as_ref().key)?,
+        ))
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_binding_Binding_recordGetValue<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    pointer: Pointer<'a, Record>,
+) -> ByteArray<'a> {
+    execute_and_catch(env.clone(), move || {
+        Ok(ByteArray::from(
+            env.byte_array_from_slice(pointer.as_ref().value)?,
+        ))
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_binding_Binding_recordClose<'a>(
+    _env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    pointer: Pointer<'a, Record>,
+) {
+    pointer.drop()
+}
+
 pub struct Iterator {
     cur_idx: usize,
 }
 
+pub struct Record {
+    key: &'static [u8],
+    value: &'static [u8],
+}
+
 impl Iterator {
-    fn next<'a>(&'a mut self, env: JNIEnv<'a>) -> Result<NextResult<'a>> {
+    fn next(&mut self) -> Option<Record> {
         if self.cur_idx == 0 {
             self.cur_idx += 1;
-            NextResult::from_kv(env, &b"first"[..], &b"value1"[..])
+            Some(Record {
+                key: &b"first"[..],
+                value: &b"value1"[..],
+            })
         } else if self.cur_idx == 1 {
             self.cur_idx += 1;
-            NextResult::from_kv(env, &b"second"[..], &b"value2"[..])
+            Some(Record {
+                key: &b"second"[..],
+                value: &b"value2"[..],
+            })
         } else {
-            NextResult::none(env)
+            None
         }
-    }
-}
-
-const NEXT_RESULT_CLASSNAME: &'static str = "com/risingwave/binding/NextResult";
-
-#[derive(Default)]
-#[repr(transparent)]
-pub struct NextResult<'a>(JObject<'a>);
-
-impl<'a> NextResult<'a> {
-    fn from_kv(env: JNIEnv<'a>, key: &'a [u8], value: &'a [u8]) -> Result<Self> {
-        let key = unsafe { JValue::Object(JObject::from_raw(env.byte_array_from_slice(key)?)) };
-        let value = unsafe { JValue::Object(JObject::from_raw(env.byte_array_from_slice(value)?)) };
-        let class = env.find_class(NEXT_RESULT_CLASSNAME)?;
-        Ok(Self(env.new_object(class, "([B[B)V", &[key, value])?))
-    }
-
-    fn none(env: JNIEnv<'a>) -> Result<Self> {
-        let class = env.find_class(NEXT_RESULT_CLASSNAME)?;
-        Ok(Self(env.new_object(class, "()V", &[])?))
-    }
-}
-
-impl<'a> Into<jobject> for NextResult<'a> {
-    fn into(self) -> jobject {
-        self.0.into_raw()
     }
 }

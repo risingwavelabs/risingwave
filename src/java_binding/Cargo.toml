@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 jni = "0.20.0"
 thiserror = "1"
+tracing = "0.1"
 #risingwave_storage = { path = "../../storage" }
 #tokio = { version = "0.2"}
 

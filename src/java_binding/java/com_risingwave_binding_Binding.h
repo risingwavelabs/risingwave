@@ -18,9 +18,9 @@ JNIEXPORT jlong JNICALL Java_com_risingwave_binding_Binding_iteratorNew
 /*
  * Class:     com_risingwave_binding_Binding
  * Method:    iteratorNext
- * Signature: (J)Lcom/risingwave/binding/NextResult;
+ * Signature: (J)J
  */
-JNIEXPORT jobject JNICALL Java_com_risingwave_binding_Binding_iteratorNext
+JNIEXPORT jlong JNICALL Java_com_risingwave_binding_Binding_iteratorNext
   (JNIEnv *, jclass, jlong);
 
 /*
@@ -29,6 +29,30 @@ JNIEXPORT jobject JNICALL Java_com_risingwave_binding_Binding_iteratorNext
  * Signature: (J)V
  */
 JNIEXPORT void JNICALL Java_com_risingwave_binding_Binding_iteratorClose
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     com_risingwave_binding_Binding
+ * Method:    recordGetKey
+ * Signature: (J)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_com_risingwave_binding_Binding_recordGetKey
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     com_risingwave_binding_Binding
+ * Method:    recordGetValue
+ * Signature: (J)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_com_risingwave_binding_Binding_recordGetValue
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     com_risingwave_binding_Binding
+ * Method:    recordClose
+ * Signature: (J)V
+ */
+JNIEXPORT void JNICALL Java_com_risingwave_binding_Binding_recordClose
   (JNIEnv *, jclass, jlong);
 
 #ifdef __cplusplus
