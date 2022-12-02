@@ -109,17 +109,17 @@ fn bench_encoding(c: &mut Criterion) {
         Case::new(
             "Utf8 (len = 10)",
             DataType::Varchar,
-            ScalarImpl::Utf8(String::from_iter(vec!['a'; 10])),
+            ScalarImpl::Utf8("a".repeat(10).into()),
         ),
         Case::new(
             "Utf8 (len = 1000)",
             DataType::Varchar,
-            ScalarImpl::Utf8(String::from_iter(vec!['a'; 1000])),
+            ScalarImpl::Utf8("a".repeat(1000).into()),
         ),
         Case::new(
-            "Utf8 (len = 10000)",
+            "Utf8 (len = 100000)",
             DataType::Varchar,
-            ScalarImpl::Utf8(String::from_iter(vec!['a'; 100000])),
+            ScalarImpl::Utf8("a".repeat(100000).into()),
         ),
         // Use bool as the inner elem/field type to eliminate the performance gap in elem/field
         // encoding.

@@ -45,11 +45,14 @@ where
     }
 }
 
-impl RandValue for String {
+impl RandValue for Box<str> {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         let len = rand.gen_range(1..=10);
         // `rand.gen:::<char>` create a random Unicode scalar value.
-        (0..len).map(|_| rand.gen::<char>()).collect()
+        (0..len)
+            .map(|_| rand.gen::<char>())
+            .collect::<String>()
+            .into_boxed_str()
     }
 }
 

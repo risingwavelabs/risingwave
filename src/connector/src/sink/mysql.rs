@@ -157,7 +157,7 @@ impl TryFrom<Datum> for MySqlValue {
                 ScalarImpl::Bool(v) => Ok(MySqlValue(v.into())),
                 ScalarImpl::Decimal(Decimal::Normalized(v)) => Ok(MySqlValue(v.into())),
                 ScalarImpl::Decimal(_) => panic!("NaN, -inf, +inf are not supported by MySQL"),
-                ScalarImpl::Utf8(v) => Ok(MySqlValue(v.into())),
+                ScalarImpl::Utf8(v) => Ok(MySqlValue(String::from(v).into())),
                 ScalarImpl::NaiveDate(v) => Ok(MySqlValue(format!("{}", v).into())),
                 ScalarImpl::NaiveTime(v) => Ok(MySqlValue(format!("{}", v).into())),
                 ScalarImpl::NaiveDateTime(v) => Ok(MySqlValue(format!("{}", v).into())),
