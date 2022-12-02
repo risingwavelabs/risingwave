@@ -486,9 +486,7 @@ impl<S: StateStore> StateTable<S> {
                     .map(|index| self.pk_indices[index])
                     .collect_vec();
 
-                let check_bloom_filter = !self.dist_key_indices.is_empty()
-                    && self.distribution_key_start_index_in_pk.is_some()
-                    && is_subset(self.dist_key_indices.clone(), key_indices.clone());
+                let check_bloom_filter = self.dist_key_indices.clone() == key_indices.clone();
 
                 let read_options = ReadOptions {
                     dist_key_hint: None,
