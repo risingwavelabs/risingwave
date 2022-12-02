@@ -158,6 +158,9 @@ async fn campaign<S: MetaStore>(
 fn s_to_ha(s: &str) -> HostAddress {
     // adduming addr is e.g. 127.0.0.1:1234
     let parts = s.split(':').collect::<Vec<&str>>();
+    if parts.len() != 2 {
+        return HostAddress::default();
+    }
     let host = match parts.first() {
         None => "".to_owned(),
         Some(h) => h.to_owned().to_owned(),
@@ -553,5 +556,27 @@ mod tests {
         );
     }
 
-    fn test_s_to_ha() {}
+    #[tokio::test]
+    async fn test_s_to_ha() {
+        // invalid input defaults
+        let default_ha = HostAddress::default();
+        assert!(default_ha.eq(&s_to_ha("")));
+        assert!(default_ha.eq(&s_to_ha("12323")));
+        assert!(default_ha.eq(&s_to_ha("localhost")));
+        assert!(default_ha.eq(&s_to_ha("invalid")));
+        assert!(default_ha.eq(&s_to_ha("1:2:3")));
+
+        // valid input
+        let addr = HostAddress {
+            host: "localhost".to_owned(),
+            port: 123 as i32,
+        };
+        assert!(addr.eq(&s_to_ha("localhost:123")));
+
+        let addr = HostAddress {
+            host: "127.0.0.1".to_owned(),
+            port: 123 as i32,
+        };
+        assert!(addr.eq(&s_to_ha("127.0.0.1:123")));
+    }
 }
