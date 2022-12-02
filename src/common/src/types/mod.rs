@@ -1065,12 +1065,14 @@ mod tests {
 
     #[test]
     fn test_size() {
-        assert_eq!(std::mem::size_of::<StructValue>(), 16);
-        assert_eq!(std::mem::size_of::<ListValue>(), 16);
+        use static_assertions::const_assert_eq;
+
+        const_assert_eq!(std::mem::size_of::<StructValue>(), 16);
+        const_assert_eq!(std::mem::size_of::<ListValue>(), 16);
         // TODO: try to reduce the memory usage of `Decimal`, `ScalarImpl` and `Datum`.
-        assert_eq!(std::mem::size_of::<Decimal>(), 20);
-        assert_eq!(std::mem::size_of::<ScalarImpl>(), 32);
-        assert_eq!(std::mem::size_of::<Datum>(), 32);
+        const_assert_eq!(std::mem::size_of::<Decimal>(), 20);
+        const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 24);
+        const_assert_eq!(std::mem::size_of::<Datum>(), 24);
     }
 
     #[test]
