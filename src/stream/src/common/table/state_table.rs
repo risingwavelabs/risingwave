@@ -488,10 +488,7 @@ impl<S: StateStore> StateTable<S> {
 
                 let check_bloom_filter = !self.dist_key_indices.is_empty()
                     && self.distribution_key_start_index_in_pk.is_some()
-                    && is_subset(self.dist_key_indices.clone(), key_indices.clone())
-                    && self.dist_key_indices.len()
-                        + self.distribution_key_start_index_in_pk.unwrap()
-                        <= key_indices.len();
+                    && is_subset(self.dist_key_indices.clone(), key_indices.clone());
 
                 let read_options = ReadOptions {
                     dist_key_hint: None,
