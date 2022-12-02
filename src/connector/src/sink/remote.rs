@@ -126,15 +126,25 @@ impl RemoteSink {
                     "connector sink endpoint not specified".parse().unwrap()
                 ))?
         );
-        let channel = Endpoint::from_shared(address)
-        .map_err(|e| SinkError::Remote(format!("invalid connector endpoint `{}`: {:?}", address, e)))?
-        .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
-        .initial_stream_window_size(STREAM_WINDOW_SIZE)
-        .tcp_nodelay(true)
-        .connect_timeout(Duration::from_secs(5))
-        .connect()
-        .await
-        .map_err(|e| SinkError::Remote(format!("failed to connect to connector endpoint `{}`: {:?}", address, e)))?; // create client and start sink
+        let channel = Endpoint::from_shared(address.clone())
+            .map_err(|e| {
+                SinkError::Remote(format!(
+                    "invalid connector endpoint `{}`: {:?}",
+                    &address, e
+                ))
+            })?
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+            .initial_stream_window_size(STREAM_WINDOW_SIZE)
+            .tcp_nodelay(true)
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
+            .await
+            .map_err(|e| {
+                SinkError::Remote(format!(
+                    "failed to connect to connector endpoint `{}`: {:?}",
+                    &address, e
+                ))
+            })?; // create client and start sink
         let mut client = ConnectorServiceClient::new(channel);
 
         let (request_sender, request_receiver) = mpsc::unbounded_channel::<SinkStreamRequest>();
