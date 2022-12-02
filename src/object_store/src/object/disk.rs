@@ -167,7 +167,7 @@ impl DiskObjectStore {
                     path_when_err.to_str(),
                     e
                 ))
-            })??;
+            })?;
         Ok(Arc::new(entry))
     }
 }
