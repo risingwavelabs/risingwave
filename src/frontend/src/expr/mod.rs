@@ -158,7 +158,7 @@ impl ExprImpl {
 
     /// Count `Now`s in the expression.
     pub fn count_nows(&self) -> usize {
-        let mut visitor = CountNow::new();
+        let mut visitor = CountNow::default();
         visitor.visit_expr(self);
         visitor.into()
     }
