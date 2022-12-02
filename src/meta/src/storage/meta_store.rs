@@ -17,7 +17,6 @@ use async_trait::async_trait;
 use mockall::automock;
 use thiserror::Error;
 
-use super::etcd_meta_store::EtcdSnapshot;
 use crate::storage::transaction::Transaction;
 use crate::storage::{Key, Value};
 

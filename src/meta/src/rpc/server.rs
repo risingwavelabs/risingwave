@@ -387,7 +387,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     tokio::spawn(async move {
         loop {
             if leader_rx.changed().await.is_err() {
-                tracing::error!("issue receiving leader value from channel");
+                tracing::error!("Leader status: issue receiving leader value from channel");
                 continue;
             }
 
@@ -396,7 +396,22 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 "This node currently is a {}",
                 if is_leader { "leader" } else { "follower" }
             );
-            if !is_leader {
+            if is_leader {
+                // Implementation of naive fencing mechanism:
+                // leader nodes should panic if they loose their leader position
+                tracing::info!("Starting fencing mechanism on leader");
+                loop {
+                    if leader_rx.changed().await.is_err() {
+                        tracing::error!("Fencing: issue receiving leader value from channel");
+                    }
+                    // This node was a leader and lost its lease
+                    let (new_host_addr, is_leader) = leader_rx.borrow().to_owned();
+                    panic!(
+                        "This node is no longer leader: {}. New host address is {}:{}. Killing node",
+                        is_leader, new_host_addr.host, new_host_addr.port
+                    )
+                }
+            } else {
                 tracing::info!(
                     "Current leader is serving at {}:{}",
                     host_addr.host,
