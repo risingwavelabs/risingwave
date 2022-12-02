@@ -237,7 +237,7 @@ impl AvroParser {
 fn from_avro_value(value: Value) -> Result<Datum> {
     let v = match value {
         Value::Boolean(b) => ScalarImpl::Bool(b),
-        Value::String(s) => ScalarImpl::Utf8(s),
+        Value::String(s) => ScalarImpl::Utf8(s.into_boxed_str()),
         Value::Int(i) => ScalarImpl::Int32(i),
         Value::Long(i) => ScalarImpl::Int64(i),
         Value::Float(f) => ScalarImpl::Float32(OrderedF32::from(f)),
@@ -280,7 +280,7 @@ fn from_avro_value(value: Value) -> Result<Datum> {
             let millis = u32::from(duration.millis()) as i64;
             ScalarImpl::Interval(IntervalUnit::new(months, days, millis))
         }
-        Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol),
+        Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol.into_boxed_str()),
         Value::Record(descs) => {
             let rw_values = descs
                 .into_iter()
@@ -425,7 +425,7 @@ mod test {
             let value = field.clone().1;
             match value {
                 Value::String(str) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Utf8(str)));
+                    assert_eq!(row[i], Some(ScalarImpl::Utf8(str.into_boxed_str())));
                 }
                 Value::Boolean(bool_val) => {
                     assert_eq!(row[i], Some(ScalarImpl::Bool(bool_val)));

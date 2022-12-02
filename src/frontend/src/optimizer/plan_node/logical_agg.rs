@@ -23,11 +23,12 @@ use risingwave_expr::expr::AggKind;
 use super::explain::NodeExplain;
 use super::generic::{
     self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
+    ProjectBuilder,
 };
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
-    StreamLocalSimpleAgg, StreamProject, ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg, StreamLocalSimpleAgg, StreamProject,
+    ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
@@ -294,7 +295,7 @@ impl LogicalAgg {
 /// having clause.
 struct LogicalAggBuilder {
     /// the builder of the input Project
-    input_proj_builder: LogicalProjectBuilder,
+    input_proj_builder: ProjectBuilder,
     /// the group key column indices in the project's output
     group_key: Vec<usize>,
     /// the agg calls
@@ -311,7 +312,7 @@ struct LogicalAggBuilder {
 
 impl LogicalAggBuilder {
     fn new(group_exprs: Vec<ExprImpl>) -> Result<Self> {
-        let mut input_proj_builder = LogicalProjectBuilder::default();
+        let mut input_proj_builder = ProjectBuilder::default();
 
         let group_key = group_exprs
             .into_iter()
@@ -332,7 +333,7 @@ impl LogicalAggBuilder {
 
     pub fn build(self, input: PlanRef) -> LogicalAgg {
         // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
-        let logical_project = self.input_proj_builder.build(input);
+        let logical_project = LogicalProject::with_core(self.input_proj_builder.build(input));
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
         LogicalAgg::new(self.agg_calls, self.group_key, logical_project.into())

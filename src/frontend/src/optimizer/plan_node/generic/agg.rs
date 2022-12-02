@@ -27,12 +27,12 @@ use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePro
 
 use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
-use crate::expr::{Expr, InputRef, InputRefDisplay};
+use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
 use crate::optimizer::plan_node::explain::{field_doc_iter, NodeExplain};
 use crate::optimizer::property::Direction;
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, IndexRewriter};
 use crate::TableCatalog;
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
@@ -520,6 +520,24 @@ impl fmt::Debug for PlanAggCall {
 }
 
 impl PlanAggCall {
+    pub fn rewrite_input_index(&mut self, mapping: ColIndexMapping) {
+        // modify input
+        self.inputs.iter_mut().for_each(|x| {
+            x.index = mapping.map(x.index);
+        });
+
+        // modify order_by_fields
+        self.order_by_fields.iter_mut().for_each(|x| {
+            x.input.index = mapping.map(x.input.index);
+        });
+
+        // modify filter
+        let mut rewriter = IndexRewriter { mapping };
+        self.filter.conjunctions.iter_mut().for_each(|x| {
+            *x = rewriter.rewrite_expr(x.clone());
+        });
+    }
+
     pub fn to_protobuf(&self) -> ProstAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
