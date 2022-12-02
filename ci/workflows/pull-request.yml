@@ -170,8 +170,8 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "pre check"
-    command: "ci/scripts/pre-check.sh"
+  - label: "check"
+    command: "ci/scripts/check.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
