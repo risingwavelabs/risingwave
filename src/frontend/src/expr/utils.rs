@@ -404,7 +404,7 @@ impl ExprVisitor<usize> for CountNow {
         if func_call.get_expr_type() == ExprType::Now {
             1
         } else {
-            ExprVisitor::<usize>::visit_function_call(self, func_call)
+            self.visit_function_call_general(func_call)
         }
     }
 }
