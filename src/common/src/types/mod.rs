@@ -1067,10 +1067,23 @@ mod tests {
     fn test_size() {
         use static_assertions::const_assert_eq;
 
-        const_assert_eq!(std::mem::size_of::<StructValue>(), 16);
-        const_assert_eq!(std::mem::size_of::<ListValue>(), 16);
+        use crate::array::*;
+
+        macro_rules! assert_item_size_eq {
+            ($array:ty, $size:literal) => {
+                const_assert_eq!(std::mem::size_of::<<$array as Array>::OwnedItem>(), $size);
+            };
+        }
+
+        assert_item_size_eq!(StructArray, 16); // Box<[Datum]>
+        assert_item_size_eq!(ListArray, 16); // Box<[Datum]>
+        assert_item_size_eq!(Utf8Array, 16); // Box<str>
+        assert_item_size_eq!(IntervalArray, 16);
+        assert_item_size_eq!(NaiveDateTimeArray, 12);
+
         // TODO: try to reduce the memory usage of `Decimal`, `ScalarImpl` and `Datum`.
-        const_assert_eq!(std::mem::size_of::<Decimal>(), 20);
+        assert_item_size_eq!(DecimalArray, 20);
+
         const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 24);
         const_assert_eq!(std::mem::size_of::<Datum>(), 24);
     }
