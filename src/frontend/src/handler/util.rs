@@ -90,7 +90,7 @@ fn pg_value_format(data_type: &DataType, d: ScalarRefImpl<'_>, format: bool) -> 
     if !format {
         match (data_type, d) {
             (DataType::Timestampz, ScalarRefImpl::Int64(us)) => {
-                Ok(timestampz_to_utc_string(us).into())
+                Ok(timestampz_to_utc_string(us).into_boxed_bytes().into())
             }
             _ => Ok(d.text_format().into()),
         }

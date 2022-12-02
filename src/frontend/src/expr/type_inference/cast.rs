@@ -143,9 +143,9 @@ pub enum CastContext {
 
 pub type CastMap = BTreeMap<(DataTypeName, DataTypeName), CastContext>;
 
-impl From<&CastContext> for String {
-    fn from(c: &CastContext) -> Self {
-        match c {
+impl ToString for CastContext {
+    fn to_string(&self) -> String {
+        match self {
             CastContext::Implicit => "IMPLICIT".to_string(),
             CastContext::Assign => "ASSIGN".to_string(),
             CastContext::Explicit => "EXPLICIT".to_string(),

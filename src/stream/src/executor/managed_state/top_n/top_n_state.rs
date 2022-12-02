@@ -344,10 +344,10 @@ mod tests {
         let cache_key_serde = (first_key_serde, second_key_serde);
         let mut managed_state = ManagedTopNState::new(state_table, &data_types, &order_types, 1);
 
-        let row1 = row_nonnull!["abc".to_string(), 2i64];
-        let row2 = row_nonnull!["abc".to_string(), 3i64];
-        let row3 = row_nonnull!["abd".to_string(), 3i64];
-        let row4 = row_nonnull!["ab".to_string(), 4i64];
+        let row1 = row_nonnull!["abc", 2i64];
+        let row2 = row_nonnull!["abc", 3i64];
+        let row3 = row_nonnull!["abd", 3i64];
+        let row4 = row_nonnull!["ab", 4i64];
 
         let row1_bytes = serialize_row_to_cache_key(row1.clone(), 1, &cache_key_serde);
         let row2_bytes = serialize_row_to_cache_key(row2.clone(), 1, &cache_key_serde);
@@ -424,11 +424,11 @@ mod tests {
         let cache_key_serde = (first_key_serde, second_key_serde);
         let mut managed_state = ManagedTopNState::new(state_table, &data_types, &order_types, 1);
 
-        let row1 = row_nonnull!["abc".to_string(), 2i64];
-        let row2 = row_nonnull!["abc".to_string(), 3i64];
-        let row3 = row_nonnull!["abd".to_string(), 3i64];
-        let row4 = row_nonnull!["ab".to_string(), 4i64];
-        let row5 = row_nonnull!["abcd".to_string(), 5i64];
+        let row1 = row_nonnull!["abc", 2i64];
+        let row2 = row_nonnull!["abc", 3i64];
+        let row3 = row_nonnull!["abd", 3i64];
+        let row4 = row_nonnull!["ab", 4i64];
+        let row5 = row_nonnull!["abcd", 5i64];
 
         let row1_bytes = serialize_row_to_cache_key(row1.clone(), 1, &cache_key_serde);
         let row2_bytes = serialize_row_to_cache_key(row2.clone(), 1, &cache_key_serde);

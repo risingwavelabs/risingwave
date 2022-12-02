@@ -49,7 +49,7 @@ pub static PG_TYPE_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         .map(|(oid, name)| {
             Row::new(vec![
                 Some(ScalarImpl::Int32(*oid)),
-                Some(ScalarImpl::Utf8(name.to_string())),
+                Some(ScalarImpl::Utf8((*name).into())),
             ])
         })
         .collect_vec()
