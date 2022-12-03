@@ -24,10 +24,11 @@ use crate::expr::{
     CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Subquery,
     SubqueryKind,
 };
+use crate::optimizer::plan_node::generic::{Project, ProjectBuilder};
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalOverAgg, LogicalProject, LogicalProjectBuilder,
-    LogicalProjectSet, LogicalTopN, LogicalValues, PlanAggCall, PlanRef,
+    LogicalAgg, LogicalApply, LogicalOverAgg, LogicalProject, LogicalProjectSet, LogicalTopN,
+    LogicalValues, PlanAggCall, PlanRef,
 };
 use crate::optimizer::property::{FieldOrder, Order};
 use crate::planner::Planner;
@@ -107,7 +108,7 @@ impl Planner {
             distinct_list_index_to_select_items_index.reserve(distinct_list.len());
             let mut builder_index_to_select_items_index =
                 Vec::with_capacity(original_select_items_len);
-            let mut input_proj_builder = LogicalProjectBuilder::default();
+            let mut input_proj_builder = ProjectBuilder::default();
             for (select_item_index, select_item) in select_items.iter().enumerate() {
                 let builder_index = input_proj_builder
                     .add_expr(select_item)
@@ -152,15 +153,11 @@ impl Planner {
         }
 
         if need_restore_select_items {
-            let mut input_proj_builder = LogicalProjectBuilder::default();
-            let mut data_types = root.schema().data_types();
-            data_types.truncate(original_select_items_len);
-            for (input_idx, input_type) in data_types.into_iter().enumerate() {
-                input_proj_builder
-                    .add_expr(&ExprImpl::from(InputRef::new(input_idx, input_type)))
-                    .map_err(|msg| ExprError::UnsupportedFunction(String::from(msg)))?;
-            }
-            root = input_proj_builder.build(root).into();
+            root = LogicalProject::with_core(Project::with_out_col_idx(
+                root,
+                0..original_select_items_len,
+            ))
+            .into();
         }
 
         if let BoundDistinct::Distinct = distinct {
