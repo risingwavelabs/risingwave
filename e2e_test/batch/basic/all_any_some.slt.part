@@ -55,6 +55,16 @@ t
 query T
 select 1 <> ALL(array[1, 2]);
 ----
+f
+
+query T
+select 1 <> ANY(array[2, 3]);
+----
+t
+
+query T
+select 1 <> ALL(array[2, 3]);
+----
 t
 
 statement error
