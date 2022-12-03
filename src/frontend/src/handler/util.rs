@@ -27,7 +27,6 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::types::{DataType, ScalarRefImpl};
-use risingwave_expr::vector_op::cast::{timestampz_to_utc_binary, timestampz_to_utc_string};
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -88,17 +87,9 @@ fn pg_value_format(data_type: &DataType, d: ScalarRefImpl<'_>, format: bool) -> 
     // format == false means TEXT format
     // format == true means BINARY format
     if !format {
-        match (data_type, d) {
-            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => {
-                Ok(timestampz_to_utc_string(us).into_boxed_bytes().into())
-            }
-            _ => Ok(d.text_format().into()),
-        }
+        Ok(d.text_format(data_type).into())
     } else {
-        match (data_type, d) {
-            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => Ok(timestampz_to_utc_binary(us)),
-            _ => d.binary_format(),
-        }
+        d.binary_format(data_type)
     }
 }
 
