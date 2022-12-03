@@ -115,6 +115,32 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 }
 
 impl KafkaSplitEnumerator {
+    async fn list_splits_batch(&mut self, expect_start_timestamp_millis: Option<i64>, expect_stop_timestamp_millis: Option<i64>) -> anyhow::Result<Vec<KafkaSplit>> {
+        let topic_partitions = self.fetch_topic_partition().await.map_err(|e| {
+            anyhow!(format!(
+                "failed to fetch metadata from kafka ({}), error: {}",
+                self.broker_address, e
+            ))
+        })?;
+        let mut expect_start_offset = if let Some(ts) = expect_start_timestamp_millis {
+            Some(self.fetch_offset_for_time(topic_partitions.as_ref(), ts).await?)
+        } else { None };
+        let mut expect_stop_offset = if let Some(ts) = expect_stop_timestamp_millis {
+            Some(self.fetch_offset_for_time(topic_partitions.as_ref(), ts).await?)
+        } else { None };
+
+        let fetch_watermark = |topic_partitions: &[i32]| -> anyhow::Result<HashMap<i32, (i64, i64)>> {
+            let mut ret = HashMap::new();
+            for partition in topic_partitions.partitions() {
+                let (low, high) = self.client.fetch_watermarks(&self.topic, partition, KAFKA_SYNC_CALL_TIMEOUT).unwrap();
+                ret.insert(partition, (low, high));
+            }
+            ret
+        };
+
+        Ok(())
+    }
+
     async fn fetch_stop_offset(
         &self,
         partitions: &[i32],
