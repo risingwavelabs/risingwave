@@ -38,6 +38,7 @@ use risingwave_storage::store::{
 use risingwave_storage::{StateStore, StateStoreIter};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
+use crate::dispatch_iter;
 pub(crate) struct HummockReplayIter<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>>(I);
 
 impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + Send + Sync> HummockReplayIter<I> {
@@ -77,19 +78,11 @@ impl GlobalReplay for GlobalReplayInterface {}
 impl ReplayRead for GlobalReplayInterface {
     async fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
         epoch: u64,
         read_options: TraceReadOptions,
     ) -> Result<Box<dyn ReplayIter>> {
-        let read_options = from_trace_read_options(read_options);
-        let iter = self
-            .store
-            .iter(key_range, epoch, read_options)
-            .await
-            .map_err(|e| TraceError::IterFailed(format!("{e}")))?;
-
-        let iter = HummockReplayIter::new(iter);
-        Ok(Box::new(iter))
+        dispatch_iter!(self.store, key_range, epoch, read_options)
     }
 
     async fn get(
@@ -98,11 +91,12 @@ impl ReplayRead for GlobalReplayInterface {
         epoch: u64,
         read_options: TraceReadOptions,
     ) -> Result<Option<TracedBytes>> {
-        let read_options = from_trace_read_options(read_options);
-
-        let value = self.store.get(&key, epoch, read_options).await.unwrap();
-
-        Ok(value.map(TracedBytes::from))
+        Ok(self
+            .store
+            .get(&key, epoch, from_trace_read_options(read_options))
+            .await
+            .unwrap()
+            .map(TracedBytes::from))
     }
 }
 
@@ -150,20 +144,11 @@ impl LocalReplay for LocalReplayInterface {}
 impl ReplayRead for LocalReplayInterface {
     async fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
         epoch: u64,
         read_options: TraceReadOptions,
     ) -> Result<Box<dyn ReplayIter>> {
-        let read_options = from_trace_read_options(read_options);
-
-        let iter = self
-            .0
-            .iter(key_range, epoch, read_options)
-            .await
-            .map_err(|e| TraceError::IterFailed(format!("{e}")))?;
-
-        let iter = HummockReplayIter::new(iter);
-        Ok(Box::new(iter))
+        dispatch_iter!(self.0, key_range, epoch, read_options)
     }
 
     async fn get(
@@ -172,11 +157,12 @@ impl ReplayRead for LocalReplayInterface {
         epoch: u64,
         read_options: TraceReadOptions,
     ) -> Result<Option<TracedBytes>> {
-        let read_options = from_trace_read_options(read_options);
-
-        let value = self.0.get(&key, epoch, read_options).await.unwrap();
-
-        Ok(value.map(TracedBytes::from))
+        Ok(self
+            .0
+            .get(&key, epoch, from_trace_read_options(read_options))
+            .await
+            .unwrap()
+            .map(TracedBytes::from))
     }
 }
 
@@ -305,4 +291,20 @@ fn from_trace_write_options(opt: TracedWriteOptions) -> WriteOptions {
             table_id: opt.table_id,
         },
     }
+}
+
+#[macro_export]
+macro_rules! dispatch_iter {
+    ($storage:expr, $range:ident, $epoch:ident, $opts:ident) => {
+        Ok(Box::new(HummockReplayIter::new(
+            $storage
+                .iter(
+                    ($range.0.map(|b| b.to_vec()), $range.1.map(|b| b.to_vec())),
+                    $epoch,
+                    from_trace_read_options($opts),
+                )
+                .await
+                .map_err(|e| TraceError::IterFailed(format!("{e}")))?,
+        )))
+    };
 }

@@ -17,6 +17,7 @@ use std::fs::{create_dir_all, OpenOptions};
 use std::io::BufWriter;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
+use std::sync::LazyLock;
 
 use bincode::{Decode, Encode};
 use parking_lot::Mutex;
@@ -31,13 +32,12 @@ use crate::{
     UniqueIdGenerator,
 };
 
-// create a global singleton of collector as well as record id generator
-lazy_static! {
-    static ref GLOBAL_COLLECTOR: GlobalCollector = GlobalCollector::new();
-    static ref GLOBAL_RECORD_ID: RecordIdGenerator = UniqueIdGenerator::new(AtomicU64::new(0));
-    static ref SHOULD_USE_TRACE: bool = set_use_trace();
-    pub static ref CONCURRENT_ID: ConcurrentIdGenerator = UniqueIdGenerator::new(AtomicU64::new(0));
-}
+static GLOBAL_COLLECTOR: LazyLock<GlobalCollector> = LazyLock::new(GlobalCollector::new);
+static GLOBAL_RECORD_ID: LazyLock<RecordIdGenerator> =
+    LazyLock::new(|| UniqueIdGenerator::new(AtomicU64::new(0)));
+static SHOULD_USE_TRACE: LazyLock<bool> = LazyLock::new(set_use_trace);
+pub static CONCURRENT_ID: LazyLock<ConcurrentIdGenerator> =
+    LazyLock::new(|| UniqueIdGenerator::new(AtomicU64::new(0)));
 
 const USE_TRACE: &str = "USE_HM_TRACE";
 const LOG_PATH: &str = "HM_TRACE_PATH";
@@ -59,11 +59,9 @@ fn set_use_trace() -> bool {
 /// Initialize the `GLOBAL_COLLECTOR` with configured log file
 pub fn init_collector() {
     tokio::spawn(async move {
-        let path = match env::var(LOG_PATH) {
-            Ok(p) => p,
-            Err(_) => DEFAULT_PATH.to_string(),
-        };
+        let path = env::var(LOG_PATH).unwrap_or_else(|_| DEFAULT_PATH.to_string());
         let path = Path::new(&path);
+        tracing::info!("Hummock Tracing log path {}", path.to_string_lossy());
 
         if let Some(parent) = path.parent() {
             if !parent.exists() {
@@ -75,7 +73,6 @@ pub fn init_collector() {
             .truncate(true)
             .create(true)
             .open(path)
-            // .await
             .expect("failed to open log file");
         let writer = BufWriter::with_capacity(WRITER_BUFFER_SIZE, f);
         let writer = TraceWriterImpl::new_bincode(writer).unwrap();
@@ -102,17 +99,10 @@ impl GlobalCollector {
     fn run(mut writer: impl TraceWriter + Send + 'static) -> tokio::task::JoinHandle<()> {
         tokio::task::spawn_blocking(move || {
             let mut rx = GLOBAL_COLLECTOR.rx.lock().take().unwrap();
-            while let Some(r) = rx.blocking_recv() {
-                match r {
-                    Some(r) => {
-                        writer.write(r).expect("failed to write hummock trace");
-                    }
-                    None => {
-                        writer.flush().expect("failed to flush hummock trace");
-                        break;
-                    }
-                }
+            while let Some(Some(r)) = rx.blocking_recv() {
+                writer.write(r).expect("failed to write hummock trace");
             }
+            writer.flush().expect("failed to flush hummock trace");
         })
     }
 
@@ -184,7 +174,7 @@ impl TraceSpan {
     }
 
     #[cfg(test)]
-    pub fn new_op(
+    pub fn new_with_op(
         tx: Sender<RecordMsg>,
         id: RecordId,
         op: Operation,
@@ -223,7 +213,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{MockTraceWriter, TracedBytes};
+    use crate::{traced_bytes, MockTraceWriter};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_new_spans_concurrent() {
@@ -238,7 +228,7 @@ mod tests {
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
                 let op = Operation::get(
-                    TracedBytes::from(vec![i as u8]),
+                    traced_bytes![i as u8],
                     123,
                     None,
                     true,
@@ -246,8 +236,12 @@ mod tests {
                     123,
                     false,
                 );
-                let _span =
-                    TraceSpan::new_op(collector.tx(), generator.next(), op, StorageType::Global);
+                let _span = TraceSpan::new_with_op(
+                    collector.tx(),
+                    generator.next(),
+                    op,
+                    StorageType::Global,
+                );
             });
             handles.push(handle);
         }
@@ -271,7 +265,7 @@ mod tests {
         let generator = Arc::new(UniqueIdGenerator::new(AtomicU64::new(0)));
 
         let op = Operation::get(
-            TracedBytes::from(vec![74, 56, 43, 67]),
+            traced_bytes![74, 56, 43, 67],
             256,
             None,
             true,
@@ -296,7 +290,7 @@ mod tests {
             let tx = GLOBAL_COLLECTOR.tx();
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
-                let _span = TraceSpan::new_op(tx, generator.next(), op, StorageType::Local(0));
+                let _span = TraceSpan::new_with_op(tx, generator.next(), op, StorageType::Local(0));
             });
             handles.push(handle);
         }

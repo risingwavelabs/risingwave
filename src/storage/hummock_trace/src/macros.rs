@@ -55,7 +55,16 @@ macro_rules! trace {
     (ITER, $range:ident, $epoch:ident, $opt:ident, $storage_type:expr) => {
         risingwave_hummock_trace::new_global_span!(
             risingwave_hummock_trace::Operation::Iter {
-                key_range: $range.clone(),
+                key_range: (
+                    $range
+                        .0
+                        .as_ref()
+                        .map(|v| risingwave_hummock_trace::TracedBytes::from(v.clone())),
+                    $range
+                        .1
+                        .as_ref()
+                        .map(|v| risingwave_hummock_trace::TracedBytes::from(v.clone()))
+                ),
                 epoch: $epoch,
                 read_options: risingwave_hummock_trace::TraceReadOptions {
                     prefix_hint: $opt.prefix_hint.clone(),

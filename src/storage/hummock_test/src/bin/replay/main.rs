@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#![feature(bound_map)]
+#[macro_use]
 mod replay_impl;
 
 use std::fs::File;
@@ -65,7 +67,7 @@ async fn run_replay(args: Args) -> Result<()> {
     Ok(())
 }
 
-async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn GlobalReplay>> {
+async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay> {
     let config: ReplayConfig = load_config(&args.config).expect("failed to read config file");
     let config = Arc::new(config.storage);
 
@@ -119,7 +121,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn GlobalR
     .expect("fail to create a HummockStorage object");
     let replay_interface = GlobalReplayInterface::new(storage, notifier);
 
-    Ok(Box::new(replay_interface))
+    Ok(replay_interface)
 }
 
 #[derive(Serialize, Deserialize, Default)]

@@ -104,7 +104,7 @@ pub enum Operation {
 
     /// Iter operation of Hummock
     Iter {
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
         epoch: u64,
         read_options: TraceReadOptions,
     },

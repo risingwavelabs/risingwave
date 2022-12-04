@@ -9,15 +9,13 @@ async-trait = "0.1"
 bincode = { version = "=2.0.0-rc.2", features = ["serde"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
-either = "1"
-flume = "0.10.14"
-lazy_static = "1.4.0"
 parking_lot = "0.12"
 prost = "0.11"
 risingwave_common = { path = "../../common" }
 risingwave_pb = { path = "../../prost" }
 thiserror = "1.0"
 tokio = { version = "0.2", package = "madsim-tokio" }
+tracing = "0.1"
 
 [dev-dependencies]
 itertools = "0.10.5"

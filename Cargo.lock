@@ -2026,19 +2026,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flume"
-version = "0.10.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1657b4441c3403d9f7b3409e47575237dac27b1b5726df654a6ecbf92f0f7577"
-dependencies = [
- "futures-core",
- "futures-sink",
- "nanorand",
- "pin-project",
- "spin 0.9.4",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3515,15 +3502,6 @@ name = "naive-timer"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "034a0ad7deebf0c2abcf2435950a6666c3c15ea9d8fad0c0f48efa8a7f843fed"
-
-[[package]]
-name = "nanorand"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
-dependencies = [
- "getrandom 0.2.7",
-]
 
 [[package]]
 name = "native-tls"
@@ -5527,10 +5505,7 @@ dependencies = [
  "bincode 2.0.0-rc.2",
  "byteorder",
  "bytes",
- "either",
- "flume",
  "itertools",
- "lazy_static",
  "madsim-tokio",
  "mockall",
  "parking_lot 0.12.1",
@@ -5538,6 +5513,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_pb",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

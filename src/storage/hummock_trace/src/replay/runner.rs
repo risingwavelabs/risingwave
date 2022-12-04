@@ -19,13 +19,13 @@ use crate::error::Result;
 use crate::read::TraceReader;
 use crate::{GlobalReplay, Operation, ReplayWorkerScheduler, WorkerScheduler};
 
-pub struct HummockReplay<R: TraceReader> {
+pub struct HummockReplay<R: TraceReader, G: GlobalReplay> {
     reader: R,
-    replay: Arc<Box<dyn GlobalReplay>>,
+    replay: Arc<G>,
 }
 
-impl<R: TraceReader> HummockReplay<R> {
-    pub fn new(reader: R, replay: Box<dyn GlobalReplay>) -> Self {
+impl<R: TraceReader, G: GlobalReplay + 'static> HummockReplay<R, G> {
+    pub fn new(reader: R, replay: G) -> Self {
         Self {
             reader,
             replay: Arc::new(replay),
@@ -274,7 +274,6 @@ mod tests {
             .times(1)
             .return_const(());
 
-        let mock_replay = Box::new(mock_replay);
         let mut replay = HummockReplay::new(mock_reader, mock_replay);
 
         replay.run().await.unwrap();

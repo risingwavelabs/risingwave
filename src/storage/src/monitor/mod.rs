@@ -24,12 +24,10 @@ mod local_metrics;
 pub use local_metrics::StoreLocalStatistic;
 pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 
-#[cfg(hm_trace)]
+#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
 mod traced_store;
 use futures::Future;
-#[cfg(all(not(madsim), hm_trace))]
-use risingwave_hummock_trace::hummock_trace_scope;
-#[cfg(hm_trace)]
+#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
 pub use traced_store::*;
 
 pub trait HummockTraceFutureExt: Sized + Future {
@@ -41,12 +39,13 @@ impl<F: Future> HummockTraceFutureExt for F {
     type TraceOutput = impl Future<Output = F::Output>;
 
     fn may_trace_hummock(self) -> Self::TraceOutput {
-        #[cfg(any(madsim, not(hm_trace)))]
+        #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
         {
             self
         }
-        #[cfg(all(not(madsim), hm_trace))]
+        #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
         {
+            use risingwave_hummock_trace::hummock_trace_scope;
             hummock_trace_scope(self)
         }
     }
@@ -55,7 +54,7 @@ impl<F: Future> HummockTraceFutureExt for F {
 #[macro_export]
 macro_rules! hummock_trace {
     ($ident:ident, $($params:tt)*) => {
-        #[cfg(all(not(madsim), hm_trace))]
+        #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
         risingwave_hummock_trace::trace!($ident, $($params)*)
     };
 }

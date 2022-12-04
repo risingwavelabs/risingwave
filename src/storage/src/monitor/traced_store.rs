@@ -82,7 +82,7 @@ impl<S: StateStoreRead> TracedStateStore<S> {
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {}
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {
-    type Local = S::Local;
+    type Local = TracedStateStore<S::Local>;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
@@ -111,7 +111,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
     }
 
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        self.inner.new_local(table_id)
+        async move { TracedStateStore::new_local(self.inner.new_local(table_id).await) }
     }
 }
 
@@ -227,10 +227,5 @@ where
 }
 
 pub fn get_concurrent_id() -> ConcurrentId {
-    #[cfg(all(not(madsim), hm_trace))]
-    {
-        LOCAL_ID.get()
-    }
-    #[cfg(any(madsim, not(hm_trace)))]
-    0
+    LOCAL_ID.get()
 }
