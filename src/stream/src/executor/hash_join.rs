@@ -823,7 +823,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut degree = 0;
-                    let mut append_only_matched_rows = None;
+                    let mut append_only_matched_row = None;
                     if let Some(mut matched_rows) = matched_rows {
                         for (matched_row_ref, matched_row) in
                             matched_rows.values_mut(&side_match.all_data_types)
@@ -849,8 +849,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             if append_only_optimize {
                                 // Since join key contains pk and pk is unique, there should be only
                                 // one row if matched.
-                                assert!(append_only_matched_rows.is_none());
-                                append_only_matched_rows = Some(matched_row);
+                                assert!(append_only_matched_row.is_none());
+                                append_only_matched_row = Some(matched_row);
                             }
                         }
                         if degree == 0 {
@@ -872,7 +872,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         yield Message::Chunk(chunk);
                     }
 
-                    if append_only_optimize && let Some(row) = append_only_matched_rows {
+                    if append_only_optimize && let Some(row) = append_only_matched_row {
                         side_match.ht.delete(key, row);
                     } else if side_update.need_degree_table {
                         side_update.ht.insert(key, JoinRow::new(value, degree));
