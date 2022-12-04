@@ -823,7 +823,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut degree = 0;
-                    let mut append_only_matched_rows = Vec::with_capacity(1);
+                    let mut append_only_matched_rows = None;
                     if let Some(mut matched_rows) = matched_rows {
                         for (matched_row_ref, matched_row) in
                             matched_rows.values_mut(&side_match.all_data_types)
@@ -847,7 +847,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             // then we can remove matched rows since pk is unique and will not be
                             // inserted again
                             if append_only_optimize {
-                                append_only_matched_rows.push(matched_row.clone());
+                                // Since join key contains pk and pk is unique, there should be only
+                                // one row if matched.
+                                assert!(append_only_matched_rows.is_none());
+                                append_only_matched_rows = Some(matched_row);
                             }
                         }
                         if degree == 0 {
@@ -869,10 +872,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         yield Message::Chunk(chunk);
                     }
 
-                    if append_only_optimize && !append_only_matched_rows.is_empty() {
-                        // Since join key contains pk and pk is unique, there should be only
-                        // one row if matched
-                        let [row]: [_; 1] = append_only_matched_rows.try_into().unwrap();
+                    if append_only_optimize && let Some(row) = append_only_matched_rows {
                         side_match.ht.delete(key, row);
                     } else if side_update.need_degree_table {
                         side_update.ht.insert(key, JoinRow::new(value, degree));
