@@ -140,7 +140,7 @@ impl<S: StateStore> SortExecutor<S> {
                             // before a barrier since last watermark.
                             // TODO: Use range delete instead.
                             if persisted {
-                                self.state_table.delete(row.clone());
+                                self.state_table.delete(&row);
                             }
                             // Add the record to stream chunk data. Note that we retrieve the
                             // record from a BTreeMap, so data in this chunk should be ordered
@@ -199,7 +199,7 @@ impl<S: StateStore> SortExecutor<S> {
                         // buffer that have not been persisted before to state store.
                         for (row, persisted) in self.buffer.values_mut() {
                             if !*persisted {
-                                self.state_table.insert(row.clone());
+                                self.state_table.insert(&*row);
                                 // Update `persisted` so if the next barrier arrives before the
                                 // next watermark, this record will not be persisted redundantly.
                                 *persisted = true;
