@@ -174,7 +174,7 @@ impl<S: StateStore> SortExecutor<S> {
                 }
                 // Otherwise, it just forwards the watermark message to downstream without sending a
                 // stream chunk message.
-                Message::Wastermark(w) => yield Message::Watermark(w),
+                Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     for (op, row_ref) in chunk.rows() {
                         match op {
