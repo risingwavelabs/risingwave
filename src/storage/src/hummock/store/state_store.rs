@@ -22,6 +22,7 @@ use minitrace::future::FutureExt;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::key::{map_table_key_range, FullKey, TableKey, TableKeyRange};
 use tokio::sync::mpsc;
+use tracing::warn;
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
@@ -198,11 +199,22 @@ impl StateStoreWrite for LocalHummockStorage {
             let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
                 tracker
             } else {
+                warn!(
+                    "blocked at requiring memory: {}, current {}",
+                    size,
+                    limiter.get_memory_usage()
+                );
                 self.core
                     .event_sender
                     .send(HummockEvent::BufferMayFlush)
                     .expect("should be able to send");
-                limiter.require_memory(size as u64).await
+                let tracker = limiter.require_memory(size as u64).await;
+                warn!(
+                    "successfully requiring memory: {}, current {}",
+                    size,
+                    limiter.get_memory_usage()
+                );
+                tracker
             };
 
             let imm = SharedBufferBatch::build_shared_buffer_batch(
