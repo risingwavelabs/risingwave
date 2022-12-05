@@ -323,7 +323,7 @@ pub async fn run_elections<S: MetaStore>(
     // Randomize interval to reduce mitigate likelihood of simultaneous requests
     let mut rng: StdRng = SeedableRng::from_entropy();
     let mut ticker = tokio::time::interval(
-        Duration::from_secs(lease_time_sec) + Duration::from_millis(rng.gen_range(0..500)),
+        Duration::from_secs(lease_time_sec / 2) + Duration::from_millis(rng.gen_range(0..500)),
     );
 
     // runs the initial election, determining who the first leader is
@@ -366,19 +366,8 @@ pub async fn run_elections<S: MetaStore>(
         let (leader_tx, leader_rx) = tokio::sync::watch::channel((leader_addr, is_initial_leader));
         let handle = tokio::spawn(async move {
             // runs all follow-up elections
-            let mut wait = true;
-            'election: loop {
-                if wait {
-                    tokio::select! {
-                        _ = &mut shutdown_rx => {
-                            tracing::info!("Register leader info is stopped");
-                            return;
-                        }
-                        _ = ticker.tick() => {},
-                    }
-                }
-                wait = true;
 
+            'election: loop {
                 // Do not elect new leader directly after running the initial election
                 let mut is_leader = is_initial_leader;
                 let mut leader_info = initial_leader.clone();
@@ -390,6 +379,7 @@ pub async fn run_elections<S: MetaStore>(
                         {
                             None => {
                                 tracing::info!("election failed. Repeating election");
+                                _ = ticker.tick();
                                 continue 'election;
                             }
                             Some(outcome) => {
@@ -441,8 +431,7 @@ pub async fn run_elections<S: MetaStore>(
                         manage_term(is_leader, &leader_info, lease_time_sec, &meta_store).await
                     {
                         if !leader_alive {
-                            // leader failed. Immediately elect new leader
-                            wait = false;
+                            // leader failed. Elect new leader
                             continue 'election;
                         }
                     }
