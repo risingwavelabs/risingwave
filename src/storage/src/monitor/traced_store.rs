@@ -52,11 +52,14 @@ impl<S> TracedStateStore<S> {
         }
     }
 
-    pub fn new_local(inner: S) -> Self {
+    pub fn new_local(inner: S, table_id: TableId) -> Self {
         let id = get_concurrent_id();
+        let storage_type = StorageType::Local(id, table_id.table_id);
+
+        trace!(NEWLOCAL, storage_type);
         Self {
             inner,
-            storage_type: StorageType::Local(id),
+            storage_type,
         }
     }
 }
@@ -74,7 +77,20 @@ impl<S: StateStoreRead> TracedStateStore<S> {
     where
         I: Future<Output = StorageResult<S::Iter>>,
     {
-        let inner = iter.await?;
+        let inner = match iter.await {
+            Err(e) => {
+                if let Some(span) = span {
+                    span.send_result(OperationResult::Iter(TraceResult::Err));
+                }
+                return Err(e);
+            }
+            Ok(inner) => {
+                if let Some(span) = &span {
+                    span.send_result(OperationResult::Iter(TraceResult::Ok(())));
+                }
+                inner
+            }
+        };
         Ok(TracedStateStoreIter::new(inner, span))
     }
 }
@@ -111,7 +127,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
     }
 
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move { TracedStateStore::new_local(self.inner.new_local(table_id).await) }
+        async move { TracedStateStore::new_local(self.inner.new_local(table_id).await, table_id) }
     }
 }
 
@@ -192,6 +208,14 @@ impl TracedStateStore<HummockStorage> {
     }
 }
 
+impl<S> Drop for TracedStateStore<S> {
+    fn drop(&mut self) {
+        if let StorageType::Local(_, _) = self.storage_type {
+            trace!(DROPLOCAL, self.storage_type);
+        }
+    }
+}
+
 pub struct TracedStateStoreIter<I> {
     inner: I,
     span: Option<TraceSpan>,
@@ -199,9 +223,6 @@ pub struct TracedStateStoreIter<I> {
 
 impl<I> TracedStateStoreIter<I> {
     fn new(inner: I, span: Option<TraceSpan>) -> Self {
-        if let Some(span) = &span {
-            span.send_result(OperationResult::Iter(TraceResult::Ok(())));
-        }
         TracedStateStoreIter { inner, span }
     }
 }

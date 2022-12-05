@@ -26,7 +26,7 @@ use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::hummock::event_handler::HummockEvent;
-use crate::monitor::hummock_trace;
+use crate::hummock_trace;
 
 pub struct HummockObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
@@ -43,10 +43,8 @@ impl ObserverState for HummockObserverNode {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
-
-        // Used for hummock trace. Do nothing if tracing is not enabled
+        // Hummock Tracing. Do nothing if it's not enabled
         hummock_trace!(METAMSG, resp);
-
         match info.to_owned() {
             Info::Table(table_catalog) => {
                 assert!(
@@ -79,7 +77,7 @@ impl ObserverState for HummockObserverNode {
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
-        // Used for hummock trace. Do nothing if tracing is not enabled
+        // Hummock Tracing. Do nothing if it's not enabled
         hummock_trace!(METAMSG, resp);
 
         let Some(Info::Snapshot(snapshot)) = resp.info else {

@@ -3,10 +3,11 @@
 ## Tracing
 
 ### Config
-In the `risedev.yml`, we must disable the vacuum of the compactor.
-```yml
-  # Interval of GC stale metadata and SST
-  vacuum-interval-sec: 30000000 // a very large number
+In the `./src/config/config.toml`, we must disable the vacuum of the compactor.
+```toml
+[meta]
+# Put a very large number
+vacuum_interval_sec = 3000000
 ```
 Otherwise, the compactor may remove data from the object storage.
 ### Risedev
@@ -16,7 +17,7 @@ Put env variables in `risedev-components.user.env`
 ```toml
 # Path of log file
 HM_TRACE_PATH=".trace/hummock.ht"
-# Runtime tracing flag
+# Runtime tracing flag. False disables tracing even it is compiled
 USE_HM_TRACE=true
 # Decide whether to compile it
 ENABLE_HM_TRACE=true

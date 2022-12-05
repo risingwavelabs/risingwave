@@ -29,7 +29,7 @@ use tokio::task_local;
 use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{
     ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
-    UniqueIdGenerator,
+    TableId, UniqueIdGenerator,
 };
 
 static GLOBAL_COLLECTOR: LazyLock<GlobalCollector> = LazyLock::new(GlobalCollector::new);
@@ -39,7 +39,7 @@ static SHOULD_USE_TRACE: LazyLock<bool> = LazyLock::new(set_should_use_trace);
 pub static CONCURRENT_ID: LazyLock<ConcurrentIdGenerator> =
     LazyLock::new(|| UniqueIdGenerator::new(AtomicU64::new(0)));
 
-const USE_TRACE: &str = "USE_HM_TRACE";
+pub const USE_TRACE: &str = "USE_HM_TRACE";
 const LOG_PATH: &str = "HM_TRACE_PATH";
 const DEFAULT_PATH: &str = ".trace/hummock.ht";
 const WRITER_BUFFER_SIZE: usize = 1024;
@@ -197,7 +197,7 @@ pub type ConcurrentId = u64;
 #[derive(Clone, Copy, Debug, Encode, Decode, PartialEq, Eq)]
 pub enum StorageType {
     Global,
-    Local(ConcurrentId),
+    Local(ConcurrentId, TableId),
 }
 
 task_local! {
@@ -289,7 +289,8 @@ mod tests {
             let tx = GLOBAL_COLLECTOR.tx();
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
-                let _span = TraceSpan::new_with_op(tx, generator.next(), op, StorageType::Local(0));
+                let _span =
+                    TraceSpan::new_with_op(tx, generator.next(), op, StorageType::Local(0, 0));
             });
             handles.push(handle);
         }

@@ -24,7 +24,7 @@ use clap::Parser;
 use replay_impl::{get_replay_notification_client, GlobalReplayInterface};
 use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_hummock_trace::{
-    GlobalReplay, HummockReplay, Operation, Record, Result, TraceReader, TraceReaderImpl,
+    GlobalReplay, HummockReplay, Operation, Record, Result, TraceReader, TraceReaderImpl, USE_TRACE,
 };
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -51,6 +51,8 @@ struct Args {
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let args = Args::parse();
+    // disable runtime tracing when replaying
+    std::env::set_var(USE_TRACE, "false");
     run_replay(args).await.unwrap();
 }
 

@@ -24,7 +24,9 @@ use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, ReplayIter, ReplayRead, ReplayStateStore, ReplayWrite, Result,
     TraceError, TraceReadOptions, TraceSubResp, TracedBytes, TracedWriteOptions,
 };
-use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
+use risingwave_meta::manager::{
+    MessageStatus, MetaSrvEnv, NotificationManagerRef, NotificationVersion, WorkerKey,
+};
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
@@ -115,13 +117,20 @@ impl ReplayStateStore for GlobalReplayInterface {
         self.store.seal_epoch(epoch_id, is_checkpoint);
     }
 
-    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
+    async fn notify_hummock(
+        &self,
+        info: Info,
+        op: RespOperation,
+        version: NotificationVersion,
+    ) -> Result<u64> {
         let prev_version_id = match &info {
             Info::HummockVersionDeltas(deltas) => deltas.version_deltas.last().map(|d| d.prev_id),
             _ => None,
         };
 
-        let version = self.notifier.notify_hummock(op, info).await;
+        self.notifier
+            .notify_hummock_with_version(op, info, Some(version))
+            .await;
 
         // wait till version updated
         if let Some(prev_version_id) = prev_version_id {

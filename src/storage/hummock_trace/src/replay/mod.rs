@@ -28,7 +28,11 @@ use crate::{Record, TraceReadOptions, TracedBytes, TracedWriteOptions};
 
 type ReplayGroup = Record;
 
-type WorkerResponse = ();
+#[derive(Debug)]
+enum WorkerResponse {
+    Continue,
+    Shutdown,
+}
 
 pub(crate) type ReplayRequest = Option<ReplayGroup>;
 
@@ -73,7 +77,7 @@ pub trait ReplayWrite {
 pub trait ReplayStateStore {
     async fn sync(&self, id: u64) -> Result<usize>;
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
-    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
+    async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64) -> Result<u64>;
     async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay>;
 }
 
@@ -115,7 +119,8 @@ mock! {
     impl ReplayStateStore for GlobalReplayInterface{
         async fn sync(&self, id: u64) -> Result<usize>;
         async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
-        async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
+        async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64,
+        ) -> Result<u64>;
         async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay>;
     }
     impl GlobalReplay for GlobalReplayInterface{}

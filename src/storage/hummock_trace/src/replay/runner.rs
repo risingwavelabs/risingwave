@@ -91,14 +91,15 @@ mod tests {
         let sync_id = 4561245432;
         let seal_id = 5734875243;
 
-        let storage_type1 = StorageType::Local(0);
-        let storage_type2 = StorageType::Local(1);
-        let storage_type3 = StorageType::Local(2);
-        let storage_type4 = StorageType::Global;
-
         let table_id1 = 1;
         let table_id2 = 2;
         let table_id3 = 3;
+
+        let storage_type1 = StorageType::Local(0, table_id1);
+        let storage_type2 = StorageType::Local(1, table_id2);
+        let storage_type3 = StorageType::Local(2, table_id3);
+        let storage_type4 = StorageType::Global;
+
         let actor_1 = vec![
             (
                 0,

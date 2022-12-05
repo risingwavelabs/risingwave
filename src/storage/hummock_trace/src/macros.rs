@@ -95,6 +95,18 @@ macro_rules! trace {
             $storage_type
         );
     };
+    (NEWLOCAL, $storage_type:expr) => {
+        let _span = risingwave_hummock_trace::new_global_span!(
+            risingwave_hummock_trace::Operation::NewLocalStorage,
+            $storage_type
+        );
+    };
+    (DROPLOCAL, $storage_type:expr) => {
+        let _ = risingwave_hummock_trace::new_global_span!(
+            risingwave_hummock_trace::Operation::DropLocalStorage,
+            $storage_type
+        );
+    };
     (METAMSG, $resp:ident) => {
         let _span = risingwave_hummock_trace::new_global_span!(
             risingwave_hummock_trace::Operation::MetaMessage(Box::new(

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -52,7 +51,7 @@ impl<G: GlobalReplay> WorkerScheduler<G> {
 
     fn allocate_worker_id(&mut self, record: &Record) -> WorkerId {
         match record.storage_type() {
-            StorageType::Local(id) => WorkerId::Local(*id),
+            StorageType::Local(concurrent_id, _) => WorkerId::Local(*concurrent_id),
             StorageType::Global => WorkerId::OneShot(record.record_id()),
         }
     }
@@ -90,11 +89,13 @@ impl<G: GlobalReplay + 'static> ReplayWorkerScheduler for WorkerScheduler<G> {
         // Check if the worker with the given ID exists in the workers map.
         if let Some(handler) = self.workers.get_mut(&worker_id) {
             // If the worker exists, wait for it to finish executing.
-            handler.wait().await;
+            let resp = handler.wait().await;
 
-            // If the worker is a one-shot worker, remove it from the workers map and call its
-            // finish method.
-            if let WorkerId::OneShot(_) = worker_id {
+            // If the worker is a one-shot worker or local workers that should be closed, remove it
+            // from the workers map and call its finish method.
+            if matches!(worker_id, WorkerId::OneShot(_))
+                || matches!(resp, Some(WorkerResponse::Shutdown))
+            {
                 let handler = self.workers.remove(&worker_id).unwrap();
                 handler.finish();
             }
@@ -136,6 +137,7 @@ impl ReplayWorker {
     ) {
         let mut iters_map = HashMap::new();
         let mut local_storages = LocalStorages::new();
+        let mut should_shutdown = false;
         while let Some(Some(record)) = req_rx.recv().await {
             Self::handle_record(
                 record,
@@ -143,9 +145,17 @@ impl ReplayWorker {
                 &mut res_rx,
                 &mut iters_map,
                 &mut local_storages,
+                &mut should_shutdown,
             )
             .await;
-            resp_tx.send(()).expect("failed to done task");
+
+            let message = if should_shutdown {
+                WorkerResponse::Shutdown
+            } else {
+                WorkerResponse::Continue
+            };
+
+            resp_tx.send(message).expect("Failed to send message");
         }
     }
 
@@ -155,6 +165,7 @@ impl ReplayWorker {
         res_rx: &mut UnboundedReceiver<OperationResult>,
         iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
         local_storages: &mut LocalStorages,
+        should_exit: &mut bool,
     ) {
         let Record(storage_type, record_id, op) = record;
         match op {
@@ -165,10 +176,9 @@ impl ReplayWorker {
             } => {
                 let actual = match storage_type {
                     StorageType::Global => replay.get(key, epoch, read_options).await,
-                    StorageType::Local(_) => {
-                        let s = local_storages
-                            .get_or_insert(read_options.table_id, replay)
-                            .await;
+                    StorageType::Local(_, table_id) => {
+                        assert_eq!(table_id, read_options.table_id);
+                        let s = local_storages.get_mut(&read_options.table_id).unwrap();
                         s.get(key, epoch, read_options).await
                     }
                 };
@@ -182,9 +192,7 @@ impl ReplayWorker {
                 delete_ranges,
                 write_options,
             } => {
-                let s = local_storages
-                    .get_or_insert(write_options.table_id, replay)
-                    .await;
+                let s = local_storages.get_mut(&write_options.table_id).unwrap();
                 let actual = s.ingest(kv_pairs, delete_ranges, write_options).await;
 
                 let res = res_rx.recv().await.expect("recv result failed");
@@ -199,10 +207,8 @@ impl ReplayWorker {
             } => {
                 let iter = match storage_type {
                     StorageType::Global => replay.iter(key_range, epoch, read_options).await,
-                    StorageType::Local(_) => {
-                        let s = local_storages
-                            .get_or_insert(read_options.table_id, replay)
-                            .await;
+                    StorageType::Local(_, _) => {
+                        let s = local_storages.get_mut(&read_options.table_id).unwrap();
                         s.iter(key_range, epoch, read_options).await
                     }
                 };
@@ -235,11 +241,29 @@ impl ReplayWorker {
                     assert_eq!(TraceResult::Ok(actual), expected, "iter_next result wrong");
                 }
             }
+            Operation::NewLocalStorage => {
+                if let StorageType::Local(_, table_id) = storage_type {
+                    local_storages.insert(table_id, &replay).await;
+                }
+            }
+            Operation::DropLocalStorage => {
+                if let StorageType::Local(_, table_id) = storage_type {
+                    local_storages.remove(&table_id);
+                }
+                // All local storages have been dropped, we should shutdown this worker
+                // If there are incoming new_local, this ReplayWorker will spawn again
+                if local_storages.is_empty() {
+                    *should_exit = true;
+                }
+            }
             Operation::MetaMessage(resp) => {
                 assert_eq!(storage_type, StorageType::Global);
                 let op = resp.0.operation();
                 if let Some(info) = resp.0.info {
-                    replay.notify_hummock(info, op).await.unwrap();
+                    replay
+                        .notify_hummock(info, op, resp.0.version)
+                        .await
+                        .unwrap();
                 }
             }
             _ => unreachable!(),
@@ -269,14 +293,21 @@ impl WorkerHandler {
         self.send_replay_req(req);
     }
 
-    async fn wait(&mut self) {
+    async fn wait(&mut self) -> Option<WorkerResponse> {
+        assert!(self.stacked_replay_count > 0);
+        let mut resp = None;
+
         while self.stacked_replay_count > 0 {
-            self.resp_rx
-                .recv()
-                .await
-                .expect("failed to wait worker resp");
+            resp = Some(
+                self.resp_rx
+                    .recv()
+                    .await
+                    .expect("failed to wait worker resp"),
+            );
             self.stacked_replay_count -= 1;
         }
+        // impossible to be None
+        resp
     }
 
     fn send_replay_req(&self, req: ReplayRequest) {
@@ -300,15 +331,21 @@ impl LocalStorages {
         }
     }
 
-    async fn get_or_insert(
-        &mut self,
-        table_id: u32,
-        replay: &Arc<impl GlobalReplay>,
-    ) -> &mut Box<dyn LocalReplay> {
-        match self.storages.entry(table_id) {
-            Entry::Occupied(s) => s.into_mut(),
-            Entry::Vacant(e) => e.insert(replay.new_local(table_id).await),
-        }
+    fn remove(&mut self, table_id: &u32) {
+        self.storages.remove(table_id);
+    }
+
+    fn get_mut(&mut self, table_id: &u32) -> Option<&mut Box<dyn LocalReplay>> {
+        self.storages.get_mut(table_id)
+    }
+
+    async fn insert(&mut self, table_id: u32, replay: &Arc<impl GlobalReplay>) {
+        self.storages
+            .insert(table_id, replay.new_local(table_id).await);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.storages.is_empty()
     }
 
     #[cfg(test)]
@@ -357,7 +394,9 @@ mod tests {
             read_options: read_options.clone(),
         };
 
-        let record = Record::new(StorageType::Local(0), 0, op);
+        let mut should_exit = false;
+
+        let record = Record::new(StorageType::Local(0, 0), 0, op);
         let mut mock_replay = MockGlobalReplayInterface::new();
 
         mock_replay.expect_new_local().times(1).returning(move |_| {
@@ -409,6 +448,7 @@ mod tests {
             &mut res_rx,
             &mut iters_map,
             &mut local_storages,
+            &mut should_exit,
         )
         .await;
 
@@ -420,7 +460,7 @@ mod tests {
             epoch: 45,
             read_options: iter_read_options,
         };
-        let record = Record::new(StorageType::Local(0), 1, op);
+        let record = Record::new(StorageType::Local(0, 0), 1, op);
         res_tx
             .send(OperationResult::Iter(TraceResult::Ok(())))
             .unwrap();
@@ -431,6 +471,7 @@ mod tests {
             &mut res_rx,
             &mut iters_map,
             &mut local_storages,
+            &mut should_exit,
         )
         .await;
 
@@ -438,7 +479,7 @@ mod tests {
         assert_eq!(iters_map.len(), 1);
 
         let op = Operation::IterNext(1);
-        let record = Record::new(StorageType::Local(0), 2, op);
+        let record = Record::new(StorageType::Local(0, 0), 2, op);
         res_tx
             .send(OperationResult::IterNext(TraceResult::Ok(Some((
                 traced_bytes![1],
@@ -452,6 +493,7 @@ mod tests {
             &mut res_rx,
             &mut iters_map,
             &mut local_storages,
+            &mut should_exit,
         )
         .await;
 

@@ -84,7 +84,7 @@ impl Record {
     }
 }
 
-type TableId = u32;
+pub type TableId = u32;
 /// Operations represents Hummock operations
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub enum Operation {
@@ -121,6 +121,9 @@ pub enum Operation {
     MetaMessage(Box<TraceSubResp>),
 
     Result(OperationResult),
+
+    NewLocalStorage,
+    DropLocalStorage,
 
     /// The end of an operation
     Finish,
