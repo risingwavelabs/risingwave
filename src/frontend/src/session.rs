@@ -765,10 +765,8 @@ impl Session<PgResponseStream> for SessionImpl {
         format: bool,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
-            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
-            e
-        })?;
+        let mut stmts = Parser::parse_sql(sql)
+            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
         if stmts.is_empty() {
             return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
@@ -781,10 +779,25 @@ impl Session<PgResponseStream> for SessionImpl {
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql, format).await.map_err(|e| {
-            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
-            e
-        })?;
+        let rsp = {
+            let mut handle_fut = Box::pin(handle(self, stmt, sql, format));
+            if cfg!(debug_assertions) {
+                // Report the SQL in the log periodically if the query is slow.
+                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
+                loop {
+                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
+                        Ok(result) => break result,
+                        Err(_) => tracing::warn!(
+                            sql,
+                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
+                        ),
+                    }
+                }
+            } else {
+                handle_fut.await
+            }
+        }
+        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
         Ok(rsp)
     }
 
@@ -793,10 +806,8 @@ impl Session<PgResponseStream> for SessionImpl {
         sql: &str,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
-            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
-            e
-        })?;
+        let mut stmts = Parser::parse_sql(sql)
+            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
         if stmts.is_empty() {
             return Ok(vec![]);
         }
@@ -810,10 +821,8 @@ impl Session<PgResponseStream> for SessionImpl {
         // This part refers from src/frontend/handler/ so the Vec<PgFieldDescriptor> is same as
         // result of run_statement().
         let rsp = match stmt {
-            Statement::Query(_) => infer(self, stmt, sql).map_err(|e| {
-                tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
-                e
-            })?,
+            Statement::Query(_) => infer(self, stmt, sql)
+                .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?,
             Statement::ShowObjects(show_object) => match show_object {
                 ShowObject::Columns { table: _ } => {
                     vec![
