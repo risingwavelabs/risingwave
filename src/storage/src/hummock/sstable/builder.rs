@@ -203,7 +203,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             // add bloom_filter check
             // 1. not empty_key
             // 2. extract_key key is not duplicate
-            if !extract_key.is_empty() && extract_key.to_vec() != self.last_extract_key {
+            if !extract_key.is_empty() && extract_key != self.last_extract_key.as_slice() {
                 // avoid duplicate add to bloom filter
                 self.user_key_hashes
                     .push(farmhash::fingerprint32(extract_key));

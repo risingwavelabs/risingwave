@@ -140,8 +140,7 @@ pub struct SchemaFilterKeyExtractor {
     /// from storage key.
 
     /// distribution_key does not need to be the prefix of pk.
-    distribution_key_start_index_in_pk: Option<usize>,
-    distribution_key_end_index_in_pk: usize,
+    distribution_key_indices_pair_in_pk: Option<(usize, usize)>,
     deserializer: OrderedRowSerde,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
     // prefix_key)
@@ -158,8 +157,8 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
-        match self.distribution_key_end_index_in_pk != 0
-            && self.distribution_key_start_index_in_pk.is_some()
+        match self.distribution_key_indices_pair_in_pk.is_some()
+            && self.distribution_key_indices_pair_in_pk.unwrap().1 != 0
         {
             false => &[],
             true => {
@@ -167,8 +166,8 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
                     .deserializer
                     .deserialize_dist_key_position_with_column_indices(
                         pk,
-                        0..self.distribution_key_end_index_in_pk,
-                        self.distribution_key_start_index_in_pk.unwrap(),
+                        0..self.distribution_key_indices_pair_in_pk.unwrap().1,
+                        self.distribution_key_indices_pair_in_pk.unwrap().0,
                     )
                     .unwrap();
 
@@ -214,9 +213,14 @@ impl SchemaFilterKeyExtractor {
             false => None,
             true => Some(*dist_key_in_pk_indices.iter().min().unwrap()),
         };
+        let distribution_key_indices_pair_in_pk =
+            distribution_key_start_index_in_pk.map(|distribution_key_start_index_in_pk| {
+                (
+                    distribution_key_start_index_in_pk,
+                    dist_key_in_pk_indices.len() + distribution_key_start_index_in_pk,
+                )
+            });
 
-        let distribution_key_end_index_in_pk =
-            dist_key_in_pk_indices.len() + distribution_key_start_index_in_pk.unwrap_or(0);
         // column_index in pk
 
         let data_types = pk_indices
@@ -236,8 +240,7 @@ impl SchemaFilterKeyExtractor {
             .collect();
 
         Self {
-            distribution_key_start_index_in_pk,
-            distribution_key_end_index_in_pk,
+            distribution_key_indices_pair_in_pk,
             deserializer: OrderedRowSerde::new(data_types, order_types),
         }
     }

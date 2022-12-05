@@ -620,7 +620,7 @@ impl HummockVersionReader {
                     if let Some(bloom_filter_key) = read_options.dist_key_hint.as_deref() {
                         if !hit_sstable_bloom_filter(
                             sstable.value(),
-                            &TableKey(bloom_filter_key),
+                            bloom_filter_key,
                             &mut local_stats,
                         ) {
                             continue;

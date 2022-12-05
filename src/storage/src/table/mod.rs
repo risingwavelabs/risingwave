@@ -156,3 +156,22 @@ fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
         vnode
     );
 }
+
+pub fn is_continous_subset<T: Eq>(
+    mut sub_iter: impl Iterator<Item = T>,
+    mut iter: impl Iterator<Item = T>,
+) -> bool {
+    if let Some(first) = sub_iter.next() {
+        if iter.any(|item| item == first) {
+            return false;
+        }
+
+        for sub_item in sub_iter {
+            if let Some(item) = iter.next() && item == sub_item {
+                continue;
+            }
+            return false;
+        }
+    }
+    true
+}

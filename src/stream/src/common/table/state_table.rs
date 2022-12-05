@@ -14,7 +14,7 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::ops::Bound;
 use std::ops::Bound::*;
@@ -47,7 +47,9 @@ use risingwave_storage::store::{
 use risingwave_storage::table::streaming_table::mem_table::{
     MemTable, MemTableError, MemTableIter, RowOp,
 };
-use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
+use risingwave_storage::table::{
+    compute_chunk_vnode, compute_vnode, is_continous_subset, Distribution,
+};
 use risingwave_storage::{StateStore, StateStoreIter};
 use tracing::trace;
 
@@ -524,9 +526,6 @@ impl<S: StateStore> StateTable<S> {
 
         std::mem::replace(&mut self.vnodes, new_vnodes)
     }
-}
-fn is_subset(vec1: Vec<usize>, vec2: Vec<usize>) -> bool {
-    HashSet::<usize>::from_iter(vec1).is_subset(&vec2.into_iter().collect())
 }
 // write
 impl<S: StateStore> StateTable<S> {
@@ -1025,7 +1024,7 @@ impl<S: StateStore> StateTable<S> {
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
         let dist_key_hint = {
             if self.dist_key_indices.is_empty()
-                || !is_subset(self.dist_key_indices.clone(), pk_prefix_indices.to_vec())
+                || !is_continous_subset(self.dist_key_indices.iter(), pk_prefix_indices.iter())
                 || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk.unwrap()
                     > pk_prefix.len()
             {

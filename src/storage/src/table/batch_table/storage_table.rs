@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -40,7 +39,7 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
-use crate::table::{compute_vnode, Distribution, TableIter};
+use crate::table::{compute_vnode, is_continous_subset, Distribution, TableIter};
 use crate::{StateStore, StateStoreIter};
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
@@ -450,7 +449,7 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
         let dist_key_hint = if self.dist_key_indices.is_empty()
-            || !is_subset(self.dist_key_indices.clone(), pk_prefix_indices.clone())
+            || !is_continous_subset(self.dist_key_indices.iter(), pk_prefix_indices.iter())
             || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk.unwrap()
                 > pk_prefix.len()
         {
@@ -517,10 +516,6 @@ impl<S: StateStore> StorageTable<S> {
         self.batch_iter_with_pk_bounds(epoch, row::empty(), ..)
             .await
     }
-}
-
-fn is_subset(vec1: Vec<usize>, vec2: Vec<usize>) -> bool {
-    HashSet::<usize>::from_iter(vec1).is_subset(&vec2.into_iter().collect())
 }
 
 /// [`StorageTableIterInner`] iterates on the storage table.
