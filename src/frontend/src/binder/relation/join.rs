@@ -117,11 +117,11 @@ impl Binder {
                     JoinConstraint::Using(cols) => {
                         // sanity check
                         for col in &cols {
-                            if old_context.indices_of.get(&col.value).is_none() {
-                                return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in left table", col.value)).into());
+                            if old_context.indices_of.get(&col.real_value()).is_none() {
+                                return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in left table", col.real_value())).into());
                             }
-                            if self.context.indices_of.get(&col.value).is_none() {
-                                return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in right table", col.value)).into());
+                            if self.context.indices_of.get(&col.real_value()).is_none() {
+                                return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in right table", col.real_value())).into());
                             }
                         }
                         Some(cols)
@@ -136,7 +136,7 @@ impl Binder {
                     .filter(|(s, _)| *s != "_row_id") // filter out `_row_id`
                     .map(|(s, idxes)| (Ident::new(s.to_owned()), idxes))
                     .collect::<Vec<_>>();
-                columns.sort_by(|a, b| a.0.value.cmp(&b.0.value));
+                columns.sort_by(|a, b| a.0.real_value().cmp(&b.0.real_value()));
 
                 let mut col_indices = Vec::new();
                 let mut binary_expr = Expr::Value(Value::Boolean(true));
@@ -149,12 +149,13 @@ impl Binder {
                     if let Some(cols) = &using_columns && !cols.contains(&column) {
                         continue;
                     }
-                    let indices_l = match old_context.get_unqualified_indices(&column.value) {
+                    let indices_l = match old_context.get_unqualified_indices(&column.real_value())
+                    {
                         Err(e) => {
-                            if let ErrorCode::ItemNotFound(_) = e.inner() {
+                            if let ErrorCode::ItemNotFound(_) = e {
                                 continue;
                             } else {
-                                return Err(e);
+                                return Err(e.into());
                             }
                         }
                         Ok(idxs) => idxs,
@@ -227,7 +228,10 @@ impl Binder {
                 column,
             ]))
         } else {
-            Err(ErrorCode::InternalError(format!("Ambiguous column name: {}", column.value)).into())
+            Err(
+                ErrorCode::InternalError(format!("Ambiguous column name: {}", column.real_value()))
+                    .into(),
+            )
         }
     }
 }

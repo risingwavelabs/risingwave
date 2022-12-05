@@ -1,13 +1,19 @@
 [package]
 name = "risingwave_tracing"
-version = "0.1.11"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc", "executor"] }
 minitrace = "0.4"
+minitrace-jaeger = "0.4"
+rand = "0.8"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "sync",
     "macros",
@@ -15,4 +21,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal"
 ] }
 tracing = "0.1"
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }

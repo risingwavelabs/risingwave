@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use risingwave_common::array::{StringWriter, WrittenGuard};
 
 use crate::Result;
 
 #[inline(always)]
-pub fn lower(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
-    writer.write_ref(&s.to_lowercase()).map_err(Into::into)
+pub fn lower(s: &str, writer: StringWriter<'_>) -> Result<WrittenGuard> {
+    Ok(writer.write_ref(&s.to_lowercase()))
 }
 
 #[cfg(test)]
@@ -36,10 +36,10 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
+            let mut builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
-            let guard = lower(s, writer)?;
-            let array = guard.into_inner().finish().unwrap();
+            let _guard = lower(s, writer)?;
+            let array = builder.finish();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }

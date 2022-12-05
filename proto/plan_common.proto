@@ -15,7 +15,8 @@ message Field {
 message ColumnDesc {
   data.DataType column_type = 1;
   int32 column_id = 2;
-  // we store the column name in column desc now just for debug, but in future we should store it in ColumnCatalog but not here
+  // we store the column name in column desc now just for debug, but in future
+  // we should store it in ColumnCatalog but not here
   string name = 3;
   // For STRUCT type.
   repeated ColumnDesc field_descs = 4;
@@ -34,9 +35,10 @@ message StorageTableDesc {
   uint32 table_id = 1;
   repeated ColumnDesc columns = 2;
   // TODO: may refactor primary key representations
-  repeated ColumnOrder order_key = 3;
+  repeated ColumnOrder pk = 3;
   repeated uint32 dist_key_indices = 4;
   uint32 retention_seconds = 5;
+  repeated uint32 value_indices = 6;
 }
 
 enum JoinType {
@@ -71,4 +73,6 @@ enum RowFormatType {
   PROTOBUF = 2;
   DEBEZIUM_JSON = 3;
   AVRO = 4;
+  MAXWELL = 5;
+  CANAL_JSON = 6;
 }

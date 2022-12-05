@@ -14,70 +14,61 @@
 
 use std::convert::TryFrom;
 
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use parse_display::{Display, FromStr};
+use risingwave_common::bail;
 use risingwave_pb::expr::agg_call::Type;
 
+use crate::{ExprError, Result};
+
 /// Kind of aggregation function
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
+#[display(style = "snake_case")]
 pub enum AggKind {
     Min,
     Max,
     Sum,
+    Sum0,
     Count,
     Avg,
     StringAgg,
-    SingleValue,
     ApproxCountDistinct,
     ArrayAgg,
-}
-
-impl std::fmt::Display for AggKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AggKind::Min => write!(f, "min"),
-            AggKind::Max => write!(f, "max"),
-            AggKind::Sum => write!(f, "sum"),
-            AggKind::Count => write!(f, "count"),
-            AggKind::Avg => write!(f, "avg"),
-            AggKind::StringAgg => write!(f, "string_agg"),
-            AggKind::SingleValue => write!(f, "single_value"),
-            AggKind::ApproxCountDistinct => write!(f, "approx_count_distinct"),
-            AggKind::ArrayAgg => write!(f, "array_agg"),
-        }
-    }
+    FirstValue,
 }
 
 impl TryFrom<Type> for AggKind {
-    type Error = RwError;
+    type Error = ExprError;
 
     fn try_from(prost: Type) -> Result<Self> {
         match prost {
             Type::Min => Ok(AggKind::Min),
             Type::Max => Ok(AggKind::Max),
             Type::Sum => Ok(AggKind::Sum),
+            Type::Sum0 => Ok(AggKind::Sum0),
             Type::Avg => Ok(AggKind::Avg),
             Type::Count => Ok(AggKind::Count),
             Type::StringAgg => Ok(AggKind::StringAgg),
-            Type::SingleValue => Ok(AggKind::SingleValue),
             Type::ApproxCountDistinct => Ok(AggKind::ApproxCountDistinct),
             Type::ArrayAgg => Ok(AggKind::ArrayAgg),
-            Type::Unspecified => Err(ErrorCode::InternalError("Unrecognized agg.".into()).into()),
+            Type::FirstValue => Ok(AggKind::FirstValue),
+            Type::Unspecified => bail!("Unrecognized agg."),
         }
     }
 }
 
 impl AggKind {
-    pub fn to_prost(&self) -> Type {
+    pub fn to_prost(self) -> Type {
         match self {
             Self::Min => Type::Min,
             Self::Max => Type::Max,
             Self::Sum => Type::Sum,
+            Self::Sum0 => Type::Sum0,
             Self::Avg => Type::Avg,
             Self::Count => Type::Count,
             Self::StringAgg => Type::StringAgg,
-            Self::SingleValue => Type::SingleValue,
             Self::ApproxCountDistinct => Type::ApproxCountDistinct,
             Self::ArrayAgg => Type::ArrayAgg,
+            Self::FirstValue => Type::FirstValue,
         }
     }
 }

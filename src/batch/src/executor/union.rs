@@ -66,13 +66,16 @@ impl UnionExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for UnionExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let _union_node =
             try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::Union)?;
 
-        Ok(Box::new(Self::new(inputs, "UnionExecutor".into())))
+        Ok(Box::new(Self::new(
+            inputs,
+            source.plan_node().get_identity().clone(),
+        )))
     }
 }
 

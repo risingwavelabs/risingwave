@@ -18,7 +18,7 @@ use risingwave_common::types::{Scalar, ToOwnedDatum};
 use crate::Result;
 
 #[inline(always)]
-pub fn array_access<T: Scalar>(l: Option<ListRef>, r: Option<i32>) -> Result<Option<T>> {
+pub fn array_access<T: Scalar>(l: Option<ListRef<'_>>, r: Option<i32>) -> Result<Option<T>> {
     match (l, r) {
         // index must be greater than 0 following a one-based numbering convention for arrays
         (Some(list), Some(index)) if index > 0 => {
@@ -75,15 +75,15 @@ mod tests {
         let l3 = ListRef::ValueRef { val: &v3 };
 
         assert_eq!(
-            array_access::<String>(Some(l1), Some(1)).unwrap(),
+            array_access::<Box<str>>(Some(l1), Some(1)).unwrap(),
             Some("来自".into())
         );
         assert_eq!(
-            array_access::<String>(Some(l2), Some(2)).unwrap(),
+            array_access::<Box<str>>(Some(l2), Some(2)).unwrap(),
             Some("荷兰".into())
         );
         assert_eq!(
-            array_access::<String>(Some(l3), Some(3)).unwrap(),
+            array_access::<Box<str>>(Some(l3), Some(3)).unwrap(),
             Some("的爱".into())
         );
     }

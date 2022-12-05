@@ -67,7 +67,7 @@ impl Executor for LookupUnionExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -112,6 +112,10 @@ impl LookupUnionExecutor {
                     };
                     end = false;
                     match msg {
+                        Message::Watermark(_) => {
+                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        }
+
                         msg @ Message::Chunk(_) => yield msg,
                         Message::Barrier(barrier) => {
                             if let Some(this_barrier) = &this_barrier {

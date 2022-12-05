@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use risingwave_common::array::{StringWriter, WrittenGuard};
 
 use crate::Result;
 
@@ -23,8 +23,8 @@ pub fn translate(
     s: &str,
     match_str: &str,
     replace_str: &str,
-    writer: BytesWriter,
-) -> Result<BytesGuard> {
+    writer: StringWriter<'_>,
+) -> Result<WrittenGuard> {
     let mut char_map = HashMap::new();
     let mut match_chars = match_str.chars();
     let mut replace_chars = replace_str.chars();
@@ -45,7 +45,7 @@ pub fn translate(
         None => Some(c),
     });
 
-    writer.write_from_char_iter(iter).map_err(Into::into)
+    Ok(writer.write_from_char_iter(iter))
 }
 
 #[cfg(test)]
@@ -73,10 +73,10 @@ mod tests {
         ];
 
         for (s, match_str, replace_str, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
+            let mut builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
-            let guard = translate(s, match_str, replace_str, writer)?;
-            let array = guard.into_inner().finish().unwrap();
+            let _guard = translate(s, match_str, replace_str, writer)?;
+            let array = builder.finish();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }

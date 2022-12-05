@@ -3,22 +3,47 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-echo "--- Install gh cli"
-curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
-dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | \
-tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-apt update -yy && apt install gh -yy
+echo "--- Install rust"
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain $(cat ./rust-toolchain) -y
+source "$HOME/.cargo/env"
+source ci/scripts/common.env.sh
 
-echo "--- Release create"
-gh release create "${BUILDKITE_TAG}" --generate-notes -d -p
+echo "--- Install protoc3"
+curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
+unzip -o protoc-3.15.8-linux-x86_64.zip -d /usr/local bin/protoc
 
-echo "--- Download artifacts"
-mkdir -p target/debug && cd target/debug
-buildkite-agent artifact download risingwave-release .
-mv risingwave-release risingwave
-chmod +x risingwave
-tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave
+echo "--- Install lld"
+yum install -y centos-release-scl-rh
+yum install -y llvm-toolset-7.0-lld
+source /opt/rh/llvm-toolset-7.0/enable
 
-echo "--- Release upload asset"
-gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
+echo "--- Install aws cli"
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
+
+echo "--- Build release binary"
+cargo build -p risingwave_cmd_all --features "static-link static-log-level" --profile release
+cd target/release && chmod +x risingwave
+
+echo "--- Upload nightly binary to s3"
+tar -czvf risingwave-"$(date '+%Y%m%d')"-x86_64-unknown-linux.tar.gz risingwave
+aws s3 cp risingwave-"$(date '+%Y%m%d')"-x86_64-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
+
+if [[ -n "${BUILDKITE_TAG+x}" ]]; then
+  echo "--- Install gh cli"
+  yum install -y dnf
+  dnf install -y 'dnf-command(config-manager)'
+  dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+  dnf install -y gh
+
+  echo "--- Release create"
+  gh release create "${BUILDKITE_TAG}" --notes "release ${BUILDKITE_TAG}" -d -p
+
+  echo "--- Release upload asset"
+  tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave
+  gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
+fi
+
+
+
+

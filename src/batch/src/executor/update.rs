@@ -23,7 +23,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::SourceManagerRef;
+use risingwave_source::TableSourceManagerRef;
 
 use crate::error::BatchError;
 use crate::executor::{
@@ -37,7 +37,7 @@ use crate::task::BatchTaskContext;
 pub struct UpdateExecutor {
     /// Target table id.
     table_id: TableId,
-    source_manager: SourceManagerRef,
+    source_manager: TableSourceManagerRef,
     child: BoxedExecutor,
     exprs: Vec<BoxedExpression>,
     schema: Schema,
@@ -47,9 +47,10 @@ pub struct UpdateExecutor {
 impl UpdateExecutor {
     pub fn new(
         table_id: TableId,
-        source_manager: SourceManagerRef,
+        source_manager: TableSourceManagerRef,
         child: BoxedExecutor,
         exprs: Vec<BoxedExpression>,
+        identity: String,
     ) -> Self {
         assert_eq!(
             child.schema().data_types(),
@@ -66,7 +67,7 @@ impl UpdateExecutor {
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
-            identity: "UpdateExecutor".to_string(),
+            identity,
         }
     }
 }
@@ -89,14 +90,14 @@ impl UpdateExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table_v2().expect("not table source");
+        let source = source_desc.source.as_table().expect("not table source");
 
         let schema = self.child.schema().clone();
         let mut notifiers = Vec::new();
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?.compact()?;
+            let data_chunk = data_chunk?.compact();
             let len = data_chunk.cardinality();
 
             let updated_data_chunk = {
@@ -118,13 +119,10 @@ impl UpdateExecutor {
                 .flat_map(|(a, b)| [a, b])
             {
                 for (datum_ref, builder) in row.values().zip_eq(builders.iter_mut()) {
-                    builder.append_datum_ref(datum_ref)?;
+                    builder.append_datum(datum_ref);
                 }
             }
-            let columns = builders
-                .into_iter()
-                .map(|b| b.finish().map(|a| a.into()))
-                .try_collect()?;
+            let columns = builders.into_iter().map(|b| b.finish().into()).collect();
 
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
@@ -151,9 +149,9 @@ impl UpdateExecutor {
         // Create ret value
         {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
-            array_builder.append(Some(rows_updated as i64))?;
+            array_builder.append(Some(rows_updated as i64));
 
-            let array = array_builder.finish()?;
+            let array = array_builder.finish();
             let ret_chunk = DataChunk::new(vec![array.into()], 1);
 
             yield ret_chunk
@@ -164,7 +162,7 @@ impl UpdateExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for UpdateExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -184,9 +182,10 @@ impl BoxedExecutorBuilder for UpdateExecutor {
 
         Ok(Box::new(Self::new(
             table_id,
-            source.context().try_get_source_manager_ref()?,
+            source.context().source_manager(),
             child,
             exprs,
+            source.plan_node().get_identity().clone(),
         )))
     }
 }
@@ -197,10 +196,11 @@ mod tests {
 
     use futures::StreamExt;
     use risingwave_common::array::Array;
-    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
+    use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_expr::expr::InputRefExpression;
-    use risingwave_source::{MemSourceManager, SourceManager};
+    use risingwave_source::table_test_utils::create_table_source_desc_builder;
+    use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -208,7 +208,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_executor() -> Result<()> {
-        let source_manager = Arc::new(MemSourceManager::default());
+        let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();
@@ -216,19 +216,6 @@ mod tests {
 
         // Schema of the table
         let schema = schema_test_utils::ii();
-
-        let table_columns: Vec<_> = schema
-            .fields
-            .iter()
-            .enumerate()
-            .map(|(i, f)| ColumnDesc {
-                data_type: f.data_type.clone(),
-                column_id: ColumnId::from(i as i32), // use column index as column id
-                name: f.name.clone(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            })
-            .collect();
 
         mock_executor.add(DataChunk::from_pretty(
             "i  i
@@ -247,12 +234,21 @@ mod tests {
 
         // Create the table.
         let table_id = TableId::new(0);
-        source_manager.create_table_source(&table_id, table_columns.to_vec())?;
 
         // Create reader
-        let source_desc = source_manager.get_source(&table_id)?;
-        let source = source_desc.source.as_table_v2().unwrap();
-        let mut reader = source.stream_reader(vec![0.into(), 1.into()]).await?;
+        let source_builder = create_table_source_desc_builder(
+            &schema,
+            table_id,
+            None,
+            vec![1],
+            source_manager.clone(),
+        );
+        let source_desc = source_builder.build().await?;
+        let source = source_desc.source.as_table().unwrap();
+        let mut reader = source
+            .stream_reader(vec![0.into(), 1.into()])
+            .await?
+            .into_stream();
 
         // Update
         let update_executor = Box::new(UpdateExecutor::new(
@@ -260,6 +256,7 @@ mod tests {
             source_manager.clone(),
             Box::new(mock_executor),
             exprs,
+            "UpdateExecutor".to_string(),
         ));
 
         let handle = tokio::spawn(async move {
@@ -281,7 +278,7 @@ mod tests {
         });
 
         // Read
-        let chunk = reader.next().await?;
+        let chunk = reader.next().await.unwrap()?.chunk;
 
         assert_eq!(
             chunk.ops().chunks(2).collect_vec(),

@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
+use risingwave_common::types::DataTypeName;
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{
-    agg_func_sigs, cast_sigs, func_sigs, AggFuncSig, CastContext, CastSig, DataTypeName, ExprType,
-    FuncSign,
+    agg_func_sigs, cast_sigs, func_sigs, AggFuncSig, CastContext, CastSig, ExprType, FuncSign,
 };
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
@@ -30,42 +31,24 @@ use risingwave_sqlparser::ast::{
 use crate::utils::data_type_name_to_ast_data_type;
 use crate::SqlGenerator;
 
-lazy_static::lazy_static! {
-    static ref FUNC_TABLE: HashMap<DataTypeName, Vec<FuncSign>> = {
-        init_op_table()
-    };
-}
-
-lazy_static::lazy_static! {
-    static ref AGG_FUNC_TABLE: HashMap<DataTypeName, Vec<AggFuncSig>> = {
-        init_agg_table()
-    };
-}
-
-lazy_static::lazy_static! {
-    static ref CAST_TABLE: HashMap<DataTypeName, Vec<CastSig>> = {
-        init_cast_table()
-    };
-}
-
-fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
+static FUNC_TABLE: LazyLock<HashMap<DataTypeName, Vec<FuncSign>>> = LazyLock::new(|| {
     let mut funcs = HashMap::<DataTypeName, Vec<FuncSign>>::new();
     func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
     funcs
-}
+});
 
-fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSig>> {
+static AGG_FUNC_TABLE: LazyLock<HashMap<DataTypeName, Vec<AggFuncSig>>> = LazyLock::new(|| {
     let mut funcs = HashMap::<DataTypeName, Vec<AggFuncSig>>::new();
     agg_func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
     funcs
-}
+});
 
 /// Build a cast map from return types to viable cast-signatures.
 /// TODO: Generate implicit casts.
 /// NOTE: We avoid cast from varchar to other datatypes apart from itself.
 /// This is because arbitrary strings may not be able to cast,
 /// creating large number of invalid queries.
-fn init_cast_table() -> HashMap<DataTypeName, Vec<CastSig>> {
+static CAST_TABLE: LazyLock<HashMap<DataTypeName, Vec<CastSig>>> = LazyLock::new(|| {
     let mut casts = HashMap::<DataTypeName, Vec<CastSig>>::new();
     cast_sigs()
         .filter(|cast| cast.context == CastContext::Explicit)
@@ -74,7 +57,7 @@ fn init_cast_table() -> HashMap<DataTypeName, Vec<CastSig>> {
         })
         .for_each(|cast| casts.entry(cast.to_type).or_default().push(cast));
     casts
-}
+});
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// In generating expression, there are two execution modes:
@@ -101,7 +84,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let range = if can_agg & !inside_agg { 99 } else { 90 };
 
         match self.rng.gen_range(0..=range) {
-            0..=80 => self.gen_func(typ, can_agg, inside_agg),
+            0..=70 => self.gen_func(typ, can_agg, inside_agg),
+            71..=80 => self.gen_exists(typ, inside_agg),
             81..=90 => self.gen_cast(typ, can_agg, inside_agg),
             91..=99 => self.gen_agg(typ),
             // TODO: There are more that are not in the functions table, e.g. CAST.
@@ -167,7 +151,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates functions with variable arity:
-    /// CASE, COALESCE, CONCAT, CONCAT_WS
+    /// `CASE`, `COALESCE`, `CONCAT`, `CONCAT_WS`
     fn gen_variadic_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         use DataTypeName as T;
         match ret {
@@ -218,7 +202,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     // TODO: Gen implicit cast here.
-    // Tracked by: https://github.com/singularity-data/risingwave/issues/3896.
+    // Tracked by: https://github.com/risingwavelabs/risingwave/issues/3896.
     fn gen_concat_args(&mut self, can_agg: bool, inside_agg: bool) -> Vec<Expr> {
         let n = self.rng.gen_range(1..10);
         self.gen_n_exprs_with_type(n, DataTypeName::Varchar, can_agg, inside_agg)
@@ -259,8 +243,24 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
+    fn gen_exists(&mut self, ret: DataTypeName, inside_agg: bool) -> Expr {
+        // TODO: Streaming nested loop join is not implemented yet.
+        // Tracked by: <https://github.com/singularity-data/risingwave/issues/2655>.
+
+        // Generation of subquery inside aggregation is now workaround.
+        // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/3896>.
+        if self.is_mview || ret != DataTypeName::Boolean || inside_agg {
+            return self.gen_simple_scalar(ret);
+        };
+        // TODO: Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+        // let (subquery, _) = self.gen_correlated_query();
+        // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/2275>
+        let (subquery, _) = self.gen_local_query();
+        Expr::Exists(Box::new(subquery))
+    }
+
     fn gen_agg(&mut self, ret: DataTypeName) -> Expr {
-        // TODO: workaround for <https://github.com/singularity-data/risingwave/issues/4508>
+        // TODO: workaround for <https://github.com/risingwavelabs/risingwave/issues/4508>
         if ret == DataTypeName::Interval {
             return self.gen_simple_scalar(ret);
         }
@@ -282,28 +282,41 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let distinct = self.flip_coin() && self.is_distinct_allowed;
         self.make_agg_expr(func.func, &exprs, distinct)
+            .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
-    fn make_agg_expr(&mut self, func: AggKind, exprs: &[Expr], distinct: bool) -> Expr {
+    /// Generates aggregate expressions. For internal / unsupported aggregators, we return `None`.
+    fn make_agg_expr(&mut self, func: AggKind, exprs: &[Expr], distinct: bool) -> Option<Expr> {
         use AggKind as A;
-
         match func {
-            A::Sum => Expr::Function(make_agg_func("sum", exprs, distinct)),
-            A::Min => Expr::Function(make_agg_func("min", exprs, distinct)),
-            A::Max => Expr::Function(make_agg_func("max", exprs, distinct)),
-            A::Count => Expr::Function(make_agg_func("count", exprs, distinct)),
-            A::Avg => Expr::Function(make_agg_func("avg", exprs, distinct)),
-            A::StringAgg => Expr::Function(make_agg_func("string_agg", exprs, distinct)),
-            A::SingleValue => Expr::Function(make_agg_func("single_value", exprs, false)),
-            A::ApproxCountDistinct => {
-                if distinct {
-                    self.gen_simple_scalar(DataTypeName::Int64)
+            A::Sum | A::Sum0 => Some(Expr::Function(make_agg_func("sum", exprs, distinct))),
+            A::Min => Some(Expr::Function(make_agg_func("min", exprs, distinct))),
+            A::Max => Some(Expr::Function(make_agg_func("max", exprs, distinct))),
+            A::Count => Some(Expr::Function(make_agg_func("count", exprs, distinct))),
+            A::Avg => Some(Expr::Function(make_agg_func("avg", exprs, distinct))),
+            A::StringAgg => {
+                // distinct and non_distinct_string_agg are incompatible according to
+                // https://github.com/risingwavelabs/risingwave/blob/a703dc7d725aa995fecbaedc4e9569bc9f6ca5ba/src/frontend/src/optimizer/plan_node/logical_agg.rs#L394
+                if self.is_distinct_allowed && !distinct {
+                    None
                 } else {
-                    Expr::Function(make_agg_func("approx_count_distinct", exprs, false))
+                    Some(Expr::Function(make_agg_func("string_agg", exprs, distinct)))
+                }
+            }
+            A::FirstValue => None,
+            A::ApproxCountDistinct => {
+                if self.is_distinct_allowed {
+                    None
+                } else {
+                    Some(Expr::Function(make_agg_func(
+                        "approx_count_distinct",
+                        exprs,
+                        false,
+                    )))
                 }
             }
             // TODO(yuchao): `array_agg` support is still WIP, see #4657.
-            A::ArrayAgg => self.gen_simple_scalar(DataTypeName::List),
+            A::ArrayAgg => None,
         }
     }
 }
@@ -345,7 +358,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::Md5 => Some(Expr::Function(make_simple_func("md5", &exprs))),
         E::ToChar => Some(Expr::Function(make_simple_func("to_char", &exprs))),
         E::SplitPart => Some(Expr::Function(make_simple_func("split_part", &exprs))),
-        // TODO: Tracking issue: https://github.com/singularity-data/risingwave/issues/112
+        // TODO: Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
         // E::Translate => Some(Expr::Function(make_simple_func("translate", &exprs))),
         E::Overlay => Some(make_overlay(exprs)),
         _ => None,
@@ -410,20 +423,18 @@ fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
 
 /// This is the function that generate aggregate function.
 /// DISTINCT , ORDER BY or FILTER is allowed in aggregation functions。
-/// Currently, distinct is allowed only, other and others rule is TODO: <https://github.com/singularity-data/risingwave/issues/3933>
-fn make_agg_func(func_name: &str, exprs: &[Expr], _distinct: bool) -> Function {
+/// Currently, distinct is allowed only, other and others rule is TODO: <https://github.com/risingwavelabs/risingwave/issues/3933>
+fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool) -> Function {
     let args = exprs
         .iter()
         .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
         .collect();
 
-    // Distinct Aggregate shall be workaround until the following issue is resolved
-    // https://github.com/singularity-data/risingwave/issues/4220
     Function {
         name: ObjectName(vec![Ident::new(func_name)]),
         args,
         over: None,
-        distinct: false,
+        distinct,
         order_by: vec![],
         filter: None,
     }

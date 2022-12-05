@@ -1,19 +1,23 @@
 [package]
-edition = "2021"
 name = "risingwave_connector"
-version = "0.1.11"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.46", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-kinesis = { version = "0.16", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.16", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-sqs = { version = "0.16", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.46"
-aws-smithy-types = "0.46"
-aws-types = { version = "0.46", features = ["hardcoded-credentials"] }
+aws-config = { workspace = true } 
+aws-sdk-kinesis = { workspace = true } 
+aws-sdk-s3 = { workspace = true } 
+aws-sdk-sqs = { workspace = true } 
+aws-smithy-http = { workspace = true }
+aws-smithy-types = { workspace = true }
+aws-types = { workspace = true }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -25,27 +29,30 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 futures-concurrency = "3"
 globset = "0.4.8"
+google-cloud-googleapis = { version = "0.6.0", features = ["pubsub"] }
+google-cloud-pubsub = "0.7.0"
 http = "0.2"
 http-serde = "1.1.0"
 humantime = "2.1"
 hyper = "0.14"
 itertools = "0.10"
 maplit = "1.0.2"
-memcomparable = { path = "../utils/memcomparable" }
-mysql_async = "0.30"
+mysql_async = "0.31"
+nexmark = { version = "0.1", features = ["serde"] }
 num-traits = "0.2"
 paste = "1"
 prost = "0.11"
-pulsar = { version = "5", default-features = false, features = ["tokio-runtime"], rev = "7fab6a9", git = "https://github.com/skyzh/pulsar-rs" }
+pulsar = { version = "4.2", default-features = false, features = ["tokio-runtime"] }
 rand = "0.8"
-rdkafka = { version = "0.28", features = ["cmake-build"] }
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.8-alpha", features = ["cmake-build", "ssl-vendored", "gssapi"] }
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
+risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
-serde_with = "1"
+serde_with = "2"
 smallvec = "1"
 static_assertions = "1"
 strum = { version = "0.24", features = ["derive"] }
@@ -56,12 +63,14 @@ tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
-tonic = { version = "0.2.1", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 twox-hash = "1"
 url = "2"
 urlencoding = "2"
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 rand = "0.8"

@@ -22,11 +22,10 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::user_key;
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, TableKey, UserKey};
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 
 use self::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::iterator::{
@@ -36,9 +35,8 @@ use crate::hummock::iterator::{
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::state_store::HummockIteratorType;
-use crate::hummock::utils::{filter_single_sst, range_overlap};
-use crate::hummock::{HummockResult, SstableIteratorType, SstableStore};
+use crate::hummock::utils::filter_single_sst;
+use crate::hummock::{HummockIteratorType, HummockResult, SstableIteratorType, SstableStore};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,52 +50,46 @@ pub fn get_sst_key_range(info: &SstableInfo) -> &KeyRange {
         .key_range
         .as_ref()
         .expect("local sstable should have key range");
-    assert!(
-        !key_range.inf,
-        "local sstable should not have infinite key range. Sstable info: {:?}",
-        info,
-    );
     key_range
 }
 
 impl UncommittedData {
-    pub fn start_user_key(&self) -> &[u8] {
+    pub fn start_user_key(&self) -> UserKey<&[u8]> {
         match self {
-            UncommittedData::Sst((_, info)) => {
+            UncommittedData::Sst(LocalSstableInfo { sst_info: info, .. }) => {
                 let key_range = get_sst_key_range(info);
-                user_key(key_range.left.as_slice())
+                UserKey::decode(user_key(key_range.left.as_slice()))
             }
             UncommittedData::Batch(batch) => batch.start_user_key(),
         }
     }
 
-    pub fn end_user_key(&self) -> &[u8] {
+    pub fn end_user_key(&self) -> UserKey<&[u8]> {
         match self {
-            UncommittedData::Sst((_, info)) => {
+            UncommittedData::Sst(LocalSstableInfo { sst_info: info, .. }) => {
                 let key_range = get_sst_key_range(info);
-                user_key(key_range.right.as_slice())
+                UserKey::decode(user_key(key_range.right.as_slice()))
             }
-            UncommittedData::Batch(batch) => batch.end_user_key(),
+            UncommittedData::Batch(batch) => batch.start_user_key(),
         }
     }
 }
 
 pub(crate) type OrderIndex = usize;
 /// `{ end_key -> batch }`
-pub(crate) type KeyIndexSharedBufferBatch = BTreeMap<Vec<u8>, SharedBufferBatch>;
 /// `{ (end key, order_id) -> batch }`
 pub(crate) type KeyIndexedUncommittedData = BTreeMap<(Vec<u8>, OrderIndex), UncommittedData>;
 /// uncommitted data sorted by order index in descending order. Data in the same inner list share
 /// the same order index, which means their keys don't overlap.
 pub(crate) type OrderSortedUncommittedData = Vec<Vec<UncommittedData>>;
 
-pub fn to_order_sorted(key_indexed_data: &KeyIndexedUncommittedData) -> OrderSortedUncommittedData {
+pub fn to_order_sorted(key_indexed_data: KeyIndexedUncommittedData) -> OrderSortedUncommittedData {
     let mut order_indexed_data = BTreeMap::new();
     for ((_, order_id), data) in key_indexed_data {
         order_indexed_data
-            .entry(*order_id)
+            .entry(order_id)
             .or_insert_with(Vec::new)
-            .push(data.clone());
+            .push(data);
     }
     // Take rev here to ensure order index sorted in descending order.
     order_indexed_data.into_values().rev().collect()
@@ -138,8 +130,11 @@ pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
                         batch.clone().into_directed_iter::<T::Direction>(),
                     ));
                 }
-                UncommittedData::Sst((_, table_info)) => {
-                    let table = sstable_store.sstable(table_info.id, local_stats).await?;
+                UncommittedData::Sst(LocalSstableInfo {
+                    sst_info: sstable_info,
+                    ..
+                }) => {
+                    let table = sstable_store.sstable(sstable_info, local_stats).await?;
                     data_iters.push(UncommittedDataIteratorType::Second(
                         T::SstableIteratorType::create(
                             table,
@@ -169,44 +164,10 @@ pub struct SharedBuffer {
     // OrderIndex -> (task payload, task write batch size)
     uploading_tasks: HashMap<OrderIndex, (KeyIndexedUncommittedData, usize)>,
     upload_batches_size: usize,
-    replicate_batches_size: usize,
 
     global_upload_task_size: Arc<AtomicUsize>,
 
     next_order_index: usize,
-}
-
-#[derive(Debug)]
-pub struct WriteRequest {
-    pub batch: SharedBufferBatch,
-    pub epoch: HummockEpoch,
-    pub is_remote_batch: bool,
-    pub grant_sender: oneshot::Sender<()>,
-}
-
-#[derive(Debug)]
-pub enum SharedBufferEvent {
-    /// Write request to shared buffer. The first parameter is the batch size and the second is the
-    /// request permission notifier. After the write request is granted and notified, the size is
-    /// already tracked.
-    WriteRequest(WriteRequest),
-
-    /// Notify that we may flush the shared buffer.
-    MayFlush,
-
-    /// A shared buffer batch is released. The parameter is the batch size.
-    BufferRelease(usize),
-
-    /// An epoch is going to be synced. Once the event is processed, there will be no more flush
-    /// task on this epoch. Previous concurrent flush task join handle will be returned by the join
-    /// handle sender.
-    SyncEpoch(Vec<HummockEpoch>, oneshot::Sender<Vec<JoinHandle<()>>>),
-
-    /// An epoch has been synced.
-    EpochSynced(Vec<HummockEpoch>),
-
-    /// Clear shared buffer and reset all states
-    Clear(oneshot::Sender<()>),
 }
 
 impl SharedBuffer {
@@ -215,7 +176,6 @@ impl SharedBuffer {
             uncommitted_data: Default::default(),
             uploading_tasks: Default::default(),
             upload_batches_size: 0,
-            replicate_batches_size: 0,
             global_upload_task_size,
             next_order_index: 0,
         }
@@ -231,7 +191,7 @@ impl SharedBuffer {
         let order_index = self.get_next_order_index();
 
         let insert_result = self.uncommitted_data.insert(
-            (batch.end_user_key().to_vec(), order_index),
+            (batch.end_user_key().encode(), order_index),
             UncommittedData::Batch(batch),
         );
         assert!(
@@ -245,15 +205,20 @@ impl SharedBuffer {
 
     /// Gets batches from shared buffer that overlap with the given key range.
     /// The return tuple is (replicated batches, uncommitted data).
-    pub fn get_overlap_data<R, B>(&self, key_range: &R) -> OrderSortedUncommittedData
+    pub fn get_overlap_data<R, B>(
+        &self,
+        table_id: TableId,
+        table_key_range: &R,
+    ) -> OrderSortedUncommittedData
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
+        let user_key_range = bound_table_key_range(table_id, table_key_range);
         let range = (
-            match key_range.start_bound() {
-                Bound::Included(key) => Bound::Included((key.as_ref().to_vec(), OrderIndex::MIN)),
-                Bound::Excluded(key) => Bound::Excluded((key.as_ref().to_vec(), OrderIndex::MAX)),
+            match user_key_range.start_bound() {
+                Bound::Included(key) => Bound::Included((key.encode(), OrderIndex::MIN)),
+                Bound::Excluded(key) => Bound::Excluded((key.encode(), OrderIndex::MAX)),
                 Bound::Unbounded => Bound::Unbounded,
             },
             std::ops::Bound::Unbounded,
@@ -268,10 +233,10 @@ impl SharedBuffer {
                     .flat_map(|(payload, _)| payload.range(range.clone())),
             )
             .filter(|(_, data)| match data {
-                UncommittedData::Batch(batch) => {
-                    range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
+                UncommittedData::Batch(batch) => batch.filter(table_id, table_key_range),
+                UncommittedData::Sst(LocalSstableInfo { sst_info, .. }) => {
+                    filter_single_sst(sst_info, table_id, table_key_range)
                 }
-                UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
             })
             .map(|((_, order_index), data)| (*order_index, data.clone()));
 
@@ -380,7 +345,7 @@ impl SharedBuffer {
                 .fetch_add(task_write_batch_size, Relaxed);
             let ret = Some((
                 min_order_index,
-                to_order_sorted(&keyed_payload),
+                to_order_sorted(keyed_payload.clone()),
                 task_write_batch_size,
             ));
             self.uploading_tasks
@@ -426,7 +391,7 @@ impl SharedBuffer {
             let data = UncommittedData::Sst(sst);
             let insert_result = self
                 .uncommitted_data
-                .insert((data.end_user_key().to_vec(), order_index), data);
+                .insert((data.end_user_key().encode(), order_index), data);
             assert!(
                 insert_result.is_none(),
                 "duplicate data end key and order index when inserting an SST. \
@@ -451,7 +416,7 @@ impl SharedBuffer {
     }
 
     pub fn size(&self) -> usize {
-        self.upload_batches_size + self.replicate_batches_size
+        self.upload_batches_size
     }
 
     fn get_next_order_index(&mut self) -> OrderIndex {
@@ -463,13 +428,13 @@ impl SharedBuffer {
 
 #[cfg(test)]
 mod tests {
+    use core::ops::Bound::Included;
     use std::cell::RefCell;
     use std::ops::DerefMut;
 
     use bytes::Bytes;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
-    use tokio::sync::mpsc;
+    use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
     use crate::hummock::iterator::test_utils::iterator_test_value_of;
@@ -486,25 +451,16 @@ mod tests {
         let mut shared_buffer_items = Vec::new();
         for key in put_keys {
             shared_buffer_items.push((
-                Bytes::from(key_with_epoch(key.clone(), epoch)),
+                Bytes::from(key.clone()),
                 HummockValue::put(iterator_test_value_of(*idx).into()),
             ));
             *idx += 1;
         }
         for key in delete_keys {
-            shared_buffer_items.push((
-                Bytes::from(key_with_epoch(key.clone(), epoch)),
-                HummockValue::delete(),
-            ));
+            shared_buffer_items.push((Bytes::from(key.clone()), HummockValue::delete()));
         }
-        shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
-        let batch = SharedBufferBatch::new(
-            shared_buffer_items,
-            epoch,
-            mpsc::unbounded_channel().0,
-            StaticCompactionGroupId::StateDefault.into(),
-            Default::default(),
-        );
+        shared_buffer_items.sort_by(|l, r| l.0.cmp(&r.0));
+        let batch = SharedBufferBatch::for_test(shared_buffer_items, epoch, Default::default());
         shared_buffer.write_batch(batch.clone());
 
         batch
@@ -530,7 +486,10 @@ mod tests {
         // Get overlap batches and verify
         for key in &keys[0..3] {
             // Single key
-            let overlap_data = shared_buffer.get_overlap_data(&(key.clone()..=key.clone()));
+            let overlap_data = shared_buffer.get_overlap_data(
+                TableId::default(),
+                &map_table_key_range((Included(key.clone()), Included(key.clone()))),
+            );
             assert_eq!(overlap_data.len(), 1);
             assert_eq!(
                 overlap_data[0],
@@ -538,7 +497,10 @@ mod tests {
             );
 
             // Forward key range
-            let overlap_data = shared_buffer.get_overlap_data(&(key.clone()..=keys[3].clone()));
+            let overlap_data = shared_buffer.get_overlap_data(
+                TableId::default(),
+                &map_table_key_range((Included(key.clone()), Included(keys[3].clone()))),
+            );
             assert_eq!(overlap_data.len(), 1);
             assert_eq!(
                 overlap_data[0],
@@ -546,11 +508,17 @@ mod tests {
             );
         }
         // Non-existent key
-        let overlap_data = shared_buffer.get_overlap_data(&(large_key.clone()..=large_key.clone()));
+        let overlap_data = shared_buffer.get_overlap_data(
+            TableId::default(),
+            &map_table_key_range((Included(large_key.clone()), Included(large_key.clone()))),
+        );
         assert!(overlap_data.is_empty());
 
         // Non-existent key range forward
-        let overlap_data = shared_buffer.get_overlap_data(&(keys[3].clone()..=large_key));
+        let overlap_data = shared_buffer.get_overlap_data(
+            TableId::default(),
+            &map_table_key_range((Included(keys[3].clone()), Included(large_key))),
+        );
         assert!(overlap_data.is_empty());
     }
 
@@ -605,10 +573,13 @@ mod tests {
         assert_eq!(payload1[1], vec![UncommittedData::Batch(batch1.clone())]);
         assert_eq!(task_size, batch1.size() + batch2.size());
 
-        let sst1 = gen_dummy_sst_info(1, vec![batch1, batch2]);
+        let sst1 = gen_dummy_sst_info(1, vec![batch1, batch2], TableId::default(), 1);
         shared_buffer.borrow_mut().succeed_upload_task(
             order_index1,
-            vec![(StaticCompactionGroupId::StateDefault.into(), sst1)],
+            vec![LocalSstableInfo::with_compaction_group(
+                StaticCompactionGroupId::StateDefault.into(),
+                sst1,
+            )],
         );
     }
 }

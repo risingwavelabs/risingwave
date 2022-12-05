@@ -16,34 +16,41 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
-use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
+use super::task_progress::TaskProgress;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
 };
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
-use crate::hummock::utils::can_concat;
-use crate::hummock::{CachePolicy, CompressionAlgorithm, HummockResult, SstableBuilderOptions};
+use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
+use crate::hummock::{
+    CachePolicy, CompressionAlgorithm, HummockResult, RangeTombstonesCollector,
+    SstableBuilderOptions,
+};
+use crate::monitor::StoreLocalStatistic;
 
-#[derive(Clone)]
 pub struct CompactorRunner {
     compact_task: CompactTask,
     compactor: Compactor,
     sstable_store: CompactorSstableStoreRef,
+    key_range: KeyRange,
     split_index: usize,
 }
 
 impl CompactorRunner {
     pub fn new(split_index: usize, context: &CompactorContext, task: CompactTask) -> Self {
         let max_target_file_size = context.context.options.sstable_size_mb as usize * (1 << 20);
-        let cache_policy = if task.target_level == 0 {
-            CachePolicy::Fill
-        } else {
-            CachePolicy::NotFill
-        };
+        let total_file_size = task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table| table.file_size)
+            .sum::<u64>();
         let mut options: SstableBuilderOptions = context.context.options.as_ref().into();
         options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
@@ -51,25 +58,40 @@ impl CompactorRunner {
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
+        let total_file_size = (total_file_size as f64 * 1.2).round() as usize;
+        if options.compression_algorithm == CompressionAlgorithm::None {
+            options.capacity = std::cmp::min(options.capacity, total_file_size);
+        }
         let key_range = KeyRange {
             left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
             right: Bytes::copy_from_slice(task.splits[split_index].get_right()),
-            inf: task.splits[split_index].get_inf(),
+            right_exclusive: true,
         };
+        let stats_target_table_ids = task
+            .input_ssts
+            .iter()
+            .flat_map(|i| {
+                i.table_infos
+                    .iter()
+                    .flat_map(|t| t.table_ids.clone())
+                    .collect_vec()
+            })
+            .collect();
         let compactor = Compactor::new(
             context.context.clone(),
             options,
-            context.sstable_store.clone(),
-            key_range,
-            cache_policy,
+            key_range.clone(),
+            CachePolicy::NotFill,
             task.gc_delete_keys,
             task.watermark,
+            Some(stats_target_table_ids),
         );
 
         Self {
             compactor,
             compact_task: task,
             sstable_store: context.sstable_store.clone(),
+            key_range,
             split_index,
         }
     }
@@ -78,13 +100,41 @@ impl CompactorRunner {
         &self,
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        del_agg: Arc<RangeTombstonesCollector>,
+        task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
-        let ssts = self
+        let (ssts, table_stats_map) = self
             .compactor
-            .compact_key_range_impl(iter, compaction_filter, filter_key_extractor)
+            .compact_key_range(
+                iter,
+                compaction_filter,
+                del_agg,
+                filter_key_extractor,
+                Some(task_progress),
+            )
             .await?;
-        Ok((self.split_index, ssts))
+        Ok((self.split_index, ssts, table_stats_map))
+    }
+
+    pub async fn build_delete_range_iter(
+        compact_task: &CompactTask,
+        sstable_store: &CompactorSstableStoreRef,
+    ) -> HummockResult<Arc<RangeTombstonesCollector>> {
+        let mut builder = DeleteRangeAggregatorBuilder::default();
+        let mut local_stats = StoreLocalStatistic::default();
+        for level in &compact_task.input_ssts {
+            if level.table_infos.is_empty() {
+                continue;
+            }
+
+            for table_info in &level.table_infos {
+                let table = sstable_store.sstable(table_info, &mut local_stats).await?;
+                builder.add_tombstone(table.value().meta.range_tombstone_list.clone());
+            }
+        }
+        let aggregator = builder.build(compact_task.watermark, compact_task.gc_delete_keys);
+        Ok(aggregator)
     }
 
     /// Build the merge iterator based on the given input ssts.
@@ -99,24 +149,34 @@ impl CompactorRunner {
             // Do not need to filter the table because manager has done it.
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&level.table_infos.iter().collect_vec()));
+                let tables = level
+                    .table_infos
+                    .iter()
+                    .filter(|info| {
+                        let key_range = KeyRange::from(info.key_range.as_ref().unwrap());
+                        self.key_range.full_key_overlap(&key_range)
+                    })
+                    .cloned()
+                    .collect_vec();
                 table_iters.push(ConcatSstableIterator::new(
-                    level.table_infos.clone(),
-                    self.compactor.key_range.clone(),
+                    tables,
+                    self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
                 ));
             } else {
                 for table_info in &level.table_infos {
+                    let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
+                    if !self.key_range.full_key_overlap(&key_range) {
+                        continue;
+                    }
                     table_iters.push(ConcatSstableIterator::new(
                         vec![table_info.clone()],
-                        self.compactor.key_range.clone(),
+                        self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
                     ));
                 }
             }
         }
-        Ok(UnorderedMergeIteratorInner::for_compactor(
-            table_iters,
-            self.compactor.context.stats.clone(),
-        ))
+        Ok(UnorderedMergeIteratorInner::for_compactor(table_iters))
     }
 }

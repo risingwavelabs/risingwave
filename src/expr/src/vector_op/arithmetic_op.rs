@@ -220,6 +220,33 @@ pub fn timestamp_interval_sub<T1, T2, T3>(
 }
 
 #[inline(always)]
+pub fn timestampz_interval_add<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
+    interval_timestampz_add::<T1, T2, T3>(r, l)
+}
+
+#[inline(always)]
+pub fn timestampz_interval_sub<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
+    interval_timestampz_add::<T1, T2, T3>(r.negative(), l)
+}
+
+#[inline(always)]
+pub fn interval_timestampz_add<T1, T2, T3>(l: IntervalUnit, r: i64) -> Result<i64> {
+    // Without session TimeZone, we cannot add month/day in local time. See #5826.
+    // However, we only reject months but accept days, assuming them are always 24-hour and ignoring
+    // Daylight Saving.
+    // This is to keep consistent with `tumble_start` of RisingWave / `date_bin` of PostgreSQL.
+    if l.get_months() != 0 {
+        return Err(ExprError::UnsupportedFunction(
+            "timestamp with time zone +/- interval of months".into(),
+        ));
+    }
+    let delta_usecs = l.get_days() as i64 * 24 * 60 * 60 * 1_000_000 + l.get_ms() * 1000;
+
+    r.checked_add(delta_usecs)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
+#[inline(always)]
 pub fn interval_int_mul<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<IntervalUnit>
 where
     T2: TryInto<i32> + Debug,

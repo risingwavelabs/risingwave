@@ -12,33 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use risingwave_pb::catalog::source::Info::StreamSource;
+use itertools::Itertools;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::meta::reschedule_request::Reschedule;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
-    GetClusterInfoRequest, GetClusterInfoResponse, PauseRequest, PauseResponse, ResumeRequest,
-    ResumeResponse,
+    GetClusterInfoRequest, GetClusterInfoResponse, PauseRequest, PauseResponse, RescheduleRequest,
+    RescheduleResponse, ResumeRequest, ResumeResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
-use crate::barrier::{BarrierManagerRef, Command};
+use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
-use crate::stream::SourceManagerRef;
+use crate::stream::{GlobalStreamManagerRef, ParallelUnitReschedule, SourceManagerRef};
 
 pub struct ScaleServiceImpl<S: MetaStore> {
-    barrier_manager: BarrierManagerRef<S>,
+    barrier_scheduler: BarrierScheduler<S>,
     fragment_manager: FragmentManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     source_manager: SourceManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
-    ddl_lock: Arc<RwLock<()>>,
+    stream_manager: GlobalStreamManagerRef<S>,
 }
 
 impl<S> ScaleServiceImpl<S>
@@ -46,20 +43,20 @@ where
     S: MetaStore,
 {
     pub fn new(
-        barrier_manager: BarrierManagerRef<S>,
+        barrier_scheduler: BarrierScheduler<S>,
         fragment_manager: FragmentManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         source_manager: SourceManagerRef<S>,
         catalog_manager: CatalogManagerRef<S>,
-        ddl_lock: Arc<RwLock<()>>,
+        stream_manager: GlobalStreamManagerRef<S>,
     ) -> Self {
         Self {
-            barrier_manager,
+            barrier_scheduler,
             fragment_manager,
             cluster_manager,
             source_manager,
             catalog_manager,
-            ddl_lock,
+            stream_manager,
         }
     }
 }
@@ -71,15 +68,15 @@ where
 {
     #[cfg_attr(coverage, no_coverage)]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.write().await;
-        self.barrier_manager.run_command(Command::pause()).await?;
+        self.barrier_scheduler.run_command(Command::pause()).await?;
         Ok(Response::new(PauseResponse {}))
     }
 
     #[cfg_attr(coverage, no_coverage)]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.write().await;
-        self.barrier_manager.run_command(Command::resume()).await?;
+        self.barrier_scheduler
+            .run_command(Command::resume())
+            .await?;
         Ok(Response::new(ResumeResponse {}))
     }
 
@@ -116,20 +113,55 @@ where
             })
             .collect();
 
-        let sources = self.catalog_manager.list_sources().await?;
+        let sources = self.catalog_manager.list_sources().await;
 
-        let mut stream_source_infos = HashMap::new();
-        for source in sources {
-            if let Some(StreamSource(info)) = source.info {
-                stream_source_infos.insert(source.id, info);
-            }
-        }
+        let source_infos = sources.into_iter().map(|s| (s.id, s)).collect();
 
         Ok(Response::new(GetClusterInfoResponse {
             worker_nodes,
             table_fragments,
             actor_splits,
-            stream_source_infos,
+            source_infos,
         }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn reschedule(
+        &self,
+        request: Request<RescheduleRequest>,
+    ) -> Result<Response<RescheduleResponse>, Status> {
+        let req = request.into_inner();
+
+        self.stream_manager
+            .reschedule_actors(
+                req.reschedules
+                    .into_iter()
+                    .map(|(fragment_id, reschedule)| {
+                        let Reschedule {
+                            added_parallel_units,
+                            removed_parallel_units,
+                        } = reschedule;
+
+                        (
+                            fragment_id,
+                            ParallelUnitReschedule {
+                                added_parallel_units: added_parallel_units
+                                    .into_iter()
+                                    .sorted()
+                                    .dedup()
+                                    .collect(),
+                                removed_parallel_units: removed_parallel_units
+                                    .into_iter()
+                                    .sorted()
+                                    .dedup()
+                                    .collect(),
+                            },
+                        )
+                    })
+                    .collect(),
+            )
+            .await?;
+
+        Ok(Response::new(RescheduleResponse { success: true }))
     }
 }

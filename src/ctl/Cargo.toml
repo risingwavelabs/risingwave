@@ -1,7 +1,11 @@
 [package]
 name = "risingwave_ctl"
-version = "0.1.11"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
@@ -10,15 +14,21 @@ chrono = "0.4"
 clap = { version = "3", features = ["derive"] }
 comfy-table = "6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+itertools = "0.10"
 parking_lot = "0.12"
+regex = "1.6.0"
 risingwave_common = { path = "../common" }
+risingwave_common_service = { path = "../common/common_service" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
-size = "0.2"
+risingwave_stream = { path = "../stream" }
+risingwave_tracing = { path = "../tracing" }
+serde_json = "1"
+size = "0.4"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -29,4 +39,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tracing = "0.1"
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }

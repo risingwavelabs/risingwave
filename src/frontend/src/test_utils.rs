@@ -17,9 +17,11 @@ use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use futures_async_stream::for_await;
 use parking_lot::RwLock;
-use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
+use pgwire::pg_response::StatementType;
+use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
+use pgwire::types::Row;
 use risingwave_common::catalog::{
     IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
@@ -28,29 +30,26 @@ use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable,
+    Source as ProstSource, Table as ProstTable, View as ProstView,
 };
+use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
-use risingwave_pb::user::{GrantPrivilege, UpdateUserRequest, UserInfo};
+use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
-use risingwave_sqlparser::ast::Statement;
-use risingwave_sqlparser::parser::Parser;
 use tempfile::{Builder, NamedTempFile};
 
-use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{DatabaseId, SchemaId};
+use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
-use crate::optimizer::PlanRef;
-use crate::planner::Planner;
-use crate::session::{AuthContext, FrontendEnv, OptimizerContext, SessionImpl};
+use crate::session::{AuthContext, FrontendEnv, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::user::UserId;
-use crate::FrontendOpts;
+use crate::{FrontendOpts, PgResponseStream};
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
@@ -58,7 +57,7 @@ pub struct LocalFrontend {
     env: FrontendEnv,
 }
 
-impl SessionManager for LocalFrontend {
+impl SessionManager<PgResponseStream> for LocalFrontend {
     type Session = SessionImpl;
 
     fn connect(
@@ -67,6 +66,14 @@ impl SessionManager for LocalFrontend {
         _user_name: &str,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
+    }
+
+    fn cancel_queries_in_session(&self, _session_id: SessionId) {
+        todo!()
+    }
+
+    fn end_session(&self, _session: &Self::Session) {
+        todo!()
     }
 }
 
@@ -80,7 +87,7 @@ impl LocalFrontend {
     pub async fn run_sql(
         &self,
         sql: impl Into<String>,
-    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_ref().run_statement(sql.as_str(), false).await
     }
@@ -91,7 +98,7 @@ impl LocalFrontend {
         database: String,
         user_name: String,
         user_id: UserId,
-    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_user_ref(database, user_name, user_id)
             .run_statement(sql.as_str(), false)
@@ -99,45 +106,39 @@ impl LocalFrontend {
     }
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
-        self.run_sql(sql)
-            .await
-            .unwrap()
-            .iter()
-            .map(|row| format!("{:?}", row))
-            .collect()
+        let mut rsp = self.run_sql(sql).await.unwrap();
+        let mut res = vec![];
+        #[for_await]
+        for row_set in rsp.values_stream() {
+            for row in row_set.unwrap() {
+                res.push(format!("{:?}", row));
+            }
+        }
+        res
     }
 
-    /// Convert a sql (must be an `Query`) into an unoptimized batch plan.
-    pub fn to_batch_plan(&self, sql: impl Into<String>) -> Result<PlanRef> {
-        let raw_sql = &sql.into();
-        let statements = Parser::parse_sql(raw_sql).unwrap();
-        let statement = statements.get(0).unwrap();
-        if let Statement::Query(query) = statement {
-            let session = self.session_ref();
-
-            let bound = {
-                let mut binder = Binder::new(&session);
-                binder.bind(Statement::Query(query.clone()))?
-            };
-            Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())
-                .plan(bound)
-                .unwrap()
-                .gen_batch_query_plan()
-        } else {
-            unreachable!()
+    pub async fn get_explain_output(&self, sql: impl Into<String>) -> String {
+        let mut rsp = self.run_sql(sql).await.unwrap();
+        assert_eq!(rsp.get_stmt_type(), StatementType::EXPLAIN);
+        let mut res = String::new();
+        #[for_await]
+        for row_set in rsp.values_stream() {
+            for row in row_set.unwrap() {
+                let row: Row = row;
+                let row = row.values()[0].as_ref().unwrap();
+                res += std::str::from_utf8(row).unwrap();
+                res += "\n";
+            }
         }
+        res
     }
 
     pub fn session_ref(&self) -> Arc<SessionImpl> {
-        Arc::new(SessionImpl::new(
-            self.env.clone(),
-            Arc::new(AuthContext::new(
-                DEFAULT_DATABASE_NAME.to_string(),
-                DEFAULT_SUPER_USER.to_string(),
-                DEFAULT_SUPER_USER_ID,
-            )),
-            UserAuthenticator::None,
-        ))
+        self.session_user_ref(
+            DEFAULT_DATABASE_NAME.to_string(),
+            DEFAULT_SUPER_USER.to_string(),
+            DEFAULT_SUPER_USER_ID,
+        )
     }
 
     pub fn session_user_ref(
@@ -150,8 +151,26 @@ impl LocalFrontend {
             self.env.clone(),
             Arc::new(AuthContext::new(database, user_name, user_id)),
             UserAuthenticator::None,
+            // Local Frontend use a non-sense id.
+            (0, 0),
         ))
     }
+}
+
+pub async fn get_explain_output(sql: &str, session: Arc<SessionImpl>) -> String {
+    let mut rsp = session.run_statement(sql, false).await.unwrap();
+    assert_eq!(rsp.get_stmt_type(), StatementType::EXPLAIN);
+    let mut res = String::new();
+    #[for_await]
+    for row_set in rsp.values_stream() {
+        for row in row_set.unwrap() {
+            let row: Row = row;
+            let row = row.values()[0].as_ref().unwrap();
+            res += std::str::from_utf8(row).unwrap();
+            res += "\n";
+        }
+    }
+    res
 }
 
 pub struct MockCatalogWriter {
@@ -165,7 +184,7 @@ pub struct MockCatalogWriter {
 impl CatalogWriter for MockCatalogWriter {
     async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
         let database_id = self.gen_id();
-        self.catalog.write().create_database(ProstDatabase {
+        self.catalog.write().create_database(&ProstDatabase {
             name: db_name.to_string(),
             id: database_id,
             owner,
@@ -184,7 +203,7 @@ impl CatalogWriter for MockCatalogWriter {
         owner: UserId,
     ) -> Result<()> {
         let id = self.gen_id();
-        self.catalog.write().create_schema(ProstSchema {
+        self.catalog.write().create_schema(&ProstSchema {
             id,
             name: schema_name.to_string(),
             database_id: db_id,
@@ -205,7 +224,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_materialized_source(
+    async fn create_view(&self, _view: ProstView) -> Result<()> {
+        todo!()
+    }
+
+    async fn create_table(
         &self,
         source: ProstSource,
         mut table: ProstTable,
@@ -249,6 +272,13 @@ impl CatalogWriter for MockCatalogWriter {
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
         let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
         self.drop_table_or_source_id(table_id.table_id);
+        let indexes =
+            self.catalog
+                .read()
+                .get_all_indexes_related_to_object(database_id, schema_id, table_id);
+        for index in indexes {
+            self.drop_index(index.id).await?;
+        }
         self.catalog
             .write()
             .drop_table(database_id, schema_id, table_id);
@@ -258,8 +288,19 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn drop_view(&self, _view_id: u32) -> Result<()> {
+        todo!()
+    }
+
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
         let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        let indexes =
+            self.catalog
+                .read()
+                .get_all_indexes_related_to_object(database_id, schema_id, table_id);
+        for index in indexes {
+            self.drop_index(index.id).await?;
+        }
         self.catalog
             .write()
             .drop_table(database_id, schema_id, table_id);
@@ -323,18 +364,18 @@ impl CatalogWriter for MockCatalogWriter {
 
 impl MockCatalogWriter {
     pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
-        catalog.write().create_database(ProstDatabase {
+        catalog.write().create_database(&ProstDatabase {
             id: 0,
             name: DEFAULT_DATABASE_NAME.to_string(),
             owner: DEFAULT_SUPER_USER_ID,
         });
-        catalog.write().create_schema(ProstSchema {
+        catalog.write().create_schema(&ProstSchema {
             id: 1,
             name: DEFAULT_SCHEMA_NAME.to_string(),
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
         });
-        catalog.write().create_schema(ProstSchema {
+        catalog.write().create_schema(&ProstSchema {
             id: 2,
             name: PG_CATALOG_SCHEMA_NAME.to_string(),
             database_id: 0,
@@ -416,14 +457,14 @@ impl MockCatalogWriter {
 
     fn create_source_inner(&self, mut source: ProstSource) -> Result<u32> {
         source.id = self.gen_id();
-        self.catalog.write().create_source(source.clone());
+        self.catalog.write().create_source(&source);
         self.add_table_or_source_id(source.id, source.schema_id, source.database_id);
         Ok(source.id)
     }
 
     fn create_sink_inner(&self, mut sink: ProstSink, _graph: StreamFragmentGraph) -> Result<()> {
         sink.id = self.gen_id();
-        self.catalog.write().create_sink(sink.clone());
+        self.catalog.write().create_sink(&sink);
         self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
         Ok(())
     }
@@ -456,26 +497,23 @@ impl UserInfoWriter for MockUserInfoWriter {
         Ok(())
     }
 
-    async fn update_user(&self, request: UpdateUserRequest) -> Result<()> {
+    async fn update_user(
+        &self,
+        update_user: UserInfo,
+        update_fields: Vec<UpdateField>,
+    ) -> Result<()> {
         let mut lock = self.user_info.write();
-        let update_user = request.user.unwrap();
         let id = update_user.get_id();
         let old_name = lock.get_user_name_by_id(id).unwrap();
         let mut user_info = lock.get_user_by_name(&old_name).unwrap().clone();
-        request.update_fields.into_iter().for_each(|field| {
-            if field == UpdateField::Super as i32 {
-                user_info.is_supper = update_user.is_supper;
-            } else if field == UpdateField::Login as i32 {
-                user_info.can_login = update_user.can_login;
-            } else if field == UpdateField::CreateDb as i32 {
-                user_info.can_create_db = update_user.can_create_db;
-            } else if field == UpdateField::CreateUser as i32 {
-                user_info.can_create_user = update_user.can_create_user;
-            } else if field == UpdateField::AuthInfo as i32 {
-                user_info.auth_info = update_user.auth_info.clone();
-            } else if field == UpdateField::Rename as i32 {
-                user_info.name = update_user.name.clone();
-            }
+        update_fields.into_iter().for_each(|field| match field {
+            UpdateField::Super => user_info.is_super = update_user.is_super,
+            UpdateField::Login => user_info.can_login = update_user.can_login,
+            UpdateField::CreateDb => user_info.can_create_db = update_user.can_create_db,
+            UpdateField::CreateUser => user_info.can_create_user = update_user.can_create_user,
+            UpdateField::AuthInfo => user_info.auth_info = update_user.auth_info.clone(),
+            UpdateField::Rename => user_info.name = update_user.name.clone(),
+            UpdateField::Unspecified => unreachable!(),
         });
         lock.update_user(update_user);
         Ok(())
@@ -557,7 +595,7 @@ impl MockUserInfoWriter {
         user_info.write().create_user(UserInfo {
             id: DEFAULT_SUPER_USER_ID,
             name: DEFAULT_SUPER_USER.to_string(),
-            is_supper: true,
+            is_super: true,
             can_create_db: true,
             can_create_user: true,
             can_login: true,
@@ -578,16 +616,25 @@ pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
-    async fn pin_snapshot(&self) -> RpcResult<u64> {
-        Ok(0)
+    async fn pin_snapshot(&self) -> RpcResult<HummockSnapshot> {
+        Ok(HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 0,
+        })
     }
 
-    async fn get_epoch(&self) -> RpcResult<u64> {
-        Ok(0)
+    async fn get_epoch(&self) -> RpcResult<HummockSnapshot> {
+        Ok(HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 0,
+        })
     }
 
-    async fn flush(&self) -> RpcResult<u64> {
-        Ok(0)
+    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockSnapshot> {
+        Ok(HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 0,
+        })
     }
 
     async fn list_table_fragments(
@@ -629,15 +676,44 @@ pub static PROTO_FILE_DATA: &str = r#"
 /// Returns the file.
 /// (`NamedTempFile` will automatically delete the file when it goes out of scope.)
 pub fn create_proto_file(proto_data: &str) -> NamedTempFile {
-    let temp_file = Builder::new()
+    let in_file = Builder::new()
         .prefix("temp")
         .suffix(".proto")
-        .rand_bytes(5)
+        .rand_bytes(8)
         .tempfile()
         .unwrap();
 
-    let mut file = temp_file.as_file();
+    let out_file = Builder::new()
+        .prefix("temp")
+        .suffix(".pb")
+        .rand_bytes(8)
+        .tempfile()
+        .unwrap();
+
+    let mut file = in_file.as_file();
     file.write_all(proto_data.as_ref())
         .expect("writing binary to test file");
-    temp_file
+    file.flush().expect("flush temp file failed");
+    let include_path = in_file
+        .path()
+        .parent()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let out_path = out_file.path().to_string_lossy().into_owned();
+    let in_path = in_file.path().to_string_lossy().into_owned();
+    let mut compile = std::process::Command::new("protoc");
+
+    let out = compile
+        .arg("--include_imports")
+        .arg("-I")
+        .arg(include_path)
+        .arg(format!("--descriptor_set_out={}", out_path))
+        .arg(in_path)
+        .output()
+        .expect("failed to compile proto");
+    if !out.status.success() {
+        panic!("compile proto failed \n output: {:?}", out);
+    }
+    out_file
 }

@@ -93,17 +93,14 @@ impl Debug for SimpleProjectExecutor {
 }
 
 impl SimpleExecutor for SimpleProjectExecutor {
-    fn map_filter_chunk(
-        &mut self,
-        chunk: StreamChunk,
-    ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact()?;
+    fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>> {
+        let chunk = chunk.compact();
 
         let (data_chunk, ops) = chunk.into_parts();
 
         let projected_columns = self
             .exprs
-            .iter_mut()
+            .iter()
             .map(|expr| {
                 Column::new(expr.eval_infallible(&data_chunk, |err| {
                     self.ctx.on_compute_error(err, &self.info.identity)
@@ -119,7 +116,7 @@ impl SimpleExecutor for SimpleProjectExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -171,7 +168,8 @@ mod tests {
             DataType::Int64,
             Box::new(left_expr),
             Box::new(right_expr),
-        );
+        )
+        .unwrap();
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),

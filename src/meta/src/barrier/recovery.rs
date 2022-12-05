@@ -12,25 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-use std::iter::Map;
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
-use risingwave_pb::data::Epoch as ProstEpoch;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
+use risingwave_pb::stream_plan::barrier::Mutation;
+use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
-    UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use uuid::Uuid;
 
 use crate::barrier::command::CommandContext;
@@ -39,9 +36,8 @@ use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
-use crate::{MetaError, MetaResult};
-
-pub type RecoveryResult = (Epoch, HashSet<ActorId>, Vec<CreateMviewProgress>);
+use crate::stream::build_actor_connector_splits;
+use crate::MetaResult;
 
 impl<S> GlobalBarrierManager<S>
 where
@@ -54,7 +50,7 @@ where
 
     #[inline(always)]
     /// Initialize a retry strategy for operation in recovery.
-    fn get_retry_strategy() -> Map<ExponentialBackoff, fn(Duration) -> Duration> {
+    fn get_retry_strategy() -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(Self::RECOVERY_RETRY_BASE_INTERVAL)
             .max_delay(Self::RECOVERY_RETRY_MAX_INTERVAL)
             .map(jitter)
@@ -63,74 +59,119 @@ where
     async fn resolve_actor_info_for_recovery(&self) -> BarrierActorInfo {
         self.resolve_actor_info(
             &mut CheckpointControl::new(self.metrics.clone()),
-            &Command::checkpoint(),
+            &Command::barrier(),
         )
         .await
     }
 
+    /// Clean up all dirty streaming jobs.
+    async fn clean_dirty_fragments(&self) -> MetaResult<()> {
+        let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
+        let table_fragments = self.fragment_manager.list_table_fragments().await?;
+        let to_drop_table_fragments = table_fragments
+            .into_iter()
+            .filter(|table_fragment| {
+                !stream_job_ids.contains(&table_fragment.table_id().table_id)
+                    || !table_fragment.is_created()
+            })
+            .collect_vec();
+
+        let to_drop_streaming_ids = to_drop_table_fragments
+            .iter()
+            .map(|t| t.table_id())
+            .collect();
+
+        debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
+        self.fragment_manager
+            .drop_table_fragments_vec(&to_drop_streaming_ids)
+            .await?;
+
+        // unregister compaction group for dirty table fragments.
+        let _ = self.hummock_manager
+            .unregister_table_ids(
+                &to_drop_streaming_ids
+                    .iter()
+                    .map(|t| t.table_id)
+                    .collect_vec(),
+            )
+            .await.inspect_err(|e|
+            tracing::warn!(
+                "Failed to unregister compaction group for {:#?}.\nThey will be cleaned up on node restart.\n{:#?}",
+                to_drop_streaming_ids,
+                e)
+        );
+
+        // clean up source connector dirty changes.
+        self.source_manager
+            .drop_source_change(&to_drop_table_fragments)
+            .await;
+
+        Ok(())
+    }
+
     /// Recovery the whole cluster from the latest epoch.
-    pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> RecoveryResult {
+    pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> Epoch {
+        // pause discovery of all connector split changes and trigger config change.
+        let _source_pause_guard = self.source_manager.paused.lock().await;
+
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
         debug!("recovery start!");
+        self.clean_dirty_fragments()
+            .await
+            .expect("clean dirty fragments");
         let retry_strategy = Self::get_retry_strategy();
-        let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
+        let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
             let mut info = self.resolve_actor_info_for_recovery().await;
             let mut new_epoch = prev_epoch.next();
 
-            {
-                // Migrate expired actors to newly joined node by changing actor_map
-                let migrated = self.migrate_actors(&info).await?;
-                if migrated {
-                    info = self.resolve_actor_info_for_recovery().await;
-                }
+            // Migrate expired actors to newly joined node by changing actor_map
+            let migrated = self.migrate_actors(&info).await?;
+            if migrated {
+                info = self.resolve_actor_info_for_recovery().await;
             }
 
             // Reset all compute nodes, stop and drop existing actors.
-            if let Err(err) = self
-                .reset_compute_nodes(&info, &prev_epoch, &new_epoch)
-                .await
-            {
-                error!("reset compute nodes failed: {}", err);
-                return Err(err);
-            }
-
-            // Refresh sources in local source manger of compute node.
-            if let Err(err) = self.sync_sources(&info).await {
-                error!("sync_sources failed: {}", err);
-                return Err(err);
-            }
+            self.reset_compute_nodes(&info).await.inspect_err(|e| {
+                error!("reset compute nodes failed: {}", e);
+            })?;
 
             // update and build all actors.
-            if let Err(err) = self.update_actors(&info).await {
-                error!("update_actors failed: {}", err);
-                return Err(err);
-            }
-            if let Err(err) = self.build_actors(&info).await {
-                error!("build_actors failed: {}", err);
-                return Err(err);
-            }
+            self.update_actors(&info).await.inspect_err(|e| {
+                error!("update actors failed: {}", e);
+            })?;
+            self.build_actors(&info).await.inspect_err(|e| {
+                error!("build_actors failed: {}", e);
+            })?;
+
+            // get split assignments for all actors
+            let source_split_assignments = self.source_manager.list_assignments().await;
+            let command = Command::Plain(Some(Mutation::Add(AddMutation {
+                actor_dispatchers: Default::default(),
+                actor_splits: build_actor_connector_splits(&source_split_assignments),
+            })));
 
             let prev_epoch = new_epoch;
             new_epoch = prev_epoch.next();
             // checkpoint, used as init barrier to initialize all executors.
             let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),
+                self.snapshot_manager.clone(),
                 self.env.stream_client_pool_ref(),
                 info,
                 prev_epoch,
                 new_epoch,
-                Command::checkpoint(),
+                command,
+                true,
+                self.source_manager.clone(),
             ));
 
-            let command_ctx_clone = command_ctx.clone();
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            if let Err(err) = self.inject_barrier(command_ctx_clone, tx).await {
-                error!("inject_barrier failed: {}", err);
-                return Err(err);
-            }
-            match rx.recv().await.unwrap() {
+            let (barrier_complete_tx, mut barrier_complete_rx) =
+                tokio::sync::mpsc::unbounded_channel();
+            self.inject_barrier(command_ctx.clone(), barrier_complete_tx)
+                .await;
+            match barrier_complete_rx.recv().await.unwrap() {
                 (_, Ok(response)) => {
                     if let Err(err) = command_ctx.post_collect().await {
                         error!("post_collect failed: {}", err);
@@ -148,14 +189,7 @@ where
         .expect("Retry until recovery success.");
         debug!("recovery success");
 
-        (
-            new_epoch,
-            self.fragment_manager.all_chain_actor_ids().await,
-            responses
-                .into_iter()
-                .flat_map(|r| r.create_mview_progress)
-                .collect(),
-        )
+        new_epoch
     }
 
     /// map expired CNs to newly joined CNs, so we can migrate actors later
@@ -165,45 +199,54 @@ where
     async fn get_migrate_map_plan(
         &self,
         info: &BarrierActorInfo,
-        expired_workers: &Vec<WorkerId>,
+        expired_workers: &[WorkerId],
     ) -> (HashMap<ActorId, WorkerId>, HashMap<WorkerId, WorkerNode>) {
-        let workers_size = expired_workers.len();
         let mut cur = 0;
         let mut migrate_map = HashMap::new();
         let mut node_map = HashMap::new();
-        while cur < workers_size {
+        let start = Instant::now();
+        while cur < expired_workers.len() {
             let current_nodes = self
                 .cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
                 .await;
             let new_nodes = current_nodes
-                .iter()
-                .filter(|&node| {
+                .into_iter()
+                .filter(|node| {
                     !info.node_map.contains_key(&node.id) && !node_map.contains_key(&node.id)
                 })
                 .collect_vec();
             for new_node in new_nodes {
                 let actors = info.actor_map.get(&expired_workers[cur]).unwrap();
-                let actors_len = actors.len();
-                for actor in actors.iter().take(actors_len) {
+                for actor in actors {
                     migrate_map.insert(*actor, new_node.id);
                 }
-                node_map.insert(new_node.id, new_node.clone());
                 cur += 1;
                 debug!(
-                    "got new worker {} , migrate process ({}/{})",
-                    new_node.id, cur, workers_size
+                    "new worker joined: {}, migrate process ({}/{})",
+                    new_node.id,
+                    cur,
+                    expired_workers.len()
                 );
+                node_map.insert(new_node.id, new_node);
+                if cur == expired_workers.len() {
+                    return (migrate_map, node_map);
+                }
             }
+            warn!(
+                "waiting for new worker to join, elapsed: {}s",
+                start.elapsed().as_secs()
+            );
             // wait to get newly joined CN
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
         (migrate_map, node_map)
     }
 
     async fn migrate_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
         debug!("start migrate actors.");
-        // get expired workers
+
+        // 1. get expired workers
         let expired_workers = info
             .actor_map
             .iter()
@@ -215,52 +258,15 @@ where
             return Ok(false);
         }
         debug!("got expired workers {:#?}", expired_workers);
+
         let (migrate_map, node_map) = self.get_migrate_map_plan(info, &expired_workers).await;
-        // migrate actors in fragments, return updated fragments and pu to pu migrate plan
-        let new_fragments = self
-            .fragment_manager
+        // 2. migrate actors in fragments
+        self.fragment_manager
             .migrate_actors(&migrate_map, &node_map)
             .await?;
-        debug!("notify mapping info to frontends");
-        for table_fragment in new_fragments {
-            for table_id in table_fragment
-                .internal_table_ids()
-                .into_iter()
-                .chain(std::iter::once(table_fragment.table_id().table_id))
-            {
-                let mapping = table_fragment
-                    .get_table_hash_mapping(table_id)
-                    .expect("no data distribution found");
-                self.env
-                    .notification_manager()
-                    .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
-                    .await;
-            }
-        }
         debug!("migrate actors succeed.");
+
         Ok(true)
-    }
-
-    /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
-    /// already.
-    async fn sync_sources(&self, info: &BarrierActorInfo) -> MetaResult<()> {
-        let sources = self.catalog_manager.list_sources().await?;
-
-        let futures = info.node_map.iter().map(|(_, node)| {
-            let request = SyncSourcesRequest {
-                sources: sources.clone(),
-            };
-            async move {
-                let client = &self.env.stream_client_pool().get(node).await?;
-                client.sync_sources(request).await?;
-
-                Ok::<_, MetaError>(())
-            }
-        });
-
-        try_join_all(futures).await?;
-
-        Ok(())
     }
 
     /// Update all actors in compute nodes.
@@ -324,22 +330,13 @@ where
     }
 
     /// Reset all compute nodes by calling `force_stop_actors`.
-    async fn reset_compute_nodes(
-        &self,
-        info: &BarrierActorInfo,
-        prev_epoch: &Epoch,
-        new_epoch: &Epoch,
-    ) -> MetaResult<()> {
+    async fn reset_compute_nodes(&self, info: &BarrierActorInfo) -> MetaResult<()> {
         let futures = info.node_map.iter().map(|(_, worker_node)| async move {
             let client = self.env.stream_client_pool().get(worker_node).await?;
             debug!("force stop actors: {}", worker_node.id);
             client
                 .force_stop_actors(ForceStopActorsRequest {
                     request_id: Uuid::new_v4().to_string(),
-                    epoch: Some(ProstEpoch {
-                        curr: new_epoch.0,
-                        prev: prev_epoch.0,
-                    }),
                 })
                 .await
         });

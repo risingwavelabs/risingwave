@@ -14,8 +14,9 @@
 
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayImpl, ArrayRef, BoolArray, DataChunk, Row};
+use risingwave_common::array::{ArrayImpl, ArrayRef, BoolArray, DataChunk};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
@@ -99,15 +100,14 @@ impl Expression for IsNotNullExpression {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
-    use std::sync::Arc;
 
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{ArrayBuilder, ArrayImpl, DataChunk, DecimalArrayBuilder, Row};
-    use risingwave_common::error::Result;
+    use risingwave_common::array::{ArrayBuilder, DataChunk, DecimalArrayBuilder};
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Decimal};
 
     use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
     use crate::expr::{BoxedExpression, InputRefExpression};
+    use crate::Result;
 
     fn do_test(
         expr: BoxedExpression,
@@ -116,16 +116,13 @@ mod tests {
     ) -> Result<()> {
         let input_array = {
             let mut builder = DecimalArrayBuilder::new(3);
-            builder.append(Some(Decimal::from_str("0.1").unwrap()))?;
-            builder.append(Some(Decimal::from_str("-0.1").unwrap()))?;
-            builder.append(None)?;
-            builder.finish()?
+            builder.append(Some(Decimal::from_str("0.1").unwrap()));
+            builder.append(Some(Decimal::from_str("-0.1").unwrap()));
+            builder.append(None);
+            builder.finish()
         };
 
-        let input_chunk = DataChunk::new(
-            vec![Column::new(Arc::new(ArrayImpl::Decimal(input_array)))],
-            3,
-        );
+        let input_chunk = DataChunk::new(vec![input_array.into()], 3);
         let result_array = expr.eval(&input_chunk).unwrap();
         assert_eq!(3, result_array.len());
         for (i, v) in expected_eval_result.iter().enumerate() {

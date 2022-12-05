@@ -36,8 +36,8 @@ query RRRR
 select sum_v1, min_v1, max_v1, v3 from mv3 order by sum_v1;
 ----
 0 0 0 3
-1 NULL 1 4
-2 NULL 2 1
+1 1 1 4
+2 2 2 1
 
 statement ok
 drop materialized view mv2

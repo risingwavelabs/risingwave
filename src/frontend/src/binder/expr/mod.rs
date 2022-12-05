@@ -17,8 +17,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Function, ObjectName, Query,
-    StructField, TrimWhereField, UnaryOperator,
+    BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
+    TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -27,6 +27,7 @@ use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
 mod binary_op;
 mod column;
 mod function;
+mod order_by;
 mod subquery;
 mod value;
 
@@ -64,7 +65,7 @@ impl Binder {
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr(*expr),
             Expr::Array(exprs) => self.bind_array(exprs),
-            Expr::ArrayIndex { obj, indices } => self.bind_array_index(*obj, indices),
+            Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
             Expr::Function(f) => self.bind_function(f),
             // subquery
             Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
@@ -82,8 +83,8 @@ impl Binder {
             Expr::IsNotTrue(expr) => self.bind_is_operator(ExprType::IsNotTrue, *expr),
             Expr::IsFalse(expr) => self.bind_is_operator(ExprType::IsFalse, *expr),
             Expr::IsNotFalse(expr) => self.bind_is_operator(ExprType::IsNotFalse, *expr),
-            Expr::IsDistinctFrom(left, right) => self.bind_distinct_from(false, *left, *right),
-            Expr::IsNotDistinctFrom(left, right) => self.bind_distinct_from(true, *left, *right),
+            Expr::IsDistinctFrom(left, right) => self.bind_distinct_from(*left, *right),
+            Expr::IsNotDistinctFrom(left, right) => self.bind_not_distinct_from(*left, *right),
             Expr::Case {
                 operand,
                 conditions,
@@ -103,6 +104,10 @@ impl Binder {
             } => self.bind_in_list(*expr, list, negated),
             // special syntax for date/time
             Expr::Extract { field, expr } => self.bind_extract(field, *expr),
+            Expr::AtTimeZone {
+                timestamp,
+                time_zone,
+            } => self.bind_at_time_zone(*timestamp, time_zone),
             // special syntaxt for string
             Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
             Expr::Substring {
@@ -124,12 +129,12 @@ impl Binder {
         }
     }
 
-    pub(super) fn bind_extract(&mut self, field: DateTimeField, expr: Expr) -> Result<ExprImpl> {
+    pub(super) fn bind_extract(&mut self, field: String, expr: Expr) -> Result<ExprImpl> {
         let arg = self.bind_expr(expr)?;
         let arg_type = arg.return_type();
         Ok(FunctionCall::new(
             ExprType::Extract,
-            vec![self.bind_string(field.to_string())?.into(), arg],
+            vec![self.bind_string(field.clone())?.into(), arg],
         )
         .map_err(|_| {
             ErrorCode::NotImplemented(
@@ -141,6 +146,12 @@ impl Binder {
             )
         })?
         .into())
+    }
+
+    pub(super) fn bind_at_time_zone(&mut self, input: Expr, time_zone: String) -> Result<ExprImpl> {
+        let input = self.bind_expr(input)?;
+        let time_zone = self.bind_string(time_zone)?.into();
+        FunctionCall::new(ExprType::AtTimeZone, vec![input, time_zone]).map(Into::into)
     }
 
     pub(super) fn bind_in_list(
@@ -359,27 +370,30 @@ impl Binder {
         Ok(FunctionCall::new(func_type, vec![expr])?.into())
     }
 
-    pub(super) fn bind_distinct_from(
-        &mut self,
-        negated: bool,
-        left: Expr,
-        right: Expr,
-    ) -> Result<ExprImpl> {
+    pub(super) fn bind_distinct_from(&mut self, left: Expr, right: Expr) -> Result<ExprImpl> {
         let left = self.bind_expr(left)?;
         let right = self.bind_expr(right)?;
-
         let func_call = FunctionCall::new(ExprType::IsDistinctFrom, vec![left, right]);
+        Ok(func_call?.into())
+    }
 
-        if negated {
-            Ok(FunctionCall::new(ExprType::Not, vec![func_call?.into()])?.into())
-        } else {
-            Ok(func_call?.into())
-        }
+    pub(super) fn bind_not_distinct_from(&mut self, left: Expr, right: Expr) -> Result<ExprImpl> {
+        let left = self.bind_expr(left)?;
+        let right = self.bind_expr(right)?;
+        let func_call = FunctionCall::new(ExprType::IsNotDistinctFrom, vec![left, right]);
+        Ok(func_call?.into())
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
-        self.bind_expr(expr)?
-            .cast_explicit(bind_data_type(&data_type)?)
+        self.bind_cast_inner(expr, bind_data_type(&data_type)?)
+    }
+
+    pub fn bind_cast_inner(&mut self, expr: Expr, data_type: DataType) -> Result<ExprImpl> {
+        if let Expr::Array(ref expr) = expr && matches!(&data_type, DataType::List{ .. } ) {
+            return self.bind_array_cast(expr.clone(), data_type);
+        }
+        let lhs = self.bind_expr(expr)?;
+        lhs.cast_explicit(data_type)
     }
 }
 
@@ -411,6 +425,12 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
 }
 
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
+    let new_err = || {
+        ErrorCode::NotImplemented(
+            format!("unsupported data type: {:}", data_type),
+            None.into(),
+        )
+    };
     let data_type = match data_type {
         AstDataType::Boolean => DataType::Boolean,
         AstDataType::SmallInt(None) => DataType::Int16,
@@ -419,7 +439,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Real | AstDataType::Float(Some(1..=24)) => DataType::Float32,
         AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
         AstDataType::Decimal(None, None) => DataType::Decimal,
-        AstDataType::Varchar | AstDataType::String => DataType::Varchar,
+        AstDataType::Varchar | AstDataType::String | AstDataType::Text => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,
@@ -442,20 +462,21 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 .collect::<Result<Vec<_>>>()?,
             types.iter().map(|f| f.name.real_value()).collect_vec(),
         ),
-        AstDataType::Text => {
-            return Err(ErrorCode::NotImplemented(
-                format!("unsupported data type: {:}", data_type),
-                2535.into(),
-            )
-            .into())
+        AstDataType::Custom(qualified_type_name) if qualified_type_name.0.len() == 1 => {
+            // In PostgreSQL, these are not keywords but pre-defined names that could be extended by
+            // `CREATE TYPE`.
+            match qualified_type_name.0[0].real_value().as_str() {
+                "int2" => DataType::Int16,
+                "int4" => DataType::Int32,
+                "int8" => DataType::Int64,
+                "float4" => DataType::Float32,
+                "float8" => DataType::Float64,
+                "timestamptz" => DataType::Timestampz,
+                _ => return Err(new_err().into()),
+            }
         }
-        _ => {
-            return Err(ErrorCode::NotImplemented(
-                format!("unsupported data type: {:}", data_type),
-                None.into(),
-            )
-            .into())
-        }
+        AstDataType::Bytea => DataType::Bytea,
+        _ => return Err(new_err().into()),
     };
     Ok(data_type)
 }

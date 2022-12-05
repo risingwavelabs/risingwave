@@ -22,14 +22,14 @@ use std::path::Path;
 use bytes::{Buf, BufMut};
 use libc::c_void;
 use nix::fcntl::{fallocate, FallocateFlags};
-use nix::sys::mman::{mmap, mremap, msync, munmap, MRemapFlags, MapFlags, MsFlags, ProtFlags};
+use nix::sys::mman::{
+    madvise, mmap, mremap, msync, munmap, MRemapFlags, MapFlags, MmapAdvise, MsFlags, ProtFlags,
+};
 use nix::sys::stat::fstat;
 
 use super::error::Result;
 use super::{utils, ST_BLOCK_SIZE};
 use crate::hummock::TieredCacheKey;
-
-const GROW_UNIT: usize = 1024 * 1024; // 1 MiB
 
 pub type SlotId = usize;
 
@@ -86,6 +86,8 @@ where
     /// Meta file size in bytes.
     size: usize,
 
+    fallocate_unit: usize,
+
     /// Free slots list.
     free: VecDeque<usize>,
 
@@ -99,7 +101,7 @@ impl<K> MetaFile<K>
 where
     K: TieredCacheKey,
 {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+    pub fn open(path: impl AsRef<Path>, fallocate_unit: usize) -> Result<Self> {
         let mut oopts = OpenOptions::new();
         oopts.create(true);
         oopts.write(true);
@@ -112,8 +114,8 @@ where
         let stat = fstat(fd)?;
         let size = if stat.st_blocks == 0 {
             // newly created
-            fallocate(fd, FallocateFlags::empty(), 0, GROW_UNIT as i64)?;
-            GROW_UNIT
+            fallocate(fd, FallocateFlags::empty(), 0, fallocate_unit as i64)?;
+            fallocate_unit
         } else {
             stat.st_blocks as usize * ST_BLOCK_SIZE
         };
@@ -127,6 +129,9 @@ where
                 fd,
                 0,
             )? as *mut u8;
+            if let Err(e) = madvise(ptr as *mut c_void, size, MmapAdvise::MADV_WILLNEED) {
+                tracing::error!("madvise fail: {:?}", e);
+            }
             let buffer = ManuallyDrop::new(Vec::from_raw_parts(ptr, size, size));
             (ptr, buffer)
         };
@@ -137,6 +142,8 @@ where
             ptr,
             buffer,
             size,
+
+            fallocate_unit,
 
             free: VecDeque::new(),
 
@@ -237,13 +244,13 @@ where
 
     fn grow(&mut self) -> Result<()> {
         let old_size = self.size;
-        let new_size = old_size + GROW_UNIT;
+        let new_size = old_size + self.fallocate_unit;
 
         fallocate(
             self.fd,
             FallocateFlags::empty(),
             old_size as i64,
-            GROW_UNIT as i64,
+            self.fallocate_unit as i64,
         )?;
         let (ptr, buffer) = unsafe {
             let ptr = mremap(
@@ -253,6 +260,9 @@ where
                 MRemapFlags::MREMAP_MAYMOVE,
                 None,
             )? as *mut u8;
+            if let Err(e) = madvise(ptr as *mut c_void, new_size, MmapAdvise::MADV_WILLNEED) {
+                tracing::error!("madvise fail: {:?}", e);
+            }
             let buffer = ManuallyDrop::new(Vec::from_raw_parts(ptr, new_size, new_size));
             (ptr, buffer)
         };
@@ -289,14 +299,17 @@ mod tests {
     use super::super::test_utils::TestCacheKey;
     use super::*;
 
+    const FALLOCATE_UNIT: usize = 1024 * 1024;
+
     #[test]
     fn test_enc_dec() {
         let dir = tempfile::tempdir().unwrap();
         let mut map = HashMap::new();
         let slot_info_len = MetaFile::<TestCacheKey>::slot_info_len();
 
-        let mut mf: MetaFile<TestCacheKey> = MetaFile::open(dir.path().join("test-meta")).unwrap();
-        assert_eq!(mf.size(), GROW_UNIT);
+        let mut mf: MetaFile<TestCacheKey> =
+            MetaFile::open(dir.path().join("test-meta"), FALLOCATE_UNIT).unwrap();
+        assert_eq!(mf.size(), FALLOCATE_UNIT);
 
         let bloc = BlockLoc { bidx: 1, len: 2 };
         let key = TestCacheKey(3);
@@ -306,7 +319,8 @@ mod tests {
         assert_eq!(key0, key);
         drop(mf);
 
-        let mut mf: MetaFile<TestCacheKey> = MetaFile::open(dir.path().join("test-meta")).unwrap();
+        let mut mf: MetaFile<TestCacheKey> =
+            MetaFile::open(dir.path().join("test-meta"), FALLOCATE_UNIT).unwrap();
         let (bloc0, key0) = mf.get(slot).unwrap();
         assert_eq!(bloc0, bloc);
         assert_eq!(key0, key);
@@ -323,14 +337,14 @@ mod tests {
             let slot = mf.insert(&key, &bloc).unwrap();
             map.insert(slot, (key, bloc));
         }
-        assert_eq!(mf.size(), GROW_UNIT * 2);
+        assert_eq!(mf.size(), FALLOCATE_UNIT * 2);
         for (slot, (key, bloc)) in &map {
             let (gbloc, gkey) = mf.get(*slot).unwrap();
             assert_eq!(gbloc, *bloc);
             assert_eq!(gkey, *key);
         }
 
-        for slot in (GROW_UNIT / slot_info_len + 1)..(GROW_UNIT * 2 / slot_info_len) {
+        for slot in (FALLOCATE_UNIT / slot_info_len + 1)..(FALLOCATE_UNIT * 2 / slot_info_len) {
             assert_eq!(mf.get(slot), None);
         }
 
@@ -339,9 +353,9 @@ mod tests {
             assert_eq!(mf.free(slot), None);
         }
 
-        for slot in 0..(GROW_UNIT * 2 / slot_info_len) {
+        for slot in 0..(FALLOCATE_UNIT * 2 / slot_info_len) {
             assert_eq!(mf.get(slot), None);
         }
-        assert_eq!(mf.free.len(), GROW_UNIT * 2 / slot_info_len);
+        assert_eq!(mf.free.len(), FALLOCATE_UNIT * 2 / slot_info_len);
     }
 }

@@ -3,20 +3,20 @@
   formatted_ast: |
     Grant { privileges: All { with_privileges_keyword: false }, objects: Databases([ObjectName([Ident { value: "database", quote_style: None }])]), grantees: [Ident { value: "user1", quote_style: None }], with_grant_option: true, granted_by: Some(Ident { value: "user", quote_style: None }) }
 
-- input: GRANT ALL ON SCHEMA database.schema1, database.schema2 TO user1 WITH GRANT OPTION GRANTED BY user
-  formatted_sql: GRANT ALL ON SCHEMA database.schema1, database.schema2 TO user1 WITH GRANT OPTION GRANTED BY user
+- input: GRANT ALL ON SCHEMA schema1, schema2 TO user1 WITH GRANT OPTION GRANTED BY user
+  formatted_sql: GRANT ALL ON SCHEMA schema1, schema2 TO user1 WITH GRANT OPTION GRANTED BY user
   formatted_ast: |
-    Grant { privileges: All { with_privileges_keyword: false }, objects: Schemas([ObjectName([Ident { value: "database", quote_style: None }, Ident { value: "schema1", quote_style: None }]), ObjectName([Ident { value: "database", quote_style: None }, Ident { value: "schema2", quote_style: None }])]), grantees: [Ident { value: "user1", quote_style: None }], with_grant_option: true, granted_by: Some(Ident { value: "user", quote_style: None }) }
+    Grant { privileges: All { with_privileges_keyword: false }, objects: Schemas([ObjectName([Ident { value: "schema1", quote_style: None }]), ObjectName([Ident { value: "schema2", quote_style: None }])]), grantees: [Ident { value: "user1", quote_style: None }], with_grant_option: true, granted_by: Some(Ident { value: "user", quote_style: None }) }
 
-- input: GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA database.schema TO user1 GRANTED BY user
-  formatted_sql: GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA database.schema TO user1 GRANTED BY user
+- input: GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA schema TO user1 GRANTED BY user
+  formatted_sql: GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA schema TO user1 GRANTED BY user
   formatted_ast: |
-    Grant { privileges: All { with_privileges_keyword: true }, objects: AllSourcesInSchema { schemas: [ObjectName([Ident { value: "database", quote_style: None }, Ident { value: "schema", quote_style: None }])] }, grantees: [Ident { value: "user1", quote_style: None }], with_grant_option: false, granted_by: Some(Ident { value: "user", quote_style: None }) }
+    Grant { privileges: All { with_privileges_keyword: true }, objects: AllSourcesInSchema { schemas: [ObjectName([Ident { value: "schema", quote_style: None }])] }, grantees: [Ident { value: "user1", quote_style: None }], with_grant_option: false, granted_by: Some(Ident { value: "user", quote_style: None }) }
 
-- input: GRANT ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA database.schema TO user1 GRANTED BY user
-  formatted_sql: GRANT ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA database.schema TO user1 GRANTED BY user
+- input: GRANT ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA schema TO user1 GRANTED BY user
+  formatted_sql: GRANT ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA schema TO user1 GRANTED BY user
   formatted_ast: |
-    Grant { privileges: All { with_privileges_keyword: true }, objects: AllMviewsInSchema { schemas: [ObjectName([Ident { value: "database", quote_style: None }, Ident { value: "schema", quote_style: None }])] }, grantees: [Ident { value: "user1", quote_style: None }], with_grant_option: false, granted_by: Some(Ident { value: "user", quote_style: None }) }
+    Grant { privileges: All { with_privileges_keyword: true }, objects: AllMviewsInSchema { schemas: [ObjectName([Ident { value: "schema", quote_style: None }])] }, grantees: [Ident { value: "user1", quote_style: None }], with_grant_option: false, granted_by: Some(Ident { value: "user", quote_style: None }) }
 
 - input: REVOKE GRANT OPTION FOR ALL ON DATABASE database FROM user1 GRANTED BY user
   formatted_sql: REVOKE GRANT OPTION FOR ALL ON DATABASE database FROM user1 GRANTED BY user RESTRICT
@@ -28,12 +28,12 @@
   formatted_ast: |
     Revoke { privileges: All { with_privileges_keyword: true }, objects: Databases([ObjectName([Ident { value: "database", quote_style: None }])]), grantees: [Ident { value: "user1", quote_style: None }], granted_by: Some(Ident { value: "user", quote_style: None }), revoke_grant_option: false, cascade: false }
 
-- input: REVOKE ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA database.schema FROM user1
-  formatted_sql: REVOKE ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA database.schema FROM user1 RESTRICT
+- input: REVOKE ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA schema FROM user1
+  formatted_sql: REVOKE ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA schema FROM user1 RESTRICT
   formatted_ast: |
-    Revoke { privileges: All { with_privileges_keyword: true }, objects: AllMviewsInSchema { schemas: [ObjectName([Ident { value: "database", quote_style: None }, Ident { value: "schema", quote_style: None }])] }, grantees: [Ident { value: "user1", quote_style: None }], granted_by: None, revoke_grant_option: false, cascade: false }
+    Revoke { privileges: All { with_privileges_keyword: true }, objects: AllMviewsInSchema { schemas: [ObjectName([Ident { value: "schema", quote_style: None }])] }, grantees: [Ident { value: "user1", quote_style: None }], granted_by: None, revoke_grant_option: false, cascade: false }
 
-- input: REVOKE ALL PRIVILEGES ON ALL SOURCES IN SCHEMA database.schema FROM user1
-  formatted_sql: REVOKE ALL PRIVILEGES ON ALL SOURCES IN SCHEMA database.schema FROM user1 RESTRICT
+- input: REVOKE ALL PRIVILEGES ON ALL SOURCES IN SCHEMA schema FROM user1
+  formatted_sql: REVOKE ALL PRIVILEGES ON ALL SOURCES IN SCHEMA schema FROM user1 RESTRICT
   formatted_ast: |
-    Revoke { privileges: All { with_privileges_keyword: true }, objects: AllSourcesInSchema { schemas: [ObjectName([Ident { value: "database", quote_style: None }, Ident { value: "schema", quote_style: None }])] }, grantees: [Ident { value: "user1", quote_style: None }], granted_by: None, revoke_grant_option: false, cascade: false }
+    Revoke { privileges: All { with_privileges_keyword: true }, objects: AllSourcesInSchema { schemas: [ObjectName([Ident { value: "schema", quote_style: None }])] }, grantees: [Ident { value: "user1", quote_style: None }], granted_by: None, revoke_grant_option: false, cascade: false }

@@ -16,24 +16,25 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_stack_trace::{SpanValue, StackTrace};
+use futures::future::join_all;
 use futures::pin_mut;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
-use risingwave_common::error::Result;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
+use super::subtask::SubtaskHandle;
 use super::StreamConsumer;
-use crate::executor::Epoch;
+use crate::error::StreamResult;
 use crate::task::{ActorId, SharedContext};
 
 /// Shared by all operators of an actor.
-#[derive(Default)]
 pub struct ActorContext {
     pub id: ActorId,
 
-    /// TODO: report errors and prompt the user.
+    // TODO: report errors and prompt the user.
     pub errors: Mutex<HashMap<String, Vec<ExprError>>>,
 }
 
@@ -43,7 +44,7 @@ impl ActorContext {
     pub fn create(id: ActorId) -> ActorContextRef {
         Arc::new(Self {
             id,
-            ..Default::default()
+            errors: Default::default(),
         })
     }
 
@@ -59,11 +60,14 @@ impl ActorContext {
 
 /// `Actor` is the basic execution unit in the streaming framework.
 pub struct Actor<C> {
+    /// The [`StreamConsumer`] of the actor.
     consumer: C,
-    id: ActorId,
+    /// The subtasks to execute concurrently.
+    subtasks: Vec<SubtaskHandle>,
+
     context: Arc<SharedContext>,
     _metrics: Arc<StreamingMetrics>,
-    _actor_context: ActorContextRef,
+    actor_context: ActorContextRef,
 }
 
 impl<C> Actor<C>
@@ -72,32 +76,44 @@ where
 {
     pub fn new(
         consumer: C,
-        id: ActorId,
+        subtasks: Vec<SubtaskHandle>,
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
     ) -> Self {
         Self {
             consumer,
-            id,
+            subtasks,
             context,
             _metrics: metrics,
-            _actor_context: actor_context,
+            actor_context,
         }
     }
 
-    pub async fn run(self) -> Result<()> {
-        let span_name = format!("actor_poll_{:03}", self.id);
+    #[inline(always)]
+    pub async fn run(mut self) -> StreamResult<()> {
+        tokio::join!(
+            // Drive the subtasks concurrently.
+            join_all(std::mem::take(&mut self.subtasks)),
+            self.run_consumer(),
+        )
+        .1
+    }
+
+    async fn run_consumer(self) -> StreamResult<()> {
+        let id = self.actor_context.id;
+
+        let span_name = format!("actor_poll_{:03}", id);
         let mut span = {
             let mut span = Span::enter_with_local_parent("actor_poll");
             span.add_property(|| ("otel.name", span_name.to_string()));
-            span.add_property(|| ("next", self.id.to_string()));
+            span.add_property(|| ("next", id.to_string()));
             span.add_property(|| ("next", "Outbound".to_string()));
             span.add_property(|| ("epoch", (-1).to_string()));
             span
         };
 
-        let mut last_epoch: Option<Epoch> = None;
+        let mut last_epoch: Option<EpochPair> = None;
 
         let stream = Box::new(self.consumer).execute();
         pin_mut!(stream);
@@ -115,14 +131,12 @@ where
             last_epoch = Some(barrier.epoch);
 
             // Collect barriers to local barrier manager
-            self.context
-                .lock_barrier_manager()
-                .collect(self.id, &barrier)?;
+            self.context.lock_barrier_manager().collect(id, &barrier);
 
             // Then stop this actor if asked
-            let to_stop = barrier.is_stop_or_update_drop_actor(self.id);
+            let to_stop = barrier.is_stop_or_update_drop_actor(id);
             if to_stop {
-                tracing::trace!(actor_id = self.id, "actor exit");
+                tracing::trace!(actor_id = id, "actor exit");
                 return Ok(());
             }
 
@@ -130,14 +144,12 @@ where
             span = {
                 let mut span = Span::enter_with_local_parent("actor_poll");
                 span.add_property(|| ("otel.name", span_name.to_string()));
-                span.add_property(|| ("next", self.id.to_string()));
+                span.add_property(|| ("next", id.to_string()));
                 span.add_property(|| ("next", "Outbound".to_string()));
                 span.add_property(|| ("epoch", barrier.epoch.curr.to_string()));
                 span
             };
         }
-
-        tracing::error!(actor_id = self.id, "actor exit without stop barrier");
 
         Ok(())
     }

@@ -57,20 +57,11 @@ impl ComputeNodeService {
             .arg("--client-address")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
-            .arg("1");
-
-        if config.enable_async_stack_trace {
-            cmd.arg("--enable-async-stack-trace");
-        }
-
-        if config.enable_tiered_cache {
-            let prefix_data = env::var("PREFIX_DATA")?;
-            cmd.arg("--file-cache-dir").arg(
-                PathBuf::from(prefix_data)
-                    .join("filecache")
-                    .join(config.port.to_string()),
-            );
-        }
+            .arg("1")
+            .arg("--async-stack-trace")
+            .arg(&config.async_stack_trace)
+            .arg("--connector-rpc-endpoint")
+            .arg(&config.connector_rpc_endpoint);
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {
@@ -90,17 +81,39 @@ impl ComputeNodeService {
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
 
-        let is_shared_backend = add_storage_backend(
-            &config.id,
-            provide_minio,
-            provide_aws_s3,
-            hummock_in_memory_strategy,
-            cmd,
-        )?;
+        let is_shared_backend = match (
+            config.enable_in_memory_kv_state_backend,
+            provide_minio.as_slice(),
+            provide_aws_s3.as_slice(),
+        ) {
+            (true, [], []) => {
+                cmd.arg("--state-store").arg("in-memory");
+                false
+            }
+            (true, _, _) => {
+                return Err(anyhow!(
+                    "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
+                ));
+            }
+            (false, provide_minio, provide_aws_s3) => add_storage_backend(
+                &config.id,
+                provide_minio,
+                provide_aws_s3,
+                hummock_in_memory_strategy,
+                cmd,
+            )?,
+        };
+
         if provide_compute_node.len() > 1 && !is_shared_backend {
-            return Err(anyhow!(
-                "should use a shared backend (e.g. MinIO) for multiple compute-node configuration. Consider adding `use: minio` in risedev config."
-            ));
+            if config.enable_in_memory_kv_state_backend {
+                // Using a non-shared backend with multiple compute nodes will be problematic for
+                // state sharing like scaling. However, for distributed end-to-end tests with
+                // in-memory state store, this is acceptable.
+            } else {
+                return Err(anyhow!(
+                    "Hummock storage may behave incorrectly with in-memory backend for multiple compute-node configuration. Should use a shared backend (e.g. MinIO) instead. Consider adding `use: minio` in risedev config."
+                ));
+            }
         }
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
@@ -136,9 +149,26 @@ impl Task for ComputeNodeService {
                 Path::new(&env::var("PREFIX_LOG")?).join(format!("profile-{}", self.id())),
             );
         }
+
+        if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
+            // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
+            cmd.env(
+                "_RJEM_MALLOC_CONF",
+                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compute-node",
+            );
+        }
+
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Isolated)?;
+        if self.config.enable_tiered_cache {
+            let prefix_data = env::var("PREFIX_DATA")?;
+            cmd.arg("--file-cache-dir").arg(
+                PathBuf::from(prefix_data)
+                    .join("filecache")
+                    .join(self.config.port.to_string()),
+            );
+        }
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

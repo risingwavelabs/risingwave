@@ -16,29 +16,35 @@ use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+// use tokio::sync::Mutex;
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use rand::RngCore;
+use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::FrontendConfig;
-use risingwave_common::error::Result;
+use risingwave_common::config::{load_config, BatchConfig};
+use risingwave_common::error::{Result, RwError};
+use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
+use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_common_service::MetricsManager;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_rpc_client::{ComputeClientPool, MetaClient};
-use risingwave_sqlparser::ast::{ShowObject, Statement};
+use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
+use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -46,12 +52,16 @@ use tokio::task::JoinHandle;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
-use crate::catalog::root_catalog::Catalog;
+use crate::catalog::root_catalog::{Catalog, SchemaPath};
+use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
 use crate::expr::CorrelatedId;
 use crate::handler::handle;
+use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
+use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
-use crate::observer::observer_manager::FrontendObserverNode;
+use crate::monitor::FrontendMetrics;
+use crate::observer::FrontendObserverNode;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
@@ -60,11 +70,12 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::FrontendOpts;
+use crate::utils::WithOptions;
+use crate::{FrontendConfig, FrontendOpts, PgResponseStream, TableCatalog};
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
-    // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
+    // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
     pub next_id: AtomicI32,
     /// For debugging purposes, store the SQL string in Context
     pub sql: Arc<str>,
@@ -78,8 +89,8 @@ pub struct OptimizerContext {
     pub optimizer_trace: Arc<Mutex<Vec<String>>>,
     /// Store correlated id
     pub next_correlated_id: AtomicU32,
-    /// Store handle_with_properties for internal table
-    pub with_properties: HashMap<String, String>,
+    /// Store options or properties from the `with` clause
+    pub with_options: WithOptions,
 }
 
 #[derive(Clone, Debug)]
@@ -123,9 +134,9 @@ impl OptimizerContextRef {
         self.inner.explain_trace.load(Ordering::Acquire)
     }
 
-    pub fn trace(&self, str: String) {
+    pub fn trace(&self, str: impl Into<String>) {
         let mut guard = self.inner.optimizer_trace.lock().unwrap();
-        guard.push(str);
+        guard.push(str.into());
         guard.push("\n".to_string());
     }
 
@@ -136,7 +147,7 @@ impl OptimizerContextRef {
 }
 
 impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>) -> Self {
+    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>, with_options: WithOptions) -> Self {
         Self {
             session_ctx,
             next_id: AtomicI32::new(0),
@@ -145,7 +156,7 @@ impl OptimizerContext {
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
             next_correlated_id: AtomicU32::new(1),
-            with_properties: HashMap::new(),
+            with_options,
         }
     }
 
@@ -161,7 +172,7 @@ impl OptimizerContext {
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
             next_correlated_id: AtomicU32::new(1),
-            with_properties: HashMap::new(),
+            with_options: Default::default(),
         }
         .into()
     }
@@ -175,15 +186,6 @@ impl std::fmt::Debug for OptimizerContext {
             self.next_id.load(Ordering::Relaxed)
         )
     }
-}
-
-fn load_config(opts: &FrontendOpts) -> FrontendConfig {
-    if opts.config_path.is_empty() {
-        return FrontendConfig::default();
-    }
-
-    let config_path = PathBuf::from(opts.config_path.to_owned());
-    FrontendConfig::init(config_path).unwrap()
 }
 
 /// The global environment for the frontend server.
@@ -200,16 +202,21 @@ pub struct FrontendEnv {
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     server_addr: HostAddr,
+    client_pool: ComputeClientPoolRef,
+
+    /// Each session is identified by (process_id,
+    /// secret_key). When Cancel Request received, find corresponding session and cancel all
+    /// running queries.
+    sessions_map: SessionMapRef,
+
+    pub frontend_metrics: Arc<FrontendMetrics>,
+
+    batch_config: BatchConfig,
 }
 
-impl FrontendEnv {
-    pub async fn init(
-        opts: &FrontendOpts,
-    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
-        Self::with_meta_client(meta_client, opts).await
-    }
+type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
+impl FrontendEnv {
     pub fn mock() -> Self {
         use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
@@ -222,13 +229,15 @@ impl FrontendEnv {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
-        let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+        let compute_client_pool = Arc::new(ComputeClientPool::default());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
             compute_client_pool,
+            catalog_reader.clone(),
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
+        let client_pool = Arc::new(ComputeClientPool::default());
         Self {
             meta_client,
             catalog_writer,
@@ -239,30 +248,48 @@ impl FrontendEnv {
             query_manager,
             hummock_snapshot_manager,
             server_addr,
+            client_pool,
+            sessions_map: Arc::new(Mutex::new(HashMap::new())),
+            frontend_metrics: Arc::new(FrontendMetrics::for_test()),
+            batch_config: BatchConfig::default(),
         }
     }
 
-    pub async fn with_meta_client(
-        mut meta_client: MetaClient,
+    pub async fn init(
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config = load_config(opts);
-        tracing::info!("Starting frontend node with config {:?}", config);
+        let frontend_config: FrontendConfig = load_config(&opts.config_path).unwrap();
+        let batch_config: BatchConfig = load_config(&opts.config_path).unwrap();
+        tracing::info!(
+            "Starting frontend node with\nfrontend config {:?}\nbatch config {:?}",
+            frontend_config,
+            batch_config
+        );
 
         let frontend_address: HostAddr = opts
             .client_address
             .as_ref()
-            .unwrap_or(&opts.host)
+            .unwrap_or_else(|| {
+                tracing::warn!("Client address is not specified, defaulting to host address");
+                &opts.host
+            })
             .parse()
             .unwrap();
+        tracing::info!("Client address is {}", frontend_address);
+
         // Register in meta by calling `AddWorkerNode` RPC.
-        meta_client
-            .register(WorkerType::Frontend, &frontend_address, 0)
-            .await?;
+        let meta_client = MetaClient::register_new(
+            opts.meta_addr.clone().as_str(),
+            WorkerType::Frontend,
+            &frontend_address,
+            0,
+        )
+        .await?;
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            Duration::from_millis(frontend_config.server.heartbeat_interval_ms as u64),
+            Duration::from_secs(frontend_config.server.max_heartbeat_interval_secs as u64),
             vec![],
         );
 
@@ -279,11 +306,14 @@ impl FrontendEnv {
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
-        let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+        let compute_client_pool = Arc::new(ComputeClientPool::new(
+            frontend_config.server.connection_pool_size,
+        ));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
             compute_client_pool,
+            catalog_reader.clone(),
         );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
@@ -302,16 +332,38 @@ impl FrontendEnv {
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
         );
-        let observer_manager = ObserverManager::new(
-            meta_client.clone(),
-            frontend_address.clone(),
-            Box::new(frontend_observer_node),
-            WorkerType::Frontend,
-        )
-        .await;
-        let observer_join_handle = observer_manager.start().await?;
+        let observer_manager =
+            ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
+                .await;
+        let observer_join_handle = observer_manager.start().await;
 
         meta_client.activate(&frontend_address).await?;
+
+        let client_pool = Arc::new(ComputeClientPool::new(
+            frontend_config.server.connection_pool_size,
+        ));
+
+        let registry = prometheus::Registry::new();
+        monitor_process(&registry).unwrap();
+        let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
+
+        if opts.metrics_level > 0 {
+            MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
+        }
+
+        let health_srv = HealthServiceImpl::new();
+        let host = opts.health_check_listener_addr.clone();
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(HealthServer::new(health_srv))
+                .serve(host.parse().unwrap())
+                .await
+                .unwrap();
+        });
+        tracing::info!(
+            "Health Check RPC Listener is set up on {}",
+            opts.health_check_listener_addr.clone()
+        );
 
         Ok((
             Self {
@@ -324,6 +376,10 @@ impl FrontendEnv {
                 query_manager,
                 hummock_snapshot_manager,
                 server_addr: frontend_address,
+                client_pool,
+                frontend_metrics,
+                sessions_map: Arc::new(Mutex::new(HashMap::new())),
+                batch_config,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -332,7 +388,6 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's catalog writer.
-    #[expect(clippy::explicit_auto_deref)]
     pub fn catalog_writer(&self) -> &dyn CatalogWriter {
         &*self.catalog_writer
     }
@@ -343,7 +398,6 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's user info writer.
-    #[expect(clippy::explicit_auto_deref)]
     pub fn user_info_writer(&self) -> &dyn UserInfoWriter {
         &*self.user_info_writer
     }
@@ -353,16 +407,14 @@ impl FrontendEnv {
         &self.user_info_reader
     }
 
-    #[expect(clippy::explicit_auto_deref)]
     pub fn worker_node_manager(&self) -> &WorkerNodeManager {
-        &*self.worker_node_manager
+        &self.worker_node_manager
     }
 
     pub fn worker_node_manager_ref(&self) -> WorkerNodeManagerRef {
         self.worker_node_manager.clone()
     }
 
-    #[expect(clippy::explicit_auto_deref)]
     pub fn meta_client(&self) -> &dyn FrontendMetaClient {
         &*self.meta_client
     }
@@ -381,6 +433,14 @@ impl FrontendEnv {
 
     pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
+    }
+
+    pub fn client_pool(&self) -> ComputeClientPoolRef {
+        self.client_pool.clone()
+    }
+
+    pub fn batch_config(&self) -> &BatchConfig {
+        &self.batch_config
     }
 }
 
@@ -407,6 +467,9 @@ pub struct SessionImpl {
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: RwLock<ConfigMap>,
+
+    /// Identified by process_id, secret_key. Corresponds to SessionManager.
+    id: (i32, i32),
 }
 
 impl SessionImpl {
@@ -414,12 +477,14 @@ impl SessionImpl {
         env: FrontendEnv,
         auth_context: Arc<AuthContext>,
         user_authenticator: UserAuthenticator,
+        id: SessionId,
     ) -> Self {
         Self {
             env,
             auth_context,
             user_authenticator,
             config_map: RwLock::new(Default::default()),
+            id,
         }
     }
 
@@ -434,6 +499,8 @@ impl SessionImpl {
             )),
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),
+            // Mock session use non-sense id.
+            id: (0, 0),
         }
     }
 
@@ -457,12 +524,102 @@ impl SessionImpl {
         self.auth_context.user_id
     }
 
-    pub fn config(&self) -> RwLockReadGuard<ConfigMap> {
+    pub fn config(&self) -> RwLockReadGuard<'_, ConfigMap> {
         self.config_map.read()
     }
 
-    pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
+    pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
         self.config_map.write().set(key, value)
+    }
+
+    pub fn session_id(&self) -> SessionId {
+        self.id
+    }
+
+    pub fn check_relation_name_duplicated(&self, name: ObjectName) -> Result<()> {
+        let db_name = self.database();
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let (schema_name, view_name) = {
+            let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+            let search_path = self.config().get_search_path();
+            let user_name = &self.auth_context().user_name;
+            let schema_name = match schema_name {
+                Some(schema_name) => schema_name,
+                None => catalog_reader
+                    .first_valid_schema(db_name, &search_path, user_name)?
+                    .name(),
+            };
+            (schema_name, table_name)
+        };
+        catalog_reader
+            .check_relation_name_duplicated(db_name, &schema_name, &view_name)
+            .map_err(RwError::from)
+    }
+
+    /// Also check if the user has the privilege to create in the schema.
+    pub fn get_database_and_schema_id_for_create(
+        &self,
+        schema_name: Option<String>,
+    ) -> Result<(DatabaseId, SchemaId)> {
+        let db_name = self.database();
+
+        let search_path = self.config().get_search_path();
+        let user_name = &self.auth_context().user_name;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
+
+        check_schema_writable(&schema.name())?;
+        if schema.name() != DEFAULT_SCHEMA_NAME {
+            check_privileges(
+                self,
+                &vec![ObjectCheckItem::new(
+                    schema.owner(),
+                    Action::Create,
+                    Object::SchemaId(schema.id()),
+                )],
+            )?;
+        }
+
+        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
+        Ok((db_id, schema.id()))
+    }
+
+    /// Also check if the user has the privilege to create in the schema.
+    pub fn get_table_catalog_for_create(
+        &self,
+        schema_name: Option<String>,
+        table_name: &str,
+    ) -> Result<(DatabaseId, SchemaId, Arc<TableCatalog>)> {
+        let db_name = self.database();
+
+        let search_path = self.config().get_search_path();
+        let user_name = &self.auth_context().user_name;
+        let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let (table, schema_name) =
+            catalog_reader.get_table_by_name(db_name, schema_path, table_name)?;
+
+        let schema = catalog_reader.get_schema_by_name(db_name, schema_name)?;
+
+        check_schema_writable(schema_name)?;
+        if schema_name != DEFAULT_SCHEMA_NAME {
+            check_privileges(
+                self,
+                &vec![ObjectCheckItem::new(
+                    schema.owner(),
+                    Action::Create,
+                    Object::SchemaId(schema.id()),
+                )],
+            )?;
+        }
+
+        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
+        Ok((db_id, schema.id(), table.clone()))
     }
 }
 
@@ -471,9 +628,10 @@ pub struct SessionManagerImpl {
     _observer_join_handle: JoinHandle<()>,
     _heartbeat_join_handle: JoinHandle<()>,
     _heartbeat_shutdown_sender: Sender<()>,
+    number: AtomicI32,
 }
 
-impl SessionManager for SessionManagerImpl {
+impl SessionManager<PgResponseStream> for SessionManagerImpl {
     type Session = SessionImpl;
 
     fn connect(
@@ -483,12 +641,15 @@ impl SessionManager for SessionManagerImpl {
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
-        if reader.get_database_by_name(database).is_err() {
-            return Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Not found database name: {}", database),
-            )));
-        }
+        let database_id = reader
+            .get_database_by_name(database)
+            .map_err(|_| {
+                Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Not found database name: {}", database),
+                ))
+            })?
+            .id();
         let user_reader = self.env.user_info_reader();
         let reader = user_reader.read_guard();
         if let Some(user) = reader.get_user_by_name(user_name) {
@@ -496,6 +657,19 @@ impl SessionManager for SessionManagerImpl {
                 return Err(Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!("User {} is not allowed to login", user_name),
+                )));
+            }
+            let has_privilege = user.grant_privileges.iter().any(|privilege| {
+                privilege.object == Some(Object::DatabaseId(database_id))
+                    && privilege
+                        .action_with_opts
+                        .iter()
+                        .any(|ao| ao.action == Action::Connect as i32)
+            });
+            if !user.is_super && !has_privilege {
+                return Err(Box::new(Error::new(
+                    ErrorKind::PermissionDenied,
+                    "User does not have CONNECT privilege.",
                 )));
             }
             let user_authenticator = match &user.auth_info {
@@ -507,7 +681,7 @@ impl SessionManager for SessionManagerImpl {
                         let mut salt = [0; 4];
                         let mut rng = rand::thread_rng();
                         rng.fill_bytes(&mut salt);
-                        UserAuthenticator::MD5WithSalt {
+                        UserAuthenticator::Md5WithSalt {
                             encrypted_password: md5_hash_with_salt(
                                 &auth_info.encrypted_value,
                                 &salt,
@@ -523,7 +697,11 @@ impl SessionManager for SessionManagerImpl {
                 }
             };
 
-            Ok(SessionImpl::new(
+            // Assign a session id and insert into sessions map (for cancel request).
+            let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
+            // Use a trivial strategy: process_id and secret_key are equal.
+            let id = (secret_key, secret_key);
+            let session_impl: Arc<SessionImpl> = SessionImpl::new(
                 self.env.clone(),
                 Arc::new(AuthContext::new(
                     database.to_string(),
@@ -531,14 +709,27 @@ impl SessionManager for SessionManagerImpl {
                     user.id,
                 )),
                 user_authenticator,
+                id,
             )
-            .into())
+            .into();
+            self.insert_session(session_impl.clone());
+
+            Ok(session_impl)
         } else {
             Err(Box::new(Error::new(
                 ErrorKind::InvalidInput,
                 format!("Role {} does not exist", user_name),
             )))
         }
+    }
+
+    /// Used when cancel request happened, returned corresponding session ref.
+    fn cancel_queries_in_session(&self, session_id: SessionId) {
+        self.env.query_manager.cancel_queries_in_session(session_id);
+    }
+
+    fn end_session(&self, session: &Self::Session) {
+        self.delete_session(&session.session_id());
     }
 }
 
@@ -551,12 +742,23 @@ impl SessionManagerImpl {
             _observer_join_handle: join_handle,
             _heartbeat_join_handle: heartbeat_join_handle,
             _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
+            number: AtomicI32::new(0),
         })
+    }
+
+    fn insert_session(&self, session: Arc<SessionImpl>) {
+        let mut write_guard = self.env.sessions_map.lock().unwrap();
+        write_guard.insert(session.id(), session);
+    }
+
+    fn delete_session(&self, session_id: &SessionId) {
+        let mut write_guard = self.env.sessions_map.lock().unwrap();
+        write_guard.remove(session_id);
     }
 }
 
 #[async_trait::async_trait]
-impl Session for SessionImpl {
+impl Session<PgResponseStream> for SessionImpl {
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
@@ -565,7 +767,7 @@ impl Session for SessionImpl {
         // false: TEXT
         // true: BINARY
         format: bool,
-    ) -> std::result::Result<PgResponse, BoxedError> {
+    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
         let mut stmts = Parser::parse_sql(sql).map_err(|e| {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
@@ -609,7 +811,7 @@ impl Session for SessionImpl {
             )));
         }
         let stmt = stmts.swap_remove(0);
-        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescripyor> is same as
+        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescriptor> is same as
         // result of run_statement().
         let rsp = match stmt {
             Statement::Query(_) => infer(self, stmt, sql).map_err(|e| {
@@ -619,34 +821,74 @@ impl Session for SessionImpl {
             Statement::ShowObjects(show_object) => match show_object {
                 ShowObject::Columns { table: _ } => {
                     vec![
-                        PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
-                        PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                        PgFieldDescriptor::new(
+                            "Name".to_owned(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Type".to_owned(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
                     ]
                 }
                 _ => {
-                    vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)]
+                    vec![PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    )]
                 }
             },
             Statement::ShowVariable { variable } => {
-                let name = &variable[0].value.to_lowercase();
+                let name = &variable[0].real_value().to_lowercase();
                 if name.eq_ignore_ascii_case("ALL") {
                     vec![
-                        PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
-                        PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
-                        PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new(
+                            "Name".to_string(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Setting".to_string(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Description".to_string(),
+                            DataType::VARCHAR.to_oid(),
+                            DataType::VARCHAR.type_len(),
+                        ),
                     ]
                 } else {
                     vec![PgFieldDescriptor::new(
                         name.to_ascii_lowercase(),
-                        TypeOid::Varchar,
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
                     )]
                 }
             }
             Statement::Describe { name: _ } => {
                 vec![
-                    PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
-                    PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Type".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
                 ]
+            }
+            Statement::Explain { .. } => {
+                vec![PgFieldDescriptor::new(
+                    "QUERY PLAN".to_owned(),
+                    DataType::VARCHAR.to_oid(),
+                    DataType::VARCHAR.type_len(),
+                )]
             }
             _ => {
                 panic!("infer_return_type only support query statement");
@@ -658,11 +900,15 @@ impl Session for SessionImpl {
     fn user_authenticator(&self) -> &UserAuthenticator {
         &self.user_authenticator
     }
+
+    fn id(&self) -> SessionId {
+        self.id
+    }
 }
 
 /// Returns row description of the statement
 fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(session, Arc::from(sql));
+    let context = OptimizerContext::new(session, Arc::from(sql), WithOptions::try_from(&stmt)?);
     let session = context.session_ctx.clone();
 
     let bound = {

@@ -47,7 +47,7 @@ where
     meta_store: Arc<S>,
 
     /// notification manager.
-    notification_manager: NotificationManagerRef,
+    notification_manager: NotificationManagerRef<S>,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -62,50 +62,62 @@ where
 }
 
 /// Options shared by all meta service instances
+#[derive(Clone)]
 pub struct MetaOpts {
+    /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
+    /// abnormal cases.
     pub enable_recovery: bool,
-    pub checkpoint_interval: Duration,
+    /// The interval of periodic barrier.
+    pub barrier_interval: Duration,
+    /// The maximum number of barriers in-flight in the compute nodes.
+    pub in_flight_barrier_nums: usize,
+    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
+    /// fragment on one parallel unit per compute node.
+    pub minimal_scheduling: bool,
 
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
-    pub in_flight_barrier_nums: usize,
+    /// Whether run in compaction detection test mode
+    pub compaction_deterministic_test: bool,
+
+    pub checkpoint_frequency: usize,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     pub vacuum_interval_sec: u64,
     /// Threshold used by worker node to filter out new SSTs when scanning object store.
-    pub sst_retention_time_sec: u64,
-    /// Compaction scheduler retries compactor selection with this interval.
-    pub compactor_selection_retry_interval_sec: u64,
+    pub min_sst_retention_time_sec: u64,
     /// The spin interval when collecting global GC watermark in hummock
     pub collect_gc_watermark_spin_interval_sec: u64,
-}
+    /// Enable sanity check when SSTs are committed
+    pub enable_committed_sst_sanity_check: bool,
+    /// Schedule compaction for all compaction groups with this interval.
+    pub periodic_compaction_interval_sec: u64,
+    /// Interval of reporting the number of nodes in the cluster.
+    pub node_num_monitor_interval_sec: u64,
 
-impl Default for MetaOpts {
-    fn default() -> Self {
-        Self {
-            enable_recovery: false,
-            checkpoint_interval: Duration::from_millis(250),
-            max_idle_ms: 0,
-            in_flight_barrier_nums: 40,
-            vacuum_interval_sec: 30,
-            sst_retention_time_sec: 3600 * 24 * 7,
-            compactor_selection_retry_interval_sec: 5,
-            collect_gc_watermark_spin_interval_sec: 5,
-        }
-    }
+    /// The prometheus endpoint for dashboard service.
+    pub prometheus_endpoint: Option<String>,
 }
 
 impl MetaOpts {
-    /// some test need `enable_recovery=true`
-    #[cfg(test)]
+    /// Default opts for testing. Some tests need `enable_recovery=true`
     pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
-            checkpoint_interval: Duration::from_millis(250),
-            max_idle_ms: 0,
+            barrier_interval: Duration::from_millis(250),
             in_flight_barrier_nums: 40,
-            ..Default::default()
+            minimal_scheduling: false,
+            max_idle_ms: 0,
+            checkpoint_frequency: 10,
+            compaction_deterministic_test: false,
+            vacuum_interval_sec: 30,
+            min_sst_retention_time_sec: 3600 * 24 * 7,
+            collect_gc_watermark_spin_interval_sec: 5,
+            enable_committed_sst_sanity_check: false,
+            periodic_compaction_interval_sec: 60,
+            node_num_monitor_interval_sec: 10,
+            prometheus_endpoint: None,
         }
     }
 }
@@ -118,7 +130,7 @@ where
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
-        let notification_manager = Arc::new(NotificationManager::new());
+        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
 
         Self {
@@ -148,11 +160,11 @@ where
         self.id_gen_manager.deref()
     }
 
-    pub fn notification_manager_ref(&self) -> NotificationManagerRef {
+    pub fn notification_manager_ref(&self) -> NotificationManagerRef<S> {
         self.notification_manager.clone()
     }
 
-    pub fn notification_manager(&self) -> &NotificationManager {
+    pub fn notification_manager(&self) -> &NotificationManager<S> {
         self.notification_manager.deref()
     }
 
@@ -181,7 +193,7 @@ where
 impl MetaSrvEnv<MemStore> {
     // Instance for test.
     pub async fn for_test() -> Self {
-        Self::for_test_opts(MetaOpts::default().into()).await
+        Self::for_test_opts(MetaOpts::test(false).into()).await
     }
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
@@ -213,7 +225,7 @@ impl MetaSrvEnv<MemStore> {
             .await
             .unwrap();
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let notification_manager = Arc::new(NotificationManager::new());
+        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let idle_manager = Arc::new(IdleManager::disabled());
 

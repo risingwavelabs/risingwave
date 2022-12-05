@@ -92,7 +92,7 @@ fn run_test_file(file_name: &str, file_content: &str) {
     }
 }
 
-/// The entry point of test_runner.
+/// The entry point of `test_runner`.
 pub fn run_all_test_files() {
     use walkdir::WalkDir;
     for entry in WalkDir::new("../tests/testdata/") {

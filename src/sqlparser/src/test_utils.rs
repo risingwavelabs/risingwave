@@ -49,6 +49,7 @@ pub fn parse_sql_statements(sql: &str) -> Result<Vec<Statement>, ParserError> {
 /// additionally asserts that parsing `sql` results in the same parse
 /// tree as parsing `canonical`, and that serializing it back to string
 /// results in the `canonical` representation.
+#[track_caller]
 pub fn one_statement_parses_to(sql: &str, canonical: &str) -> Statement {
     let mut statements = parse_sql_statements(sql).unwrap();
     assert_eq!(statements.len(), 1);
@@ -66,12 +67,14 @@ pub fn one_statement_parses_to(sql: &str, canonical: &str) -> Statement {
 
 /// Ensures that `sql` parses as a single [Statement], and is not modified
 /// after a serialization round-trip.
+#[track_caller]
 pub fn verified_stmt(query: &str) -> Statement {
     one_statement_parses_to(query, query)
 }
 
 /// Ensures that `sql` parses as a single [Query], and is not modified
 /// after a serialization round-trip.
+#[track_caller]
 pub fn verified_query(sql: &str) -> Query {
     match verified_stmt(sql) {
         Statement::Query(query) => *query,
@@ -79,8 +82,17 @@ pub fn verified_query(sql: &str) -> Query {
     }
 }
 
+#[track_caller]
+pub fn query(sql: &str, canonical: &str) -> Query {
+    match one_statement_parses_to(sql, canonical) {
+        Statement::Query(query) => *query,
+        _ => panic!("Expected Query"),
+    }
+}
+
 /// Ensures that `sql` parses as a single [Select], and is not modified
 /// after a serialization round-trip.
+#[track_caller]
 pub fn verified_only_select(query: &str) -> Select {
     match verified_query(query).body {
         SetExpr::Select(s) => *s,
@@ -113,7 +125,7 @@ pub fn expr_from_projection(item: &SelectItem) -> &Expr {
 }
 
 pub fn number(n: &'static str) -> Value {
-    Value::Number(n.parse().unwrap(), false)
+    Value::Number(n.parse().unwrap())
 }
 
 pub fn table_alias(name: impl Into<String>) -> Option<TableAlias> {
@@ -127,7 +139,6 @@ pub fn table(name: impl Into<String>) -> TableFactor {
     TableFactor::Table {
         name: ObjectName(vec![Ident::new(name.into())]),
         alias: None,
-        args: vec![],
     }
 }
 

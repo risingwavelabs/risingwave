@@ -66,7 +66,7 @@ impl Drop for Timer<'_> {
 }
 
 impl BenchStats {
-    fn start_timer(&mut self) -> Timer {
+    fn start_timer(&mut self) -> Timer<'_> {
         Timer {
             stats: self,
             start_time: SystemTime::now(),

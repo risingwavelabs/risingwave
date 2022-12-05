@@ -16,22 +16,22 @@
  */
 export function iter(n, step) {
   for (let i = 0; i < n; ++i) {
-    step(i);
+    step(i)
   }
 }
 
-export function newNumberArray(length){
-  let rtn = [];
+export function newNumberArray(length) {
+  let rtn = []
   iter(length, () => {
-    rtn.push(0);
+    rtn.push(0)
   })
-  return rtn;
+  return rtn
 }
 
 export function newMatrix(n) {
-  let rtn = [];
+  let rtn = []
   iter(n, () => {
-    rtn.push([]);
+    rtn.push([])
   })
-  return rtn;
+  return rtn
 }

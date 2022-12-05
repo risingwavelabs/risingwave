@@ -43,10 +43,21 @@ pub struct StreamingMetrics {
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub exchange_recv_size: GenericCounterVec<AtomicU64>,
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
+
+    // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
+    pub join_cached_entries: GenericGaugeVec<AtomicI64>,
+    pub join_cached_rows: GenericGaugeVec<AtomicI64>,
+    pub join_cached_estimated_size: GenericGaugeVec<AtomicI64>,
+
+    // Streaming Aggregation
+    pub agg_lookup_miss_count: GenericCounterVec<AtomicU64>,
+    pub agg_total_lookup_count: GenericCounterVec<AtomicU64>,
+    pub agg_cached_keys: GenericGaugeVec<AtomicI64>,
+
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
     /// to flow through the graph.
@@ -70,7 +81,7 @@ impl StreamingMetrics {
         let source_output_row_count = register_int_counter_vec_with_registry!(
             "stream_source_output_rows_counts",
             "Total number of rows that have been output from source",
-            &["source_id"],
+            &["source_id", "source_name"],
             registry
         )
         .unwrap();
@@ -260,6 +271,54 @@ impl StreamingMetrics {
             register_histogram_vec_with_registry!(opts, &["actor_id", "wait_side"], registry)
                 .unwrap();
 
+        let join_cached_entries = register_int_gauge_vec_with_registry!(
+            "stream_join_cached_entries",
+            "Number of cached entries in streaming join operators",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
+        let join_cached_rows = register_int_gauge_vec_with_registry!(
+            "stream_join_cached_rows",
+            "Number of cached rows in streaming join operators",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
+        let join_cached_estimated_size = register_int_gauge_vec_with_registry!(
+            "stream_join_cached_estimated_size",
+            "Estimated size of all cached entries in streaming join operators",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
+        let agg_lookup_miss_count = register_int_counter_vec_with_registry!(
+            "stream_agg_lookup_miss_count",
+            "Aggregation executor lookup miss duration",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_total_lookup_count = register_int_counter_vec_with_registry!(
+            "stream_agg_lookup_total_count",
+            "Aggregation executor lookup total operation",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_cached_keys = register_int_gauge_vec_with_registry!(
+            "stream_agg_cached_keys",
+            "Number of cached keys in streaming aggregation operators",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -308,6 +367,12 @@ impl StreamingMetrics {
             join_total_lookup_count,
             join_actor_input_waiting_duration_ns,
             join_barrier_align_duration,
+            join_cached_entries,
+            join_cached_rows,
+            join_cached_estimated_size,
+            agg_lookup_miss_count,
+            agg_total_lookup_count,
+            agg_cached_keys,
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,

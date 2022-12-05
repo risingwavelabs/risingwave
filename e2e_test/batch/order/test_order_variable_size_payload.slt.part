@@ -128,7 +128,7 @@ SELECT * FROM test4 ORDER BY cast(i AS VARCHAR), cast(j AS VARCHAR);
 3	2
 3	3
 
-# https://github.com/singularity-data/risingwave/issues/4691
+# https://github.com/risingwavelabs/risingwave/issues/4691
 # many payload columns
 # statement ok
 # CREATE TABLE tpch_q1_agg (l_returnflag VARCHAR, l_linestatus VARCHAR, sum_qty INT, sum_base_price DOUBLE, sum_disc_price DOUBLE, sum_charge DOUBLE, avg_qty DOUBLE, avg_price DOUBLE, avg_disc DOUBLE, count_order BIGINT);

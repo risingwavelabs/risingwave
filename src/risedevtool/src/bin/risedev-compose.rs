@@ -135,7 +135,10 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::ComputeNode(c) => (c.address.clone(), c.compose(&compose_config)?),
+            ServiceConfig::ComputeNode(c) => {
+                volumes.insert(c.id.clone(), ComposeVolume::default());
+                (c.address.clone(), c.compose(&compose_config)?)
+            }
             ServiceConfig::MetaNode(c) => {
                 if opts.deploy {
                     let public_ip = &compose_deploy_config
@@ -202,6 +205,9 @@ fn main() -> Result<()> {
             ServiceConfig::Kafka(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
+            ServiceConfig::Pubsub(_) => {
+                return Err(anyhow!("not supported, please use redpanda instead"))
+            }
             ServiceConfig::ZooKeeper(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
@@ -223,6 +229,7 @@ fn main() -> Result<()> {
                 (c.address.clone(), c.compose(&compose_config)?)
             }
             ServiceConfig::Redis(_) => return Err(anyhow!("not supported")),
+            ServiceConfig::ConnectorNode(_) => return Err(anyhow!("not supported")),
         };
         compose.container_name = service.id().to_string();
         if opts.deploy {

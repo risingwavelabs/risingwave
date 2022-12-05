@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use risingwave_common::array::{StringWriter, WrittenGuard};
 
 use crate::Result;
 
 #[inline(always)]
-pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: BytesWriter) -> Result<BytesGuard> {
+pub fn overlay(
+    s: &str,
+    new_sub_str: &str,
+    start: i32,
+    writer: StringWriter<'_>,
+) -> Result<WrittenGuard> {
     // If count is omitted, it defaults to the length of new_sub_str.
     overlay_for(s, new_sub_str, start, new_sub_str.len() as i32, writer)
 }
@@ -28,8 +33,8 @@ pub fn overlay_for(
     new_sub_str: &str,
     start: i32,
     count: i32,
-    writer: BytesWriter,
-) -> Result<BytesGuard> {
+    writer: StringWriter<'_>,
+) -> Result<WrittenGuard> {
     let count = count.max(0) as usize;
 
     // If start is out of range, attach it to the end.
@@ -39,14 +44,14 @@ pub fn overlay_for(
     let remaining = start + count;
 
     let mut writer = writer.begin();
-    writer.write_ref(&s[..start])?;
-    writer.write_ref(new_sub_str)?;
+    writer.write_ref(&s[..start]);
+    writer.write_ref(new_sub_str);
 
     if remaining < s.len() {
-        writer.write_ref(&s[remaining..])?;
+        writer.write_ref(&s[remaining..]);
     }
 
-    writer.finish().map_err(Into::into)
+    Ok(writer.finish())
 }
 
 #[cfg(test)]
@@ -77,14 +82,14 @@ mod tests {
         ];
 
         for (s, new_sub_str, start, count, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
+            let mut builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
-            let guard = match count {
+            let _guard = match count {
                 None => overlay(s, new_sub_str, start, writer),
                 Some(count) => overlay_for(s, new_sub_str, start, count, writer),
             }
             .unwrap();
-            let array = guard.into_inner().finish().unwrap();
+            let array = builder.finish();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }

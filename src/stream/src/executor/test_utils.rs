@@ -14,12 +14,12 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::{Schema, TableId};
-use risingwave_storage::memory::MemoryStateStore;
+use risingwave_common::catalog::Schema;
+use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, Executor, Message, PkIndices, StreamChunk};
+use super::{Barrier, Executor, Message, PkIndices, StreamChunk, Watermark};
 
 pub struct MockSource {
     schema: Schema,
@@ -46,6 +46,22 @@ impl MessageSender {
             barrier = barrier.with_stop();
         }
         self.0.send(Message::Barrier(barrier)).unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_watermark(&mut self, col_idx: usize, data_type: DataType, val: ScalarImpl) {
+        self.0
+            .send(Message::Watermark(Watermark {
+                col_idx,
+                data_type,
+                val,
+            }))
+            .unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_int64_watermark(&mut self, col_idx: usize, val: i64) {
+        self.push_watermark(col_idx, DataType::Int64, ScalarImpl::Int64(val));
     }
 }
 
@@ -99,7 +115,7 @@ impl MockSource {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
-        let mut epoch = 0;
+        let mut epoch = 1;
 
         while let Some(msg) = self.rx.recv().await {
             epoch += 1;
@@ -121,7 +137,7 @@ impl Executor for MockSource {
         &self.schema
     }
 
-    fn pk_indices(&self) -> super::PkIndicesRef {
+    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
         &self.pk_indices
     }
 
@@ -136,53 +152,105 @@ impl Executor for MockSource {
 macro_rules! row_nonnull {
     [$( $value:expr ),*] => {
         {
-            use risingwave_common::types::Scalar;
             use risingwave_common::array::Row;
-            Row(vec![$(Some($value.to_scalar_value()), )*])
+            Row::new(vec![$(Some($value.into()), )*])
         }
     };
 }
 
-/// Create a vector of memory keyspace with len `num_ks`.
-pub fn create_in_memory_keyspace_agg(num_ks: usize) -> Vec<(MemoryStateStore, TableId)> {
-    let mut returned_vec = vec![];
-    let mem_state = MemoryStateStore::new();
-    for idx in 0..num_ks {
-        returned_vec.push((mem_state.clone(), TableId::new(idx as u32)));
-    }
-    returned_vec
-}
-
 pub mod agg_executor {
-    use itertools::Itertools;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::AggKind;
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::state_table::RowBasedStateTable;
     use risingwave_storage::StateStore;
 
-    use crate::executor::aggregation::AggCall;
+    use crate::common::table::state_table::StateTable;
+    use crate::common::StateTableColumnMapping;
+    use crate::executor::aggregation::{AggCall, AggStateStorage};
     use crate::executor::{
         ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices,
     };
 
     /// Create state table for the given agg call.
-    /// Should infer the schema in the same way as `LogicalAgg::infer_internal_table_catalog`.
-    pub fn create_state_table<S: StateStore>(
+    /// Should infer the schema in the same way as `LogicalAgg::infer_stream_agg_state`.
+    pub async fn create_agg_state_table<S: StateStore>(
         store: S,
         table_id: TableId,
         agg_call: &AggCall,
-        group_key: &[usize],
+        group_key_indices: &[usize],
         pk_indices: &[usize],
         input_ref: &dyn Executor,
-    ) -> (RowBasedStateTable<S>, Vec<usize>) {
+    ) -> AggStateStorage<S> {
+        match agg_call.kind {
+            AggKind::Min | AggKind::Max if !agg_call.append_only => {
+                let input_fields = input_ref.schema().fields();
+
+                let mut column_descs = Vec::new();
+                let mut order_types = Vec::new();
+                let mut upstream_columns = Vec::new();
+
+                let mut next_column_id = 0;
+                let mut add_column = |upstream_idx: usize, data_type: DataType, order_type: OrderType| {
+                    upstream_columns.push(upstream_idx);
+                    column_descs.push(ColumnDesc::unnamed(
+                        ColumnId::new(next_column_id),
+                        data_type,
+                    ));
+                    next_column_id += 1;
+                    order_types.push(order_type);
+                };
+
+                for idx in group_key_indices {
+                    add_column(*idx, input_fields[*idx].data_type(), OrderType::Ascending);
+                }
+
+                add_column(agg_call.args.val_indices()[0], agg_call.args.arg_types()[0].clone(), if agg_call.kind == AggKind::Max {
+                    OrderType::Descending
+                } else {
+                    OrderType::Ascending
+                });
+
+                for idx in pk_indices {
+                    add_column(*idx, input_fields[*idx].data_type(), OrderType::Ascending);
+                }
+
+                let state_table = StateTable::new_without_distribution(
+                    store,
+                    table_id,
+                    column_descs,
+                    order_types.clone(),
+                    (0..order_types.len()).collect(),
+                ).await;
+
+                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None) }
+            }
+            AggKind::Min /* append only */
+            | AggKind::Max /* append only */
+            | AggKind::Sum
+            | AggKind::Count
+            | AggKind::Avg
+            | AggKind::ApproxCountDistinct => {
+                AggStateStorage::ResultValue
+            }
+            _ => {
+                panic!("no need to mock other agg kinds here");
+            }
+        }
+    }
+
+    /// Create result state table for agg executor.
+    pub async fn create_result_table<S: StateStore>(
+        store: S,
+        table_id: TableId,
+        agg_calls: &[AggCall],
+        group_key_indices: &[usize],
+        input_ref: &dyn Executor,
+    ) -> StateTable<S> {
         let input_fields = input_ref.schema().fields();
 
         let mut column_descs = Vec::new();
         let mut order_types = Vec::new();
-        let mut column_mapping = Vec::new();
 
         let mut next_column_id = 0;
         let mut add_column_desc = |data_type: DataType| {
@@ -193,85 +261,67 @@ pub mod agg_executor {
             next_column_id += 1;
         };
 
-        for idx in group_key {
+        group_key_indices.iter().for_each(|idx| {
             add_column_desc(input_fields[*idx].data_type());
-            column_mapping.push(*idx);
             order_types.push(OrderType::Ascending);
-        }
+        });
 
-        match agg_call.kind {
-            AggKind::Min | AggKind::Max if !agg_call.append_only => {
-                add_column_desc(agg_call.args.arg_types()[0].clone());
-                column_mapping.push(agg_call.args.val_indices()[0]);
-                order_types.push(if agg_call.kind == AggKind::Max {
-                    OrderType::Descending
-                } else {
-                    OrderType::Ascending
-                });
-                for idx in pk_indices {
-                    add_column_desc(input_fields[*idx].data_type());
-                    column_mapping.push(*idx);
-                    order_types.push(OrderType::Ascending);
-                }
-            }
-            AggKind::Min /* append only */
-            | AggKind::Max /* append only */
-            | AggKind::Sum
-            | AggKind::Count
-            | AggKind::Avg
-            | AggKind::SingleValue
-            | AggKind::ApproxCountDistinct => {
-                add_column_desc(agg_call.return_type.clone());
-            }
-            _ => {
-                panic!("no need to mock other agg kinds here");
-            }
-        }
+        agg_calls.iter().for_each(|agg_call| {
+            add_column_desc(agg_call.return_type.clone());
+        });
 
-        let state_table = RowBasedStateTable::new_without_distribution(
+        StateTable::new_without_distribution(
             store,
             table_id,
             column_descs,
-            order_types.clone(),
-            (0..order_types.len()).collect(),
-        );
-
-        (state_table, column_mapping)
+            order_types,
+            (0..group_key_indices.len()).collect(),
+        )
+        .await
     }
 
-    pub fn new_boxed_simple_agg_executor(
+    pub async fn new_boxed_simple_agg_executor<S: StateStore>(
         ctx: ActorContextRef,
-        keyspace_gen: Vec<(MemoryStateStore, TableId)>,
+        store: S,
         input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
     ) -> Box<dyn Executor> {
-        let (state_tables, state_table_col_mappings) = keyspace_gen
-            .iter()
-            .zip_eq(agg_calls.iter())
-            .map(|(ks, agg_call)| {
-                create_state_table(
-                    ks.0.clone(),
-                    ks.1,
+        let mut agg_state_tables = Vec::with_capacity(agg_calls.iter().len());
+        for (idx, agg_call) in agg_calls.iter().enumerate() {
+            agg_state_tables.push(
+                create_agg_state_table(
+                    store.clone(),
+                    TableId::new(idx as u32),
                     agg_call,
-                    &key_indices,
+                    &[],
                     &pk_indices,
                     input.as_ref(),
                 )
-            })
-            .unzip();
+                .await,
+            )
+        }
+
+        let result_table = create_result_table(
+            store,
+            TableId::new(agg_calls.len() as u32),
+            &agg_calls,
+            &[],
+            input.as_ref(),
+        )
+        .await;
 
         Box::new(
             GlobalSimpleAggExecutor::new(
                 ctx,
                 input,
                 agg_calls,
+                agg_state_tables,
+                result_table,
                 pk_indices,
                 executor_id,
-                state_tables,
-                state_table_col_mappings,
+                1 << 10,
             )
             .unwrap(),
         )
@@ -284,24 +334,25 @@ pub mod top_n_executor {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::state_table::RowBasedStateTable;
 
-    pub fn create_in_memory_state_table(
+    use crate::common::table::state_table::StateTable;
+    pub async fn create_in_memory_state_table(
         data_types: &[DataType],
         order_types: &[OrderType],
         pk_indices: &[usize],
-    ) -> RowBasedStateTable<MemoryStateStore> {
+    ) -> StateTable<MemoryStateStore> {
         let column_descs = data_types
             .iter()
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        RowBasedStateTable::new_without_distribution(
+        StateTable::new_without_distribution(
             MemoryStateStore::new(),
             TableId::new(0),
             column_descs,
             order_types.to_vec(),
             pk_indices.to_vec(),
         )
+        .await
     }
 }

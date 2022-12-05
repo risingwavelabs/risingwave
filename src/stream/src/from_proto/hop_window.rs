@@ -14,20 +14,23 @@
 
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_pb::stream_plan::stream_node;
+use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::*;
 use crate::executor::HopWindowExecutor;
 
 pub struct HopWindowExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for HopWindowExecutorBuilder {
-    fn new_boxed_executor(
+    type Node = HopWindowNode;
+
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let ExecutorParams {
             actor_context,
             input,
@@ -38,22 +41,23 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
 
         let input = input.into_iter().next().unwrap();
         // TODO: reuse the schema derivation with frontend.
-        let Some(stream_node::NodeBody::HopWindow(node)) = &node.node_body else {
-            unreachable!();
-        };
         let output_indices = node
             .get_output_indices()
             .iter()
             .map(|&x| x as usize)
             .collect_vec();
+
+        let time_col = node.get_time_col()?.column_idx as usize;
+        let time_col_data_type = input.schema().fields()[time_col].data_type();
+        let output_type = DataType::window_of(&time_col_data_type).unwrap();
         let original_schema: Schema = input
             .schema()
             .clone()
             .into_fields()
             .into_iter()
             .chain([
-                Field::with_name(DataType::Timestamp, "window_start"),
-                Field::with_name(DataType::Timestamp, "window_end"),
+                Field::with_name(output_type.clone(), "window_start"),
+                Field::with_name(output_type, "window_end"),
             ])
             .collect();
         let actual_schema: Schema = output_indices
@@ -65,7 +69,6 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             identity: format!("HopWindowExecutor {:X}", executor_id),
             pk_indices,
         };
-        let time_col = node.get_time_col()?.column_idx as usize;
         let window_slide = node.get_window_slide()?.into();
         let window_size = node.get_window_size()?.into();
 

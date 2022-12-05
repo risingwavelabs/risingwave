@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use crate::expr::{CorrelatedId, CorrelatedInputRef, ExprVisitor};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalProject, PlanTreeNode};
 use crate::optimizer::plan_visitor::PlanVisitor;
+use crate::PlanRef;
 
 #[derive(Default)]
 pub struct PlanCorrelatedIdFinder {
@@ -27,11 +28,19 @@ impl PlanCorrelatedIdFinder {
     pub fn contains(&self, correlated_id: &CorrelatedId) -> bool {
         self.correlated_id_set.contains(correlated_id)
     }
+
+    pub fn find_correlated_id(plan: PlanRef, correlated_id: &CorrelatedId) -> bool {
+        let mut plan_correlated_id_finder = Self::default();
+        plan_correlated_id_finder.visit(plan);
+        plan_correlated_id_finder.contains(correlated_id)
+    }
 }
 
 impl PlanVisitor<()> for PlanCorrelatedIdFinder {
     /// `correlated_input_ref` can only appear in `LogicalProject`, `LogicalFilter` and
     /// `LogicalJoin` now.
+
+    fn merge(_: (), _: ()) {}
 
     fn visit_logical_join(&mut self, plan: &LogicalJoin) {
         let mut finder = ExprCorrelatedIdFinder::default();
@@ -65,11 +74,19 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
 }
 
 #[derive(Default)]
-struct ExprCorrelatedIdFinder {
+pub struct ExprCorrelatedIdFinder {
     correlated_id_set: HashSet<CorrelatedId>,
 }
 
+impl ExprCorrelatedIdFinder {
+    pub fn contains(&self, correlated_id: &CorrelatedId) -> bool {
+        self.correlated_id_set.contains(correlated_id)
+    }
+}
+
 impl ExprVisitor<()> for ExprCorrelatedIdFinder {
+    fn merge(_: (), _: ()) {}
+
     fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
         self.correlated_id_set
             .insert(correlated_input_ref.correlated_id());

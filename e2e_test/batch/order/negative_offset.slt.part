@@ -16,7 +16,10 @@ statement error
 SELECT * FROM generate_series(0,10,1) LIMIT -1%;
 
 statement ok
-CREATE TABLE integers AS SELECT -1 k;
+CREATE TABLE integers(k int);
+
+statement ok
+INSERT INTO integers VALUES (-1);
 
 statement error
 SELECT * FROM generate_series(0,10,1) LIMIT (SELECT k FROM integers);

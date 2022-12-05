@@ -26,15 +26,17 @@ pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) ->
                 "Cannot configure node: no meta node found in this configuration."
             ));
         }
-        [meta_node] => {
-            cmd.arg("--meta-address")
-                .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
-        }
-        other_meta_nodes => {
-            return Err(anyhow!(
-                "Cannot configure node: {} meta nodes found in this configuration, but only 1 is needed.",
-                other_meta_nodes.len()
+        meta_nodes => {
+            cmd.arg("--meta-address").arg(format!(
+                "http://{}:{}",
+                meta_nodes.last().unwrap().address,
+                meta_nodes.last().unwrap().port
             ));
+            if meta_nodes.len() > 1 {
+                eprintln!("WARN: more than 1 meta node instance is detected, only using the last one for meta node.");
+                // According to some heruistics, the last etcd node seems always to be elected as
+                // leader. Therefore we ensure compute node can start by using the last one.
+            }
         }
     };
 
@@ -43,9 +45,10 @@ pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) ->
 
 /// Strategy for whether to enable in-memory hummock if no minio and s3 is provided.
 pub enum HummockInMemoryStrategy {
-    /// Enable isolated in-memory hummock.
+    /// Enable isolated in-memory hummock. Used by single-node configuration.
     Isolated,
-    /// Enable in-memory hummock shared in the process. Used by risedev playground.
+    /// Enable in-memory hummock shared in a single process. Used by risedev playground and
+    /// deterministic end-to-end tests.
     Shared,
     /// Disallow in-memory hummock. Always requires minio or s3.
     Disallowed,
@@ -87,10 +90,16 @@ pub fn add_storage_backend(
             true
         }
         ([], [aws_s3]) => {
-            cmd.arg("--state-store")
-                .arg(format!("hummock+s3://{}", aws_s3.bucket));
+            // if s3-compatible is true, using some s3 compatible object store.
+            match aws_s3.s3_compatible{
+                true => cmd.arg("--state-store")
+                .arg(format!("hummock+s3-compatible://{}", aws_s3.bucket)),
+                false => cmd.arg("--state-store")
+                .arg(format!("hummock+s3://{}", aws_s3.bucket)),
+            };
             true
         }
+
         (other_minio, other_s3) => {
             return Err(anyhow!(
                 "{} minio and {} s3 instance found in config, but only 1 is needed",

@@ -17,10 +17,10 @@ use std::collections::HashMap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Cte, Expr, OrderByExpr, Query, Value, With};
+use risingwave_sqlparser::ast::{Cte, Expr, Fetch, OrderByExpr, Query, Value, With};
 
 use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::{CorrelatedId, ExprImpl};
+use crate::expr::{CorrelatedId, Depth, ExprImpl};
 use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.
@@ -29,8 +29,9 @@ use crate::optimizer::property::{Direction, FieldOrder};
 pub struct BoundQuery {
     pub body: BoundSetExpr,
     pub order: Vec<FieldOrder>,
-    pub limit: Option<usize>,
-    pub offset: Option<usize>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+    pub with_ties: bool,
     pub extra_order_exprs: Vec<ExprImpl>,
 }
 
@@ -75,21 +76,22 @@ impl BoundQuery {
     /// * The second example is correlated, because it depend on a correlated input ref (`a1`) that
     ///   goes out.
     /// * The last example is also correlated. because it cannot be evaluated independently either.
-    pub fn is_correlated(&self) -> bool {
-        self.body.is_correlated()
+    pub fn is_correlated(&self, depth: Depth) -> bool {
+        self.body.is_correlated(depth)
             || self
                 .extra_order_exprs
                 .iter()
-                .any(|e| e.has_correlated_input_ref_by_depth())
+                .any(|e| e.has_correlated_input_ref_by_depth(depth))
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         // TODO: collect `correlated_input_ref` in `extra_order_exprs`.
         self.body
-            .collect_correlated_indices_by_depth_and_assign_id(correlated_id)
+            .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
     }
 }
 
@@ -108,13 +110,45 @@ impl Binder {
     }
 
     /// Bind a [`Query`] using the current [`BindContext`](super::BindContext).
-    pub(super) fn bind_query_inner(&mut self, query: Query) -> Result<BoundQuery> {
-        let limit = query.get_limit_value();
-        let offset = query.get_offset_value();
-        if let Some(with) = query.with {
+    pub(super) fn bind_query_inner(
+        &mut self,
+        Query {
+            with,
+            body,
+            order_by,
+            limit,
+            offset,
+            fetch,
+        }: Query,
+    ) -> Result<BoundQuery> {
+        let mut with_ties = false;
+        let limit = match (limit, fetch) {
+            (None, None) => None,
+            (
+                None,
+                Some(Fetch {
+                    with_ties: fetch_with_ties,
+                    quantity,
+                }),
+            ) => {
+                with_ties = fetch_with_ties;
+                match quantity {
+                    Some(v) => Some(parse_non_negative_i64("LIMIT", &v)? as u64),
+                    None => Some(1),
+                }
+            }
+            (Some(limit), None) => Some(parse_non_negative_i64("LIMIT", &limit)? as u64),
+            (Some(_), Some(_)) => unreachable!(), // parse error
+        };
+        let offset = offset
+            .map(|s| parse_non_negative_i64("OFFSET", &s))
+            .transpose()?
+            .map(|v| v as u64);
+
+        if let Some(with) = with {
             self.bind_with(with)?;
         }
-        let body = self.bind_set_expr(query.body)?;
+        let body = self.bind_set_expr(body)?;
         let mut name_to_index = HashMap::new();
         body.schema()
             .fields()
@@ -131,11 +165,10 @@ impl Binder {
             });
         let mut extra_order_exprs = vec![];
         let visible_output_num = body.schema().len();
-        let order = query
-            .order_by
+        let order = order_by
             .into_iter()
             .map(|order_by_expr| {
-                self.bind_order_by_expr(
+                self.bind_order_by_expr_in_query(
                     order_by_expr,
                     &name_to_index,
                     &mut extra_order_exprs,
@@ -148,27 +181,49 @@ impl Binder {
             order,
             limit,
             offset,
+            with_ties,
             extra_order_exprs,
         })
     }
 
-    fn bind_order_by_expr(
+    /// Bind an `ORDER BY` expression in a [`Query`], which can be either:
+    /// * an output-column name
+    /// * index of an output column
+    /// * an arbitrary expression
+    ///
+    /// # Arguments
+    ///
+    /// * `name_to_index` - visible output column name -> index. Ambiguous (duplicate) output names
+    ///   are marked with `usize::MAX`.
+    /// * `visible_output_num` - the number of all visible output columns, including duplicates.
+    fn bind_order_by_expr_in_query(
         &mut self,
-        order_by_expr: OrderByExpr,
+        OrderByExpr {
+            expr,
+            asc,
+            nulls_first,
+        }: OrderByExpr,
         name_to_index: &HashMap<String, usize>,
         extra_order_exprs: &mut Vec<ExprImpl>,
         visible_output_num: usize,
     ) -> Result<FieldOrder> {
-        let direct = match order_by_expr.asc {
+        if nulls_first.is_some() {
+            return Err(ErrorCode::NotImplemented(
+                "NULLS FIRST or NULLS LAST".to_string(),
+                4743.into(),
+            )
+            .into());
+        }
+        let direct = match asc {
             None | Some(true) => Direction::Asc,
             Some(false) => Direction::Desc,
         };
-        let index = match order_by_expr.expr {
+        let index = match expr {
             Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => match *index != usize::MAX {
                 true => *index,
-                false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.value)).into()),
+                false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.real_value())).into()),
             }
-            Expr::Value(Value::Number(number, _)) => match number.parse::<usize>() {
+            Expr::Value(Value::Number(number)) => match number.parse::<usize>() {
                 Ok(index) if 1 <= index && index <= visible_output_num => index - 1,
                 _ => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -199,5 +254,19 @@ impl Binder {
             }
             Ok(())
         }
+    }
+}
+
+// TODO: Make clause a const generic param after <https://github.com/rust-lang/rust/issues/95174>.
+fn parse_non_negative_i64(clause: &str, s: &str) -> Result<i64> {
+    match s.parse::<i64>() {
+        Ok(v) => {
+            if v < 0 {
+                Err(ErrorCode::InvalidInputSyntax(format!("{clause} must not be negative")).into())
+            } else {
+                Ok(v)
+            }
+        }
+        Err(e) => Err(ErrorCode::InvalidInputSyntax(e.to_string()).into()),
     }
 }

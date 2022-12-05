@@ -12,116 +12,61 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
-use std::string::String;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 
+use super::generic::{self, GenericPlanNode, Project};
 use super::{
     gen_filter_and_pushdown, BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{
-    assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
-};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
-/// Construct a `LogicalProject` and dedup expressions.
-/// expressions
-#[derive(Default)]
-pub struct LogicalProjectBuilder {
-    exprs: Vec<ExprImpl>,
-    exprs_index: HashMap<ExprImpl, usize>,
-}
-
-impl LogicalProjectBuilder {
-    /// add an expression to the `LogicalProject` and return the column index of the project's
-    /// output
-    pub fn add_expr(&mut self, expr: &ExprImpl) -> usize {
-        if let Some(idx) = self.exprs_index.get(expr) {
-            *idx
-        } else {
-            let index = self.exprs.len();
-            self.exprs.push(expr.clone());
-            self.exprs_index.insert(expr.clone(), index);
-            index
-        }
-    }
-
-    pub fn expr_index(&self, expr: &ExprImpl) -> Option<usize> {
-        if expr.has_subquery() {
-            return None;
-        }
-        self.exprs_index.get(expr).copied()
-    }
-
-    /// build the `LogicalProject` from `LogicalProjectBuilder`
-    pub fn build(self, input: PlanRef) -> LogicalProject {
-        LogicalProject::new(input, self.exprs)
-    }
-}
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
     pub base: PlanBase,
-    exprs: Vec<ExprImpl>,
-    input: PlanRef,
+    core: generic::Project<PlanRef>,
 }
+
 impl LogicalProject {
+    pub fn create(input: PlanRef, exprs: Vec<ExprImpl>) -> PlanRef {
+        Self::new(input, exprs).into()
+    }
+
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
-        assert!(
-            exprs.iter().all(|e| !e.has_table_function()),
-            "Project should not have table function."
+        let core = generic::Project::new(exprs, input.clone());
+        Self::with_core(core)
+    }
+
+    pub fn with_core(core: generic::Project<PlanRef>) -> Self {
+        let ctx = core.input.ctx();
+
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
+
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
         );
-
-        let ctx = input.ctx();
-        let schema = Self::derive_schema(&exprs, input.schema());
-        let pk_indices = Self::derive_pk(input.schema(), input.logical_pk(), &exprs);
-        for expr in &exprs {
-            assert_input_ref!(expr, input.schema().fields().len());
-            assert!(!expr.has_subquery());
-            assert!(!expr.has_agg_call());
-        }
-        let functional_dependency =
-            Self::derive_fd(input.schema().len(), input.functional_dependency(), &exprs);
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
-        LogicalProject { base, exprs, input }
-    }
-
-    /// get the Mapping of columnIndex from output column index to input column index
-    fn o2i_col_mapping_inner(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
-        let mut map = vec![None; exprs.len()];
-        for (i, expr) in exprs.iter().enumerate() {
-            map[i] = match expr {
-                ExprImpl::InputRef(input) => Some(input.index()),
-                _ => None,
-            }
-        }
-        ColIndexMapping::with_target_size(map, input_len)
-    }
-
-    /// get the Mapping of columnIndex from input column index to output column index,if a input
-    /// column corresponds more than one out columns, mapping to any one
-    fn i2o_col_mapping_inner(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
-        Self::o2i_col_mapping_inner(input_len, exprs).inverse()
+        LogicalProject { base, core }
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        Self::o2i_col_mapping_inner(self.input.schema().len(), self.exprs())
+        self.core.o2i_col_mapping()
     }
 
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        Self::i2o_col_mapping_inner(self.input.schema().len(), self.exprs())
-    }
-
-    pub fn create(input: PlanRef, exprs: Vec<ExprImpl>) -> PlanRef {
-        Self::new(input, exprs).into()
+        self.core.i2o_col_mapping()
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
@@ -131,80 +76,25 @@ impl LogicalProject {
     /// This is useful in column pruning when we want to add a project to ensure the output schema
     /// is correct.
     pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
-        if mapping.target_size() == 0 {
-            // The mapping is empty, so the parent actually doesn't need the output of the input.
-            // This can happen when the parent node only selects constant expressions.
-            return LogicalProject::new(input, vec![]);
-        };
-        let mut input_refs = vec![None; mapping.target_size()];
-        for (src, tar) in mapping.mapping_pairs() {
-            assert_eq!(input_refs[tar], None);
-            input_refs[tar] = Some(src);
-        }
-        let input_schema = input.schema();
-        let exprs: Vec<ExprImpl> = input_refs
-            .into_iter()
-            .map(|i| i.unwrap())
-            .map(|i| InputRef::new(i, input_schema.fields()[i].data_type()).into())
-            .collect();
-
-        LogicalProject::new(input, exprs)
+        Self::with_core(generic::Project::with_mapping(input, mapping))
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
     pub fn with_out_fields(input: PlanRef, out_fields: &FixedBitSet) -> Self {
-        LogicalProject::with_out_col_idx(input, out_fields.ones())
+        Self::with_core(generic::Project::with_out_fields(input, out_fields))
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
     pub fn with_out_col_idx(input: PlanRef, out_fields: impl Iterator<Item = usize>) -> Self {
-        let input_schema = input.schema();
-        let exprs = out_fields
-            .map(|index| InputRef::new(index, input_schema[index].data_type()).into())
-            .collect();
-        LogicalProject::new(input, exprs)
-    }
-
-    fn derive_schema(exprs: &[ExprImpl], input_schema: &Schema) -> Schema {
-        let o2i = Self::o2i_col_mapping_inner(input_schema.len(), exprs);
-        let fields = exprs
-            .iter()
-            .enumerate()
-            .map(|(id, expr)| {
-                // Get field info from o2i.
-                let (name, sub_fields, type_name) = match o2i.try_map(id) {
-                    Some(input_idx) => {
-                        let field = input_schema.fields()[input_idx].clone();
-                        (field.name, field.sub_fields, field.type_name)
-                    }
-                    None => (
-                        format!("{:?}", ExprDisplay { expr, input_schema }),
-                        vec![],
-                        String::new(),
-                    ),
-                };
-                Field::with_struct(expr.return_type(), name, sub_fields, type_name)
-            })
-            .collect();
-        Schema { fields }
-    }
-
-    fn derive_pk(input_schema: &Schema, input_pk: &[usize], exprs: &[ExprImpl]) -> Vec<usize> {
-        let i2o = Self::i2o_col_mapping_inner(input_schema.len(), exprs);
-        input_pk
-            .iter()
-            .map(|pk_col| i2o.try_map(*pk_col))
-            .collect::<Option<Vec<_>>>()
-            .unwrap_or_default()
+        Self::with_core(generic::Project::with_out_col_idx(input, out_fields))
     }
 
     fn derive_fd(
-        input_len: usize,
+        core: &Project<PlanRef>,
         input_fd_set: &FunctionalDependencySet,
-        exprs: &[ExprImpl],
     ) -> FunctionalDependencySet {
-        let i2o = Self::i2o_col_mapping_inner(input_len, exprs);
-        let mut fd_set = FunctionalDependencySet::new(exprs.len());
+        let i2o = core.i2o_col_mapping();
+        let mut fd_set = FunctionalDependencySet::new(core.exprs.len());
         for fd in input_fd_set.as_dependencies() {
             if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
                 fd_set.add_functional_dependency(fd);
@@ -214,60 +104,37 @@ impl LogicalProject {
     }
 
     pub fn exprs(&self) -> &Vec<ExprImpl> {
-        &self.exprs
+        &self.core.exprs
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field(
-            "exprs",
-            &self
-                .exprs()
-                .iter()
-                .map(|expr| ExprDisplay {
-                    expr,
-                    input_schema: self.input.schema(),
-                })
-                .collect_vec(),
-        );
-        builder.finish()
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        self.core.fmt_with_name(f, name)
     }
 
     pub fn is_identity(&self) -> bool {
-        self.schema().len() == self.input.schema().len()
-            && self
-                .exprs
-                .iter()
-                .zip_eq(self.input.schema().fields())
-                .enumerate()
-                .all(|(i, (expr, field))| {
-                    matches!(expr, ExprImpl::InputRef(input_ref) if **input_ref == InputRef::new(i, field.data_type()))
-                })
+        self.core.is_identity()
     }
 
     pub fn try_as_projection(&self) -> Option<Vec<usize>> {
-        self.exprs
-            .iter()
-            .enumerate()
-            .map(|(_i, expr)| match expr {
-                ExprImpl::InputRef(input_ref) => Some(input_ref.index),
-                _ => None,
-            })
-            .collect::<Option<Vec<_>>>()
+        self.core.try_as_projection()
     }
 
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
-        (self.exprs, self.input)
+        self.core.decompose()
+    }
+
+    pub fn is_all_inputref(&self) -> bool {
+        self.core.is_all_inputref()
     }
 }
 
 impl PlanTreeNodeUnary for LogicalProject {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.exprs.clone())
+        Self::new(input, self.exprs().clone())
     }
 
     fn rewrite_with_input(
@@ -276,7 +143,7 @@ impl PlanTreeNodeUnary for LogicalProject {
         mut input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         let exprs = self
-            .exprs
+            .exprs()
             .clone()
             .into_iter()
             .map(|expr| input_col_change.rewrite_expr(expr))
@@ -291,7 +158,7 @@ impl PlanTreeNodeUnary for LogicalProject {
 impl_plan_tree_node_for_unary! {LogicalProject}
 
 impl fmt::Display for LogicalProject {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_name(f, "LogicalProject")
     }
 }
@@ -304,11 +171,11 @@ impl ColPrunable for LogicalProject {
         // Record each InputRef's index.
         let mut input_ref_collector = CollectInputRef::with_capacity(input_col_num);
         required_cols.iter().for_each(|i| {
-            if let ExprImpl::InputRef(ref input_ref) = self.exprs[*i] {
+            if let ExprImpl::InputRef(ref input_ref) = self.exprs()[*i] {
                 let input_idx = input_ref.index;
                 input_required_appeared.put(input_idx);
             } else {
-                input_ref_collector.visit_expr(&self.exprs[*i]);
+                input_ref_collector.visit_expr(&self.exprs()[*i]);
             }
         });
         let input_required_cols = {
@@ -318,7 +185,7 @@ impl ColPrunable for LogicalProject {
         };
 
         let input_required_cols = input_required_cols.ones().collect_vec();
-        let new_input = self.input.prune_col(&input_required_cols);
+        let new_input = self.input().prune_col(&input_required_cols);
         let mut mapping = ColIndexMapping::with_remaining_columns(
             &input_required_cols,
             self.input().schema().len(),
@@ -326,7 +193,7 @@ impl ColPrunable for LogicalProject {
         // Rewrite each InputRef with new index.
         let exprs = required_cols
             .iter()
-            .map(|&id| mapping.rewrite_expr(self.exprs[id].clone()))
+            .map(|&id| mapping.rewrite_expr(self.exprs()[id].clone()))
             .collect();
 
         // Reconstruct the LogicalProject.
@@ -338,7 +205,7 @@ impl PredicatePushdown for LogicalProject {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
         // convert the predicate to one that references the child of the project
         let mut subst = Substitute {
-            mapping: self.exprs.clone(),
+            mapping: self.exprs().clone(),
         };
         let predicate = predicate.rewrite_expr(&mut subst);
 
@@ -348,9 +215,16 @@ impl PredicatePushdown for LogicalProject {
 
 impl ToBatch for LogicalProject {
     fn to_batch(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_batch()?;
+        self.to_batch_with_order_required(&Order::any())
+    }
+
+    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+        let input_order = self
+            .o2i_col_mapping()
+            .rewrite_provided_order(required_order);
+        let new_input = self.input().to_batch_with_order_required(&input_order)?;
         let new_logical = self.clone_with_input(new_input.clone());
-        if let Some(input_proj) = new_input.as_batch_project() {
+        let batch_project = if let Some(input_proj) = new_input.as_batch_project() {
             let outer_project = new_logical;
             let inner_project = input_proj.as_logical();
             let mut subst = Substitute {
@@ -362,10 +236,11 @@ impl ToBatch for LogicalProject {
                 .cloned()
                 .map(|expr| subst.rewrite_expr(expr))
                 .collect();
-            Ok(BatchProject::new(LogicalProject::new(inner_project.input(), exprs)).into())
+            BatchProject::new(LogicalProject::new(inner_project.input(), exprs))
         } else {
-            Ok(BatchProject::new(new_logical).into())
-        }
+            BatchProject::new(new_logical)
+        };
+        required_order.enforce_if_not_satisfies(batch_project.into())
     }
 }
 
@@ -411,13 +286,16 @@ impl ToStream for LogicalProject {
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
         let input_pk = input.logical_pk();
-        let i2o = Self::i2o_col_mapping_inner(input.schema().len(), proj.exprs());
-        let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
+        let i2o = proj.i2o_col_mapping();
+        let col_need_to_add = input_pk
+            .iter()
+            .cloned()
+            .filter(|i| i2o.try_map(*i).is_none());
         let input_schema = input.schema();
         let exprs =
             proj.exprs()
@@ -439,7 +317,7 @@ impl ToStream for LogicalProject {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 

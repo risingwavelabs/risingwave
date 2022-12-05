@@ -14,7 +14,7 @@
 
 use anyhow::Result;
 use chrono::prelude::*;
-use chrono::Duration;
+use chrono::{Duration, DurationRound};
 use humantime::parse_duration;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -23,16 +23,34 @@ use serde_json::{json, Value};
 use super::DEFAULT_MAX_PAST;
 use crate::types::{Datum, NaiveDateTimeWrapper, Scalar};
 
+enum LocalNow {
+    Relative,
+    Absolute(NaiveDateTime),
+}
+
 pub struct TimestampField {
     max_past: Duration,
-    local_now: NaiveDateTime,
+    local_now: LocalNow,
     seed: u64,
 }
 
 impl TimestampField {
-    pub fn new(max_past_option: Option<String>, seed: u64) -> Result<Self> {
-        let local_now = Local::now().naive_local();
-        // std duration
+    pub fn new(
+        max_past_option: Option<String>,
+        max_past_mode: Option<String>,
+        seed: u64,
+    ) -> Result<Self> {
+        let local_now = match max_past_mode.as_deref() {
+            Some("relative") => LocalNow::Relative,
+            _ => {
+                LocalNow::Absolute(
+                    Local::now()
+                        .naive_local()
+                        .duration_round(Duration::microseconds(1))?,
+                ) // round to 1 us std duration
+            }
+        };
+
         let max_past = if let Some(max_past_option) = max_past_option {
             parse_duration(&max_past_option)?
         } else {
@@ -47,19 +65,25 @@ impl TimestampField {
         })
     }
 
-    pub fn generate(&mut self, offset: u64) -> Value {
-        let seconds = self.max_past.num_seconds();
+    fn generate_data(&mut self, offset: u64) -> NaiveDateTime {
+        let milliseconds = self.max_past.num_milliseconds();
         let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
-        let max_seconds = rng.gen_range(0..=seconds);
-        let res = self.local_now - Duration::seconds(max_seconds);
-        json!(res.to_string())
+        let max_milliseconds = rng.gen_range(0..=milliseconds);
+        let now = match self.local_now {
+            LocalNow::Relative => Local::now()
+                .naive_local()
+                .duration_round(Duration::microseconds(1))
+                .unwrap(),
+            LocalNow::Absolute(now) => now,
+        };
+        now - Duration::milliseconds(max_milliseconds)
+    }
+
+    pub fn generate(&mut self, offset: u64) -> Value {
+        json!(self.generate_data(offset).to_string())
     }
 
     pub fn generate_datum(&mut self, offset: u64) -> Datum {
-        let seconds = self.max_past.num_seconds();
-        let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
-        let max_seconds = rng.gen_range(0..=seconds);
-        let res = self.local_now - Duration::seconds(max_seconds);
-        Some(NaiveDateTimeWrapper::new(res).to_scalar_value())
+        Some(NaiveDateTimeWrapper::new(self.generate_data(offset)).to_scalar_value())
     }
 }

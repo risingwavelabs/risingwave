@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
 use std::future::Future;
-use std::sync::Arc;
 
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
-use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::StoreLocalStatistic;
 
 pub trait NodeExtraOrderInfo: Eq + Ord + Send + Sync {}
 
@@ -56,12 +54,8 @@ impl<I: HummockIterator> PartialOrd for Node<I, UnorderedNodeExtra> {
         // order should be reversed.
 
         Some(match I::Direction::direction() {
-            DirectionEnum::Forward => {
-                VersionedComparator::compare_key(other.iter.key(), self.iter.key())
-            }
-            DirectionEnum::Backward => {
-                VersionedComparator::compare_key(self.iter.key(), other.iter.key())
-            }
+            DirectionEnum::Forward => other.iter.key().cmp(&self.iter.key()),
+            DirectionEnum::Backward => self.iter.key().cmp(&other.iter.key()),
         })
     }
 }
@@ -71,14 +65,16 @@ impl<I: HummockIterator> PartialOrd for Node<I, OrderedNodeExtra> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         // The `extra_info` is used as a tie-breaker when the keys are equal.
         Some(match I::Direction::direction() {
-            DirectionEnum::Forward => {
-                VersionedComparator::compare_key(other.iter.key(), self.iter.key())
-                    .then_with(|| other.extra_order_info.cmp(&self.extra_order_info))
-            }
-            DirectionEnum::Backward => {
-                VersionedComparator::compare_key(self.iter.key(), other.iter.key())
-                    .then_with(|| self.extra_order_info.cmp(&other.extra_order_info))
-            }
+            DirectionEnum::Forward => other
+                .iter
+                .key()
+                .cmp(&self.iter.key())
+                .then_with(|| other.extra_order_info.cmp(&self.extra_order_info)),
+            DirectionEnum::Backward => self
+                .iter
+                .key()
+                .cmp(&other.iter.key())
+                .then_with(|| self.extra_order_info.cmp(&other.extra_order_info)),
         })
     }
 }
@@ -103,8 +99,7 @@ pub struct MergeIteratorInner<I: HummockIterator, NE: NodeExtraOrderInfo> {
     /// The heap for merge sort.
     heap: BinaryHeap<Node<I, NE>>,
 
-    /// Statistics.
-    stats: Option<Arc<StateStoreMetrics>>,
+    last_table_key: Vec<u8>,
 }
 
 /// An order aware merge iterator.
@@ -113,20 +108,14 @@ pub type OrderedMergeIteratorInner<I: HummockIterator> = MergeIteratorInner<I, O
 
 impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
     pub fn new(iterators: impl IntoIterator<Item = I>) -> Self {
-        Self::create(iterators, None)
+        Self::create(iterators)
     }
 
-    pub fn for_compactor(
-        iterators: impl IntoIterator<Item = I>,
-        stats: Arc<StateStoreMetrics>,
-    ) -> Self {
-        Self::create(iterators, Some(stats))
+    pub fn for_compactor(iterators: impl IntoIterator<Item = I>) -> Self {
+        Self::create(iterators)
     }
 
-    fn create(
-        iterators: impl IntoIterator<Item = I>,
-        stats: Option<Arc<StateStoreMetrics>>,
-    ) -> Self {
+    fn create(iterators: impl IntoIterator<Item = I>) -> Self {
         Self {
             unused_iters: iterators
                 .into_iter()
@@ -137,7 +126,7 @@ impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
                 })
                 .collect(),
             heap: BinaryHeap::new(),
-            stats,
+            last_table_key: Vec::new(),
         }
     }
 }
@@ -159,20 +148,14 @@ pub type UnorderedMergeIteratorInner<I: HummockIterator> =
 
 impl<I: HummockIterator> UnorderedMergeIteratorInner<I> {
     pub fn new(iterators: impl IntoIterator<Item = I>) -> Self {
-        Self::create(iterators, None)
+        Self::create(iterators)
     }
 
-    pub fn for_compactor(
-        iterators: impl IntoIterator<Item = I>,
-        stats: Arc<StateStoreMetrics>,
-    ) -> Self {
-        Self::create(iterators, Some(stats))
+    pub fn for_compactor(iterators: impl IntoIterator<Item = I>) -> Self {
+        Self::create(iterators)
     }
 
-    fn create(
-        iterators: impl IntoIterator<Item = I>,
-        stats: Option<Arc<StateStoreMetrics>>,
-    ) -> Self {
+    fn create(iterators: impl IntoIterator<Item = I>) -> Self {
         Self {
             unused_iters: iterators
                 .into_iter()
@@ -182,7 +165,7 @@ impl<I: HummockIterator> UnorderedMergeIteratorInner<I> {
                 })
                 .collect(),
             heap: BinaryHeap::new(),
-            stats,
+            last_table_key: Vec::new(),
         }
     }
 }
@@ -218,45 +201,43 @@ trait MergeIteratorNext {
 }
 
 impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
-    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>>;
+    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
         async {
-            let top_node = self.heap.pop().expect("no inner iter");
-            let mut popped_nodes = vec![];
-
-            // Take all nodes with the same current key as the top_node out of the heap.
-            while let Some(next_node) = self.heap.peek_mut() {
-                match VersionedComparator::compare_key(top_node.iter.key(), next_node.iter.key()) {
-                    Ordering::Equal => {
-                        popped_nodes.push(PeekMut::pop(next_node));
-                    }
-                    _ => break,
+            let top_key = {
+                let top_key = self.heap.peek().expect("no inner iter").iter.key();
+                self.last_table_key.clear();
+                self.last_table_key
+                    .extend_from_slice(top_key.user_key.table_key.0);
+                FullKey {
+                    user_key: UserKey {
+                        table_id: top_key.user_key.table_id,
+                        table_key: TableKey(self.last_table_key.as_slice()),
+                    },
+                    epoch: top_key.epoch,
                 }
-            }
+            };
+            loop {
+                let Some(mut node) = self.heap.peek_mut() else {
+                    break;
+                };
+                // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places
+                // of return. Once the iterator enters an invalid state, we should
+                // remove it from heap before returning.
 
-            popped_nodes.push(top_node);
-
-            // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
-            // return. Once the iterator enters an invalid state, we should remove it from heap
-            // before returning.
-
-            // Put the popped nodes back to the heap if valid or unused_iters if invalid.
-            for mut node in popped_nodes {
-                match node.iter.next().await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        // If the iterator returns error, we should clear the heap, so that this
-                        // iterator becomes invalid.
+                if node.iter.key() == top_key {
+                    if let Err(e) = node.iter.next().await {
+                        PeekMut::pop(node);
                         self.heap.clear();
                         return Err(e);
-                    }
-                }
-
-                if !node.iter.is_valid() {
-                    self.unused_iters.push_back(node);
+                    };
+                    if !node.iter.is_valid() {
+                        let node = PeekMut::pop(node);
+                        self.unused_iters.push_back(node);
+                    };
                 } else {
-                    self.heap.push(node);
+                    break;
                 }
             }
 
@@ -266,7 +247,7 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
 }
 
 impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
-    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>>;
+    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
         async {
@@ -316,7 +297,7 @@ where
         self.next_inner()
     }
 
-    fn key(&self) -> &[u8] {
+    fn key(&self) -> FullKey<&[u8]> {
         self.heap.peek().expect("no inner iter").iter.key()
     }
 
@@ -338,7 +319,7 @@ where
         }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             self.reset_heap();
             futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.seek(key)))
@@ -350,15 +331,5 @@ where
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.collect_local_statistic_impl(stats);
-    }
-}
-
-impl<I: HummockIterator, NE: NodeExtraOrderInfo> Drop for MergeIteratorInner<I, NE> {
-    fn drop(&mut self) {
-        if let Some(stats) = &self.stats {
-            let mut local_stats = StoreLocalStatistic::default();
-            self.collect_local_statistic_impl(&mut local_stats);
-            local_stats.report(stats);
-        }
     }
 }

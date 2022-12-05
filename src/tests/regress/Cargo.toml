@@ -1,7 +1,11 @@
 [package]
 name = "risingwave_regress_test"
-version = "0.1.0"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
@@ -11,8 +15,10 @@ similar = "2"
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "process"] }
 tracing = "0.1"
-tracing-subscriber = "0.3"
-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+tracing-subscriber = "0.3.16"
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
 
 [[bin]]
 name = "risingwave_regress_test"

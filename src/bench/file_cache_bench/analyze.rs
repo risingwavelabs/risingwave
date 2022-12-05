@@ -98,16 +98,16 @@ impl Default for Metrics {
             insert_ios: Arc::new(AtomicUsize::new(0)),
             insert_bytes: Arc::new(AtomicUsize::new(0)),
             insert_lats: Arc::new(RwLock::new(
-                Histogram::new_with_bounds(1, 1_000_000, 2).unwrap(),
+                Histogram::new_with_bounds(1, 10_000_000, 2).unwrap(),
             )),
 
             get_ios: Arc::new(AtomicUsize::new(0)),
             get_miss_ios: Arc::new(AtomicUsize::new(0)),
             get_hit_lats: Arc::new(RwLock::new(
-                Histogram::new_with_bounds(1, 1_000_000, 2).unwrap(),
+                Histogram::new_with_bounds(1, 10_000_000, 2).unwrap(),
             )),
             get_miss_lats: Arc::new(RwLock::new(
-                Histogram::new_with_bounds(1, 1_000_000, 2).unwrap(),
+                Histogram::new_with_bounds(1, 10_000_000, 2).unwrap(),
             )),
 
             flush_ios: Arc::new(AtomicUsize::new(0)),

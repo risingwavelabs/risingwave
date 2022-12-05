@@ -16,7 +16,9 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME, RW_TABLE_FUNCTION_NAME};
+use risingwave_common::catalog::{
+    Field, TableId, DEFAULT_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
+};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{FunctionArg, Ident, ObjectName, TableAlias, TableFactor};
 
@@ -34,7 +36,7 @@ pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable, BoundTableSource};
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
-use crate::expr::CorrelatedId;
+use crate::expr::{CorrelatedId, Depth};
 
 /// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
 /// It is usually part of the `from` clause.
@@ -68,13 +70,13 @@ impl Relation {
         }
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn is_correlated(&self, depth: Depth) -> bool {
         match self {
-            Relation::Subquery(subquery) => subquery.query.is_correlated(),
+            Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
             Relation::Join(join) => {
-                join.cond.has_correlated_input_ref_by_depth()
-                    || join.left.is_correlated()
-                    || join.right.is_correlated()
+                join.cond.has_correlated_input_ref_by_depth(depth)
+                    || join.left.is_correlated(depth)
+                    || join.right.is_correlated(depth)
             }
             _ => false,
         }
@@ -82,25 +84,26 @@ impl Relation {
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         match self {
             Relation::Subquery(subquery) => subquery
                 .query
-                .collect_correlated_indices_by_depth_and_assign_id(correlated_id),
+                .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
             Relation::Join(join) => {
                 let mut correlated_indices = vec![];
                 correlated_indices.extend(
                     join.cond
-                        .collect_correlated_indices_by_depth_and_assign_id(correlated_id),
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
                 );
                 correlated_indices.extend(
                     join.left
-                        .collect_correlated_indices_by_depth_and_assign_id(correlated_id),
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
                 );
                 correlated_indices.extend(
                     join.right
-                        .collect_correlated_indices_by_depth_and_assign_id(correlated_id),
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
                 );
                 correlated_indices
             }
@@ -110,24 +113,32 @@ impl Relation {
 }
 
 impl Binder {
-    /// return first and second name in identifiers,
-    /// must have one name and can use default name as other one.
-    fn resolve_double_name(
-        mut identifiers: Vec<Ident>,
-        err_str: &str,
-        default_name: &str,
-    ) -> Result<(String, String)> {
-        let second_name = identifiers
-            .pop()
-            .ok_or_else(|| ErrorCode::InternalError(err_str.into()))?
-            .real_value();
+    /// return (`schema_name`, `name`)
+    pub fn resolve_schema_qualified_name(
+        db_name: &str,
+        name: ObjectName,
+    ) -> Result<(Option<String>, String)> {
+        let mut indentifiers = name.0;
 
-        let first_name = identifiers
-            .pop()
-            .map(|ident| ident.real_value())
-            .unwrap_or_else(|| default_name.into());
+        if indentifiers.len() > 3 {
+            return Err(internal_error(
+                "schema qualified name can contain at most 3 arguments".to_string(),
+            ));
+        }
 
-        Ok((first_name, second_name))
+        let name = indentifiers.pop().unwrap().real_value();
+
+        let schema_name = indentifiers.pop().map(|ident| ident.real_value());
+        let database_name = indentifiers.pop().map(|ident| ident.real_value());
+
+        if let Some(database_name) = database_name && database_name != db_name {
+            return Err(internal_error(format!(
+                "database in schema qualified name {}.{}.{} is not equal to current database name {}",
+                database_name, schema_name.unwrap(), name, db_name
+            )));
+        }
+
+        Ok((schema_name, name))
     }
 
     /// return first name in identifiers, must have only one name.
@@ -138,25 +149,9 @@ impl Binder {
                 ident_desc
             )));
         }
-        let name = identifiers
-            .pop()
-            .ok_or_else(|| ErrorCode::InternalError(format!("empty {}", ident_desc)))?
-            .real_value();
+        let name = identifiers.pop().unwrap().real_value();
 
         Ok(name)
-    }
-
-    /// return the (`schema_name`, `table_name`)
-    pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
-        Self::resolve_double_name(name.0, "empty table name", DEFAULT_SCHEMA_NAME)
-    }
-
-    /// return the ( `database_name`, `schema_name`)
-    pub fn resolve_schema_name(
-        default_db_name: &str,
-        name: ObjectName,
-    ) -> Result<(String, String)> {
-        Self::resolve_double_name(name.0, "empty schema name", default_db_name)
     }
 
     /// return the `database_name`
@@ -164,14 +159,19 @@ impl Binder {
         Self::resolve_single_name(name.0, "database name")
     }
 
+    /// return the `schema_name`
+    pub fn resolve_schema_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "schema name")
+    }
+
+    /// return the `index_name`
+    pub fn resolve_index_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "index name")
+    }
+
     /// return the `user_name`
     pub fn resolve_user_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "user name")
-    }
-
-    /// return the (`schema_name`, `index_name`)
-    pub fn resolve_index_name(name: ObjectName) -> Result<(String, String)> {
-        Self::resolve_double_name(name.0, "empty index name", DEFAULT_SCHEMA_NAME)
     }
 
     /// Fill the [`BindContext`](super::BindContext) for table.
@@ -198,7 +198,7 @@ impl Binder {
                 true => field.name.to_string(),
                 false => alias_iter
                     .next()
-                    .map(|t| t.value)
+                    .map(|t| t.real_value())
                     .unwrap_or_else(|| field.name.to_string()),
             };
             field.name = name.clone();
@@ -237,16 +237,19 @@ impl Binder {
         }
     }
 
-    pub(super) fn bind_relation_by_name(
+    /// Binds a relation, which can be:
+    /// - a table/source/materialized view
+    /// - a reference to a CTE
+    /// - a logical view
+    pub fn bind_relation_by_name(
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
-        let has_schema_name = name.0.len() > 1;
-        let (schema_name, table_name) = Self::resolve_table_name(name)?;
-        if !has_schema_name
-            && let Some(bound_query) = self.cte_to_relation.get(&table_name)
-        {
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        if schema_name.is_none() && let Some(bound_query) = self.cte_to_relation.get(&table_name) {
+            // Handles CTE
+
             let (query, mut original_alias) = bound_query.clone();
             debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
 
@@ -272,23 +275,17 @@ impl Binder {
             )?;
             Ok(Relation::Subquery(Box::new(BoundSubquery { query })))
         } else {
-            self.bind_table_or_source(&schema_name, &table_name, alias)
+
+            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias)
         }
     }
 
-    pub(super) fn bind_relation_by_id(
+    /// `rw_table(table_id[,schema_name])` which queries internal table
+    fn bind_internal_table(
         &mut self,
-        table_id: TableId,
-        schema_name: String,
+        args: Vec<FunctionArg>,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
-        let table_name =
-            self.catalog
-                .get_table_name_by_id(table_id, &self.db_name, &schema_name)?;
-        self.bind_table_or_source(&schema_name, &table_name, alias)
-    }
-
-    fn resolve_table_id(&self, args: Vec<FunctionArg>) -> Result<(String, TableId)> {
         if args.is_empty() || args.len() > 2 {
             return Err(ErrorCode::BindError(
                 "usage: rw_table(table_id[,schema_name])".to_string(),
@@ -307,56 +304,54 @@ impl Binder {
         let schema = args
             .get(1)
             .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
-        Ok((schema, table_id))
+
+        let table_name = self.catalog.get_table_name_by_id(table_id)?;
+        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table { name, alias, args } => {
-                if args.is_empty() {
-                    self.bind_relation_by_name(name, alias)
-                } else {
-                    let func_name = &name.0[0].value;
-                    if func_name.eq_ignore_ascii_case(RW_TABLE_FUNCTION_NAME) {
-                        let (schema, table_id) = self.resolve_table_id(args)?;
-                        return self.bind_relation_by_id(table_id, schema, alias);
-                    }
-                    if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
-                        let args: Vec<ExprImpl> = args
-                            .into_iter()
-                            .map(|arg| self.bind_function_arg(arg))
-                            .flatten_ok()
-                            .try_collect()?;
-                        let tf = TableFunction::new(table_function_type, args)?;
-                        let columns = [(
-                            false,
-                            Field {
-                                data_type: tf.return_type(),
-                                name: tf.function_type.name().to_string(),
-                                sub_fields: vec![],
-                                type_name: "".to_string(),
-                            },
-                        )]
-                        .into_iter();
-
-                        self.bind_table_to_context(
-                            columns,
-                            tf.function_type.name().to_string(),
-                            alias,
-                        )?;
-
-                        return Ok(Relation::TableFunction(Box::new(tf)));
-                    }
-                    let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
-                        ErrorCode::NotImplemented(
-                            format!("unknown table function kind: {}", name.0[0].value),
-                            1191.into(),
-                        )
-                    })?;
-                    Ok(Relation::WindowTableFunction(Box::new(
-                        self.bind_window_table_function(alias, kind, args)?,
-                    )))
+            TableFactor::Table { name, alias } => self.bind_relation_by_name(name, alias),
+            TableFactor::TableFunction { name, alias, args } => {
+                let func_name = &name.0[0].real_value();
+                if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
+                    return self.bind_internal_table(args, alias);
                 }
+                if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
+                    let args: Vec<ExprImpl> = args
+                        .into_iter()
+                        .map(|arg| self.bind_function_arg(arg))
+                        .flatten_ok()
+                        .try_collect()?;
+                    let tf = TableFunction::new(table_function_type, args)?;
+                    let columns = [(
+                        false,
+                        Field {
+                            data_type: tf.return_type(),
+                            name: tf.function_type.name().to_string(),
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                    )]
+                    .into_iter();
+
+                    self.bind_table_to_context(
+                        columns,
+                        tf.function_type.name().to_string(),
+                        alias,
+                    )?;
+
+                    return Ok(Relation::TableFunction(Box::new(tf)));
+                }
+                let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
+                    ErrorCode::NotImplemented(
+                        format!("unknown table function kind: {}", func_name),
+                        1191.into(),
+                    )
+                })?;
+                Ok(Relation::WindowTableFunction(Box::new(
+                    self.bind_window_table_function(alias, kind, args)?,
+                )))
             }
             TableFactor::Derived {
                 lateral,
@@ -390,16 +385,6 @@ impl Binder {
                 self.pop_and_merge_lateral_context()?;
                 Ok(bound_join)
             }
-
-            // TODO: if and when we allow nested joins (binding table factors which are themselves
-            // joins), We need to `self.push_table_context()` prior to binding the join and
-            // `self.pop_and_merge_table_context()` after. This ensures that the nested join's
-            // `BindContext` references only the columns that are visible to it.
-            _ => Err(ErrorCode::NotImplemented(
-                format!("unsupported table factor {:?}", table_factor),
-                None.into(),
-            )
-            .into()),
         }
     }
 }

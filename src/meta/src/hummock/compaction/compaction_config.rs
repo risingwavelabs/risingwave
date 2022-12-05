@@ -63,7 +63,7 @@ impl CompactionConfigBuilder {
         }
     }
 
-    pub fn new_with(config: CompactionConfig) -> Self {
+    pub fn with_config(config: CompactionConfig) -> Self {
         Self { config }
     }
 

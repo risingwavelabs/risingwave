@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
+
+use crate::Result;
 
 /// `EqGroups` encodes the grouping information in the sort aggregate algorithm.
 ///
@@ -156,7 +158,7 @@ where
     }
 
     pub fn output_concrete(&mut self, builder: &mut T::Builder) -> Result<()> {
-        builder.append(self.group_value.as_ref().map(|x| x.as_scalar_ref()))?;
+        builder.append(self.group_value.as_ref().map(|x| x.as_scalar_ref()));
         self.ongoing = false;
         self.group_value = None;
         Ok(())
@@ -170,11 +172,7 @@ macro_rules! impl_sorted_grouper {
                 if let ArrayImpl::$input_variant(i) = input {
                     self.detect_groups_concrete(i)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Input fail to match {}.", stringify!($input_variant))
                 }
             }
 
@@ -187,11 +185,7 @@ macro_rules! impl_sorted_grouper {
                 if let ArrayImpl::$input_variant(i) = input {
                     self.update_concrete(i, start_idx, end_idx)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Input fail to match {}.", stringify!($input_variant))
                 }
             }
 
@@ -199,11 +193,7 @@ macro_rules! impl_sorted_grouper {
                 if let ArrayBuilderImpl::$input_variant(b) = builder {
                     self.output_concrete(b)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Builder fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Builder fail to match {}.", stringify!($input_variant))
                 }
             }
         }
@@ -225,14 +215,14 @@ mod tests {
         };
         let mut builder = I32ArrayBuilder::new(0);
 
-        let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
+        let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]);
         let eq = g.detect_groups_concrete(&input)?;
         assert_eq!(eq.indices, vec![2]);
         g.update_concrete(&input, 0, *eq.indices.first().unwrap())?;
         g.output_concrete(&mut builder)?;
         g.update_concrete(&input, *eq.indices.first().unwrap(), input.len())?;
 
-        let input = I32Array::from_slice(&[Some(3), Some(4), Some(4)]).unwrap();
+        let input = I32Array::from_slice(&[Some(3), Some(4), Some(4)]);
         let eq = g.detect_groups_concrete(&input)?;
         assert_eq!(eq.indices, vec![1]);
         g.update_concrete(&input, 0, *eq.indices.first().unwrap())?;
@@ -241,7 +231,7 @@ mod tests {
         g.output_concrete(&mut builder)?;
 
         assert_eq!(
-            builder.finish().unwrap().iter().collect::<Vec<_>>(),
+            builder.finish().iter().collect::<Vec<_>>(),
             vec![Some(1), Some(3), Some(4)]
         );
         Ok(())

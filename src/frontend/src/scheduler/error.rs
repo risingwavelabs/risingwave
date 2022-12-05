@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError, TrackingIssue};
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_rpc_client::error::RpcError;
 use thiserror::Error;
+use tonic::{Code, Status};
 
 use crate::scheduler::plan_fragmenter::QueryId;
 
@@ -26,21 +27,38 @@ pub enum SchedulerError {
     #[error("Rpc error: {0}")]
     RpcError(#[from] RpcError),
 
-    #[error("Feature is not yet implemented: {0}, {1}")]
-    NotImplemented(String, TrackingIssue),
-
     #[error("Empty workers found")]
     EmptyWorkerNodes,
 
-    #[error("Task fail")]
-    TaskExecutionError,
+    #[error("{0}")]
+    TaskExecutionError(String),
+
+    /// Used when receive cancel request (ctrl-c) from user.
+    #[error("Canceled by user")]
+    QueryCancelError,
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
 
+/// Only if the code is Internal, change it to Execution Error. Otherwise convert to Rpc Error.
+impl From<tonic::Status> for SchedulerError {
+    fn from(s: Status) -> Self {
+        match s.code() {
+            Code::Internal => Self::TaskExecutionError(s.message().to_string()),
+            _ => Self::RpcError(s.into()),
+        }
+    }
+}
+
 impl From<SchedulerError> for RwError {
     fn from(s: SchedulerError) -> Self {
         ErrorCode::SchedulerError(Box::new(s)).into()
+    }
+}
+
+impl From<RwError> for SchedulerError {
+    fn from(e: RwError) -> Self {
+        Self::Internal(e.into())
     }
 }

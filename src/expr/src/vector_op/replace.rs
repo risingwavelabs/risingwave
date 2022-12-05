@@ -12,25 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use risingwave_common::array::{StringWriter, WrittenGuard};
 
 use crate::Result;
 
 #[inline(always)]
-pub fn replace(s: &str, from_str: &str, to_str: &str, writer: BytesWriter) -> Result<BytesGuard> {
+pub fn replace(
+    s: &str,
+    from_str: &str,
+    to_str: &str,
+    writer: StringWriter<'_>,
+) -> Result<WrittenGuard> {
     if from_str.is_empty() {
-        return writer.write_ref(s).map_err(Into::into);
+        return Ok(writer.write_ref(s));
     }
     let mut last = 0;
     let mut writer = writer.begin();
     while let Some(mut start) = s[last..].find(from_str) {
         start += last;
-        writer.write_ref(&s[last..start])?;
-        writer.write_ref(to_str)?;
+        writer.write_ref(&s[last..start]);
+        writer.write_ref(to_str);
         last = start + from_str.len();
     }
-    writer.write_ref(&s[last..])?;
-    writer.finish().map_err(Into::into)
+    writer.write_ref(&s[last..]);
+    Ok(writer.finish())
 }
 
 #[cfg(test)]
@@ -51,10 +56,10 @@ mod tests {
         ];
 
         for (s, from_str, to_str, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
+            let mut builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
-            let guard = replace(s, from_str, to_str, writer).unwrap();
-            let array = guard.into_inner().finish().unwrap();
+            let _guard = replace(s, from_str, to_str, writer).unwrap();
+            let array = builder.finish();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }

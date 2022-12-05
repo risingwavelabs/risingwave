@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use risingwave_common::array::{StringWriter, WrittenGuard};
 
 use crate::{ExprError, Result};
 
@@ -21,8 +21,8 @@ pub fn split_part(
     string_expr: &str,
     delimiter_expr: &str,
     nth_expr: i32,
-    writer: BytesWriter,
-) -> Result<BytesGuard> {
+    writer: StringWriter<'_>,
+) -> Result<WrittenGuard> {
     if nth_expr == 0 {
         return Err(ExprError::InvalidParam {
             name: "data",
@@ -62,7 +62,7 @@ pub fn split_part(
         }
     };
 
-    writer.write_ref(nth_val).map_err(Into::into)
+    Ok(writer.write_ref(nth_val))
 }
 
 #[cfg(test)]
@@ -101,15 +101,14 @@ mod tests {
         for (i, case @ (string_expr, delimiter_expr, nth_expr, expected)) in
             cases.iter().enumerate()
         {
-            let builder = Utf8ArrayBuilder::new(1);
+            let mut builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
             let actual = split_part(string_expr, delimiter_expr, *nth_expr, writer);
 
             match actual {
-                Ok(guard) => {
+                Ok(_guard) => {
                     let expected = expected.unwrap();
-
-                    let array = guard.into_inner().finish().unwrap();
+                    let array = builder.finish();
                     let actual = array.value_at(0).unwrap();
 
                     assert_eq!(expected, actual, "\nat case {i}: {:?}\n", case)

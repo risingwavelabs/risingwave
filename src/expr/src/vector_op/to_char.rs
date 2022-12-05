@@ -13,21 +13,23 @@
 // limitations under the License.
 
 use aho_corasick::AhoCorasickBuilder;
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use risingwave_common::array::{StringWriter, WrittenGuard};
 use risingwave_common::types::NaiveDateTimeWrapper;
 
 use crate::Result;
 
 /// Compile the pg pattern to chrono pattern.
 // TODO: Chrono can not fully support the pg format, so consider using other implementations later.
-fn compile_pattern_to_chrono(tmpl: &str) -> String {
+pub fn compile_pattern_to_chrono(tmpl: &str) -> String {
     // https://www.postgresql.org/docs/current/functions-formatting.html
     static PG_PATTERNS: &[&str] = &[
-        "HH24", "HH12", "HH", "MI", "SS", "YYYY", "YY", "IYYY", "IY", "MM", "DD",
+        "HH24", "hh24", "HH12", "hh12", "HH", "hh", "MI", "mi", "SS", "ss", "YYYY", "yyyy", "YY",
+        "yy", "IYYY", "iyyy", "IY", "iy", "MM", "mm", "DD", "dd",
     ];
     // https://docs.rs/chrono/latest/chrono/format/strftime/index.html
     static CHRONO_PATTERNS: &[&str] = &[
-        "%H", "%I", "%I", "%M", "%S", "%Y", "%Y", "%G", "%g", "%m", "%d",
+        "%H", "%H", "%I", "%I", "%I", "%I", "%M", "%M", "%S", "%S", "%Y", "%Y", "%y", "%y", "%G",
+        "%G", "%g", "%g", "%m", "%m", "%d", "%d",
     ];
 
     let ac = AhoCorasickBuilder::new()
@@ -47,9 +49,9 @@ fn compile_pattern_to_chrono(tmpl: &str) -> String {
 pub fn to_char_timestamp(
     data: NaiveDateTimeWrapper,
     tmpl: &str,
-    dst: BytesWriter,
-) -> Result<BytesGuard> {
+    writer: StringWriter<'_>,
+) -> Result<WrittenGuard> {
     let chrono_tmpl = compile_pattern_to_chrono(tmpl);
     let res = data.0.format(&chrono_tmpl).to_string();
-    dst.write_ref(&res).map_err(Into::into)
+    Ok(writer.write_ref(&res))
 }

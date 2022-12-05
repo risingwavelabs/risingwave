@@ -21,7 +21,7 @@ use path_absolutize::*;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum DatabaseMode {
-    PostgreSQL,
+    Postgres,
     Risingwave,
 }
 
@@ -31,7 +31,7 @@ impl From<&OsStr> for DatabaseMode {
             .to_str()
             .expect("Expect utf-8 string for database mode");
         match mode.to_lowercase().as_str() {
-            "postgres" | "pg" | "postgresql" => DatabaseMode::PostgreSQL,
+            "postgres" | "pg" | "postgresql" => DatabaseMode::Postgres,
             "risingwave" | "rw" => DatabaseMode::Risingwave,
             _ => unreachable!("Unrecognized database mode. Support PostgreSQL or Risingwave only."),
         }

@@ -17,12 +17,11 @@ use std::sync::Arc;
 
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 
-use crate::array::{Array, ArrayImpl, DataChunk, Row};
+use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
+use crate::row::Row;
 use crate::types::ScalarImpl;
-
-pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum OrderType {
@@ -39,7 +38,7 @@ impl OrderType {
         }
     }
 
-    pub fn to_prost(&self) -> ProstOrderType {
+    pub fn to_prost(self) -> ProstOrderType {
         match self {
             OrderType::Ascending => ProstOrderType::Ascending,
             OrderType::Descending => ProstOrderType::Descending,
@@ -126,45 +125,6 @@ impl PartialEq for HeapElem {
 
 impl Eq for HeapElem {}
 
-// TODO(yuchao): We may deprecate this struct to use `OrderedRow` instead.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DescOrderedRow {
-    pub row: Row,
-    pub encoded_row: Option<Vec<u8>>,
-    pub order_pairs: Arc<Vec<OrderPair>>,
-}
-
-impl DescOrderedRow {
-    pub fn new(row: Row, encoded_row: Option<Vec<u8>>, order_pairs: Arc<Vec<OrderPair>>) -> Self {
-        Self {
-            row,
-            encoded_row,
-            order_pairs,
-        }
-    }
-}
-
-impl Ord for DescOrderedRow {
-    fn cmp(&self, other: &Self) -> Ordering {
-        let ord = if let (Some(encoded_lhs), Some(encoded_rhs)) =
-            (self.encoded_row.as_ref(), other.encoded_row.as_ref())
-        {
-            encoded_lhs.as_slice().cmp(encoded_rhs.as_slice())
-        } else {
-            compare_rows(&self.row, &other.row, &self.order_pairs).unwrap()
-        };
-        // We have to reverse the order because we need to use this in a max heap.
-        // Alternative option is to revert every order pair when constructing `OrderedRow`.
-        ord.reverse()
-    }
-}
-
-impl PartialOrd for DescOrderedRow {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 fn compare_values<'a, T>(lhs: Option<&T>, rhs: Option<&T>, order_type: &'a OrderType) -> Ordering
 where
     T: Ord,
@@ -217,7 +177,8 @@ pub fn compare_rows(lhs: &Row, rhs: &Row, order_pairs: &[OrderPair]) -> Result<O
                 NaiveDateTime,
                 NaiveTime,
                 Struct,
-                List
+                List,
+                Bytea
             ]
         );
 
@@ -299,17 +260,18 @@ mod tests {
     use itertools::Itertools;
 
     use super::{compare_rows, OrderPair, OrderType};
-    use crate::array::{DataChunk, ListValue, Row, StructValue};
+    use crate::array::{DataChunk, ListValue, StructValue};
+    use crate::row::{Row, Row2};
     use crate::types::{DataType, ScalarImpl};
     use crate::util::sort_util::compare_rows_in_chunk;
 
     #[test]
     fn test_compare_rows() {
         let v10 = Some(ScalarImpl::Int32(42));
-        let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v11 = Some(ScalarImpl::Utf8("hello".into()));
         let v12 = Some(ScalarImpl::Float32(4.0.into()));
         let v20 = Some(ScalarImpl::Int32(42));
-        let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
+        let v21 = Some(ScalarImpl::Utf8("hell".into()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
         let row1 = Row::new(vec![v10, v11, v12]);
@@ -332,10 +294,10 @@ mod tests {
     #[test]
     fn test_compare_rows_in_chunk() {
         let v10 = Some(ScalarImpl::Int32(42));
-        let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v11 = Some(ScalarImpl::Utf8("hello".into()));
         let v12 = Some(ScalarImpl::Float32(4.0.into()));
         let v20 = Some(ScalarImpl::Int32(42));
-        let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
+        let v21 = Some(ScalarImpl::Utf8("hell".into()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
         let row1 = Row::new(vec![v10, v11, v12]);
@@ -343,8 +305,7 @@ mod tests {
         let chunk = DataChunk::from_rows(
             &[row1, row2],
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
-        )
-        .unwrap();
+        );
         let order_pairs = vec![
             OrderPair::new(0, OrderType::Ascending),
             OrderPair::new(1, OrderType::Descending),
@@ -368,7 +329,7 @@ mod tests {
             Some(ScalarImpl::Int64(64)),
             Some(ScalarImpl::Float32(3.2.into())),
             Some(ScalarImpl::Float64(6.4.into())),
-            Some(ScalarImpl::Utf8("hello".to_string())),
+            Some(ScalarImpl::Utf8("hello".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Decimal(10.into())),
             Some(ScalarImpl::Interval(Default::default())),
@@ -390,7 +351,7 @@ mod tests {
             Some(ScalarImpl::Int64(64)),
             Some(ScalarImpl::Float32(3.2.into())),
             Some(ScalarImpl::Float64(6.4.into())),
-            Some(ScalarImpl::Utf8("hello".to_string())),
+            Some(ScalarImpl::Utf8("hello".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Decimal(10.into())),
             Some(ScalarImpl::Interval(Default::default())),
@@ -407,7 +368,7 @@ mod tests {
             ]))),
         ]);
 
-        let order_pairs = (0..row1.size())
+        let order_pairs = (0..row1.len())
             .map(|i| OrderPair::new(i, OrderType::Ascending))
             .collect_vec();
         assert_eq!(
@@ -439,8 +400,7 @@ mod tests {
                     datatype: Box::new(DataType::Int32),
                 },
             ],
-        )
-        .unwrap();
+        );
         assert_eq!(
             Ordering::Equal,
             compare_rows_in_chunk(&chunk, 0, &chunk, 0, &order_pairs).unwrap()

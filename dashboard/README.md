@@ -22,7 +22,7 @@ dashboard/
 TODO: Find a suitable testing framework
 
 ## Development
-Start the RisingWave database.
+Start the RisingWave database, remove drop tables from `tpch_snapshot.slt`
 ```bash
 ./risedev d
 sqllogictest -p 4566 -d dev './e2e_test/streaming/tpch_snapshot.slt'
@@ -35,6 +35,11 @@ The website will be served at port 3000.
 ```bash
 npm run dev
 ```
+You should also run:
+```
+node mock-server.js
+```
+To start a mock API server when developing. You can use `fetch.sh` to update the mock APIs.
 
 ## Test with RisingWave meta node
 To replace the built static files in RisingWave with your newest code, 

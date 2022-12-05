@@ -12,20 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
-#![deny(rustdoc::broken_intra_doc_links)]
 #![feature(allocator_api)]
-#![feature(backtrace)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(bound_as_ref)]
 #![feature(bound_map)]
@@ -33,11 +20,8 @@
 #![feature(custom_test_frameworks)]
 #![feature(drain_filter)]
 #![feature(generators)]
-#![feature(generic_associated_types)]
 #![feature(hash_drain_filter)]
-#![feature(let_else)]
 #![feature(lint_reasons)]
-#![feature(map_first_last)]
 #![feature(proc_macro_hygiene)]
 #![feature(result_option_inspect)]
 #![feature(stmt_expr_attributes)]
@@ -48,10 +32,19 @@
 #![feature(type_changing_struct_update)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(assert_matches)]
+#![feature(is_sorted)]
 #![feature(btree_drain_filter)]
+#![feature(exact_size_is_empty)]
+#![feature(once_cell)]
+#![cfg_attr(coverage, feature(no_coverage))]
+#![recursion_limit = "256"]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
+#![feature(let_chains)]
+#![expect(clippy::result_large_err, reason = "FIXME: HummockError is large")]
+#![feature(associated_type_bounds)]
 
 pub mod hummock;
-pub mod keyspace;
 pub mod memory;
 pub mod monitor;
 pub mod panic_store;
@@ -61,7 +54,6 @@ pub mod storage_value;
 pub mod store;
 pub mod error;
 pub mod store_impl;
-pub mod streaming_table;
 pub mod table;
 pub mod write_batch;
 
@@ -69,7 +61,6 @@ pub mod write_batch;
 #[cfg(feature = "failpoints")]
 mod storage_failpoints;
 
-pub use keyspace::Keyspace;
 pub use store::{StateStore, StateStoreIter};
 pub use store_impl::StateStoreImpl;
 

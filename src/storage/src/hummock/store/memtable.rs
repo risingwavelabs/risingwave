@@ -17,6 +17,13 @@ use std::ops::RangeBounds;
 
 use bytes::Bytes;
 
+use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
+
+// TODO: refine to use use a custom data structure Memtable
+pub type ImmutableMemtable = SharedBufferBatch;
+
+pub type ImmId = SharedBufferBatchId;
+
 macro_rules! memtable_impl_method_body {
     ($memtable:expr, $method_name:ident, $($args:expr),+) => {
         {
@@ -36,7 +43,7 @@ pub enum Memtable {
     BTree(BTreeMapMemtable),
 }
 
-#[allow(unused)]
+#[expect(dead_code)]
 impl Memtable {
     /// Inserts a key-value entry associated with a given `epoch` into memtable.
     fn insert(&mut self, key: Bytes, val: Bytes, epoch: u64) {
@@ -67,12 +74,12 @@ impl Memtable {
     }
 }
 
-#[allow(unused)]
+#[expect(dead_code)]
 pub struct BTreeMapMemtable {
     mem: BTreeMap<Bytes, Bytes>,
 }
 
-#[allow(unused)]
+#[expect(unused_variables, dead_code)]
 impl BTreeMapMemtable {
     fn insert(&mut self, key: Bytes, val: Bytes, epoch: u64) {
         unimplemented!()

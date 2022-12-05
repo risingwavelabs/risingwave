@@ -79,18 +79,18 @@ impl Binder {
 
         let base = self.bind_relation_by_name(table_name.clone(), None)?;
 
-        let Some(time_col_arg) = args.next() else {
+        let time_col = if let Some(time_col_arg) = args.next()
+          && let Some(ExprImpl::InputRef(time_col)) = self.bind_function_arg(time_col_arg)?.into_iter().next()
+          && matches!(time_col.data_type, DataType::Timestampz | DataType::Timestamp | DataType::Date)
+        {
+            time_col
+        } else {
             return Err(ErrorCode::BindError(
-                "the 2st arg of window table function should be time_col".to_string(),
+                "the 2st arg of window table function should be a timestamp with time zone, timestamp or date column".to_string(),
             )
             .into());
         };
-        let Some(ExprImpl::InputRef(time_col)) = self.bind_function_arg(time_col_arg)?.into_iter().next() else {
-            return Err(ErrorCode::BindError(
-                "the 2st arg of window table function should be time_col".to_string(),
-            )
-            .into());
-        };
+        let output_type = DataType::window_of(&time_col.data_type).unwrap();
 
         let base_columns = std::mem::take(&mut self.context.columns);
 
@@ -110,13 +110,13 @@ impl Binder {
             })
             .chain(
                 [
-                    Ok((false, Field::with_name(DataType::Timestamp, "window_start"))),
-                    Ok((false, Field::with_name(DataType::Timestamp, "window_end"))),
+                    Ok((false, Field::with_name(output_type.clone(), "window_start"))),
+                    Ok((false, Field::with_name(output_type, "window_end"))),
                 ]
                 .into_iter(),
             ).collect::<Result<Vec<_>>>()?;
 
-        let (_, table_name) = Self::resolve_table_name(table_name)?;
+        let (_, table_name) = Self::resolve_schema_qualified_name(&self.db_name, table_name)?;
         self.bind_table_to_context(columns, table_name, alias)?;
 
         // Other arguments are validated in `plan_window_table_function`

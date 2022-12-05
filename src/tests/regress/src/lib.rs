@@ -24,9 +24,9 @@
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(path_file_prefix)]
+#![feature(let_chains)]
 
 mod opts;
 

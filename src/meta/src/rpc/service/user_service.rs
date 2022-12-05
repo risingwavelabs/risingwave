@@ -23,7 +23,6 @@ use risingwave_pb::user::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::error::meta_error_to_tonic;
 use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv};
 use crate::storage::MetaStore;
 use crate::MetaResult;
@@ -57,7 +56,7 @@ where
         let mut expanded_privileges = Vec::new();
         for privilege in privileges {
             if let Some(Object::AllTablesSchemaId(schema_id)) = &privilege.object {
-                let tables = self.catalog_manager.list_tables(*schema_id).await?;
+                let tables = self.catalog_manager.list_table_ids(*schema_id).await;
                 for table_id in tables {
                     let mut privilege = privilege.clone();
                     privilege.object = Some(Object::TableId(table_id));
@@ -70,7 +69,7 @@ where
                     expanded_privileges.push(privilege);
                 }
             } else if let Some(Object::AllSourcesSchemaId(source_id)) = &privilege.object {
-                let sources = self.catalog_manager.list_source_ids(*source_id).await?;
+                let sources = self.catalog_manager.list_source_ids(*source_id).await;
                 for source_id in sources {
                     let mut privilege = privilege.clone();
                     privilege.object = Some(Object::SourceId(source_id));
@@ -108,9 +107,8 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::User }>()
-            .await
-            .map_err(meta_error_to_tonic)? as u32;
-        let mut user = req.get_user().map_err(meta_error_to_tonic)?.clone();
+            .await? as u32;
+        let mut user = req.get_user()?.clone();
         user.id = id;
         let version = self.catalog_manager.create_user(&user).await?;
 
@@ -145,7 +143,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .iter()
             .map(|i| UpdateField::from_i32(*i).unwrap())
             .collect_vec();
-        let user = req.get_user().map_err(meta_error_to_tonic)?.clone();
+        let user = req.get_user()?.clone();
         let version = self
             .catalog_manager
             .update_user(&user, &update_fields)
@@ -184,7 +182,6 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
     ) -> Result<Response<RevokePrivilegeResponse>, Status> {
         let req = request.into_inner();
         let privileges = self.expand_privilege(req.get_privileges(), None).await?;
-        let revoke_grant_option = req.revoke_grant_option;
         let version = self
             .catalog_manager
             .revoke_privilege(
@@ -192,7 +189,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
                 &privileges,
                 req.granted_by,
                 req.revoke_by,
-                revoke_grant_option,
+                req.revoke_grant_option,
                 req.cascade,
             )
             .await?;

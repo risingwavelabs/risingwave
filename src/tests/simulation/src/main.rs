@@ -13,12 +13,9 @@
 // limitations under the License.
 
 #![cfg_attr(not(madsim), allow(dead_code))]
-
-use std::time::Duration;
+#![feature(once_cell)]
 
 use clap::Parser;
-use rand::Rng;
-use sqllogictest::ParallelTestError;
 
 #[cfg(not(madsim))]
 fn main() {
@@ -48,202 +45,123 @@ pub struct Args {
     #[clap(long, default_value = "3")]
     compute_nodes: usize,
 
+    /// The number of compactor nodes.
+    #[clap(long, default_value = "2")]
+    compactor_nodes: usize,
+
     /// The number of CPU cores for each compute node.
     ///
     /// This determines worker_node_parallelism.
     #[clap(long, default_value = "2")]
     compute_node_cores: usize,
 
+    /// The number of clients to run simultaneously.
+    ///
+    /// If this argument is set, the runner will implicitly create a database for each test file,
+    /// and all `--kill*` options will be ignored.
     #[clap(short, long)]
     jobs: Option<usize>,
+
+    /// The probability of etcd request timeout.
+    #[clap(long, default_value = "0.0")]
+    etcd_timeout_rate: f32,
+
+    /// Allow to kill all risingwave node.
+    #[clap(long)]
+    kill: bool,
+
+    /// Allow to kill meta node.
+    #[clap(long)]
+    kill_meta: bool,
+
+    /// Allow to kill frontend node.
+    #[clap(long)]
+    kill_frontend: bool,
+
+    /// Allow to kill compute node.
+    #[clap(long)]
+    kill_compute: bool,
+
+    /// Allow to kill compactor node.
+    #[clap(long)]
+    kill_compactor: bool,
+
+    /// The probability of a node being killed.
+    #[clap(long, default_value = "1.0")]
+    kill_rate: f32,
+
+    /// The directory of kafka source data.
+    #[clap(long)]
+    kafka_datadir: Option<String>,
+
+    /// Path to configuration file.
+    #[clap(long)]
+    config_path: Option<String>,
+
+    /// The number of sqlsmith test cases to generate.
+    ///
+    /// If this argument is set, the `files` argument refers to a directory containing sqlsmith
+    /// test data.
+    #[clap(long)]
+    sqlsmith: Option<usize>,
 }
 
 #[cfg(madsim)]
 #[madsim::main]
 async fn main() {
+    use std::sync::Arc;
+
+    use risingwave_simulation::client::RisingWave;
+    use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
+    use risingwave_simulation::slt::*;
+
     let args = Args::parse();
+    let config = Configuration {
+        config_path: args.config_path.unwrap_or_default(),
+        frontend_nodes: args.frontend_nodes,
+        compute_nodes: args.compute_nodes,
+        compactor_nodes: args.compactor_nodes,
+        compute_node_cores: args.compute_node_cores,
+        etcd_timeout_rate: args.etcd_timeout_rate,
+    };
+    let kill_opts = KillOpts {
+        kill_meta: args.kill_meta || args.kill,
+        kill_frontend: args.kill_frontend || args.kill,
+        kill_compute: args.kill_compute || args.kill,
+        kill_compactor: args.kill_compactor || args.kill,
+        kill_rate: args.kill_rate,
+    };
 
-    let handle = madsim::runtime::Handle::current();
-    println!("seed = {}", handle.seed());
-    println!("{:?}", args);
+    let cluster = Arc::new(
+        Cluster::start(config)
+            .await
+            .expect("failed to start cluster"),
+    );
 
-    // meta node
-    handle
-        .create_node()
-        .name("meta")
-        .ip("192.168.1.1".parse().unwrap())
-        .init(|| async {
-            let opts = risingwave_meta::MetaNodeOpts::parse_from([
-                "meta-node",
-                "--listen-addr",
-                "0.0.0.0:5690",
-            ]);
-            risingwave_meta::start(opts).await
-        })
-        .build();
-    // wait for the service to be ready
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
-    // frontend node
-    let mut frontend_ip = vec![];
-    for i in 1..=args.frontend_nodes {
-        frontend_ip.push(format!("192.168.2.{i}"));
-        handle
-            .create_node()
-            .name(format!("frontend-{i}"))
-            .ip([192, 168, 2, i as u8].into())
-            .init(move || async move {
-                let opts = risingwave_frontend::FrontendOpts::parse_from([
-                    "frontend-node",
-                    "--host",
-                    "0.0.0.0:4566",
-                    "--client-address",
-                    &format!("192.168.2.{i}:4566"),
-                    "--meta-addr",
-                    "192.168.1.1:5690",
-                ]);
-                risingwave_frontend::start(opts).await
-            })
-            .build();
+    if let Some(datadir) = args.kafka_datadir {
+        cluster.create_kafka_producer(&datadir);
     }
 
-    // compute node
-    for i in 1..=args.compute_nodes {
-        handle
-            .create_node()
-            .name(format!("compute-{i}"))
-            .ip([192, 168, 3, i as u8].into())
-            .cores(args.compute_node_cores)
-            .init(move || async move {
-                let opts = risingwave_compute::ComputeNodeOpts::parse_from([
-                    "compute-node",
-                    "--host",
-                    "0.0.0.0:5688",
-                    "--client-address",
-                    &format!("192.168.3.{i}:5688"),
-                    "--meta-address",
-                    "192.168.1.1:5690",
-                    "--state-store",
-                    "hummock+memory-shared",
-                ]);
-                risingwave_compute::start(opts).await
+    if let Some(count) = args.sqlsmith {
+        let host = cluster.rand_frontend_ip();
+        cluster
+            .run_on_client(async move {
+                let rw = RisingWave::connect(host, "dev".into()).await.unwrap();
+                risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count).await;
             })
-            .build();
+            .await;
+        return;
     }
-    // wait for the service to be ready
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    // client
-    let client_node = handle
-        .create_node()
-        .name("client")
-        .ip([192, 168, 100, 1].into())
-        .build();
-    client_node
-        .spawn(async move {
+
+    let cluster0 = cluster.clone();
+    cluster
+        .run_on_client(async move {
             let glob = &args.files;
             if let Some(jobs) = args.jobs {
-                run_parallel_slt_task(glob, &frontend_ip, jobs)
-                    .await
-                    .unwrap();
+                run_parallel_slt_task(cluster0, glob, jobs).await.unwrap();
             } else {
-                let i = rand::thread_rng().gen_range(0..frontend_ip.len());
-                run_slt_task(glob, &frontend_ip[i]).await;
+                run_slt_task(cluster0, glob, &kill_opts).await;
             }
         })
-        .await
-        .unwrap();
-}
-
-async fn run_slt_task(glob: &str, host: &str) {
-    let mut tester =
-        sqllogictest::Runner::new(Postgres::connect(host.to_string(), "dev".to_string()).await);
-    let files = glob::glob(glob).expect("failed to read glob pattern");
-    for file in files {
-        let file = file.unwrap();
-        let path = file.as_path();
-        println!("{}", path.display());
-        tester.run_file_async(path).await.unwrap();
-    }
-}
-
-async fn run_parallel_slt_task(
-    glob: &str,
-    hosts: &[String],
-    jobs: usize,
-) -> Result<(), ParallelTestError> {
-    let i = rand::thread_rng().gen_range(0..hosts.len());
-    let db = Postgres::connect(hosts[i].clone(), "dev".to_string()).await;
-    let mut tester = sqllogictest::Runner::new(db);
-    tester
-        .run_parallel_async(glob, hosts.to_vec(), Postgres::connect, jobs)
-        .await
-}
-
-struct Postgres {
-    client: tokio_postgres::Client,
-    task: tokio::task::JoinHandle<()>,
-}
-
-impl Postgres {
-    async fn connect(host: String, dbname: String) -> Self {
-        let (client, connection) = tokio_postgres::Config::new()
-            .host(&host)
-            .port(4566)
-            .dbname(&dbname)
-            .user("root")
-            .connect_timeout(Duration::from_secs(5))
-            .connect(tokio_postgres::NoTls)
-            .await
-            .expect("Failed to connect to database");
-        let task = tokio::spawn(async move {
-            connection.await.expect("Postgres connection error");
-        });
-        Postgres { client, task }
-    }
-}
-
-impl Drop for Postgres {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-#[async_trait::async_trait]
-impl sqllogictest::AsyncDB for Postgres {
-    type Error = tokio_postgres::error::Error;
-
-    async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
-        use std::fmt::Write;
-
-        let mut output = String::new();
-        let rows = self.client.simple_query(sql).await?;
-        for row in rows {
-            match row {
-                tokio_postgres::SimpleQueryMessage::Row(row) => {
-                    for i in 0..row.len() {
-                        if i != 0 {
-                            write!(output, " ").unwrap();
-                        }
-                        match row.get(i) {
-                            Some(v) if v.is_empty() => write!(output, "(empty)").unwrap(),
-                            Some(v) => write!(output, "{}", v).unwrap(),
-                            None => write!(output, "NULL").unwrap(),
-                        }
-                    }
-                }
-                tokio_postgres::SimpleQueryMessage::CommandComplete(_) => {}
-                _ => unreachable!(),
-            }
-            writeln!(output).unwrap();
-        }
-        Ok(output)
-    }
-
-    fn engine_name(&self) -> &str {
-        "risingwave"
-    }
-
-    async fn sleep(dur: Duration) {
-        tokio::time::sleep(dur).await
-    }
+        .await;
 }

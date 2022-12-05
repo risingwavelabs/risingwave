@@ -12,26 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::future::try_join_all;
+use futures::stream::BoxStream;
+use futures::StreamExt;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_common::error::{internal_error, Result, ToRwResult};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+use risingwave_common::error::ErrorCode::{ConnectorError, ProtocolError};
+use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
+use risingwave_common::util::select_all;
 use risingwave_connector::source::{
     Column, ConnectorProperties, ConnectorState, SourceMessage, SplitId, SplitMetaData,
     SplitReaderImpl,
 };
-use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
+use risingwave_connector::ConnectorParams;
+use risingwave_pb::catalog::{
+    ColumnIndex as ProstColumnIndex, StreamSourceInfo as ProstStreamSourceInfo,
+};
+use risingwave_pb::plan_common::{
+    ColumnCatalog as ProstColumnCatalog, RowFormatType as ProstRowFormatType,
+};
 
-use crate::common::SourceChunkBuilder;
 use crate::monitor::SourceMetrics;
-use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState};
+use crate::{
+    SourceColumnDesc, SourceFormat, SourceParserImpl, SourceStreamChunkBuilder,
+    StreamChunkWithState,
+};
+
+pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 
 #[derive(Clone, Debug)]
 pub struct SourceContext {
@@ -48,8 +59,8 @@ impl SourceContext {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref DEFAULT_SPLIT_ID: SplitId = SplitId::new("None".into());
+fn default_split_id() -> SplitId {
+    "None".into()
 }
 
 struct InnerConnectorSourceReader {
@@ -61,31 +72,18 @@ struct InnerConnectorSourceReader {
     context: SourceContext,
 }
 
-struct InnerConnectorSourceReaderHandle {
-    stop_tx: oneshot::Sender<()>,
-    join_handle: JoinHandle<()>,
-}
-
-const CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 512;
-
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or
 /// batch processing. [`ConnectorSource`] introduces schema at this level while
 /// [`SplitReaderImpl`] simply loads raw content from message queue or file system.
 /// Parallel means that multiple [`InnerConnectorSourceReader`] will run in parallel during the
 /// `next`, so that 0 or more Splits reads can be handled at the Source level.
 pub struct ConnectorSourceReader {
-    pub config: ConnectorProperties,
-    pub parser: Arc<SourceParserImpl>,
-    pub columns: Vec<SourceColumnDesc>,
+    parser: Arc<SourceParserImpl>,
+    columns: Vec<SourceColumnDesc>,
 
-    handles: Option<HashMap<SplitId, InnerConnectorSourceReaderHandle>>,
-    message_rx: Receiver<Result<Vec<SourceMessage>>>,
-    // We need to keep this tx, otherwise the channel will return none with 0 inner readers, and we
-    // need to clone this tx when adding new inner readers in the future.
-    message_tx: Sender<Result<Vec<SourceMessage>>>,
-
-    metrics: Arc<SourceMetrics>,
-    context: SourceContext,
+    // merge all streams of inner reader into one
+    // TODO: make this static dispatch instead of box
+    stream: BoxStream<'static, Result<Vec<SourceMessage>>>,
 }
 
 impl InnerConnectorSourceReader {
@@ -128,150 +126,54 @@ impl InnerConnectorSourceReader {
         })
     }
 
-    async fn run(
-        &mut self,
-        mut stop: oneshot::Receiver<()>,
-        output: mpsc::Sender<Result<Vec<SourceMessage>>>,
-    ) {
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = RwError)]
+    async fn into_stream(self) {
         let actor_id = self.context.actor_id.to_string();
         let source_id = self.context.source_id.to_string();
         let id = match &self.split {
             Some(splits) => splits[0].id(),
-            None => DEFAULT_SPLIT_ID.clone(),
+            None => default_split_id(),
         };
-
-        loop {
-            let chunk: anyhow::Result<Option<Vec<SourceMessage>>>;
-            tokio::select! {
-                biased;
-                // stop chan has high priority
-                _ = stop.borrow_mut() => {
-                    tracing::debug!("connector reader {} stop signal received", id);
-                    break;
-                }
-
-                c = self.reader.next() => {
-                    chunk = c;
-                }
-            }
-
-            match chunk.map_err(|e| internal_error(e.to_string())) {
-                Err(e) => {
-                    tracing::error!("connector reader {} error happened {}", id, e.to_string());
-                    output.send(Err(e)).await.ok();
-                    break;
-                }
-                Ok(None) => {
-                    tracing::warn!("connector reader {} stream stopped", id);
-                    break;
-                }
-                Ok(Some(msg)) => {
-                    if msg.is_empty() {
-                        continue;
-                    }
-                    // Avoid occupying too much CPU time if the source is a data generator, like
-                    // DataGen or Nexmark.
-                    tokio::task::consume_budget().await;
-
-                    self.metrics
-                        .partition_input_count
-                        .with_label_values(&[actor_id.as_str(), source_id.as_str(), id.as_str()])
-                        .inc_by(msg.len() as u64);
-
-                    output.send(Ok(msg)).await.ok();
-                }
-            }
+        #[for_await]
+        for msgs in self.reader.into_stream() {
+            let msgs = msgs?;
+            self.metrics
+                .partition_input_count
+                .with_label_values(&[&actor_id, &source_id, &id])
+                .inc_by(msgs.len() as u64);
+            yield msgs;
         }
     }
 }
 
-impl SourceChunkBuilder for ConnectorSourceReader {}
-
 impl ConnectorSourceReader {
-    pub async fn next(&mut self) -> Result<StreamChunkWithState> {
-        let batch = self.message_rx.recv().await.unwrap()?;
+    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    pub async fn into_stream(self) {
+        #[for_await]
+        for batch in self.stream {
+            let batch = batch?;
+            let mut builder =
+                SourceStreamChunkBuilder::with_capacity(self.columns.clone(), batch.len());
+            let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
 
-        let mut events = Vec::with_capacity(batch.len());
-        let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
-
-        for msg in batch {
-            if let Some(content) = msg.payload {
-                split_offset_mapping.insert(msg.split_id, msg.offset);
-                match self.parser.parse(content.as_ref(), &self.columns) {
-                    Err(e) => {
+            for msg in batch {
+                if let Some(content) = msg.payload {
+                    split_offset_mapping.insert(msg.split_id, msg.offset);
+                    if let Err(e) = self
+                        .parser
+                        .parse(content.as_ref(), builder.row_writer())
+                        .await
+                    {
                         tracing::warn!("message parsing failed {}, skipping", e.to_string());
                         continue;
                     }
-                    Ok(result) => events.push(result),
                 }
             }
+            yield StreamChunkWithState {
+                chunk: builder.finish(),
+                split_offset_mapping: Some(split_offset_mapping),
+            };
         }
-
-        let columns = Self::build_columns(&self.columns, events.iter().flat_map(|e| &e.rows))?;
-        let ops = events.into_iter().flat_map(|e| e.ops).collect();
-
-        Ok(StreamChunkWithState {
-            chunk: StreamChunk::new(ops, columns, None),
-            split_offset_mapping: Some(split_offset_mapping),
-        })
-    }
-}
-
-impl Drop for ConnectorSourceReader {
-    fn drop(&mut self) {
-        let handles = self.handles.take().unwrap();
-
-        for (_, handle) in handles {
-            handle.join_handle.abort();
-        }
-    }
-}
-
-impl ConnectorSourceReader {
-    pub async fn add_split(&mut self, split: ConnectorState) -> Result<()> {
-        if let Some(append_splits) = split {
-            for split in append_splits {
-                let split_id = split.id();
-
-                let mut reader = InnerConnectorSourceReader::new(
-                    self.config.clone(),
-                    Some(vec![split]),
-                    self.columns.clone(),
-                    self.metrics.clone(),
-                    self.context.clone(),
-                )
-                .await?;
-                let (stop_tx, stop_rx) = oneshot::channel();
-                let sender = self.message_tx.clone();
-                let join_handle = tokio::spawn(async move { reader.run(stop_rx, sender).await });
-
-                if let Some(handles) = self.handles.as_mut() {
-                    handles.insert(
-                        split_id,
-                        InnerConnectorSourceReaderHandle {
-                            stop_tx,
-                            join_handle,
-                        },
-                    );
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    pub async fn drop_split(&mut self, split_id: SplitId) -> Result<()> {
-        let handle = self
-            .handles
-            .as_mut()
-            .and_then(|handles| handles.remove(&split_id))
-            .ok_or_else(|| internal_error(format!("could not find split {}", split_id)))
-            .unwrap();
-        handle.stop_tx.send(()).unwrap();
-        handle
-            .join_handle
-            .await
-            .map_err(|e| internal_error(e.to_string()))
     }
 }
 
@@ -280,9 +182,44 @@ pub struct ConnectorSource {
     pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
     pub parser: Arc<SourceParserImpl>,
+    pub connector_message_buffer_size: usize,
 }
 
 impl ConnectorSource {
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new(
+        format: SourceFormat,
+        row_schema_location: &str,
+        use_schema_registry: bool,
+        proto_message_name: String,
+        properties: HashMap<String, String>,
+        columns: Vec<SourceColumnDesc>,
+        connector_node_addr: Option<String>,
+        connector_message_buffer_size: usize,
+    ) -> Result<Self> {
+        // Store the connector node address to properties for later use.
+        let mut source_props: HashMap<String, String> =
+            HashMap::from_iter(properties.clone().into_iter());
+        connector_node_addr
+            .map(|addr| source_props.insert("connector_node_addr".to_string(), addr));
+        let config =
+            ConnectorProperties::extract(source_props).map_err(|e| ConnectorError(e.into()))?;
+        let parser = SourceParserImpl::create(
+            &format,
+            &properties,
+            row_schema_location,
+            use_schema_registry,
+            proto_message_name,
+        )
+        .await?;
+        Ok(Self {
+            config,
+            columns,
+            parser,
+            connector_message_buffer_size,
+        })
+    }
+
     fn get_target_columns(&self, column_ids: Vec<ColumnId>) -> Result<Vec<SourceColumnDesc>> {
         column_ids
             .iter()
@@ -308,12 +245,6 @@ impl ConnectorSource {
         metrics: Arc<SourceMetrics>,
         context: SourceContext,
     ) -> Result<ConnectorSourceReader> {
-        let (tx, rx) = mpsc::channel(CONNECTOR_MESSAGE_BUFFER_SIZE);
-        let mut handles = HashMap::with_capacity(if let Some(split) = &splits {
-            split.len()
-        } else {
-            1
-        });
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
         let source_metrics = metrics.clone();
@@ -338,33 +269,156 @@ impl ConnectorSource {
             }))
             .await?;
 
-        for mut reader in readers {
-            let split_id = match &reader.split {
-                Some(s) => s[0].id(),
-                None => DEFAULT_SPLIT_ID.clone(),
-            };
-            let (stop_tx, stop_rx) = oneshot::channel();
-            let sender = tx.clone();
-            let join_handle = tokio::spawn(async move { reader.run(stop_rx, sender).await });
-
-            handles.insert(
-                split_id,
-                InnerConnectorSourceReaderHandle {
-                    stop_tx,
-                    join_handle,
-                },
-            );
-        }
+        let stream = select_all(readers.into_iter().map(|r| r.into_stream())).boxed();
 
         Ok(ConnectorSourceReader {
-            config: self.config.clone(),
-            handles: Some(handles),
-            message_rx: rx,
             parser: self.parser.clone(),
             columns,
-            message_tx: tx,
-            metrics: metrics.clone(),
-            context: context.clone(),
+            stream,
         })
+    }
+}
+
+/// `SourceDescV2` describes a stream source.
+#[derive(Debug)]
+pub struct SourceDescV2 {
+    pub source: ConnectorSource,
+    pub format: SourceFormat,
+    pub columns: Vec<SourceColumnDesc>,
+    pub metrics: Arc<SourceMetrics>,
+    pub pk_column_ids: Vec<i32>,
+}
+
+#[derive(Clone)]
+pub struct SourceDescBuilderV2 {
+    row_id_index: Option<ProstColumnIndex>,
+    columns: Vec<ProstColumnCatalog>,
+    metrics: Arc<SourceMetrics>,
+    pk_column_ids: Vec<i32>,
+    properties: HashMap<String, String>,
+    source_info: ProstStreamSourceInfo,
+    connector_params: ConnectorParams,
+    connector_message_buffer_size: usize,
+}
+
+impl SourceDescBuilderV2 {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        row_id_index: Option<ProstColumnIndex>,
+        columns: Vec<ProstColumnCatalog>,
+        metrics: Arc<SourceMetrics>,
+        pk_column_ids: Vec<i32>,
+        properties: HashMap<String, String>,
+        source_info: ProstStreamSourceInfo,
+        connector_params: ConnectorParams,
+        connector_message_buffer_size: usize,
+    ) -> Self {
+        Self {
+            row_id_index,
+            columns,
+            metrics,
+            pk_column_ids,
+            properties,
+            source_info,
+            connector_params,
+            connector_message_buffer_size,
+        }
+    }
+
+    pub async fn build(self) -> Result<SourceDescV2> {
+        let format = match self.source_info.get_row_format()? {
+            ProstRowFormatType::Json => SourceFormat::Json,
+            ProstRowFormatType::Protobuf => SourceFormat::Protobuf,
+            ProstRowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
+            ProstRowFormatType::Avro => SourceFormat::Avro,
+            ProstRowFormatType::Maxwell => SourceFormat::Maxwell,
+            ProstRowFormatType::CanalJson => SourceFormat::CanalJson,
+            ProstRowFormatType::RowUnspecified => unreachable!(),
+        };
+
+        if format == SourceFormat::Protobuf && self.source_info.row_schema_location.is_empty() {
+            return Err(ProtocolError("protobuf file location not provided".to_string()).into());
+        }
+
+        let mut columns: Vec<_> = self
+            .columns
+            .iter()
+            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
+            .collect();
+        if let Some(row_id_index) = self.row_id_index.as_ref() {
+            columns[row_id_index.index as usize].skip_parse = true;
+        }
+        assert!(
+            !self.pk_column_ids.is_empty(),
+            "source should have at least one pk column"
+        );
+
+        let source = ConnectorSource::new(
+            format.clone(),
+            &self.source_info.row_schema_location,
+            self.source_info.use_schema_registry,
+            self.source_info.proto_message_name,
+            self.properties,
+            columns.clone(),
+            self.connector_params.connector_rpc_endpoint,
+            self.connector_message_buffer_size,
+        )
+        .await?;
+
+        Ok(SourceDescV2 {
+            source,
+            format,
+            columns,
+            metrics: self.metrics,
+            pk_column_ids: self.pk_column_ids,
+        })
+    }
+}
+
+pub mod test_utils {
+    use std::collections::HashMap;
+
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+    use risingwave_pb::catalog::{ColumnIndex, StreamSourceInfo};
+    use risingwave_pb::plan_common::ColumnCatalog;
+
+    use super::{SourceDescBuilderV2, DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE};
+
+    pub fn create_source_desc_builder(
+        schema: &Schema,
+        row_id_index: Option<u64>,
+        pk_column_ids: Vec<i32>,
+        source_info: StreamSourceInfo,
+        properties: HashMap<String, String>,
+    ) -> SourceDescBuilderV2 {
+        let row_id_index = row_id_index.map(|index| ColumnIndex { index });
+        let columns = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| ColumnCatalog {
+                column_desc: Some(
+                    ColumnDesc {
+                        data_type: f.data_type.clone(),
+                        column_id: ColumnId::from(i as i32), // use column index as column id
+                        name: f.name.clone(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                    }
+                    .to_protobuf(),
+                ),
+                is_hidden: false,
+            })
+            .collect();
+        SourceDescBuilderV2 {
+            row_id_index,
+            columns,
+            metrics: Default::default(),
+            pk_column_ids,
+            properties,
+            source_info,
+            connector_params: Default::default(),
+            connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
+        }
     }
 }

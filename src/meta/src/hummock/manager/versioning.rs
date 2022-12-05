@@ -13,40 +13,56 @@
 // limitations under the License.
 
 use std::cmp;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::RangeBounds;
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionDeltaExt;
-use risingwave_hummock_sdk::{HummockContextId, HummockSstableId, HummockVersionId};
+use function_name::named;
+use itertools::Itertools;
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockContextId, HummockSstableId, HummockVersionId,
+};
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionDelta,
+    HummockVersionStats,
 };
 
-#[derive(Default)]
-pub(crate) struct Versioning {
-    // Volatile states below
+use crate::hummock::manager::read_lock;
+use crate::hummock::HummockManager;
+use crate::storage::MetaStore;
 
-    // Newest version
+#[derive(Default)]
+pub struct Versioning {
+    // Volatile states below
+    /// Avoide commit epoch epochs
+    /// Don't persist compaction version delta to meta store
+    pub disable_commit_epochs: bool,
+
+    /// Latest hummock version
     pub current_version: HummockVersion,
-    // These SSTs should be deleted from object store.
-    // Mapping from a SST to the version that has marked it stale. See `ack_deleted_ssts`.
+    /// These SSTs should be deleted from object store.
+    /// Mapping from a SST to the version that has marked it stale. See `ack_deleted_ssts`.
     pub ssts_to_delete: BTreeMap<HummockSstableId, HummockVersionId>,
-    // These deltas should be deleted from meta store.
-    // A delta can be deleted if
-    // - It's version id <= checkpoint version id. Currently we only make checkpoint for version id
-    //   <= min_pinned_version_id.
-    // - AND It either contains no SST to delete, or all these SSTs has been deleted. See
-    //   `extend_ssts_to_delete_from_deltas`.
+    /// These deltas should be deleted from meta store.
+    /// A delta can be deleted if
+    /// - It's version id <= checkpoint version id. Currently we only make checkpoint for version
+    ///   id <= min_pinned_version_id.
+    /// - AND It either contains no SST to delete, or all these SSTs has been deleted. See
+    ///   `extend_ssts_to_delete_from_deltas`.
     pub deltas_to_delete: Vec<HummockVersionId>,
+    /// SST which is referenced more than once
+    pub branched_ssts:
+        BTreeMap<HummockSstableId, HashMap<CompactionGroupId, /* divide version */ u64>>,
 
     // Persistent states below
-
-    // Mapping from id of each hummock version which succeeds checkpoint to its
-    // `HummockVersionDelta`
+    /// Mapping from id of each hummock version which succeeds checkpoint to its
+    /// `HummockVersionDelta`
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pub pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pub pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
     pub checkpoint_version: HummockVersion,
+    /// Stats for latest hummock version.
+    pub version_stats: HummockVersionStats,
 }
 
 impl Versioning {
@@ -69,7 +85,7 @@ impl Versioning {
                 self.deltas_to_delete.push(delta.id);
                 continue;
             }
-            let removed_sst_ids = delta.get_removed_sst_ids();
+            let removed_sst_ids = delta.get_gc_sst_ids().clone();
             for sst_id in &removed_sst_ids {
                 let duplicate_insert = self.ssts_to_delete.insert(*sst_id, delta.id);
                 debug_assert!(duplicate_insert.is_none());
@@ -81,5 +97,74 @@ impl Versioning {
             // Otherwise, the delta is qualified for deletion after all its sst_to_delete is
             // deleted.
         }
+    }
+}
+
+impl<S> HummockManager<S>
+where
+    S: MetaStore,
+{
+    #[named]
+    pub async fn list_pinned_version(&self) -> Vec<HummockPinnedVersion> {
+        read_lock!(self, versioning)
+            .await
+            .pinned_versions
+            .values()
+            .cloned()
+            .collect_vec()
+    }
+
+    #[named]
+    pub async fn list_pinned_snapshot(&self) -> Vec<HummockPinnedSnapshot> {
+        read_lock!(self, versioning)
+            .await
+            .pinned_snapshots
+            .values()
+            .cloned()
+            .collect_vec()
+    }
+
+    pub async fn list_workers(
+        &self,
+        context_ids: &[HummockContextId],
+    ) -> HashMap<HummockContextId, WorkerNode> {
+        let mut workers = HashMap::new();
+        for context_id in context_ids {
+            if let Some(worker) = self.cluster_manager.get_worker_by_id(*context_id).await {
+                workers.insert(*context_id, worker.worker_node);
+            }
+        }
+        workers
+    }
+
+    #[named]
+    pub async fn get_version_stats(&self) -> HummockVersionStats {
+        read_lock!(self, versioning).await.version_stats.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::hummock::HummockVersionDelta;
+
+    use crate::hummock::manager::versioning::Versioning;
+
+    #[tokio::test]
+    async fn test_extend_ssts_to_delete_from_deltas_trivial_move() {
+        let mut versioning = Versioning::default();
+
+        // trivial_move
+        versioning.hummock_version_deltas.insert(
+            2,
+            HummockVersionDelta {
+                id: 2,
+                prev_id: 1,
+                trivial_move: false,
+                ..Default::default()
+            },
+        );
+        assert_eq!(versioning.deltas_to_delete.len(), 0);
+        versioning.extend_ssts_to_delete_from_deltas(1..=2);
+        assert_eq!(versioning.deltas_to_delete.len(), 1);
     }
 }

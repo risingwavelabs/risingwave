@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk, Vis};
@@ -74,28 +75,12 @@ impl SimpleFilterExecutor {
             expr,
         }
     }
-}
 
-impl Debug for SimpleFilterExecutor {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FilterExecutor")
-            .field("expr", &self.expr)
-            .finish()
-    }
-}
-
-impl SimpleExecutor for SimpleFilterExecutor {
-    fn map_filter_chunk(
-        &mut self,
+    pub(super) fn filter(
         chunk: StreamChunk,
+        filter: Arc<ArrayImpl>,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact()?;
-
         let (data_chunk, ops) = chunk.into_parts();
-
-        let pred_output = self.expr.eval_infallible(&data_chunk, |err| {
-            self.ctx.on_compute_error(err, self.identity())
-        });
 
         let (columns, vis) = data_chunk.into_parts();
 
@@ -111,7 +96,7 @@ impl SimpleExecutor for SimpleFilterExecutor {
             Vis::Bitmap(ref m) => m.len() == n,
         });
 
-        if let ArrayImpl::Bool(bool_array) = &*pred_output {
+        if let ArrayImpl::Bool(bool_array) = &*filter {
             for (op, res) in ops.into_iter().zip_eq(bool_array.iter()) {
                 // SAFETY: ops.len() == pred_output.len() == visibility.len()
                 let res = res.unwrap_or(false);
@@ -168,12 +153,32 @@ impl SimpleExecutor for SimpleFilterExecutor {
             None
         })
     }
+}
+
+impl Debug for SimpleFilterExecutor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FilterExecutor")
+            .field("expr", &self.expr)
+            .finish()
+    }
+}
+
+impl SimpleExecutor for SimpleFilterExecutor {
+    fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>> {
+        let chunk = chunk.compact();
+
+        let pred_output = self.expr.eval_infallible(chunk.data_chunk(), |err| {
+            self.ctx.on_compute_error(err, self.identity())
+        });
+
+        Self::filter(chunk, pred_output)
+    }
 
     fn schema(&self) -> &Schema {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -232,7 +237,8 @@ mod tests {
             DataType::Boolean,
             Box::new(left_expr),
             Box::new(right_expr),
-        );
+        )
+        .unwrap();
         let filter = Box::new(FilterExecutor::new(
             ActorContext::create(123),
             Box::new(source),

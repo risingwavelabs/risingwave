@@ -1,27 +1,35 @@
 # Docker Images
 
-RisingWave currently *only supports Linux x86_64* for building docker images.
+The docker images for x86_64 are built with AVX2 SIMD extensions, while the images for aarch64 are built with NEON SIMD extensions. These must be available on your machine. If your machine does not support these extensions, you must build the docker image with the build-arg `simd_disabled=true`.
 
 To build the images, simply run:
 
 ```
-make docker
+docker build . -f docker/Dockerfile
 ```
 
-in the project root.
+from the project root.
+
+To build the images without SIMD vector extensions, run 
+
+```
+docker build . -f docker/Dockerfile --build-arg simd_disabled=true
+```
+
+from the project root and run any subsequent docker commands on the resultant image.
 
 To ensure you are using the latest version of RisingWave image,
 
 ```
 # Ensure risingwave image is of latest version
-docker pull ghcr.io/singularity-data/risingwave:latest
+docker pull ghcr.io/risingwavelabs/risingwave:latest
 ```
 
 To start a RisingWave playground, run
 
 ```
 # Start playground
-docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/singularity-data/risingwave:latest playground
+docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:latest playground
 ```
 
 To start a RisingWave cluster, run

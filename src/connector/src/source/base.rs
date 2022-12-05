@@ -13,30 +13,39 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
+use futures::stream::BoxStream;
 use futures::{pin_mut, Stream, StreamExt};
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::ErrorCode;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
+use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
+use crate::source::cdc::{
+    CdcProperties, CdcSplit, CdcSplitEnumerator, CdcSplitReader, CDC_CONNECTOR,
+};
 use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
 };
 use crate::source::dummy_connector::DummySplitReader;
 use crate::source::filesystem::s3::{S3Properties, S3_CONNECTOR};
+use crate::source::google_pubsub::{
+    PubsubProperties, PubsubSplit, PubsubSplitEnumerator, PubsubSplitReader,
+    GOOGLE_PUBSUB_CONNECTOR,
+};
 use crate::source::kafka::enumerator::KafkaSplitEnumerator;
 use crate::source::kafka::source::KafkaSplitReader;
 use crate::source::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
 use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
-use crate::source::kinesis::source::reader::KinesisMultiSplitReader;
+use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
 use crate::source::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
 use crate::source::nexmark::source::reader::NexmarkSplitReader;
@@ -63,8 +72,7 @@ pub trait SplitEnumerator: Sized {
 /// [`SplitReader`] is an abstraction of the external connector read interface,
 /// used to read messages from the outside and transform them into source-oriented
 /// [`SourceMessage`], in order to improve throughput, it is recommended to return a batch of
-/// messages at a time, [`Option`] is used to be compatible with the Stream API, but the stream of a
-/// Streaming system should not end
+/// messages at a time.
 #[async_trait]
 pub trait SplitReader: Sized {
     type Properties;
@@ -75,8 +83,13 @@ pub trait SplitReader: Sized {
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
+    fn into_stream(self) -> BoxSourceStream;
 }
+
+pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+
+/// The max size of a chunk yielded by source stream.
+pub const MAX_CHUNK_SIZE: usize = 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner, PartialEq, Hash)]
 pub enum SplitImpl {
@@ -85,15 +98,19 @@ pub enum SplitImpl {
     Kinesis(KinesisSplit),
     Nexmark(NexmarkSplit),
     Datagen(DatagenSplit),
+    Cdc(CdcSplit),
+    GooglePubsub(PubsubSplit),
 }
 
 pub enum SplitReaderImpl {
-    Kinesis(Box<KinesisMultiSplitReader>),
+    Kinesis(Box<KinesisSplitReader>),
     Kafka(Box<KafkaSplitReader>),
     Dummy(Box<DummySplitReader>),
     Nexmark(Box<NexmarkSplitReader>),
     Pulsar(Box<PulsarSplitReader>),
     Datagen(Box<DatagenSplitReader>),
+    Cdc(Box<CdcSplitReader>),
+    GooglePubsub(Box<PubsubSplitReader>),
 }
 
 pub enum SplitEnumeratorImpl {
@@ -102,54 +119,62 @@ pub enum SplitEnumeratorImpl {
     Kinesis(KinesisSplitEnumerator),
     Nexmark(NexmarkSplitEnumerator),
     Datagen(DatagenSplitEnumerator),
+    Cdc(CdcSplitEnumerator),
+    GooglePubsub(PubsubSplitEnumerator),
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub enum ConnectorProperties {
-    Kafka(KafkaProperties),
-    Pulsar(PulsarProperties),
-    Kinesis(KinesisProperties),
-    Nexmark(NexmarkProperties),
-    Datagen(DatagenProperties),
-    S3(S3Properties),
-    Dummy(()),
+    Kafka(Box<KafkaProperties>),
+    Pulsar(Box<PulsarProperties>),
+    Kinesis(Box<KinesisProperties>),
+    Nexmark(Box<NexmarkProperties>),
+    Datagen(Box<DatagenProperties>),
+    S3(Box<S3Properties>),
+    Cdc(Box<CdcProperties>),
+    Dummy(Box<()>),
+    GooglePubsub(Box<PubsubProperties>),
 }
 
 impl_connector_properties! {
-    [ ] ,
     { Kafka, KAFKA_CONNECTOR },
     { Pulsar, PULSAR_CONNECTOR },
     { Kinesis, KINESIS_CONNECTOR },
     { Nexmark, NEXMARK_CONNECTOR },
     { Datagen, DATAGEN_CONNECTOR },
-    { S3, S3_CONNECTOR }
+    { S3, S3_CONNECTOR },
+    { Cdc, CDC_CONNECTOR },
+    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR}
 }
 
 impl_split_enumerator! {
-    [ ] ,
     { Kafka, KafkaSplitEnumerator },
     { Pulsar, PulsarSplitEnumerator },
     { Kinesis, KinesisSplitEnumerator },
     { Nexmark, NexmarkSplitEnumerator },
-    { Datagen, DatagenSplitEnumerator }
+    { Datagen, DatagenSplitEnumerator },
+    { Cdc, CdcSplitEnumerator },
+    { GooglePubsub, PubsubSplitEnumerator}
 }
 
 impl_split! {
-    [ ] ,
     { Kafka, KAFKA_CONNECTOR, KafkaSplit },
     { Pulsar, PULSAR_CONNECTOR, PulsarSplit },
     { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
     { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
-    { Datagen, DATAGEN_CONNECTOR, DatagenSplit }
+    { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
+    { Cdc, CDC_CONNECTOR, CdcSplit },
+    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit }
 }
 
 impl_split_reader! {
-    [ ] ,
     { Kafka, KafkaSplitReader },
     { Pulsar, PulsarSplitReader },
-    { Kinesis, KinesisMultiSplitReader },
+    { Kinesis, KinesisSplitReader },
     { Nexmark, NexmarkSplitReader },
     { Datagen, DatagenSplitReader },
+    { Cdc, CdcSplitReader},
+    { GooglePubsub, PubsubSplitReader },
     { Dummy, DummySplitReader }
 }
 
@@ -162,7 +187,7 @@ pub struct Column {
 }
 
 /// Split id resides in every source message, use `Arc` to avoid copying.
-pub type SplitId = Arc<String>;
+pub type SplitId = Arc<str>;
 
 /// The message pumped from the external source service.
 /// The third-party message structs will eventually be transformed into this struct.
@@ -186,19 +211,23 @@ pub trait SplitMetaData: Sized {
 /// split readers.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
 
-/// Used for acquiring the generated data for [`spawn_data_generation_stream`].
-pub type DataGenerationReceiver = mpsc::Receiver<Result<Vec<SourceMessage>>>;
-
-/// Spawn a **new runtime** in a new thread to run the data generator, returns a channel receiver
+/// Spawn the data generator to a dedicated runtime, returns a channel receiver
 /// for acquiring the generated data. This is used for the [`DatagenSplitReader`] and
 /// [`NexmarkSplitReader`] in case that they are CPU intensive and may block the streaming actors.
-pub fn spawn_data_generation_stream(
-    stream: impl Stream<Item = Result<Vec<SourceMessage>>> + Send + 'static,
-) -> DataGenerationReceiver {
-    const GENERATION_BUFFER: usize = 4;
+pub fn spawn_data_generation_stream<T: Send + 'static>(
+    stream: impl Stream<Item = T> + Send + 'static,
+    buffer_size: usize,
+) -> impl Stream<Item = T> + Send + 'static {
+    static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .thread_name("risingwave-data-generation")
+            .enable_all()
+            .build()
+            .expect("failed to build data-generation runtime")
+    });
 
-    let (generation_tx, generation_rx) = mpsc::channel(GENERATION_BUFFER);
-    let future = async move {
+    let (generation_tx, generation_rx) = mpsc::channel(buffer_size);
+    RUNTIME.spawn(async move {
         pin_mut!(stream);
         while let Some(result) = stream.next().await {
             if generation_tx.send(result).await.is_err() {
@@ -206,31 +235,15 @@ pub fn spawn_data_generation_stream(
                 break;
             }
         }
-    };
+    });
 
-    #[cfg(not(madsim))]
-    std::thread::Builder::new()
-        .name("risingwave-data-generation".to_string())
-        .spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(future);
-        })
-        .unwrap();
-
-    // Note: madsim does not support creating multiple runtime, so we just run it in current
-    // runtime.
-    #[cfg(madsim)]
-    tokio::spawn(future);
-
-    generation_rx
+    tokio_stream::wrappers::ReceiverStream::new(generation_rx)
 }
 
 #[cfg(test)]
 mod tests {
     use maplit::*;
+    use nexmark::event::EventType;
 
     use super::*;
 
@@ -256,8 +269,34 @@ mod tests {
         let props = ConnectorProperties::extract(props).unwrap();
 
         if let ConnectorProperties::Nexmark(props) = props {
-            assert_eq!(props.table_type, "Person");
+            assert_eq!(props.table_type, EventType::Person);
             assert_eq!(props.split_num, 1);
+        } else {
+            panic!("extract nexmark config failed");
+        }
+    }
+
+    #[test]
+    fn test_extract_cdc_properties() {
+        let props: HashMap<String, String> = convert_args!(hashmap!(
+            "connector" => "cdc",
+            "database.name" => "mydb",
+            "database.hostname" => "127.0.0.1",
+            "database.port" => "3306",
+            "database.user" => "root",
+            "database.password" => "123456",
+            "table.name" => "products",
+        ));
+
+        let props = ConnectorProperties::extract(props).unwrap();
+
+        if let ConnectorProperties::Cdc(props) = props {
+            assert_eq!(props.source_id, 0);
+            assert_eq!(props.start_offset, "");
+            assert_eq!(props.database_name, "mydb");
+            assert_eq!(props.table_name, "products");
+            assert_eq!(props.database_host, "127.0.0.1");
+            assert_eq!(props.database_password, "123456");
         } else {
             panic!("extract nexmark config failed");
         }

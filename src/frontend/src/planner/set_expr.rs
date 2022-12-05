@@ -17,6 +17,7 @@ use risingwave_common::error::Result;
 use crate::binder::BoundSetExpr;
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::PlanRef;
+use crate::optimizer::property::FieldOrder;
 use crate::planner::Planner;
 
 impl Planner {
@@ -24,10 +25,18 @@ impl Planner {
         &mut self,
         set_expr: BoundSetExpr,
         extra_order_exprs: Vec<ExprImpl>,
+        order: &[FieldOrder],
     ) -> Result<PlanRef> {
         match set_expr {
-            BoundSetExpr::Select(s) => self.plan_select(*s, extra_order_exprs),
+            BoundSetExpr::Select(s) => self.plan_select(*s, extra_order_exprs, order),
             BoundSetExpr::Values(v) => self.plan_values(*v),
+            BoundSetExpr::Query(q) => Ok(self.plan_query(*q)?.into_subplan()),
+            BoundSetExpr::SetOperation {
+                op,
+                all,
+                left,
+                right,
+            } => self.plan_set_operation(op, all, *left, *right),
         }
     }
 }

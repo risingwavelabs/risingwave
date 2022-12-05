@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod console;
 pub mod kafka;
 pub mod mysql;
 pub mod redis;
+pub mod remote;
 
 use std::collections::HashMap;
 
@@ -22,18 +24,22 @@ use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
+use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_rpc_client::error::RpcError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 pub use tracing;
 
+use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
-pub use crate::sink::mysql::{MySQLConfig, MySQLSink, MYSQL_SINK};
+pub use crate::sink::mysql::{MySqlConfig, MySqlSink, MYSQL_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
+use crate::sink::remote::{RemoteConfig, RemoteSink};
+use crate::ConnectorParams;
 
 #[async_trait]
 pub trait Sink {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()>;
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
     // the following interface is for transactions, if not supported, return Ok(())
     // start a transaction with epoch number. Note that epoch number should be increasing.
@@ -49,9 +55,11 @@ pub trait Sink {
 
 #[derive(Clone, Debug, EnumAsInner)]
 pub enum SinkConfig {
-    Mysql(MySQLConfig),
+    Mysql(MySqlConfig),
     Redis(RedisConfig),
     Kafka(KafkaConfig),
+    Remote(RemoteConfig),
+    Console(ConsoleConfig),
 }
 
 #[derive(Clone, Debug, EnumAsInner, Serialize, Deserialize)]
@@ -59,21 +67,23 @@ pub enum SinkState {
     Kafka,
     Mysql,
     Redis,
+    Console,
+    Remote,
 }
 
 impl SinkConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> RwResult<Self> {
+    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
         const SINK_TYPE_KEY: &str = "connector";
-        let sink_type = properties.get(SINK_TYPE_KEY).ok_or_else(|| {
-            RwError::from(ErrorCode::InvalidConfigValue {
-                config_entry: SINK_TYPE_KEY.to_string(),
-                config_value: "".to_string(),
-            })
-        })?;
+        let sink_type = properties
+            .get(SINK_TYPE_KEY)
+            .ok_or_else(|| SinkError::Config(format!("missing config: {}", SINK_TYPE_KEY)))?;
         match sink_type.to_lowercase().as_str() {
             KAFKA_SINK => Ok(SinkConfig::Kafka(KafkaConfig::from_hashmap(properties)?)),
-            MYSQL_SINK => Ok(SinkConfig::Mysql(MySQLConfig::from_hashmap(properties)?)),
-            _ => unimplemented!(),
+            MYSQL_SINK => Ok(SinkConfig::Mysql(MySqlConfig::from_hashmap(properties)?)),
+            CONSOLE_SINK => Ok(SinkConfig::Console(ConsoleConfig::from_hashmap(
+                properties,
+            )?)),
+            _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
         }
     }
 
@@ -82,43 +92,52 @@ impl SinkConfig {
             SinkConfig::Mysql(_) => "mysql",
             SinkConfig::Kafka(_) => "kafka",
             SinkConfig::Redis(_) => "redis",
+            SinkConfig::Remote(_) => "remote",
+            SinkConfig::Console(_) => "console",
         }
     }
 }
 
 #[derive(Debug)]
 pub enum SinkImpl {
-    MySQL(Box<MySQLSink>),
+    MySql(Box<MySqlSink>),
     Redis(Box<RedisSink>),
     Kafka(Box<KafkaSink>),
+    Remote(Box<RemoteSink>),
+    Console(Box<ConsoleSink>),
 }
 
 impl SinkImpl {
-    pub async fn new(cfg: SinkConfig) -> RwResult<Self> {
+    pub async fn new(
+        cfg: SinkConfig,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        connector_params: ConnectorParams,
+    ) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Mysql(cfg) => {
-                SinkImpl::MySQL(Box::new(MySQLSink::new(cfg).await.map_err(RwError::from)?))
-            }
-            SinkConfig::Redis(cfg) => {
-                SinkImpl::Redis(Box::new(RedisSink::new(cfg).map_err(RwError::from)?))
-            }
-            SinkConfig::Kafka(cfg) => {
-                SinkImpl::Kafka(Box::new(KafkaSink::new(cfg).map_err(RwError::from)?))
-            }
+            SinkConfig::Mysql(cfg) => SinkImpl::MySql(Box::new(MySqlSink::new(cfg, schema).await?)),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
+            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg, schema).await?)),
+            SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
+            SinkConfig::Remote(cfg) => SinkImpl::Remote(Box::new(
+                RemoteSink::new(cfg, schema, pk_indices, connector_params).await?,
+            )),
         })
     }
 
     pub fn needs_preparation(&self) -> bool {
         match self {
-            SinkImpl::MySQL(_) => true,
+            SinkImpl::MySql(_) => true,
             SinkImpl::Redis(_) => false,
             SinkImpl::Kafka(_) => false,
+            SinkImpl::Remote(_) => false,
+            SinkImpl::Console(_) => false,
         }
     }
 
-    pub async fn prepare(&mut self, schema: &Schema) -> Result<()> {
+    pub async fn prepare(&mut self) -> Result<()> {
         match self {
-            SinkImpl::MySQL(sink) => sink.prepare(schema).await,
+            SinkImpl::MySql(sink) => sink.prepare().await,
             _ => unreachable!(),
         }
     }
@@ -126,35 +145,43 @@ impl SinkImpl {
 
 #[async_trait]
 impl Sink for SinkImpl {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         match self {
-            SinkImpl::MySQL(sink) => sink.write_batch(chunk, schema).await,
-            SinkImpl::Redis(sink) => sink.write_batch(chunk, schema).await,
-            SinkImpl::Kafka(sink) => sink.write_batch(chunk, schema).await,
+            SinkImpl::MySql(sink) => sink.write_batch(chunk).await,
+            SinkImpl::Redis(sink) => sink.write_batch(chunk).await,
+            SinkImpl::Kafka(sink) => sink.write_batch(chunk).await,
+            SinkImpl::Remote(sink) => sink.write_batch(chunk).await,
+            SinkImpl::Console(sink) => sink.write_batch(chunk).await,
         }
     }
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         match self {
-            SinkImpl::MySQL(sink) => sink.begin_epoch(epoch).await,
+            SinkImpl::MySql(sink) => sink.begin_epoch(epoch).await,
             SinkImpl::Redis(sink) => sink.begin_epoch(epoch).await,
             SinkImpl::Kafka(sink) => sink.begin_epoch(epoch).await,
+            SinkImpl::Remote(sink) => sink.begin_epoch(epoch).await,
+            SinkImpl::Console(sink) => sink.begin_epoch(epoch).await,
         }
     }
 
     async fn commit(&mut self) -> Result<()> {
         match self {
-            SinkImpl::MySQL(sink) => sink.commit().await,
+            SinkImpl::MySql(sink) => sink.commit().await,
             SinkImpl::Redis(sink) => sink.commit().await,
             SinkImpl::Kafka(sink) => sink.commit().await,
+            SinkImpl::Remote(sink) => sink.commit().await,
+            SinkImpl::Console(sink) => sink.commit().await,
         }
     }
 
     async fn abort(&mut self) -> Result<()> {
         match self {
-            SinkImpl::MySQL(sink) => sink.abort().await,
+            SinkImpl::MySql(sink) => sink.abort().await,
             SinkImpl::Redis(sink) => sink.abort().await,
             SinkImpl::Kafka(sink) => sink.abort().await,
+            SinkImpl::Remote(sink) => sink.abort().await,
+            SinkImpl::Console(sink) => sink.abort().await,
         }
     }
 }
@@ -163,16 +190,24 @@ pub type Result<T> = std::result::Result<T, SinkError>;
 
 #[derive(Error, Debug)]
 pub enum SinkError {
-    #[error("MySQL error: {0}")]
-    MySQL(String),
-    #[error("MySQL inner error: {0}")]
-    MySQLInner(#[from] mysql_async::Error),
+    #[error("MySql error: {0}")]
+    MySql(String),
+    #[error("MySql inner error: {0}")]
+    MySqlInner(#[from] mysql_async::Error),
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
+    #[error("Remote sink error: {0}")]
+    Remote(String),
     #[error("Json parse error: {0}")]
     JsonParse(String),
     #[error("config error: {0}")]
     Config(String),
+}
+
+impl From<RpcError> for SinkError {
+    fn from(value: RpcError) -> Self {
+        SinkError::Remote(format!("{:?}", value))
+    }
 }
 
 impl From<SinkError> for RwError {

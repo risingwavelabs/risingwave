@@ -12,31 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::privilege::check_super_user;
+use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::catalog_service::CatalogReader;
-use crate::session::{OptimizerContext, SessionImpl};
+use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::source_catalog::SourceKind;
+use crate::catalog::table_catalog::TableKind;
+use crate::session::OptimizerContext;
 
 pub fn check_source(
-    catalog_reader: &CatalogReader,
-    session: Arc<SessionImpl>,
+    reader: &CatalogReadGuard,
+    db_name: &str,
     schema_name: &str,
     table_name: &str,
 ) -> Result<()> {
-    let reader = catalog_reader.read_guard();
-    if let Ok(s) = reader.get_source_by_name(session.database(), schema_name, table_name) {
-        if s.source_type == SourceType::Source {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP SOURCE` to drop a source.".to_owned(),
-            )));
+    if let Ok((s, _)) =
+        reader.get_source_by_name(db_name, SchemaPath::Name(schema_name), table_name)
+    {
+        match s.kind() {
+            SourceKind::Stream => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP SOURCE` to drop a source.".to_owned(),
+                )))
+            }
+            SourceKind::Table => {}
         }
     }
     Ok(())
@@ -45,22 +50,37 @@ pub fn check_source(
 pub async fn handle_drop_table(
     context: OptimizerContext,
     table_name: ObjectName,
-) -> Result<PgResponse> {
+    if_exists: bool,
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
-    let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
+    let db_name = session.database();
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
 
-    let catalog_reader = session.env().catalog_reader();
-
-    check_source(catalog_reader, session.clone(), &schema_name, &table_name)?;
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let (source_id, table_id) = {
-        let reader = catalog_reader.read_guard();
-        let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
+        let reader = session.env().catalog_reader().read_guard();
+        let (table, schema_name) = match reader.get_table_by_name(db_name, schema_path, &table_name)
+        {
+            Ok((t, s)) => (t, s),
+            Err(e) => {
+                return if if_exists {
+                    Ok(RwPgResponse::empty_result_with_notice(
+                        StatementType::DROP_TABLE,
+                        format!("table \"{}\" does not exist, skipping", table_name),
+                    ))
+                } else {
+                    Err(e.into())
+                }
+            }
+        };
 
-        let schema_owner = reader
-            .get_schema_by_name(session.database(), &schema_name)
-            .unwrap()
-            .owner();
+        let schema_catalog = reader
+            .get_schema_by_name(session.database(), schema_name)
+            .unwrap();
+        let schema_owner = schema_catalog.owner();
         if session.user_id() != table.owner
             && session.user_id() != schema_owner
             && !check_super_user(&session)
@@ -68,15 +88,23 @@ pub async fn handle_drop_table(
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
 
-        // If associated source is `None`, then it is a normal mview.
-        match table.associated_source_id() {
-            Some(source_id) => (source_id, table.id()),
-            None => {
+        match table.kind() {
+            TableKind::TableOrSource => {
+                check_source(&reader, db_name, schema_name, &table_name)?;
+            }
+            TableKind::Index => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP INDEX` to drop an index.".to_owned(),
+                )));
+            }
+            TableKind::MView => {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
-                )))
+                )));
             }
         }
+
+        (table.associated_source_id().unwrap(), table.id())
     };
 
     let catalog_writer = session.env().catalog_writer();
@@ -91,6 +119,7 @@ pub async fn handle_drop_table(
 mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 
+    use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
@@ -102,20 +131,13 @@ mod tests {
         frontend.run_sql(sql_drop_table).await.unwrap();
 
         let session = frontend.session_ref();
-        let catalog_reader = session.env().catalog_reader();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
-        let source = catalog_reader
-            .read_guard()
-            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
-            .ok()
-            .cloned();
-        assert!(source.is_none());
+        let source = catalog_reader.get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t");
+        assert!(source.is_err());
 
-        let table = catalog_reader
-            .read_guard()
-            .get_table_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
-            .ok()
-            .cloned();
-        assert!(table.is_none());
+        let table = catalog_reader.get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t");
+        assert!(table.is_err());
     }
 }

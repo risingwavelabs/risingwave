@@ -15,58 +15,71 @@
 use std::collections::HashMap;
 
 use risingwave_pb::catalog::source::Info;
+use risingwave_pb::catalog::source_info::SourceInfo;
 use risingwave_pb::catalog::Source as ProstSource;
-use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::column_catalog::ColumnCatalog;
-use super::{ColumnId, SourceId, TABLE_SOURCE_PK_COLID};
-
-pub mod with_options {
-    pub const APPEND_ONLY: &str = "appendonly";
-    pub const CONNECTOR: &str = "connector";
-}
+use super::{ColumnId, SourceId};
+use crate::WithOptions;
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
 
-/// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
+/// This struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
+///
+/// It can be either a table source or a stream source. Use `self.kind()` to distinguish them.
 #[derive(Clone, Debug)]
 pub struct SourceCatalog {
     pub id: SourceId,
     pub name: String,
     pub columns: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
-    pub source_type: SourceType,
     pub append_only: bool,
     pub owner: u32,
+    pub info: SourceInfo,
+    pub row_id_index: Option<usize>,
+    pub properties: HashMap<String, String>,
+}
+
+#[derive(PartialEq, Eq)]
+pub enum SourceKind {
+    Table,
+    Stream,
+}
+
+impl SourceCatalog {
+    pub fn kind(&self) -> SourceKind {
+        match self.info {
+            SourceInfo::StreamSource(_) => SourceKind::Stream,
+            SourceInfo::TableSource(_) => SourceKind::Table,
+        }
+    }
 }
 
 impl From<&ProstSource> for SourceCatalog {
     fn from(prost: &ProstSource) -> Self {
         let id = prost.id;
         let name = prost.name.clone();
-        let (source_type, prost_columns, pk_col_ids, with_options) = match &prost.info {
-            Some(Info::StreamSource(source)) => (
-                SourceType::Source,
-                source.columns.clone(),
-                source
-                    .pk_column_ids
-                    .iter()
-                    .map(|id| ColumnId::new(*id))
-                    .collect(),
-                source.properties.clone(),
-            ),
-            Some(Info::TableSource(source)) => (
-                SourceType::Table,
-                source.columns.clone(),
-                vec![TABLE_SOURCE_PK_COLID],
-                source.properties.clone(),
-            ),
+        let prost_columns = prost.columns.clone();
+        let pk_col_ids = prost
+            .pk_column_ids
+            .clone()
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        let with_options = WithOptions::new(prost.properties.clone());
+        let info = match &prost.info {
+            Some(Info::StreamSource(info_inner)) => SourceInfo::StreamSource(info_inner.clone()),
+            Some(Info::TableSource(info_inner)) => SourceInfo::TableSource(info_inner.clone()),
             None => unreachable!(),
         };
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
+        let row_id_index = prost
+            .row_id_index
+            .clone()
+            .map(|row_id_index| row_id_index.index as _);
 
-        let append_only = check_append_only(&with_options);
+        let append_only = with_options.append_only();
         let owner = prost.owner;
 
         Self {
@@ -74,24 +87,11 @@ impl From<&ProstSource> for SourceCatalog {
             name,
             columns,
             pk_col_ids,
-            source_type,
             append_only,
             owner,
+            info,
+            row_id_index,
+            properties: with_options.into_inner(),
         }
     }
-}
-
-fn check_append_only(with_options: &HashMap<String, String>) -> bool {
-    if let Some(val) = with_options.get(with_options::APPEND_ONLY) {
-        if val.to_lowercase() == "true" {
-            return true;
-        }
-    }
-    if let Some(val) = with_options.get(with_options::CONNECTOR) {
-        // Kafka source is append-only
-        if val.to_lowercase() == KAFKA_CONNECTOR {
-            return true;
-        }
-    }
-    false
 }

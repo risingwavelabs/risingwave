@@ -18,12 +18,12 @@ use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::ObjectType;
+use super::{Ident, ObjectType, Query};
 use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
 use crate::keywords::Keyword;
-use crate::parser::{Parser, ParserError};
+use crate::parser::{IsOptional, Parser, ParserError};
 use crate::tokenizer::Token;
 
 /// Consumes token from the parser into an AST node.
@@ -85,8 +85,11 @@ pub struct CreateSourceStatement {
 pub enum SourceSchema {
     Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json,         // Keyword::JSON
-    DebeziumJson, // Keyword::DEBEZIUM_JSON
+    Json,             // Keyword::JSON
+    DebeziumJson,     // Keyword::DEBEZIUM_JSON
+    Avro(AvroSchema), // Keyword::AVRO
+    Maxwell,          // Keyword::MAXWELL
+    CanalJson,        // Keyword::CANAL_JSON
 }
 
 impl ParseTo for SourceSchema {
@@ -98,9 +101,16 @@ impl ParseTo for SourceSchema {
             SourceSchema::Protobuf(protobuf_schema)
         } else if p.parse_keywords(&[Keyword::DEBEZIUM_JSON]) {
             SourceSchema::DebeziumJson
+        } else if p.parse_keywords(&[Keyword::AVRO]) {
+            impl_parse_to!(avro_schema: AvroSchema, p);
+            SourceSchema::Avro(avro_schema)
+        } else if p.parse_keywords(&[Keyword::MAXWELL]) {
+            SourceSchema::Maxwell
+        } else if p.parse_keywords(&[Keyword::CANAL_JSON]) {
+            SourceSchema::CanalJson
         } else {
             return Err(ParserError::ParserError(
-                "expected JSON | PROTOBUF after ROW FORMAT".to_string(),
+                "expected JSON | PROTOBUF | DEBEZIUM_JSON | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
             ));
         };
         Ok(schema)
@@ -112,7 +122,10 @@ impl fmt::Display for SourceSchema {
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
+            SourceSchema::Maxwell => write!(f, "MAXWELL"),
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
+            SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
+            SourceSchema::CanalJson => write!(f, "CANAL JSON"),
         }
     }
 }
@@ -128,6 +141,7 @@ impl fmt::Display for SourceSchema {
 pub struct ProtobufSchema {
     pub message_name: AstString,
     pub row_schema_location: AstString,
+    pub use_schema_registry: bool,
 }
 
 impl ParseTo for ProtobufSchema {
@@ -135,10 +149,12 @@ impl ParseTo for ProtobufSchema {
         impl_parse_to!([Keyword::MESSAGE], p);
         impl_parse_to!(message_name: AstString, p);
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
+        impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
         impl_parse_to!(row_schema_location: AstString, p);
         Ok(Self {
             message_name,
             row_schema_location,
+            use_schema_registry,
         })
     }
 }
@@ -149,6 +165,48 @@ impl fmt::Display for ProtobufSchema {
         impl_fmt_display!([Keyword::MESSAGE], v);
         impl_fmt_display!(message_name, v, self);
         impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
+        impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
+        impl_fmt_display!(row_schema_location, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+// sql_grammar!(AvroSchema {
+//     [Keyword::MESSAGE],
+//     message_name: AstString,
+//     [Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION],
+//     row_schema_location: AstString,
+// });
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct AvroSchema {
+    pub message_name: AstString,
+    pub row_schema_location: AstString,
+    pub use_schema_registry: bool,
+}
+
+impl ParseTo for AvroSchema {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!([Keyword::MESSAGE], p);
+        impl_parse_to!(message_name: AstString, p);
+        impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
+        impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
+        impl_parse_to!(row_schema_location: AstString, p);
+        Ok(Self {
+            message_name,
+            row_schema_location,
+            use_schema_registry,
+        })
+    }
+}
+
+impl fmt::Display for AvroSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!([Keyword::MESSAGE], v);
+        impl_fmt_display!(message_name, v, self);
+        impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
+        impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
         impl_fmt_display!(row_schema_location, v, self);
         v.iter().join(" ").fmt(f)
     }
@@ -188,6 +246,22 @@ impl fmt::Display for CreateSourceStatement {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateSink {
+    From(ObjectName),
+    AsQuery(Box<Query>),
+}
+
+impl fmt::Display for CreateSink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::From(mv) => write!(f, "FROM {}", mv),
+            Self::AsQuery(query) => write!(f, "AS {}", query),
+        }
+    }
+}
+
 // sql_grammar!(CreateSinkStatement {
 //     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
 //     sink_name: Ident,
@@ -201,7 +275,8 @@ pub struct CreateSinkStatement {
     pub if_not_exists: bool,
     pub sink_name: ObjectName,
     pub with_properties: WithProperties,
-    pub materialized_view: ObjectName,
+    pub sink_from: CreateSink,
+    pub columns: Vec<Ident>,
 }
 
 impl ParseTo for CreateSinkStatement {
@@ -209,15 +284,26 @@ impl ParseTo for CreateSinkStatement {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(sink_name: ObjectName, p);
 
-        p.expect_keyword(Keyword::FROM)?;
-        impl_parse_to!(materialized_view: ObjectName, p);
+        let columns = p.parse_parenthesized_column_list(IsOptional::Optional)?;
+
+        let sink_from = if p.parse_keyword(Keyword::FROM) {
+            impl_parse_to!(from_name: ObjectName, p);
+            CreateSink::From(from_name)
+        } else if p.parse_keyword(Keyword::AS) {
+            let query = Box::new(p.parse_query()?);
+            CreateSink::AsQuery(query)
+        } else {
+            p.expected("FROM or AS after CREATE SINK sink_name", p.peek_token())?
+        };
 
         impl_parse_to!(with_properties: WithProperties, p);
+
         Ok(Self {
             if_not_exists,
             sink_name,
             with_properties,
-            materialized_view,
+            sink_from,
+            columns,
         })
     }
 }
@@ -227,8 +313,7 @@ impl fmt::Display for CreateSinkStatement {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(sink_name, v, self);
-        impl_fmt_display!([Keyword::FROM], v);
-        impl_fmt_display!(materialized_view, v, self);
+        impl_fmt_display!(sink_from, v, self);
         impl_fmt_display!(with_properties, v, self);
         v.iter().join(" ").fmt(f)
     }
@@ -401,9 +486,50 @@ impl fmt::Display for UserOption {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct UserOptions(pub Vec<UserOption>);
 
+#[derive(Default)]
+struct UserOptionsBuilder {
+    super_user: Option<UserOption>,
+    create_db: Option<UserOption>,
+    create_user: Option<UserOption>,
+    login: Option<UserOption>,
+    password: Option<UserOption>,
+}
+
+impl UserOptionsBuilder {
+    fn build(self) -> UserOptions {
+        let mut options = vec![];
+        if let Some(option) = self.super_user {
+            options.push(option);
+        }
+        if let Some(option) = self.create_db {
+            options.push(option);
+        }
+        if let Some(option) = self.create_user {
+            options.push(option);
+        }
+        if let Some(option) = self.login {
+            options.push(option);
+        }
+        if let Some(option) = self.password {
+            options.push(option);
+        }
+        UserOptions(options)
+    }
+}
+
 impl ParseTo for UserOptions {
     fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
-        let mut options = vec![];
+        let mut builder = UserOptionsBuilder::default();
+        let add_option = |item: &mut Option<UserOption>, user_option| {
+            let old_value = item.replace(user_option);
+            if old_value.is_some() {
+                Err(ParserError::ParserError(
+                    "conflicting or redundant options".to_string(),
+                ))
+            } else {
+                Ok(())
+            }
+        };
         let _ = parser.parse_keyword(Keyword::WITH);
         loop {
             let token = parser.peek_token();
@@ -413,42 +539,51 @@ impl ParseTo for UserOptions {
 
             if let Token::Word(ref w) = token {
                 parser.next_token();
-                let option = match w.keyword {
-                    Keyword::SUPERUSER => UserOption::SuperUser,
-                    Keyword::NOSUPERUSER => UserOption::NoSuperUser,
-                    Keyword::CREATEDB => UserOption::CreateDB,
-                    Keyword::NOCREATEDB => UserOption::NoCreateDB,
-                    Keyword::CREATEUSER => UserOption::CreateUser,
-                    Keyword::NOCREATEUSER => UserOption::NoCreateUser,
-                    Keyword::LOGIN => UserOption::Login,
-                    Keyword::NOLOGIN => UserOption::NoLogin,
+                let (item_mut_ref, user_option) = match w.keyword {
+                    Keyword::SUPERUSER => (&mut builder.super_user, UserOption::SuperUser),
+                    Keyword::NOSUPERUSER => (&mut builder.super_user, UserOption::NoSuperUser),
+                    Keyword::CREATEDB => (&mut builder.create_db, UserOption::CreateDB),
+                    Keyword::NOCREATEDB => (&mut builder.create_db, UserOption::NoCreateDB),
+                    Keyword::CREATEUSER => (&mut builder.create_user, UserOption::CreateUser),
+                    Keyword::NOCREATEUSER => (&mut builder.create_user, UserOption::NoCreateUser),
+                    Keyword::LOGIN => (&mut builder.login, UserOption::Login),
+                    Keyword::NOLOGIN => (&mut builder.login, UserOption::NoLogin),
                     Keyword::PASSWORD => {
                         if parser.parse_keyword(Keyword::NULL) {
-                            UserOption::Password(None)
+                            (&mut builder.password, UserOption::Password(None))
                         } else {
-                            UserOption::Password(Some(AstString::parse_to(parser)?))
+                            (
+                                &mut builder.password,
+                                UserOption::Password(Some(AstString::parse_to(parser)?)),
+                            )
                         }
                     }
                     Keyword::ENCRYPTED => {
                         parser.expect_keyword(Keyword::PASSWORD)?;
-                        UserOption::EncryptedPassword(AstString::parse_to(parser)?)
+                        (
+                            &mut builder.password,
+                            UserOption::EncryptedPassword(AstString::parse_to(parser)?),
+                        )
                     }
-                    _ => parser.expected(
-                        "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
-                            | NOLOGIN | CREATEUSER | NOCREATEUSER | ENCRYPTED | PASSWORD | NULL",
-                        token,
-                    )?,
+                    _ => {
+                        parser.expected(
+                            "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
+                            | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL",
+                            token,
+                        )?;
+                        unreachable!()
+                    }
                 };
-                options.push(option);
+                add_option(item_mut_ref, user_option)?;
             } else {
                 parser.expected(
                     "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
-                        | CREATEUSER | NOCREATEUSER | ENCRYPTED| PASSWORD | NULL",
+                        | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL",
                     token,
                 )?
             }
         }
-        Ok(Self(options))
+        Ok(builder.build())
     }
 }
 
@@ -594,7 +729,7 @@ impl ParseTo for DropMode {
 }
 
 impl fmt::Display for DropMode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             DropMode::Cascade => "CASCADE",
             DropMode::Restrict => "RESTRICT",

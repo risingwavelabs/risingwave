@@ -34,39 +34,10 @@ use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::md5::md5;
 use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
+use crate::vector_op::timestampz::f64_sec_to_timestampz;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
-use crate::{for_each_cast, ExprError, Result};
-
-/// This macro helps to create cast expression.
-/// It receives all the combinations of `gen_cast` and generates corresponding match cases
-/// In `[]`, the parameters are for constructing new expression
-/// * `$child`: child expression
-/// * `$ret`: return expression
-///
-/// In `()*`, the parameters are for generating match cases
-/// * `$input`: input type
-/// * `$cast`: The cast type in that the operation will calculate
-/// * `$func`: The scalar function for expression, it's a generic function and specialized by the
-///   type of `$input, $cast`
-macro_rules! gen_cast_impl {
-    ([$child:expr, $ret:expr], $( { $input:ident, $cast:ident, $func:expr } ),* $(,)?) => {
-        match ($child.return_type(), $ret.clone()) {
-            $(
-                ($input! { type_match_pattern }, $cast! { type_match_pattern }) => Box::new(
-                    UnaryExpression::< $input! { type_array }, $cast! { type_array }, _>::new(
-                        $child,
-                        $ret.clone(),
-                        $func
-                    )
-                ),
-            )*
-            _ => {
-                return Err(ExprError::Cast2($child.return_type(), $ret));
-            }
-        }
-    };
-}
+use crate::{for_all_cast_variants, ExprError, Result};
 
 /// This macro helps to create unary expression.
 /// In [], the parameters are for constructing new expression
@@ -149,6 +120,17 @@ pub fn new_unary_expr(
             DataType::List {
                 datatype: target_elem_type,
             },
+            DataType::Varchar,
+        ) => Box::new(UnaryExpression::<Utf8Array, ListArray, _>::new(
+            child_expr,
+            return_type,
+            move |input| str_to_list(input, &target_elem_type),
+        )),
+        (
+            ProstType::Cast,
+            DataType::List {
+                datatype: target_elem_type,
+            },
             DataType::List {
                 datatype: source_elem_type,
             },
@@ -157,7 +139,28 @@ pub fn new_unary_expr(
             return_type,
             move |input| list_cast(input, &source_elem_type, &target_elem_type),
         )),
-        (ProstType::Cast, _, _) => for_each_cast! { gen_cast_impl, child_expr, return_type, },
+        (ProstType::Cast, _, _) => {
+            macro_rules! gen_cast_impl {
+                ($( { $input:ident, $cast:ident, $func:expr } ),*) => {
+                    match (child_expr.return_type(), return_type.clone()) {
+                        $(
+                            ($input! { type_match_pattern }, $cast! { type_match_pattern }) => Box::new(
+                                UnaryExpression::< $input! { type_array }, $cast! { type_array }, _>::new(
+                                    child_expr,
+                                    return_type.clone(),
+                                    $func
+                                )
+                            ),
+                        )*
+                        _ => {
+                            return Err(ExprError::Cast2(child_expr.return_type(), return_type));
+                        }
+                    }
+                };
+            }
+
+            for_all_cast_variants! { gen_cast_impl }
+        }
         (ProstType::BoolOut, _, DataType::Boolean) => {
             Box::new(UnaryExpression::<BoolArray, Utf8Array, _>::new(
                 child_expr,
@@ -269,6 +272,13 @@ pub fn new_unary_expr(
         (ProstType::Round, _, _) => {
             gen_round_expr! {"Ceil", child_expr, return_type, round_f64, round_decimal}
         }
+        (ProstType::ToTimestamp, DataType::Timestampz, DataType::Float64) => {
+            Box::new(UnaryExpression::<F64Array, I64Array, _>::new(
+                child_expr,
+                return_type,
+                f64_sec_to_timestampz,
+            ))
+        }
         (expr, ret, child) => {
             return Err(ExprError::UnsupportedFunction(format!(
                 "{:?}({:?}) -> {:?}",
@@ -314,9 +324,7 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> Boxed
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
     use itertools::Itertools;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
     use risingwave_common::types::{NaiveDateWrapper, Scalar};
     use risingwave_pb::data::data_type::TypeName;
@@ -342,17 +350,13 @@ mod tests {
         for i in 0..100i16 {
             if i % 2 == 0 {
                 target.push(Some(i as i32));
-                input.push(Some(i as i16));
+                input.push(Some(i));
             } else {
                 input.push(None);
                 target.push(None);
             }
         }
-        let col1 = Column::new(
-            I16Array::from_slice(&input)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1 = I16Array::from_slice(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
         let return_type = DataType {
             type_name: TypeName::Int32 as i32,
@@ -395,11 +399,7 @@ mod tests {
         target.push(Some(0));
         target.push(Some(1));
 
-        let col1 = Column::new(
-            I32Array::from_slice(&input)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1 = I32Array::from_slice(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 3);
         let return_type = DataType {
             type_name: TypeName::Int32 as i32,
@@ -436,11 +436,11 @@ mod tests {
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
         F: Fn(&str) -> <A as Array>::OwnedItem,
     {
-        let mut input = Vec::<Option<String>>::new();
+        let mut input = Vec::<Option<Box<str>>>::new();
         let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
         for i in 0..1u32 {
             if i % 2 == 0 {
-                let s = i.to_string();
+                let s = i.to_string().into_boxed_str();
                 target.push(Some(f(&s)));
                 input.push(Some(s));
             } else {
@@ -448,11 +448,8 @@ mod tests {
                 target.push(None);
             }
         }
-        let col1 = Column::new(
-            Utf8Array::from_slice(&input.iter().map(|x| x.as_ref().map(|x| &**x)).collect_vec())
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1_data = &input.iter().map(|x| x.as_ref().map(|x| &**x)).collect_vec();
+        let col1 = Utf8Array::from_slice(col1_data).into();
         let data_chunk = DataChunk::new(vec![col1], 1);
         let return_type = DataType {
             type_name: TypeName::Int16 as i32,
@@ -507,11 +504,7 @@ mod tests {
             }
         }
 
-        let col1 = Column::new(
-            BoolArray::from_slice(&input)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1 = BoolArray::from_slice(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = make_expression(kind, &[TypeName::Boolean], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -541,7 +534,7 @@ mod tests {
         let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
         for i in 0..100 {
             if i % 2 == 0 {
-                let date = NaiveDateWrapper::new(NaiveDate::from_num_days_from_ce(i));
+                let date = NaiveDateWrapper::from_num_days_from_ce_uncheck(i);
                 input.push(Some(date));
                 target.push(Some(f(date)));
             } else {
@@ -550,11 +543,7 @@ mod tests {
             }
         }
 
-        let col1 = Column::new(
-            NaiveDateArray::from_slice(&input)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
+        let col1 = NaiveDateArray::from_slice(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = make_expression(kind, &[TypeName::Date], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();

@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use either::Either;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 use tokio::sync::OnceCell;
 
@@ -24,7 +21,7 @@ pub(super) struct DataChunkInChannel {
     data_chunk: DataChunk,
     /// If the data chunk is only needed to transfer locally,
     /// this field should not be initialized.
-    prost_data_chunk: OnceCell<Either<ProstDataChunk, String>>,
+    prost_data_chunk: OnceCell<ProstDataChunk>,
 }
 
 impl DataChunkInChannel {
@@ -35,24 +32,15 @@ impl DataChunkInChannel {
         }
     }
 
-    pub async fn to_protobuf(&self) -> Result<ProstDataChunk> {
+    pub async fn to_protobuf(&self) -> ProstDataChunk {
         let prost_data_chunk = self
             .prost_data_chunk
             .get_or_init(|| async {
                 let res = self.data_chunk.clone().compact();
-                match res {
-                    Ok(chunk) => Either::Left(chunk.to_protobuf()),
-                    Err(e) => Either::Right(format!("{:?}", e)),
-                }
+                res.to_protobuf()
             })
             .await;
-        // Pass the error message out in this ugly way. Better way to do this?
-        match prost_data_chunk {
-            Either::Left(chunk) => Ok(chunk.clone()),
-            Either::Right(error_msg) => {
-                Err(ErrorCode::ArrayError(anyhow!(error_msg.clone()).into()).into())
-            }
-        }
+        prost_data_chunk.clone()
     }
 
     pub fn into_data_chunk(self) -> DataChunk {

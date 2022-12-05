@@ -15,20 +15,25 @@
 use std::fmt::Debug;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
+use risingwave_sqlparser::ast::{Distinct, Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::expr::{CorrelatedId, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::catalog::system_catalog::pg_catalog::{
+    PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
+};
+use crate::expr::{
+    CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef,
+};
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
-    pub distinct: bool,
+    pub distinct: BoundDistinct,
     pub select_items: Vec<ExprImpl>,
     pub aliases: Vec<Option<String>>,
     pub from: Option<Relation>,
@@ -44,39 +49,67 @@ impl BoundSelect {
         &self.schema
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn exprs(&self) -> impl Iterator<Item = &ExprImpl> {
         self.select_items
             .iter()
             .chain(self.group_by.iter())
             .chain(self.where_clause.iter())
             .chain(self.having.iter())
-            .any(|expr| expr.has_correlated_input_ref_by_depth())
+    }
+
+    pub fn exprs_mut(&mut self) -> impl Iterator<Item = &mut ExprImpl> {
+        self.select_items
+            .iter_mut()
+            .chain(self.group_by.iter_mut())
+            .chain(self.where_clause.iter_mut())
+            .chain(self.having.iter_mut())
+    }
+
+    pub fn is_correlated(&self, depth: Depth) -> bool {
+        self.exprs()
+            .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
             || match self.from.as_ref() {
-                Some(relation) => relation.is_correlated(),
+                Some(relation) => relation.is_correlated(depth),
                 None => false,
             }
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
-        let mut correlated_indices = vec![];
-        self.select_items
-            .iter_mut()
-            .chain(self.group_by.iter_mut())
-            .chain(self.where_clause.iter_mut())
-            .for_each(|expr| {
-                correlated_indices
-                    .extend(expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
-            });
+        let mut correlated_indices = self
+            .exprs_mut()
+            .flat_map(|expr| {
+                expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+            })
+            .collect_vec();
 
         if let Some(relation) = self.from.as_mut() {
-            correlated_indices
-                .extend(relation.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
+            correlated_indices.extend(
+                relation.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+            );
         }
 
         correlated_indices
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum BoundDistinct {
+    All,
+    Distinct,
+    DistinctOn(Vec<ExprImpl>),
+}
+
+impl BoundDistinct {
+    pub const fn is_all(&self) -> bool {
+        matches!(self, Self::All)
+    }
+
+    pub const fn is_distinct(&self) -> bool {
+        matches!(self, Self::Distinct)
     }
 }
 
@@ -87,6 +120,9 @@ impl Binder {
 
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_select_list(select.projection)?;
+
+        // Bind DISTINCT ON.
+        let distinct = self.bind_distinct_on(select.distinct)?;
 
         // Bind WHERE clause.
         self.context.clause = Some(Clause::Where);
@@ -99,15 +135,19 @@ impl Binder {
         Self::require_bool_clause(&selection, "WHERE")?;
 
         // Bind GROUP BY clause.
+        self.context.clause = Some(Clause::GroupBy);
         let group_by = select
             .group_by
             .into_iter()
             .map(|expr| self.bind_expr(expr))
             .try_collect()?;
+        self.context.clause = None;
 
         // Bind HAVING clause.
+        self.context.clause = Some(Clause::Having);
         let having = select.having.map(|expr| self.bind_expr(expr)).transpose()?;
         Self::require_bool_clause(&having, "HAVING")?;
+        self.context.clause = None;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items
@@ -120,7 +160,7 @@ impl Binder {
             .collect::<Result<Vec<Field>>>()?;
 
         Ok(BoundSelect {
-            distinct: select.distinct,
+            distinct,
             select_items,
             aliases,
             from,
@@ -222,6 +262,57 @@ impl Binder {
         Ok((select_list, aliases))
     }
 
+    /// `bind_get_user_by_id_select` binds a select statement that returns a single user name by id,
+    /// this is used for function `pg_catalog.get_user_by_id()`.
+    pub fn bind_get_user_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
+        let select_items = vec![InputRef::new(PG_USER_NAME_INDEX, DataType::Varchar).into()];
+        let schema = Schema {
+            fields: vec![Field::with_name(
+                DataType::Varchar,
+                UNNAMED_COLUMN.to_string(),
+            )],
+        };
+        let input = match input {
+            ExprImpl::InputRef(input_ref) => {
+                CorrelatedInputRef::new(input_ref.index(), input_ref.return_type(), 1).into()
+            }
+            ExprImpl::CorrelatedInputRef(col_input_ref) => CorrelatedInputRef::new(
+                col_input_ref.index(),
+                col_input_ref.return_type(),
+                col_input_ref.depth() + 1,
+            )
+            .into(),
+            ExprImpl::Literal(_) => input.clone(),
+            _ => return Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
+        };
+        let from = Some(self.bind_relation_by_name_inner(
+            Some(PG_CATALOG_SCHEMA_NAME),
+            PG_USER_TABLE_NAME,
+            None,
+        )?);
+        let where_clause = Some(
+            FunctionCall::new(
+                ExprType::Equal,
+                vec![
+                    input,
+                    InputRef::new(PG_USER_ID_INDEX, DataType::Int32).into(),
+                ],
+            )?
+            .into(),
+        );
+
+        Ok(BoundSelect {
+            distinct: BoundDistinct::All,
+            select_items,
+            aliases: vec![None],
+            from,
+            where_clause,
+            group_by: vec![],
+            having: None,
+            schema,
+        })
+    }
+
     pub fn iter_bound_columns<'a>(
         column_binding: impl Iterator<Item = &'a ColumnBinding>,
     ) -> (Vec<ExprImpl>, Vec<Option<String>>) {
@@ -282,5 +373,19 @@ impl Binder {
             }
         }
         Ok(())
+    }
+
+    fn bind_distinct_on(&mut self, distinct: Distinct) -> Result<BoundDistinct> {
+        Ok(match distinct {
+            Distinct::All => BoundDistinct::All,
+            Distinct::Distinct => BoundDistinct::Distinct,
+            Distinct::DistinctOn(exprs) => {
+                let mut bound_exprs = vec![];
+                for expr in exprs {
+                    bound_exprs.push(self.bind_expr(expr)?);
+                }
+                BoundDistinct::DistinctOn(bound_exprs)
+            }
+        })
     }
 }

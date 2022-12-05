@@ -60,7 +60,7 @@ impl Executor for UnionExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -80,6 +80,9 @@ pub fn merge(inputs: Vec<BoxedMessageStream>) -> BoxedMessageStream {
             #[for_await]
             for item in input {
                 match item? {
+                    Message::Watermark(_) => {
+                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    }
                     msg @ Message::Chunk(_) => yield msg,
                     msg @ Message::Barrier(_) => {
                         if barrier.wait().await.is_leader() {

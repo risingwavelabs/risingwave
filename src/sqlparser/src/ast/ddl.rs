@@ -78,7 +78,7 @@ pub enum AlterTableOperation {
 }
 
 impl fmt::Display for AlterTableOperation {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AlterTableOperation::AddConstraint(c) => write!(f, "ADD {}", c),
             AlterTableOperation::AddColumn { column_def } => {
@@ -154,7 +154,7 @@ pub enum AlterColumnOperation {
 }
 
 impl fmt::Display for AlterColumnOperation {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AlterColumnOperation::SetNotNull => write!(f, "SET NOT NULL",),
             AlterColumnOperation::DropNotNull => write!(f, "DROP NOT NULL",),
@@ -208,7 +208,7 @@ pub enum TableConstraint {
 }
 
 impl fmt::Display for TableConstraint {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TableConstraint::Unique {
                 name,
@@ -279,7 +279,7 @@ impl ColumnDef {
 }
 
 impl fmt::Display for ColumnDef {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", self.name, self.data_type)?;
         for option in &self.options {
             write!(f, " {}", option)?;
@@ -312,7 +312,7 @@ pub struct ColumnOptionDef {
 }
 
 impl fmt::Display for ColumnOptionDef {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", display_constraint_name(&self.name), self.option)
     }
 }
@@ -350,7 +350,7 @@ pub enum ColumnOption {
 }
 
 impl fmt::Display for ColumnOption {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ColumnOption::*;
         match self {
             Null => write!(f, "NULL"),
@@ -386,7 +386,7 @@ impl fmt::Display for ColumnOption {
 fn display_constraint_name(name: &'_ Option<Ident>) -> impl fmt::Display + '_ {
     struct ConstraintName<'a>(&'a Option<Ident>);
     impl<'a> fmt::Display for ConstraintName<'a> {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             if let Some(name) = self.0 {
                 write!(f, "CONSTRAINT {} ", name)?;
             }
@@ -411,7 +411,7 @@ pub enum ReferentialAction {
 }
 
 impl fmt::Display for ReferentialAction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             ReferentialAction::Restrict => "RESTRICT",
             ReferentialAction::Cascade => "CASCADE",

@@ -14,45 +14,41 @@
 
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![allow(rustdoc::private_intra_doc_links)]
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
-#![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
-#![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
+#![feature(result_option_inspect)]
+#![feature(generators)]
+#![feature(hash_drain_filter)]
+#![feature(type_alias_impl_trait)]
 
 use std::collections::HashMap;
 use std::fmt::Debug;
 
 use enum_as_inner::EnumAsInner;
+use futures::stream::BoxStream;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::error::Result;
+use risingwave_common::error::RwError;
 use risingwave_connector::source::SplitId;
-pub use table_v2::*;
+pub use table::*;
 
-use crate::connector_source::{ConnectorSource, ConnectorSourceReader};
+use crate::connector_source::ConnectorSource;
 
 pub mod parser;
 
 mod manager;
+pub use manager::test_utils as table_test_utils;
+
+pub mod dml_manager;
 
 mod common;
 pub mod connector_source;
+pub use connector_source::test_utils as connector_test_utils;
 pub mod monitor;
 pub mod row_id;
-mod table_v2;
+mod table;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceFormat {
@@ -61,28 +57,17 @@ pub enum SourceFormat {
     Protobuf,
     DebeziumJson,
     Avro,
+    Maxwell,
+    CanalJson,
 }
 
 #[derive(Debug, EnumAsInner)]
 pub enum SourceImpl {
-    TableV2(TableSourceV2),
+    Table(TableSource),
     Connector(ConnectorSource),
 }
 
-#[expect(clippy::large_enum_variant)]
-pub enum SourceStreamReaderImpl {
-    TableV2(TableV2StreamReader),
-    Connector(ConnectorSourceReader),
-}
-
-impl SourceStreamReaderImpl {
-    pub async fn next(&mut self) -> Result<StreamChunkWithState> {
-        match self {
-            SourceStreamReaderImpl::TableV2(t) => t.next().await.map(Into::into),
-            SourceStreamReaderImpl::Connector(c) => c.next().await,
-        }
-    }
-}
+pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
 
 /// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
 /// current design, one connector source can have multiple split reader. The keys are unique

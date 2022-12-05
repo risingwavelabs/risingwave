@@ -64,11 +64,11 @@ pub fn run_test_inner(cases: &[&TestDescAndFn], hook: impl TestHook + 'static + 
             let f = match case.testfn {
                 TestFn::StaticTestFn(f) => TestFn::DynTestFn(Box::new(move || {
                     let _watcher = TestWatcher::new(name, h);
-                    f();
+                    f()
                 })),
                 TestFn::StaticBenchFn(f) => TestFn::DynTestFn(Box::new(move || {
                     let _watcher = TestWatcher::new(name, h);
-                    bench::run_once(f);
+                    bench::run_once(f)
                 })),
                 ref f => panic!("unexpected testfn {:?}", f),
             };
@@ -100,21 +100,43 @@ impl TestHook for FailPointHook {
         })
     }
 }
+
+#[derive(Clone)]
+struct SyncPointHook;
+
+impl TestHook for SyncPointHook {
+    fn setup(&mut self) {
+        sync_point::reset();
+    }
+
+    fn teardown(&mut self) {
+        sync_point::reset();
+    }
+}
+
 // End Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
 pub fn run_failpont_tests(cases: &[&TestDescAndFn]) {
     let mut cases1 = vec![];
     let mut cases2 = vec![];
+    let mut cases3 = vec![];
     cases.iter().for_each(|case| {
-        if case.desc.name.as_slice().contains("test_failpoints") {
+        if case.desc.name.as_slice().contains("test_syncpoints") {
+            // sync_point tests should specify #[serial], because sync_point lib doesn't implement
+            // an implicit global lock to order tests like fail-rs.
             cases1.push(*case);
-        } else {
+        } else if case.desc.name.as_slice().contains("test_failpoints") {
             cases2.push(*case);
+        } else {
+            cases3.push(*case);
         }
     });
     if !cases1.is_empty() {
-        run_test_inner(cases1.as_slice(), FailPointHook);
+        run_test_inner(cases1.as_slice(), SyncPointHook);
     }
     if !cases2.is_empty() {
-        run_general_test(cases2.as_slice());
+        run_test_inner(cases2.as_slice(), FailPointHook);
+    }
+    if !cases3.is_empty() {
+        run_general_test(cases3.as_slice());
     }
 }

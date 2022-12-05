@@ -14,14 +14,14 @@
 
 use std::collections::BTreeSet;
 
-use risingwave_common::array::{Op, Row, StreamChunk};
-use risingwave_common::collection::evictable::EvictableHashMap;
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::row::{Row, Row2};
 
-use crate::executor::JOIN_CACHE_SIZE;
+use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
-    data: EvictableHashMap<Row, BTreeSet<Row>>,
+    data: ExecutorCache<Row, BTreeSet<Row>>,
 }
 
 impl LookupCache {
@@ -41,13 +41,12 @@ impl LookupCache {
             let key = row.row_by_indices(arrange_join_keys);
             if let Some(values) = self.data.get_mut(&key) {
                 // the item is in cache, update it
-                let value = row.to_owned_row();
                 match op {
                     Op::Insert | Op::UpdateInsert => {
-                        values.insert(value);
+                        values.insert(row.into_owned_row());
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        values.remove(&value);
+                        values.remove(&row.into_owned_row());
                     }
                 }
             }
@@ -56,12 +55,20 @@ impl LookupCache {
 
     /// Flush the cache and evict the items.
     pub fn flush(&mut self) {
-        self.data.evict_to_target_cap();
+        self.data.evict();
     }
 
-    pub fn new() -> Self {
-        Self {
-            data: EvictableHashMap::new(JOIN_CACHE_SIZE),
-        }
+    /// Update the current epoch.
+    pub fn update_epoch(&mut self, epoch: u64) {
+        self.data.update_epoch(epoch);
+    }
+
+    pub fn new(lru_manager: Option<LruManagerRef>, cache_size: usize) -> Self {
+        let cache = if let Some(lru_manager) = lru_manager {
+            ExecutorCache::Managed(lru_manager.create_cache())
+        } else {
+            ExecutorCache::Local(EvictableHashMap::new(cache_size))
+        };
+        Self { data: cache }
     }
 }

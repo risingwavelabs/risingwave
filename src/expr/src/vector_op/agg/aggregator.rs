@@ -16,21 +16,22 @@ use std::sync::Arc;
 
 use dyn_clone::DynClone;
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::expr::AggCall;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
-use super::string_agg::StringAgg;
-use crate::expr::{
-    build_from_prost, AggKind, Expression, ExpressionRef, InputRefExpression, LiteralExpression,
-};
+use crate::expr::{build_from_prost, AggKind};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
+use crate::vector_op::agg::array_agg::create_array_agg_state;
 use crate::vector_op::agg::count_star::CountStar;
+use crate::vector_op::agg::filter::*;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
 use crate::vector_op::agg::general_distinct_agg::*;
+use crate::vector_op::agg::string_agg::create_string_agg_state;
+use crate::Result;
 
 /// An `Aggregator` supports `update` data and `output` result.
 pub trait Aggregator: Send + DynClone + 'static {
@@ -82,22 +83,12 @@ impl AggStateFactory {
             order_pairs.push(OrderPair::new(col_idx, order_type));
             order_col_types.push(col_type);
         });
-        let filter: ExpressionRef = match prost.filter {
-            Some(ref expr) => Arc::from(build_from_prost(expr)?),
-            None => Arc::from(
-                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-            ),
-        };
 
         let initial_agg_state: BoxedAggState = match (agg_kind, &prost.get_args()[..]) {
-            (AggKind::Count, []) => Box::new(CountStar::new(return_type.clone(), filter)),
+            (AggKind::Count, []) => Box::new(CountStar::new(return_type.clone())),
             (AggKind::ApproxCountDistinct, [arg]) => {
                 let input_col_idx = arg.get_input()?.get_column_idx() as usize;
-                Box::new(ApproxCountDistinct::new(
-                    return_type.clone(),
-                    input_col_idx,
-                    filter,
-                ))
+                Box::new(ApproxCountDistinct::new(return_type.clone(), input_col_idx))
             }
             (AggKind::StringAgg, [agg_arg, delim_arg]) => {
                 assert_eq!(
@@ -108,20 +99,13 @@ impl AggStateFactory {
                     DataType::from(delim_arg.get_type().unwrap()),
                     DataType::Varchar
                 );
-                let input_col_idx = agg_arg.get_input()?.get_column_idx() as usize;
-                let delim_expr = Arc::from(
-                    InputRefExpression::new(
-                        DataType::Varchar,
-                        delim_arg.get_input()?.get_column_idx() as usize,
-                    )
-                    .boxed(),
-                );
-                Box::new(StringAgg::new(
-                    input_col_idx,
-                    delim_expr,
-                    order_pairs,
-                    order_col_types,
-                ))
+                let agg_col_idx = agg_arg.get_input()?.get_column_idx() as usize;
+                let delim_col_idx = delim_arg.get_input()?.get_column_idx() as usize;
+                create_string_agg_state(agg_col_idx, delim_col_idx, order_pairs)?
+            }
+            (AggKind::ArrayAgg, [arg]) => {
+                let agg_col_idx = arg.get_input()?.get_column_idx() as usize;
+                create_array_agg_state(return_type.clone(), agg_col_idx, order_pairs)?
             }
             (agg_kind, [arg]) => {
                 // other unary agg call
@@ -133,14 +117,18 @@ impl AggStateFactory {
                     agg_kind,
                     return_type.clone(),
                     distinct,
-                    filter,
                 )?
             }
-            _ => {
-                return Err(
-                    ErrorCode::InternalError(format!("Invalid agg call: {:?}", agg_kind)).into(),
-                );
-            }
+            _ => bail!("Invalid agg call: {:?}", agg_kind),
+        };
+
+        // wrap the agg state in a `Filter` if needed
+        let initial_agg_state = match prost.filter {
+            Some(ref expr) => Box::new(Filter::new(
+                Arc::from(build_from_prost(expr)?),
+                initial_agg_state,
+            )),
+            None => initial_agg_state,
         };
 
         Ok(Self {
@@ -164,7 +152,6 @@ pub fn create_agg_state_unary(
     agg_kind: AggKind,
     return_type: DataType,
     distinct: bool,
-    filter: ExpressionRef,
 ) -> Result<BoxedAggState> {
     use crate::expr::data_types::*;
 
@@ -183,7 +170,6 @@ pub fn create_agg_state_unary(
                             input_col_idx,
                             $fn,
                             $init_result,
-                            filter
                         ))
                     },
                     ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, true) => {
@@ -191,17 +177,13 @@ pub fn create_agg_state_unary(
                             return_type,
                             input_col_idx,
                             $fn,
-                            filter,
                         ))
                     },
                 )*
                 (unimpl_input, unimpl_agg, unimpl_ret, distinct) => {
-                    return Err(
-                        ErrorCode::InternalError(format!(
+                    bail!(
                         "unsupported aggregator: type={:?} input={:?} output={:?} distinct={}",
                         unimpl_agg, unimpl_input, unimpl_ret, distinct
-                        ))
-                        .into(),
                     )
                 }
             }
@@ -223,12 +205,14 @@ pub fn create_agg_state_unary(
         (Count, count, time, int64, Some(0)),
         (Count, count_struct, struct_type, int64, Some(0)),
         (Count, count_list, list, int64, Some(0)),
+        (Sum0, sum, int64, int64, Some(0)),
         (Sum, sum, int16, int64, None),
         (Sum, sum, int32, int64, None),
         (Sum, sum, int64, decimal, None),
         (Sum, sum, float32, float32, None),
         (Sum, sum, float64, float64, None),
         (Sum, sum, decimal, decimal, None),
+        (Sum, sum, interval, interval, None),
         (Min, min, int16, int16, None),
         (Min, min, int32, int32, None),
         (Min, min, int64, int64, None),
@@ -257,18 +241,22 @@ pub fn create_agg_state_unary(
         (Max, max_struct, struct_type, struct_type, None),
         (Max, max_str, varchar, varchar, None),
         (Max, max_list, list, list, None),
+        (FirstValue, first, int16, int16, None),
+        (FirstValue, first, int32, int32, None),
+        (FirstValue, first, int64, int64, None),
+        (FirstValue, first, float32, float32, None),
+        (FirstValue, first, float64, float64, None),
+        (FirstValue, first, decimal, decimal, None),
+        (FirstValue, first, boolean, boolean, None),
+        (FirstValue, first, interval, interval, None),
+        (FirstValue, first, date, date, None),
+        (FirstValue, first, timestamp, timestamp, None),
+        (FirstValue, first, time, time, None),
+        (FirstValue, first_struct, struct_type, struct_type, None),
+        (FirstValue, first_str, varchar, varchar, None),
+        (FirstValue, first_list, list, list, None),
         // Global Agg
         (Sum, sum, int64, int64, None),
-        // We remark that SingleValue does not produce a runtime error when it receives zero row.
-        // Therefore, we do NOT need to change the logic in GeneralAgg::output_concrete.
-        (SingleValue, SingleValue::new(), int16, int16, None),
-        (SingleValue, SingleValue::new(), int32, int32, None),
-        (SingleValue, SingleValue::new(), int64, int64, None),
-        (SingleValue, SingleValue::new(), float32, float32, None),
-        (SingleValue, SingleValue::new(), float64, float64, None),
-        (SingleValue, SingleValue::new(), decimal, decimal, None),
-        (SingleValue, SingleValue::new(), boolean, boolean, None),
-        (SingleValue, SingleValue::new(), varchar, varchar, None),
     ];
     Ok(state)
 }
@@ -285,9 +273,6 @@ mod tests {
         let decimal_type = DataType::Decimal;
         let bool_type = DataType::Boolean;
         let char_type = DataType::Varchar;
-        let filter: ExpressionRef = Arc::from(
-            LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-        );
         macro_rules! test_create {
             ($input_type:expr, $agg:ident, $return_type:expr, $expected:ident) => {
                 assert!(create_agg_state_unary(
@@ -296,7 +281,6 @@ mod tests {
                     AggKind::$agg,
                     $return_type.clone(),
                     false,
-                    filter.clone(),
                 )
                 .$expected());
                 assert!(create_agg_state_unary(
@@ -305,7 +289,6 @@ mod tests {
                     AggKind::$agg,
                     $return_type.clone(),
                     true,
-                    filter.clone(),
                 )
                 .$expected());
             };
@@ -325,10 +308,5 @@ mod tests {
         test_create! { decimal_type, Min, decimal_type, is_ok }
         test_create! { bool_type, Min, bool_type, is_ok } // TODO(#359): revert to is_err
         test_create! { char_type, Min, char_type, is_ok }
-
-        test_create! { int64_type, SingleValue, int64_type, is_ok }
-        test_create! { decimal_type, SingleValue, decimal_type, is_ok }
-        test_create! { bool_type, SingleValue, bool_type, is_ok }
-        test_create! { char_type, SingleValue, char_type, is_ok }
     }
 }

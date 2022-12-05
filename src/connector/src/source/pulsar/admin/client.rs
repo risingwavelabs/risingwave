@@ -34,7 +34,7 @@ impl PulsarAdminClient {
 }
 
 impl PulsarAdminClient {
-    pub async fn get_last_message_id(&self, topic: &Topic) -> Result<LastMessageID> {
+    pub async fn get_last_message_id(&self, topic: &Topic) -> Result<LastMessageId> {
         self.get(topic, "lastMessageId").await
     }
 
@@ -80,19 +80,19 @@ impl PulsarAdminClient {
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LastMessageID {
+pub struct LastMessageId {
     pub ledger_id: i64,
     pub entry_id: i64,
     pub partition_index: i64,
     pub batch_index: Option<i64>,
     pub batch_size: Option<i64>,
-    pub acker: Option<LastMessageIDAcker>,
+    pub acker: Option<LastMessageIdAcker>,
     pub outstanding_acks_in_same_batch: Option<i64>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LastMessageIDAcker {
+pub struct LastMessageIdAcker {
     pub batch_size: Option<i64>,
     pub prev_batch_cumulatively_acked: Option<bool>,
     pub outstanding_acks: Option<i64>,

@@ -109,6 +109,24 @@ where
         (None, None) => Ok(Some(false)),
     }
 }
+
+pub fn general_is_not_distinct_from<T1, T2, T3>(
+    l: Option<T1>,
+    r: Option<T2>,
+) -> Result<Option<bool>>
+where
+    T1: TryInto<T3> + Debug,
+    T2: TryInto<T3> + Debug,
+    T3: Ord,
+{
+    match (l, r) {
+        (Some(lv), Some(rv)) => Ok(general_eq::<T1, T2, T3>(lv, rv).ok()),
+        (Some(_), None) => Ok(Some(false)),
+        (None, Some(_)) => Ok(Some(false)),
+        (None, None) => Ok(Some(true)),
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum Comparison {
     Eq,
@@ -127,13 +145,13 @@ pub(crate) static LE: Comparison = Comparison::Le;
 pub(crate) static GE: Comparison = Comparison::Ge;
 
 #[inline(always)]
-pub fn gen_struct_cmp(op: Comparison) -> fn(StructRef, StructRef) -> Result<bool> {
+pub fn gen_struct_cmp(op: Comparison) -> fn(StructRef<'_>, StructRef<'_>) -> Result<bool> {
     use crate::gen_cmp;
     gen_cmp!(op)
 }
 
 #[inline(always)]
-pub fn gen_list_cmp(op: Comparison) -> fn(ListRef, ListRef) -> Result<bool> {
+pub fn gen_list_cmp(op: Comparison) -> fn(ListRef<'_>, ListRef<'_>) -> Result<bool> {
     use crate::gen_cmp;
     gen_cmp!(op)
 }
@@ -164,6 +182,15 @@ pub fn str_is_distinct_from(l: Option<&str>, r: Option<&str>) -> Result<Option<b
         (Some(_), None) => Ok(Some(true)),
         (None, Some(_)) => Ok(Some(true)),
         (None, None) => Ok(Some(false)),
+    }
+}
+
+pub fn str_is_not_distinct_from(l: Option<&str>, r: Option<&str>) -> Result<Option<bool>> {
+    match (l, r) {
+        (Some(lv), Some(rv)) => Ok(Some(lv == rv)),
+        (Some(_), None) => Ok(Some(false)),
+        (None, Some(_)) => Ok(Some(false)),
+        (None, None) => Ok(Some(true)),
     }
 }
 

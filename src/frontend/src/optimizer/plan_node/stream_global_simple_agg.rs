@@ -14,13 +14,12 @@
 
 use std::fmt;
 
-use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::logical_agg::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::plan_node::PlanAggCallDisplay;
+use super::generic::PlanAggCall;
+use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone)]
 pub struct StreamGlobalSimpleAgg {
@@ -54,20 +53,18 @@ impl StreamGlobalSimpleAgg {
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }
-
-    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallDisplay> {
-        self.logical.agg_calls_display()
-    }
 }
 
 impl fmt::Display for StreamGlobalSimpleAgg {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.input().append_only() {
-            self.logical
-                .fmt_with_name(f, "StreamAppendOnlyGlobalSimpleAgg")
-        } else {
-            self.logical.fmt_with_name(f, "StreamGlobalSimpleAgg")
-        }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.logical.fmt_with_name(
+            f,
+            if self.input().append_only() {
+                "StreamAppendOnlyGlobalSimpleAgg"
+            } else {
+                "StreamGlobalSimpleAgg"
+            },
+        )
     }
 }
 
@@ -82,10 +79,12 @@ impl PlanTreeNodeUnary for StreamGlobalSimpleAgg {
 }
 impl_plan_tree_node_for_unary! { StreamGlobalSimpleAgg }
 
-impl ToStreamProst for StreamGlobalSimpleAgg {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamGlobalSimpleAgg {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let (internal_tables, column_mappings) = self.logical.infer_internal_table_catalog();
+        let result_table = self.logical.infer_result_table(None);
+        let agg_states = self.logical.infer_stream_agg_state(None);
+
         ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
@@ -98,18 +97,17 @@ impl ToStreamProst for StreamGlobalSimpleAgg {
                 .dist_column_indices()
                 .iter()
                 .map(|idx| *idx as u32)
-                .collect_vec(),
-            internal_tables: internal_tables
-                .into_iter()
-                .map(|table_catalog| table_catalog.to_state_table_prost())
-                .collect_vec(),
-            column_mappings: column_mappings
-                .into_iter()
-                .map(|v| ColumnMapping {
-                    indices: v.iter().map(|x| *x as u32).collect(),
-                })
                 .collect(),
             is_append_only: self.input().append_only(),
+            agg_call_states: agg_states
+                .into_iter()
+                .map(|s| s.into_prost(state))
+                .collect(),
+            result_table: Some(
+                result_table
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            ),
         })
     }
 }

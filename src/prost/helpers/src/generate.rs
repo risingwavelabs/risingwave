@@ -31,10 +31,12 @@ fn extract_type_from_option(option_segment: &PathSegment) -> Type {
 }
 
 /// For example:
-///   #[prost(enumeration = "data_type::TypeName", tag = "1")]
-///   pub type_name: i32,
+/// ```ignore
+/// #[prost(enumeration = "data_type::TypeName", tag = "1")]
+/// pub type_name: i32,
+/// ```
 ///
-/// Returns "data_type::TypeName".
+/// Returns `data_type::TypeName`.
 fn extract_enum_type_from_field(field: &Field) -> Option<Type> {
     use syn::punctuated::Punctuated;
     use syn::Token;
@@ -88,19 +90,16 @@ pub fn implement(field: &Field) -> TokenStream2 {
 
     let getter_fn_name = Ident::new(&format!("get_{}", field_name.unraw()), Span::call_site());
 
-    match extract_enum_type_from_field(field) {
-        None => {}
-        Some(enum_type) => {
-            return quote! {
-                #[inline(always)]
-                pub fn #getter_fn_name(&self) -> std::result::Result<#enum_type, crate::ProstFieldNotFound> {
-                    if self.#field_name.eq(&0) {
-                        return Err(crate::ProstFieldNotFound(stringify!(#field_name)));
-                    }
-                    #enum_type::from_i32(self.#field_name).ok_or_else(|| crate::ProstFieldNotFound(stringify!(#field_name)))
+    if let Some(enum_type) = extract_enum_type_from_field(field) {
+        return quote! {
+            #[inline(always)]
+            pub fn #getter_fn_name(&self) -> std::result::Result<#enum_type, crate::ProstFieldNotFound> {
+                if self.#field_name.eq(&0) {
+                    return Err(crate::ProstFieldNotFound(stringify!(#field_name)));
                 }
-            };
-        }
+                #enum_type::from_i32(self.#field_name).ok_or_else(|| crate::ProstFieldNotFound(stringify!(#field_name)))
+            }
+        };
     };
 
     let ty = field.ty.clone();
@@ -118,7 +117,7 @@ pub fn implement(field: &Field) -> TokenStream2 {
         } else if ["u32", "u64", "f32", "f64", "i32", "i64", "bool"]
             .contains(&data_type.ident.to_string().as_str())
         {
-            // Primitive types.
+            // Primitive types. Return value instead of reference.
             return quote! {
                 #[inline(always)]
                 pub fn #getter_fn_name(&self) -> #ty {

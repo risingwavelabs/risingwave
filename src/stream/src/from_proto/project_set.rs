@@ -13,29 +13,42 @@
 // limitations under the License.
 
 use risingwave_expr::table_function::ProjectSetSelectItem;
+use risingwave_pb::stream_plan::ProjectSetNode;
 
 use super::*;
 use crate::executor::ProjectSetExecutor;
 
 pub struct ProjectSetExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for ProjectSetExecutorBuilder {
-    fn new_boxed_executor(
+    type Node = ProjectSetNode;
+
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::ProjectSet)?;
+    ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let select_list: Vec<_> = node
             .get_select_list()
             .iter()
-            .map(ProjectSetSelectItem::from_prost)
+            .map(|proto| {
+                ProjectSetSelectItem::from_prost(
+                    proto,
+                    params.env.config().developer.stream_chunk_size,
+                )
+            })
             .try_collect()?;
-        Ok(
-            ProjectSetExecutor::new(input, params.pk_indices, select_list, params.executor_id)
-                .boxed(),
+        let chunk_size = params.env.config().developer.stream_chunk_size;
+        Ok(ProjectSetExecutor::new(
+            input,
+            params.pk_indices,
+            select_list,
+            params.executor_id,
+            chunk_size,
         )
+        .boxed())
     }
 }

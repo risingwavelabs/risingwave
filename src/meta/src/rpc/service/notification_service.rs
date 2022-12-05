@@ -12,25 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
 use itertools::Itertools;
+use risingwave_pb::catalog::Table;
 use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::{ParallelUnitMapping, WorkerNode, WorkerType};
+use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse};
+use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeType};
+use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
-use crate::error::meta_error_to_tonic;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, Notification, WorkerKey,
+    Catalog, CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, Notification,
+    NotificationVersion, WorkerKey,
 };
 use crate::storage::MetaStore;
-use crate::stream::GlobalStreamManagerRef;
 
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
@@ -38,7 +37,6 @@ pub struct NotificationServiceImpl<S: MetaStore> {
     catalog_manager: CatalogManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     hummock_manager: HummockManagerRef<S>,
-    stream_manager: GlobalStreamManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
 
@@ -51,7 +49,6 @@ where
         catalog_manager: CatalogManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
-        stream_manager: GlobalStreamManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         Self {
@@ -59,8 +56,107 @@ where
             catalog_manager,
             cluster_manager,
             hummock_manager,
-            stream_manager,
             fragment_manager,
+        }
+    }
+
+    async fn get_catalog_snapshot(&self) -> (Catalog, Vec<UserInfo>, NotificationVersion) {
+        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+        let (databases, schemas, tables, sources, sinks, indexes, views) =
+            catalog_guard.database.get_catalog();
+        let users = catalog_guard.user.list_users();
+        let notification_version = self.env.notification_manager().current_version().await;
+        (
+            (databases, schemas, tables, sources, sinks, indexes, views),
+            users,
+            notification_version,
+        )
+    }
+
+    async fn get_parallel_unit_mapping_snapshot(
+        &self,
+    ) -> (Vec<ParallelUnitMapping>, NotificationVersion) {
+        let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
+        let parallel_unit_mappings = fragment_guard.all_running_fragment_mappings().collect_vec();
+        let notification_version = self.env.notification_manager().current_version().await;
+        (parallel_unit_mappings, notification_version)
+    }
+
+    async fn get_worker_node_snapshot(&self) -> (Vec<WorkerNode>, NotificationVersion) {
+        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
+        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
+        let notification_version = self.env.notification_manager().current_version().await;
+        (nodes, notification_version)
+    }
+
+    async fn get_tables_and_creating_tables_snapshot(&self) -> (Vec<Table>, NotificationVersion) {
+        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+        let mut tables = catalog_guard.database.list_tables();
+        tables.extend(catalog_guard.database.list_creating_tables());
+        let notification_version = self.env.notification_manager().current_version().await;
+        (tables, notification_version)
+    }
+
+    async fn compactor_subscribe(&self) -> MetaSnapshot {
+        let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await;
+
+        MetaSnapshot {
+            tables,
+            version: Some(SnapshotVersion {
+                catalog_version,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    async fn frontend_subscribe(&self) -> MetaSnapshot {
+        let ((databases, schemas, tables, sources, sinks, indexes, views), users, catalog_version) =
+            self.get_catalog_snapshot().await;
+        let (parallel_unit_mappings, parallel_unit_mapping_version) =
+            self.get_parallel_unit_mapping_snapshot().await;
+        let (nodes, worker_node_version) = self.get_worker_node_snapshot().await;
+
+        let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
+
+        MetaSnapshot {
+            databases,
+            schemas,
+            sources,
+            sinks,
+            tables,
+            indexes,
+            views,
+            users,
+            parallel_unit_mappings,
+            nodes,
+            hummock_snapshot,
+            version: Some(SnapshotVersion {
+                catalog_version,
+                parallel_unit_mapping_version,
+                worker_node_version,
+            }),
+            ..Default::default()
+        }
+    }
+
+    async fn hummock_subscribe(&self) -> MetaSnapshot {
+        let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await;
+        let hummock_version = self
+            .hummock_manager
+            .get_read_guard()
+            .await
+            .current_version
+            .clone();
+
+        MetaSnapshot {
+            tables,
+            hummock_version: Some(hummock_version),
+            version: Some(SnapshotVersion {
+                catalog_version,
+                ..Default::default()
+            }),
+            ..Default::default()
         }
     }
 }
@@ -78,81 +174,37 @@ where
         request: Request<SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
-        let worker_type = req.get_worker_type().map_err(meta_error_to_tonic)?;
-        let host_address = req.get_host().map_err(meta_error_to_tonic)?.clone();
+        let host_address = req.get_host()?.clone();
+        let subscribe_type = req.get_subscribe_type()?;
+
+        let worker_key = WorkerKey(host_address);
 
         let (tx, rx) = mpsc::unbounded_channel();
+        self.env
+            .notification_manager()
+            .insert_sender(subscribe_type, worker_key.clone(), tx)
+            .await;
 
-        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let (databases, schemas, mut tables, sources, sinks, indexes) =
-            catalog_guard.database.get_catalog().await?;
-        let users = catalog_guard.user.list_users();
-
-        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
-        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
-
-        let processing_table_guard = self.stream_manager.get_processing_table_guard().await;
-
-        let table_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.id));
-        let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
-        let parallel_unit_mappings = fragment_guard
-            .all_table_mappings()
-            .filter(|mapping| table_ids.contains(&mapping.table_id))
-            .collect_vec();
-        let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
-
-        let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
-
-        // Send the snapshot on subscription. After that we will send only updates.
-        let meta_snapshot = match worker_type {
-            WorkerType::Frontend => MetaSnapshot {
-                nodes,
-                databases,
-                schemas,
-                sources,
-                sinks,
-                tables,
-                indexes,
-                users,
-                parallel_unit_mappings,
-                hummock_version: None,
-                hummock_snapshot,
-            },
-
-            WorkerType::Compactor => {
-                tables.extend(processing_table_guard.values().cloned());
-
-                MetaSnapshot {
-                    tables,
-                    ..Default::default()
-                }
+        let meta_snapshot = match subscribe_type {
+            SubscribeType::Compactor => self.compactor_subscribe().await,
+            SubscribeType::Frontend => {
+                self.hummock_manager
+                    .pin_snapshot(req.get_worker_id())
+                    .await?;
+                self.frontend_subscribe().await
             }
-
-            WorkerType::ComputeNode => {
-                tables.extend(processing_table_guard.values().cloned());
-
-                MetaSnapshot {
-                    tables,
-                    hummock_version: Some(hummock_manager_guard.current_version.clone()),
-                    ..Default::default()
-                }
+            SubscribeType::Hummock => {
+                self.hummock_manager
+                    .pin_version(req.get_worker_id())
+                    .await?;
+                self.hummock_subscribe().await
             }
-
-            _ => unreachable!(),
+            SubscribeType::Unspecified => unreachable!(),
         };
-
-        tx.send(Ok(SubscribeResponse {
-            status: None,
-            operation: Operation::Snapshot as i32,
-            info: Some(Info::Snapshot(meta_snapshot)),
-            version: self.env.notification_manager().current_version().await,
-        }))
-        .unwrap();
 
         self.env
             .notification_manager()
-            .insert_sender(worker_type, WorkerKey(host_address), tx)
-            .await;
+            .notify_snapshot(worker_key, meta_snapshot);
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }

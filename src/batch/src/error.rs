@@ -32,14 +32,14 @@ pub enum BatchError {
     #[error("Array error: {0}")]
     Array(#[from] ArrayError),
 
-    #[error("Out of range")]
-    NumericOutOfRange,
-
     #[error("Failed to send result to channel")]
     SenderError,
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
+
+    #[error("Prometheus error: {0}")]
+    Prometheus(#[from] prometheus::Error),
 }
 
 impl From<BatchError> for RwError {

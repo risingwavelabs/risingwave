@@ -47,7 +47,7 @@ pub struct HopWindowExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for HopWindowExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -66,14 +66,16 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
             .map(|x| x as usize)
             .collect_vec();
 
+        let time_col_data_type = child.schema().fields()[time_col].data_type();
+        let output_type = DataType::window_of(&time_col_data_type).unwrap();
         let original_schema: Schema = child
             .schema()
             .clone()
             .into_fields()
             .into_iter()
             .chain([
-                Field::with_name(DataType::Timestamp, "window_start"),
-                Field::with_name(DataType::Timestamp, "window_end"),
+                Field::with_name(output_type.clone(), "window_start"),
+                Field::with_name(output_type, "window_end"),
             ])
             .collect();
         let output_indices_schema: Schema = output_indices
@@ -152,6 +154,7 @@ impl HopWindowExecutor {
             .get();
 
         let time_col_data_type = child.schema().fields()[time_col_idx].data_type();
+        let output_type = DataType::window_of(&time_col_data_type).unwrap();
         let time_col_ref = InputRefExpression::new(time_col_data_type, self.time_col_idx).boxed();
 
         let window_slide_expr =
@@ -174,15 +177,15 @@ impl HopWindowExecutor {
         .boxed();
         let hop_expr = new_binary_expr(
             expr_node::Type::TumbleStart,
-            risingwave_common::types::DataType::Timestamp,
+            output_type.clone(),
             new_binary_expr(
                 expr_node::Type::Subtract,
-                DataType::Timestamp,
+                output_type.clone(),
                 time_col_ref,
                 window_size_sub_slide_expr,
-            ),
+            )?,
             window_slide_expr,
-        );
+        )?;
 
         let mut window_start_exprs = Vec::with_capacity(units);
         let mut window_end_exprs = Vec::with_capacity(units);
@@ -212,17 +215,17 @@ impl HopWindowExecutor {
             .boxed();
             let window_start_expr = new_binary_expr(
                 expr_node::Type::Add,
-                DataType::Timestamp,
-                InputRefExpression::new(DataType::Timestamp, 0).boxed(),
+                output_type.clone(),
+                InputRefExpression::new(output_type.clone(), 0).boxed(),
                 window_start_offset_expr,
-            );
+            )?;
             window_start_exprs.push(window_start_expr);
             let window_end_expr = new_binary_expr(
                 expr_node::Type::Add,
-                DataType::Timestamp,
-                InputRefExpression::new(DataType::Timestamp, 0).boxed(),
+                output_type.clone(),
+                InputRefExpression::new(output_type.clone(), 0).boxed(),
                 window_end_offset_expr,
-            );
+            )?;
             window_end_exprs.push(window_end_expr);
         }
         let window_start_col_index = child.schema().len();

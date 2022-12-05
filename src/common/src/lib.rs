@@ -14,23 +14,9 @@
 
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
-#![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
-#![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
-#![feature(backtrace)]
 #![feature(fn_traits)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
@@ -39,6 +25,10 @@
 #![feature(lint_reasons)]
 #![feature(generators)]
 #![feature(map_try_insert)]
+#![feature(once_cell)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
+#![feature(let_chains)]
 
 #[macro_use]
 pub mod error;
@@ -54,6 +44,7 @@ pub mod config;
 pub mod field_generator;
 pub mod hash;
 pub mod monitor;
+pub mod row;
 pub mod session_config;
 #[cfg(test)]
 pub mod test_utils;

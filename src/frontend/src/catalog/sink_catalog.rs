@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use risingwave_pb::catalog::Sink as ProstSink;
 
 use super::SinkId;
-use crate::catalog::TableId;
+use crate::WithOptions;
 
 #[derive(Clone, Debug)]
 pub struct SinkCatalog {
     pub id: SinkId,
     pub name: String,
 
-    pub associated_table_id: TableId,
-    pub properties: HashMap<String, String>,
+    pub properties: WithOptions,
     pub owner: u32,
 }
 
@@ -34,8 +31,7 @@ impl From<&ProstSink> for SinkCatalog {
         SinkCatalog {
             id: sink.id,
             name: sink.name.clone(),
-            associated_table_id: TableId::new(sink.associated_table_id),
-            properties: sink.properties.clone(),
+            properties: WithOptions::new(sink.properties.clone()),
             owner: sink.owner,
         }
     }

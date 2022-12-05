@@ -1,7 +1,11 @@
 [package]
 name = "risingwave_hummock_sdk"
-version = "0.1.11"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 bytes = "1"
@@ -10,6 +14,7 @@ itertools = "0.10"
 num-derive = "0.3"
 num-traits = "0.2"
 parking_lot = "0.12"
+parse-display = "0.6"
 prost = "0.11"
 risingwave_common = { path = "../../common" }
 risingwave_pb = { path = "../../prost" }
@@ -21,4 +26,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+tracing = "0.1"
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }

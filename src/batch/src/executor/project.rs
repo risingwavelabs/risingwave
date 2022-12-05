@@ -53,7 +53,7 @@ impl ProjectExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
-            // let data_chunk = data_chunk.compact()?;
+            // let data_chunk = data_chunk.compact();
             let arrays: Vec<Column> = self
                 .expr
                 .iter_mut()
@@ -69,7 +69,7 @@ impl ProjectExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for ProjectExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -112,6 +112,8 @@ mod tests {
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::{Executor, ValuesExecutor};
     use crate::*;
+
+    const CHUNK_SIZE: usize = 1024;
 
     #[tokio::test]
     async fn test_project_executor() -> Result<()> {
@@ -171,7 +173,7 @@ mod tests {
             vec![vec![]], // One single row with no column.
             Schema::default(),
             "ValuesExecutor".to_string(),
-            1024,
+            CHUNK_SIZE,
         ));
 
         let proj_executor = Box::new(ProjectExecutor {

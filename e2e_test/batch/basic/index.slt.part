@@ -42,10 +42,4 @@ select v1,v2 from t1 order by v1, v2;
 5 6
 
 statement ok
-drop index idx1;
-
-statement ok
-drop index idx2;
-
-statement ok
 drop table t1;

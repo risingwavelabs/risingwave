@@ -12,15 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_expr::vector_op::agg::{
     create_sorted_grouper, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
@@ -52,7 +48,7 @@ pub struct SortAggExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for SortAggExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -93,7 +89,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             child,
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
-            output_size_limit: DEFAULT_CHUNK_BUFFER_SIZE,
+            output_size_limit: source.context.get_config().developer.batch_chunk_size,
         }))
     }
 }
@@ -118,22 +114,26 @@ impl SortAggExecutor {
         let mut left_capacity = self.output_size_limit;
         let (mut group_builders, mut agg_builders) =
             SortAggExecutor::create_builders(&self.group_key, &self.agg_states);
+        let mut no_input_data = true;
 
         #[for_await]
         for child_chunk in self.child.execute() {
-            let child_chunk = child_chunk?.compact()?;
+            let child_chunk = child_chunk?.compact();
+            if no_input_data && child_chunk.cardinality() > 0 {
+                no_input_data = false;
+            }
             let group_columns: Vec<_> = self
                 .group_key
                 .iter_mut()
                 .map(|expr| expr.eval(&child_chunk))
                 .try_collect()?;
 
-            let groups = self
+            let groups: Vec<_> = self
                 .sorted_groupers
                 .iter()
                 .zip_eq(&group_columns)
                 .map(|(grouper, array)| grouper.detect_groups(array))
-                .collect::<Result<Vec<EqGroups>>>()?;
+                .try_collect()?;
 
             let groups = EqGroups::intersect(&groups);
 
@@ -161,11 +161,11 @@ impl SortAggExecutor {
                 left_capacity -= 1;
                 if left_capacity == 0 {
                     // output chunk reaches its limit size, yield it
-                    let columns = group_builders
+                    let columns: Vec<_> = group_builders
                         .into_iter()
                         .chain(agg_builders)
-                        .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
-                        .collect::<Result<Vec<_>>>()?;
+                        .map(|b| b.finish().into())
+                        .collect();
 
                     let output = DataChunk::new(columns, self.output_size_limit);
                     yield output;
@@ -195,14 +195,19 @@ impl SortAggExecutor {
         }
 
         assert!(left_capacity > 0);
+        // Simple agg should give a Null row if there has been no data input, But the group agg does
+        // not
+        if no_input_data && !self.group_key.is_empty() {
+            return Ok(());
+        }
         Self::output_sorted_groupers(&mut self.sorted_groupers, &mut group_builders)?;
         Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
 
-        let columns = group_builders
+        let columns: Vec<_> = group_builders
             .into_iter()
             .chain(agg_builders)
-            .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
-            .collect::<Result<Vec<_>>>()?;
+            .map(|b| b.finish().into())
+            .collect();
 
         let output = DataChunk::new(columns, self.output_size_limit - left_capacity + 1);
 
@@ -219,6 +224,7 @@ impl SortAggExecutor {
             .iter_mut()
             .zip_eq(group_columns)
             .try_for_each(|(grouper, column)| grouper.update(column, start_row_idx, end_row_idx))
+            .map_err(Into::into)
     }
 
     fn update_agg_states(
@@ -230,6 +236,7 @@ impl SortAggExecutor {
         agg_states
             .iter_mut()
             .try_for_each(|state| state.update_multi(child_chunk, start_row_idx, end_row_idx))
+            .map_err(Into::into)
     }
 
     fn output_sorted_groupers(
@@ -240,6 +247,7 @@ impl SortAggExecutor {
             .iter_mut()
             .zip_eq(group_builders)
             .try_for_each(|(grouper, builder)| grouper.output(builder))
+            .map_err(Into::into)
     }
 
     fn output_agg_states(
@@ -250,6 +258,7 @@ impl SortAggExecutor {
             .iter_mut()
             .zip_eq(agg_builders)
             .try_for_each(|(state, builder)| state.output(builder))
+            .map_err(Into::into)
     }
 
     fn create_builders(
@@ -442,10 +451,10 @@ mod tests {
             })
             .try_collect()?;
 
-        let sorted_groupers = group_exprs
+        let sorted_groupers: Vec<_> = group_exprs
             .iter()
             .map(|e| create_sorted_grouper(e.return_type()))
-            .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
+            .try_collect()?;
 
         let agg_states = vec![count_star];
 
@@ -780,10 +789,10 @@ mod tests {
             })
             .try_collect()?;
 
-        let sorted_groupers = group_exprs
+        let sorted_groupers: Vec<_> = group_exprs
             .iter()
             .map(|e| create_sorted_grouper(e.return_type()))
-            .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
+            .try_collect()?;
 
         let agg_states = vec![sum_agg];
 

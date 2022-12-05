@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::fmt;
 use std::cmp::Ordering;
+use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
-lazy_static::lazy_static! {
-    /// `UNIX_SINGULARITY_DATE_EPOCH` represents the singularity date of the UNIX epoch: 2021-04-01T00:00:00Z.
-    pub static ref UNIX_SINGULARITY_DATE_EPOCH: SystemTime = SystemTime::UNIX_EPOCH + Duration::from_secs(1_617_235_200);
-}
+use parse_display::Display;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+static UNIX_SINGULARITY_DATE_SEC: u64 = 1_617_235_200;
+
+/// `UNIX_SINGULARITY_DATE_EPOCH` represents the singularity date of the UNIX epoch:
+/// 2021-04-01T00:00:00Z.
+pub static UNIX_SINGULARITY_DATE_EPOCH: LazyLock<SystemTime> =
+    LazyLock::new(|| SystemTime::UNIX_EPOCH + Duration::from_secs(UNIX_SINGULARITY_DATE_SEC));
+
+#[derive(Clone, Copy, Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Epoch(pub u64);
 
 /// `INVALID_EPOCH` defines the invalid epoch value.
@@ -39,7 +43,7 @@ impl Epoch {
         let physical_now = Epoch::physical_now();
         let prev_physical_time = self.physical_time();
         match physical_now.cmp(&prev_physical_time) {
-            Ordering::Greater => Epoch(physical_now << EPOCH_PHYSICAL_SHIFT_BITS),
+            Ordering::Greater => Self::from_physical_time(physical_now),
             Ordering::Equal => {
                 tracing::warn!("New generate epoch is too close to the previous one.");
                 Epoch(self.0 + 1)
@@ -59,11 +63,19 @@ impl Epoch {
         self.0 >> EPOCH_PHYSICAL_SHIFT_BITS
     }
 
-    fn physical_now() -> u64 {
+    pub fn from_physical_time(time: u64) -> Self {
+        Epoch(time << EPOCH_PHYSICAL_SHIFT_BITS)
+    }
+
+    pub fn physical_now() -> u64 {
         UNIX_SINGULARITY_DATE_EPOCH
             .elapsed()
             .expect("system clock set earlier than singularity date!")
             .as_millis() as u64
+    }
+
+    pub fn as_unix_millis(&self) -> u64 {
+        UNIX_SINGULARITY_DATE_SEC * 1000 + self.physical_time()
     }
 
     /// Returns the epoch in real system time.
@@ -90,12 +102,30 @@ impl From<u64> for Epoch {
     }
 }
 
-impl fmt::Display for Epoch {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
-    }
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EpochPair {
+    pub curr: u64,
+    pub prev: u64,
 }
 
+impl EpochPair {
+    pub fn new(curr: u64, prev: u64) -> Self {
+        assert!(curr > prev);
+        Self { curr, prev }
+    }
+
+    pub fn inc(&self) -> Self {
+        Self {
+            curr: self.curr + 1,
+            prev: self.prev + 1,
+        }
+    }
+
+    pub fn new_test_epoch(curr: u64) -> Self {
+        assert!(curr > 0);
+        Self::new(curr, curr - 1)
+    }
+}
 #[cfg(test)]
 mod tests {
     use chrono::{Local, TimeZone, Utc};
@@ -104,7 +134,7 @@ mod tests {
 
     #[test]
     fn test_singularity_system_time() {
-        let utc = Utc.ymd(2021, 4, 1).and_hms(0, 0, 0);
+        let utc = Utc.with_ymd_and_hms(2021, 4, 1, 0, 0, 0).unwrap();
         let singularity_dt = Local.from_utc_datetime(&utc.naive_utc());
         let singularity_st = SystemTime::from(singularity_dt);
         assert_eq!(singularity_st, *UNIX_SINGULARITY_DATE_EPOCH);

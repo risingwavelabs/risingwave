@@ -12,65 +12,89 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::{self, ProtocolError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
-use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
-use risingwave_pb::user::grant_privilege::{Action, Object};
-use risingwave_source::ProtobufParser;
-use risingwave_sqlparser::ast::{CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
-
-use super::create_table::{
-    bind_sql_columns, bind_sql_table_constraints, gen_materialized_source_plan,
+use risingwave_pb::catalog::{
+    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
 };
-use super::privilege::check_privileges;
-use super::util::handle_with_properties;
+use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
+use risingwave_source::{AvroParser, ProtobufParser};
+use risingwave_sqlparser::ast::{
+    AvroSchema, CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema,
+};
+
+use super::create_table::{bind_sql_columns, bind_sql_table_constraints, gen_materialize_plan};
+use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::check_schema_writable;
-use crate::catalog::column_catalog::ColumnCatalog;
-use crate::handler::privilege::ObjectCheckItem;
 use crate::session::{OptimizerContext, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenterV2;
+use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn make_prost_source(
     session: &SessionImpl,
     name: ObjectName,
+    row_id_index: Option<ProstColumnIndex>,
+    columns: Vec<ProstColumnCatalog>,
+    pk_column_ids: Vec<i32>,
+    properties: HashMap<String, String>,
     source_info: Info,
 ) -> Result<ProstSource> {
-    let (schema_name, name) = Binder::resolve_table_name(name)?;
-    check_schema_writable(&schema_name)?;
+    let db_name = session.database();
+    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, name)?;
 
-    let (database_id, schema_id) = {
-        let catalog_reader = session.env().catalog_reader().read_guard();
-
-        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
-        check_privileges(
-            session,
-            &vec![ObjectCheckItem::new(
-                schema.owner(),
-                Action::Create,
-                Object::SchemaId(schema.id()),
-            )],
-        )?;
-
-        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?
-    };
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     Ok(ProstSource {
         id: 0,
         schema_id,
         database_id,
         name,
+        row_id_index,
+        columns,
+        pk_column_ids,
+        properties,
         info: Some(source_info),
         owner: session.user_id(),
     })
 }
 
+/// Map an Avro schema to a relational schema.
+async fn extract_avro_table_schema(
+    schema: &AvroSchema,
+    with_properties: HashMap<String, String>,
+) -> Result<Vec<ProstColumnCatalog>> {
+    let parser = AvroParser::new(
+        schema.row_schema_location.0.as_str(),
+        schema.use_schema_registry,
+        with_properties,
+    )
+    .await?;
+    let vec_column_desc = parser.map_to_columns()?;
+    Ok(vec_column_desc
+        .into_iter()
+        .map(|c| ProstColumnCatalog {
+            column_desc: Some(c),
+            is_hidden: false,
+        })
+        .collect_vec())
+}
+
 /// Map a protobuf schema to a relational schema.
-fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ProstColumnCatalog>> {
-    let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
+async fn extract_protobuf_table_schema(
+    schema: &ProtobufSchema,
+    with_properties: HashMap<String, String>,
+) -> Result<Vec<ProstColumnCatalog>> {
+    let parser = ProtobufParser::new(
+        &schema.row_schema_location.0,
+        &schema.message_name.0,
+        schema.use_schema_registry,
+        with_properties,
+    )
+    .await?;
     let column_descs = parser.map_to_columns()?;
 
     Ok(column_descs
@@ -82,63 +106,167 @@ fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ProstCol
         .collect_vec())
 }
 
+// TODO(Yuanxin): Only create a source w/o materializing.
 pub async fn handle_create_source(
     context: OptimizerContext,
     is_materialized: bool,
     stmt: CreateSourceStatement,
-) -> Result<PgResponse> {
-    let with_properties = handle_with_properties("create_source", stmt.with_properties.0)?;
-
+) -> Result<RwPgResponse> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
-    let (columns, pk_column_ids) =
-        bind_sql_table_constraints(&column_descs, pk_column_id_from_columns, stmt.constraints)?;
-
-    let source = match &stmt.source_schema {
+    let (mut columns, pk_column_ids, row_id_index) =
+        bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
+    if row_id_index.is_none() && !is_materialized {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "The non-materialized source does not support PRIMARY KEY constraint, please use \"CREATE MATERIALIZED SOURCE\" instead".to_owned(),
+        )
+        .into());
+    }
+    let with_properties = context.with_options.inner().clone();
+    const UPSTREAM_SOURCE_KEY: &str = "connector";
+    // confluent schema registry must be used with kafka
+    let is_kafka = with_properties
+        .get("connector")
+        .unwrap_or(&"".to_string())
+        .to_lowercase()
+        .eq("kafka");
+    if !is_kafka
+        && matches!(
+            &stmt.source_schema,
+            SourceSchema::Protobuf(ProtobufSchema {
+                use_schema_registry: true,
+                ..
+            }) | SourceSchema::Avro(AvroSchema {
+                use_schema_registry: true,
+                ..
+            })
+        )
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "The {} must be kafka when schema registry is used",
+            UPSTREAM_SOURCE_KEY
+        ))));
+    }
+    let (columns, source_info) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            let mut columns = vec![ColumnCatalog::row_id_column().to_protobuf()];
-            columns.extend(extract_protobuf_table_schema(protobuf_schema)?.into_iter());
-            StreamSourceInfo {
-                properties: with_properties.clone(),
-                row_format: RowFormatType::Protobuf as i32,
-                row_schema_location: protobuf_schema.row_schema_location.0.clone(),
-                row_id_index: 0,
+            assert_eq!(columns.len(), 1);
+            assert_eq!(pk_column_ids, vec![0.into()]);
+            assert_eq!(row_id_index, Some(0));
+
+            columns.extend(
+                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
+            );
+
+            (
                 columns,
-                pk_column_ids: vec![0],
-            }
+                StreamSourceInfo {
+                    row_format: RowFormatType::Protobuf as i32,
+                    row_schema_location: protobuf_schema.row_schema_location.0.clone(),
+                    use_schema_registry: protobuf_schema.use_schema_registry,
+                    proto_message_name: protobuf_schema.message_name.0.clone(),
+                },
+            )
         }
-        SourceSchema::Json => StreamSourceInfo {
-            properties: with_properties.clone(),
-            row_format: RowFormatType::Json as i32,
-            row_schema_location: "".to_string(),
-            row_id_index: 0,
+        SourceSchema::Avro(avro_schema) => {
+            assert_eq!(columns.len(), 1);
+            assert_eq!(pk_column_ids, vec![0.into()]);
+            assert_eq!(row_id_index, Some(0));
+            columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
+            (
+                columns,
+                StreamSourceInfo {
+                    row_format: RowFormatType::Avro as i32,
+                    row_schema_location: avro_schema.row_schema_location.0.clone(),
+                    use_schema_registry: avro_schema.use_schema_registry,
+                    proto_message_name: "".to_owned(),
+                },
+            )
+        }
+        SourceSchema::Json => (
             columns,
-            pk_column_ids,
-        },
-        SourceSchema::DebeziumJson => StreamSourceInfo {
-            properties: with_properties.clone(),
-            row_format: RowFormatType::DebeziumJson as i32,
-            row_schema_location: "".to_string(),
-            row_id_index: 0,
-            columns,
-            pk_column_ids,
-        },
+            StreamSourceInfo {
+                row_format: RowFormatType::Json as i32,
+                ..Default::default()
+            },
+        ),
+        SourceSchema::Maxwell => {
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format debezium."
+                        .to_string(),
+                )));
+            }
+            (
+                columns,
+                StreamSourceInfo {
+                    row_format: RowFormatType::Maxwell as i32,
+                    ..Default::default()
+                },
+            )
+        }
+        SourceSchema::DebeziumJson => {
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format debezium."
+                        .to_string(),
+                )));
+            }
+            (
+                columns,
+                StreamSourceInfo {
+                    row_format: RowFormatType::DebeziumJson as i32,
+                    ..Default::default()
+                },
+            )
+        }
+        SourceSchema::CanalJson => {
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format cannal_json."
+                        .to_string(),
+                )));
+            }
+            (
+                columns,
+                StreamSourceInfo {
+                    row_format: RowFormatType::CanalJson as i32,
+                    ..Default::default()
+                },
+            )
+        }
     };
 
+    let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
+    let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
+
     let session = context.session_ctx.clone();
-    let source = make_prost_source(&session, stmt.source_name, Info::StreamSource(source))?;
+
+    session.check_relation_name_duplicated(stmt.source_name.clone())?;
+
+    let source = make_prost_source(
+        &session,
+        stmt.source_name,
+        row_id_index,
+        columns,
+        pk_column_ids,
+        with_properties,
+        Info::StreamSource(source_info),
+    )?;
     let catalog_writer = session.env().catalog_writer();
+
+    // TODO(Yuanxin): This should be removed after unifying table and materialized source.
     if is_materialized {
         let (graph, table) = {
             let (plan, table) =
-                gen_materialized_source_plan(context.into(), source.clone(), session.user_id())?;
-            let graph = StreamFragmenterV2::build_graph(plan);
+                gen_materialize_plan(context.into(), source.clone(), session.user_id())?;
+            let graph = build_graph(plan);
 
             (graph, table)
         };
 
-        catalog_writer
-            .create_materialized_source(source, table, graph)
-            .await?;
+        catalog_writer.create_table(source, table, graph).await?;
     } else {
         catalog_writer.create_source(source).await?;
     }
@@ -152,6 +280,7 @@ pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
+    use crate::catalog::root_catalog::SchemaPath;
     use crate::catalog::row_id_column_name;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
@@ -168,14 +297,13 @@ pub mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();
-        let catalog_reader = session.env().catalog_reader();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
         // Check source exists.
-        let source = catalog_reader
-            .read_guard()
-            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
-            .unwrap()
-            .clone();
+        let (source, _) = catalog_reader
+            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+            .unwrap();
         assert_eq!(source.name, "t");
 
         let columns = source

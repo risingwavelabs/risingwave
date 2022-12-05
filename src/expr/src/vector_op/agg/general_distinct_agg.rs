@@ -16,12 +16,12 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
 
-use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::functions::RTFn;
+use crate::Result;
 
 /// Where the actual aggregation happens.
 ///
@@ -41,7 +41,6 @@ where
     result: Option<R::OwnedItem>,
     f: F,
     exists: HashSet<Datum>,
-    filter: ExpressionRef,
     _phantom: PhantomData<T>,
 }
 impl<T, F, R> GeneralDistinctAgg<T, F, R>
@@ -50,7 +49,7 @@ where
     F: for<'a> RTFn<'a, T, R>,
     R: Array,
 {
-    pub fn new(return_type: DataType, input_col_idx: usize, f: F, filter: ExpressionRef) -> Self {
+    pub fn new(return_type: DataType, input_col_idx: usize, f: F) -> Self {
         Self {
             return_type,
             input_col_idx,
@@ -58,7 +57,6 @@ where
             f,
             exists: HashSet::new(),
             _phantom: PhantomData,
-            filter,
         }
     }
 
@@ -81,46 +79,31 @@ where
 
     fn update_multi_concrete(
         &mut self,
-        array: &T,
-        input: &DataChunk,
+        input: &T,
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
+        let input = input
+            .iter()
+            .skip(start_row_id)
+            .take(end_row_id - start_row_id)
+            .filter(|scalar_ref| {
+                self.exists.insert(
+                    scalar_ref.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()),
+                )
+            });
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
-        for row_id in start_row_id..end_row_id {
-            if self.apply_filter_on_row(input, row_id)? {
-                let datum = array.value_at(row_id);
-                if self
-                    .exists
-                    .insert(datum.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()))
-                {
-                    cur = self.f.eval(cur, datum)?;
-                }
-            }
+        for datum in input {
+            cur = self.f.eval(cur, datum)?;
         }
-        let r = cur.map(|x| x.to_owned_scalar());
-        self.result = r;
+        self.result = cur.map(|x| x.to_owned_scalar());
         Ok(())
     }
 
     fn output_concrete(&mut self, builder: &mut R::Builder) -> Result<()> {
         let res = std::mem::replace(&mut self.result, None);
-        builder
-            .append(res.as_ref().map(|x| x.as_scalar_ref()))
-            .map_err(Into::into)
-    }
-
-    fn apply_filter_on_row(&self, input: &DataChunk, row_id: usize) -> Result<bool> {
-        let (row, visible) = input.row_at(row_id)?;
-        // SAFETY: when performing agg, the data chunk should already be
-        // compacted.
-        assert!(visible);
-        let filter_res = if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
-            v
-        } else {
-            false
-        };
-        Ok(filter_res)
+        builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
+        Ok(())
     }
 }
 
@@ -138,17 +121,9 @@ macro_rules! impl_aggregator {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
-                    let filter_res = self.apply_filter_on_row(input, row_id)?;
-                    if filter_res {
-                        self.update_single_concrete(i, row_id)?;
-                    }
-                    Ok(())
+                    self.update_single_concrete(i, row_id)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Input fail to match {}.", stringify!($input_variant))
                 }
             }
 
@@ -161,13 +136,9 @@ macro_rules! impl_aggregator {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
-                    self.update_multi_concrete(i, input, start_row_id, end_row_id)
+                    self.update_multi_concrete(i, start_row_id, end_row_id)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Input fail to match {}.", stringify!($input_variant))
                 }
             }
 
@@ -175,11 +146,7 @@ macro_rules! impl_aggregator {
                 if let ArrayBuilderImpl::$result_variant(b) = builder {
                     self.output_concrete(b)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Builder fail to match {}.",
-                        stringify!($result_variant)
-                    ))
-                    .into())
+                    bail!("Builder fail to match {}.", stringify!($result_variant))
                 }
             }
         }
@@ -228,7 +195,7 @@ mod tests {
     use risingwave_common::types::Decimal;
 
     use super::*;
-    use crate::expr::{AggKind, Expression, LiteralExpression};
+    use crate::expr::AggKind;
     use crate::vector_op::agg::aggregator::create_agg_state_unary;
 
     fn eval_agg(
@@ -240,24 +207,15 @@ mod tests {
     ) -> Result<ArrayImpl> {
         let len = input.len();
         let input_chunk = DataChunk::new(vec![Column::new(input)], len);
-        let mut agg_state = create_agg_state_unary(
-            input_type,
-            0,
-            agg_kind,
-            return_type,
-            true,
-            Arc::from(
-                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-            ),
-        )?;
+        let mut agg_state = create_agg_state_unary(input_type, 0, agg_kind, return_type, true)?;
         agg_state.update_multi(&input_chunk, 0, input_chunk.cardinality())?;
         agg_state.output(&mut builder)?;
-        builder.finish().map_err(Into::into)
+        Ok(builder.finish())
     }
 
     #[test]
     fn vec_distinct_sum_int32() -> Result<()> {
-        let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
+        let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]);
         let agg_kind = AggKind::Sum;
         let input_type = DataType::Int32;
         let return_type = DataType::Int64;
@@ -276,7 +234,7 @@ mod tests {
 
     #[test]
     fn vec_distinct_sum_int64() -> Result<()> {
-        let input = I64Array::from_slice(&[Some(1), Some(1), Some(3)])?;
+        let input = I64Array::from_slice(&[Some(1), Some(1), Some(3)]);
         let agg_kind = AggKind::Sum;
         let input_type = DataType::Int64;
         let return_type = DataType::Decimal;
@@ -295,8 +253,7 @@ mod tests {
 
     #[test]
     fn vec_distinct_min_float32() -> Result<()> {
-        let input =
-            F32Array::from_slice(&[Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]).unwrap();
+        let input = F32Array::from_slice(&[Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]);
         let agg_kind = AggKind::Min;
         let input_type = DataType::Float32;
         let return_type = DataType::Float32;
@@ -315,7 +272,7 @@ mod tests {
 
     #[test]
     fn vec_distinct_min_char() -> Result<()> {
-        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
+        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")]);
         let agg_kind = AggKind::Min;
         let input_type = DataType::Varchar;
         let return_type = DataType::Varchar;
@@ -334,7 +291,7 @@ mod tests {
 
     #[test]
     fn vec_distinct_max_char() -> Result<()> {
-        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
+        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")]);
         let agg_kind = AggKind::Max;
         let input_type = DataType::Varchar;
         let return_type = DataType::Varchar;
@@ -369,13 +326,13 @@ mod tests {
             assert_eq!(actual, expected);
             Ok(())
         };
-        let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
+        let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]);
         let expected = &[Some(2)];
         test_case(input.into(), expected)?;
-        let input = I32Array::from_slice(&[]).unwrap();
+        let input = I32Array::from_slice(&[]);
         let expected = &[None];
         test_case(input.into(), expected)?;
-        let input = I32Array::from_slice(&[None]).unwrap();
+        let input = I32Array::from_slice(&[None]);
         let expected = &[Some(0)];
         test_case(input.into(), expected)
     }

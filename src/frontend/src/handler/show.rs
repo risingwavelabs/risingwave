@@ -13,14 +13,17 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowObject};
 
-use crate::binder::Binder;
+use super::RwPgResponse;
+use crate::binder::{Binder, Relation};
+use crate::catalog::CatalogError;
 use crate::handler::util::col_descs_to_rows;
 use crate::session::{OptimizerContext, SessionImpl};
 
@@ -28,20 +31,17 @@ pub fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<Vec<ColumnDesc>> {
-    let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
-
-    let catalog_reader = session.env().catalog_reader().read_guard();
-    let catalogs = match catalog_reader
-        .get_schema_by_name(session.database(), &schema_name)?
-        .get_table_by_name(&table_name)
-    {
-        Some(table) => &table.columns,
-        None => {
-            &catalog_reader
-                .get_source_by_name(session.database(), &schema_name, &table_name)?
-                .columns
+    let mut binder = Binder::new(session);
+    let relation = binder.bind_relation_by_name(table_name.clone(), None)?;
+    let catalogs = match relation {
+        Relation::Source(s) => s.catalog.columns,
+        Relation::BaseTable(t) => t.table_catalog.columns,
+        Relation::SystemTable(t) => t.sys_table_catalog.columns,
+        _ => {
+            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
         }
     };
+
     Ok(catalogs
         .iter()
         .filter(|c| !c.is_hidden)
@@ -55,7 +55,7 @@ fn schema_or_default(schema: &Option<Ident>) -> String {
         .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
 }
 
-pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Result<PgResponse> {
+pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader().read_guard();
 
@@ -93,15 +93,22 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
             let columns = get_columns_from_table(&session, table)?;
             let rows = col_descs_to_rows(columns);
 
-            return Ok(PgResponse::new(
+            return Ok(PgResponse::new_for_stream(
                 StatementType::SHOW_COMMAND,
-                rows.len() as i32,
-                rows,
+                Some(rows.len() as i32),
+                rows.into(),
                 vec![
-                    PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
-                    PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Type".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
                 ],
-                true,
             ));
         }
     };
@@ -111,12 +118,15 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
         .map(|n| Row::new(vec![Some(n.into())]))
         .collect_vec();
 
-    Ok(PgResponse::new(
+    Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        rows.len() as i32,
-        rows,
-        vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
-        true,
+        Some(rows.len() as i32),
+        rows.into(),
+        vec![PgFieldDescriptor::new(
+            "Name".to_owned(),
+            DataType::VARCHAR.to_oid(),
+            DataType::VARCHAR.type_len(),
+        )],
     ))
 }
 
@@ -124,6 +134,8 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
 mod tests {
     use std::collections::HashMap;
     use std::ops::Index;
+
+    use futures_async_stream::for_await;
 
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
@@ -170,28 +182,34 @@ mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let sql = "show columns from t";
-        let pg_response = frontend.run_sql(sql).await.unwrap();
+        let mut pg_response = frontend.run_sql(sql).await.unwrap();
 
-        let columns = pg_response
-            .iter()
-            .map(|row| {
-                (
-                    std::str::from_utf8(row.index(0).as_ref().unwrap()).unwrap(),
-                    std::str::from_utf8(row.index(1).as_ref().unwrap()).unwrap(),
-                )
-            })
-            .collect::<HashMap<&str, &str>>();
+        let mut columns = HashMap::new();
+        #[for_await]
+        for row_set in pg_response.values_stream() {
+            let row_set = row_set.unwrap();
+            for row in row_set {
+                columns.insert(
+                    std::str::from_utf8(row.index(0).as_ref().unwrap())
+                        .unwrap()
+                        .to_string(),
+                    std::str::from_utf8(row.index(1).as_ref().unwrap())
+                        .unwrap()
+                        .to_string(),
+                );
+            }
+        }
 
-        let expected_columns = maplit::hashmap! {
-            "id" => "Int32",
-            "country.zipcode" => "Varchar",
-            "zipcode" => "Int64",
-            "country.city.address" => "Varchar",
-            "country.address" => "Varchar",
-            "country.city" => ".test.City",
-            "country.city.zipcode" => "Varchar",
-            "rate" => "Float32",
-            "country" => ".test.Country",
+        let expected_columns: HashMap<String, String> = maplit::hashmap! {
+            "id".into() => "Int32".into(),
+            "country.zipcode".into() => "Varchar".into(),
+            "zipcode".into() => "Int64".into(),
+            "country.city.address".into() => "Varchar".into(),
+            "country.address".into() => "Varchar".into(),
+            "country.city".into() => "test.City".into(),
+            "country.city.zipcode".into() => "Varchar".into(),
+            "rate".into() => "Float32".into(),
+            "country".into() => "test.Country".into(),
         };
 
         assert_eq!(columns, expected_columns);

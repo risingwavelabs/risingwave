@@ -12,30 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use futures::StreamExt;
-use risingwave_batch::executor::test_utils::{gen_data, MockExecutor};
+pub mod utils;
+
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, FilterExecutor};
-use risingwave_common::catalog::schema_test_utils::field_n;
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::Datum as ProstDatum;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{
     ConstantValue as TConstValue, Equal, InputRef, Modulus,
 };
-use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
+use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
 use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
+use utils::{create_input, execute_executor};
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
 fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor {
-    let input_data = gen_data(chunk_size, chunk_num, &[DataType::Int64]);
-
-    let mut mock_executor = MockExecutor::new(field_n::<1>(DataType::Int64));
-    input_data.into_iter().for_each(|c| mock_executor.add(c));
+    const CHUNK_SIZE: usize = 1024;
+    let input = create_input(&[DataType::Int64], chunk_size, chunk_num);
 
     // Expression: $1 % 2 == 0
     let expr = {
@@ -54,8 +54,8 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ConstantValue {
-                body: ScalarImpl::Int64(2).to_protobuf(),
+            rex_node: Some(RexNode::Constant(ProstDatum {
+                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(2)).as_ref()),
             })),
         };
 
@@ -77,8 +77,8 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ConstantValue {
-                body: ScalarImpl::Int64(0).to_protobuf(),
+            rex_node: Some(RexNode::Constant(ProstDatum {
+                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(0)).as_ref()),
             })),
         };
 
@@ -97,22 +97,16 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
 
     Box::new(FilterExecutor::new(
         build_from_prost(&expr).unwrap(),
-        Box::new(mock_executor),
+        input,
         "FilterBenchmark".to_string(),
+        CHUNK_SIZE,
     ))
-}
-
-async fn execute_filter_executor(executor: BoxedExecutor) {
-    let mut stream = executor.execute();
-    while let Some(ret) = stream.next().await {
-        black_box(ret.unwrap());
-    }
 }
 
 fn bench_filter(c: &mut Criterion) {
     const TOTAL_SIZE: usize = 1024 * 1024usize;
     let rt = Runtime::new().unwrap();
-    for chunk_size in &[32usize, 128, 512, 1024, 2048, 4096] {
+    for chunk_size in &[32, 128, 512, 1024, 2048, 4096] {
         c.bench_with_input(
             BenchmarkId::new("FilterExecutor", chunk_size),
             chunk_size,
@@ -120,7 +114,7 @@ fn bench_filter(c: &mut Criterion) {
                 let chunk_num = TOTAL_SIZE / chunk_size;
                 b.to_async(&rt).iter_batched(
                     || create_filter_executor(chunk_size, chunk_num),
-                    |e| execute_filter_executor(e),
+                    |e| execute_executor(e),
                     BatchSize::SmallInput,
                 );
             },

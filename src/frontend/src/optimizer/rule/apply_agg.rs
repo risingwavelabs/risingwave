@@ -27,7 +27,7 @@ pub struct ApplyAggRule {}
 impl Rule for ApplyAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, correlated_id, correlated_indices) =
+        let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
         let agg: &LogicalAgg = right.as_logical_agg()?;
@@ -35,6 +35,11 @@ impl Rule for ApplyAggRule {
         let is_scalar_agg = agg_group_key.is_empty();
         let agg_input_len = agg_input.schema().len();
         let apply_left_len = left.schema().len();
+
+        if !is_scalar_agg && max_one_row {
+            // We can only eliminate max_one_row for scalar aggregation.
+            return None;
+        }
 
         let input = if is_scalar_agg {
             // add a constant column to help convert count(*) to count(c) where c is non-nullable.
@@ -62,9 +67,9 @@ impl Rule for ApplyAggRule {
                 .map(|(i, data_type)| {
                     let left = InputRef::new(i, data_type.clone());
                     let right = InputRef::new(i + left_len, data_type);
-                    // TODO: use is not distinct from instead of equal
+                    // use null-safe equal
                     FunctionCall::new_unchecked(
-                        ExprType::Equal,
+                        ExprType::IsNotDistinctFrom,
                         vec![left.into(), right.into()],
                         DataType::Boolean,
                     )
@@ -78,6 +83,7 @@ impl Rule for ApplyAggRule {
                 Condition::true_cond(),
                 correlated_id,
                 correlated_indices,
+                false,
             )
             .translate_apply(left, eq_predicates)
         } else {
@@ -88,6 +94,7 @@ impl Rule for ApplyAggRule {
                 Condition::true_cond(),
                 correlated_id,
                 correlated_indices,
+                false,
             )
             .into()
         };

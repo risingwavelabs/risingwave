@@ -1,0 +1,9 @@
+**/.git
+**/.svn
+**/.hg
+**/node_modules
+**/*.md
+**/.next
+**/*.json
+out/
+proto/

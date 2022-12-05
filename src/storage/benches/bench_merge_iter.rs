@@ -17,7 +17,6 @@ use std::cell::RefCell;
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::executor::block_on;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_storage::hummock::iterator::{
     Forward, HummockIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
     UnorderedMergeIteratorInner,
@@ -26,7 +25,6 @@ use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
 use risingwave_storage::hummock::value::HummockValue;
-use tokio::sync::mpsc;
 
 fn gen_interleave_shared_buffer_batch_iter(
     batch_size: usize,
@@ -41,13 +39,7 @@ fn gen_interleave_shared_buffer_batch_iter(
                 HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
-        let batch = SharedBufferBatch::new(
-            batch_data,
-            2333,
-            mpsc::unbounded_channel().0,
-            StaticCompactionGroupId::StateDefault.into(),
-            Default::default(),
-        );
+        let batch = SharedBufferBatch::for_test(batch_data, 2333, Default::default());
         iterators.push(batch.into_forward_iter());
     }
     iterators
@@ -75,13 +67,7 @@ fn gen_interleave_shared_buffer_batch_enum_iter(
                 HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
-        let batch = SharedBufferBatch::new(
-            batch_data,
-            2333,
-            mpsc::unbounded_channel().0,
-            StaticCompactionGroupId::StateDefault.into(),
-            Default::default(),
-        );
+        let batch = SharedBufferBatch::for_test(batch_data, 2333, Default::default());
         match i % 4 {
             0 => iterators.push(HummockIteratorUnion::First(batch.into_forward_iter())),
             1 => iterators.push(HummockIteratorUnion::Second(batch.into_forward_iter())),

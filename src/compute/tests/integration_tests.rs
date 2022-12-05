@@ -21,31 +21,34 @@ use bytes::Bytes;
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
-    RowSeqScanExecutor, ScanType,
+    RowSeqScanExecutor, ScanRange,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
+use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::row::Row;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
-use risingwave_source::{MemSourceManager, SourceManager};
+use risingwave_source::table_test_utils::create_table_source_desc_builder;
+use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::state_table::RowBasedStateTable;
-use risingwave_storage::table::storage_table::RowBasedStorageTable;
-use risingwave_storage::Keyspace;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_stream::common::table::state_table::StateTable;
+use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
+use risingwave_stream::executor::state_table_handler::SourceStateTableHandler;
 use risingwave_stream::executor::{
     ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
+
+const MOCK_SOURCE_NAME: &str = "mock_source";
 
 struct SingleChunkExecutor {
     chunk: Option<DataChunk>,
@@ -84,41 +87,32 @@ impl SingleChunkExecutor {
     }
 }
 
-/// This test checks whether batch task and streaming task work together for `TableV2` creation,
+/// This test checks whether batch task and streaming task work together for `Table` creation,
 /// insertion, deletion, and materialization.
 #[tokio::test]
-async fn test_table_v2_materialize() -> Result<()> {
-    use risingwave_pb::data::DataType;
+async fn test_table_materialize() -> StreamResult<()> {
+    use risingwave_common::types::DataType;
+    use risingwave_stream::executor::state_table_handler::default_source_internal_table;
 
     let memory_state_store = MemoryStateStore::new();
-    let source_manager = Arc::new(MemSourceManager::default());
+    let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
     let source_table_id = TableId::default();
-    let table_columns: Vec<ColumnDesc> = vec![
-        // row id
-        ProstColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            column_id: 0,
-            ..Default::default()
-        }
-        .into(),
-        // data
-        ProstColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Double as i32,
-                ..Default::default()
-            }),
-            column_id: 1,
-            ..Default::default()
-        }
-        .into(),
-    ];
-    source_manager.create_table_source(&source_table_id, table_columns)?;
+    let schema = Schema {
+        fields: vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Float64),
+        ],
+    };
+    let source_builder = create_table_source_desc_builder(
+        &schema,
+        source_table_id,
+        Some(0),
+        vec![0],
+        source_manager.clone(),
+    );
 
     // Ensure the source exists
-    let source_desc = source_manager.get_source(&source_table_id)?;
+    let source_desc = source_builder.build().await.unwrap();
     let get_schema = |column_ids: &[ColumnId]| {
         let mut fields = Vec::with_capacity(column_ids.len());
         for &column_id in column_ids {
@@ -136,14 +130,19 @@ async fn test_table_v2_materialize() -> Result<()> {
     let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
-    let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
     let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+    let state_table = SourceStateTableHandler::from_table_catalog(
+        &default_source_internal_table(0x2333),
+        MemoryStateStore::new(),
+    )
+    .await;
     let stream_source = SourceExecutor::new(
         ActorContext::create(0x3f3f3f),
+        source_builder,
         source_table_id,
-        source_desc,
+        MOCK_SOURCE_NAME.to_string(),
         vnodes,
-        keyspace,
+        state_table,
         all_column_ids.clone(),
         all_schema.clone(),
         PkIndices::from([0]),
@@ -157,14 +156,18 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Create a `Materialize` to write the changes to storage
 
-    let mut materialize = MaterializeExecutor::new_for_test(
+    let mut materialize = MaterializeExecutor::for_test(
         Box::new(stream_source),
         memory_state_store.clone(),
         source_table_id,
         vec![OrderPair::new(0, OrderType::Ascending)],
         all_column_ids.clone(),
         2,
+        None,
+        0,
+        false,
     )
+    .await
     .boxed()
     .execute();
 
@@ -183,6 +186,8 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_table_id,
         source_manager.clone(),
         insert_inner,
+        "InsertExecutor".to_string(),
+        vec![], // ignore insertion order
     ));
 
     tokio::spawn(async move {
@@ -204,7 +209,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         .collect_vec();
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = RowBasedStorageTable::new_for_test(
+    let table = StorageTable::for_test(
         memory_state_store.clone(),
         source_table_id,
         column_descs.clone(),
@@ -213,11 +218,12 @@ async fn test_table_v2_materialize() -> Result<()> {
     );
 
     let scan = Box::new(RowSeqScanExecutor::new(
-        table.schema().clone(),
-        vec![ScanType::BatchScan(table.batch_iter(u64::MAX).await?)],
+        table.clone(),
+        vec![ScanRange::full()],
+        u64::MAX,
         1024,
         "RowSeqExecutor2".to_string(),
-        Arc::new(BatchMetrics::unused()),
+        None,
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
@@ -242,6 +248,9 @@ async fn test_table_v2_materialize() -> Result<()> {
     let message = materialize.next().await.unwrap()?;
     let mut col_row_ids = vec![];
     match message {
+        Message::Watermark(_) => {
+            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+        }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].array_ref().as_int64();
             col_row_ids.push(col_row_id.value_at(0).unwrap());
@@ -255,7 +264,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     }
 
     // Send a barrier and poll again, should write changes to storage
-    let curr_epoch = 1919;
+    let curr_epoch = 1920;
     barrier_tx
         .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
@@ -271,11 +280,12 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
-        table.schema().clone(),
-        vec![ScanType::BatchScan(table.batch_iter(u64::MAX).await?)],
+        table.clone(),
+        vec![ScanRange::full()],
+        u64::MAX,
         1024,
         "RowSeqScanExecutor2".to_string(),
-        Arc::new(BatchMetrics::unused()),
+        None,
     ));
 
     let mut stream = scan.execute();
@@ -301,6 +311,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_table_id,
         source_manager.clone(),
         delete_inner,
+        "DeleteExecutor".to_string(),
     ));
 
     tokio::spawn(async move {
@@ -312,6 +323,9 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Poll `Materialize`, should output the same deletion stream chunk
     let message = materialize.next().await.unwrap()?;
     match message {
+        Message::Watermark(_) => {
+            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+        }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].array_ref().as_int64();
             assert_eq!(col_row_id.value_at(0).unwrap(), col_row_ids[0]);
@@ -338,11 +352,12 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
-        table.schema().clone(),
-        vec![ScanType::BatchScan(table.batch_iter(u64::MAX).await?)],
+        table,
+        vec![ScanRange::full()],
+        u64::MAX,
         1024,
         "RowSeqScanExecutor2".to_string(),
-        Arc::new(BatchMetrics::unused()),
+        None,
     ));
 
     let mut stream = scan.execute();
@@ -372,41 +387,44 @@ async fn test_row_seq_scan() -> Result<()> {
         ColumnDesc::unnamed(ColumnId::from(2), schema[2].data_type.clone()),
     ];
 
-    let mut state = RowBasedStateTable::new_without_distribution(
+    let mut state = StateTable::new_without_distribution(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0_usize],
+    )
+    .await;
+    let table = StorageTable::for_test(
+        memory_state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        vec![OrderType::Ascending],
+        vec![0],
     );
-    let table = state.storage_table().clone();
 
-    let epoch: u64 = 0;
-
-    state
-        .insert(Row(vec![
-            Some(1_i32.into()),
-            Some(4_i32.into()),
-            Some(7_i64.into()),
-        ]))
-        .unwrap();
-    state
-        .insert(Row(vec![
-            Some(2_i32.into()),
-            Some(5_i32.into()),
-            Some(8_i64.into()),
-        ]))
-        .unwrap();
-    state.commit(epoch).await.unwrap();
+    let epoch = EpochPair::new_test_epoch(1);
+    state.init_epoch(epoch);
+    epoch.inc();
+    state.insert(Row::new(vec![
+        Some(1_i32.into()),
+        Some(4_i32.into()),
+        Some(7_i64.into()),
+    ]));
+    state.insert(Row::new(vec![
+        Some(2_i32.into()),
+        Some(5_i32.into()),
+        Some(8_i64.into()),
+    ]));
+    state.commit_for_test(epoch.inc()).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
-        table.schema().clone(),
-        vec![ScanType::BatchScan(
-            table.batch_iter(u64::MAX).await.unwrap(),
-        )],
+        table,
+        vec![ScanRange::full()],
+        u64::MAX,
         1,
         "RowSeqScanExecutor2".to_string(),
-        Arc::new(BatchMetrics::unused()),
+        None,
     ));
 
     assert_eq!(executor.schema().fields().len(), 3);

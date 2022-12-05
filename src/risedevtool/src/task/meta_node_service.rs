@@ -57,27 +57,33 @@ impl MetaNodeService {
             config.listen_address, config.exporter_port
         ));
 
-        match config.provide_etcd_backend.as_ref().map(|v| &v[..]) {
-            Some([]) => {
-                cmd.arg("--backend").arg("mem");
-            }
-            Some([etcd]) => {
-                cmd.arg("--backend")
-                    .arg("etcd")
-                    .arg("--etcd-endpoints")
-                    .arg(format!("{}:{}", etcd.address, etcd.port));
+        match config.provide_prometheus.as_ref().unwrap().as_slice() {
+            [] => {}
+            [prometheus] => {
+                cmd.arg("--prometheus-endpoint")
+                    .arg(format!("http://{}:{}", prometheus.address, prometheus.port));
             }
             _ => {
                 return Err(anyhow!(
-                    "unexpected etcd config {:?}",
-                    config.provide_etcd_backend
+                    "unexpected prometheus config {:?}, only 1 instance is supported",
+                    config.provide_prometheus
                 ))
             }
         }
 
-        if config.enable_dashboard_v2 {
-            cmd.arg("--dashboard-ui-path")
-                .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
+        match config.provide_etcd_backend.as_ref().unwrap().as_slice() {
+            [] => {
+                cmd.arg("--backend").arg("mem");
+            }
+            etcds => {
+                cmd.arg("--backend")
+                    .arg("etcd")
+                    .arg("--etcd-endpoints")
+                    .arg(format!("{}:{}", etcds[0].address, etcds[0].port));
+                if etcds.len() > 1 {
+                    eprintln!("WARN: more than 1 etcd instance is detected, only using the first one for meta node.");
+                }
+            }
         }
 
         if config.unsafe_disable_recovery {
@@ -88,6 +94,17 @@ impl MetaNodeService {
             if sec > 0 {
                 cmd.arg("--dangerous-max-idle-secs").arg(format!("{}", sec));
             }
+        }
+
+        cmd.arg("--max-heartbeat-interval-secs")
+            .arg(format!("{}", config.max_heartbeat_interval_secs));
+
+        if config.enable_compaction_deterministic {
+            cmd.arg("--enable-compaction-deterministic");
+        }
+
+        if config.enable_committed_sst_sanity_check {
+            cmd.arg("--enable-committed-sst-sanity-check");
         }
 
         Ok(())
@@ -102,17 +119,30 @@ impl Task for MetaNodeService {
         let mut cmd = self.meta_node()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",
                 Path::new(&env::var("PREFIX_LOG")?).join(format!("profile-{}", self.id())),
             );
         }
+
+        if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
+            // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
+            cmd.env(
+                "_RJEM_MALLOC_CONF",
+                "prof:true,lg_prof_interval:32,lg_prof_sample:19,prof_prefix:meta-node",
+            );
+        }
+
         Self::apply_command_args(&mut cmd, &self.config)?;
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
+
+        cmd.arg("--dashboard-ui-path")
+            .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

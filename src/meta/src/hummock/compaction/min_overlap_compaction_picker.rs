@@ -135,7 +135,7 @@ pub mod tests {
 
     use super::*;
     use crate::hummock::compaction::level_selector::tests::{
-        generate_l0_with_overlap, generate_table,
+        generate_l0_nonoverlapping_sublevels, generate_table,
     };
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
 
@@ -171,7 +171,7 @@ pub mod tests {
         ];
         let levels = Levels {
             levels,
-            l0: Some(generate_l0_with_overlap(vec![])),
+            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
         };
         let mut level_handlers = vec![
             LevelHandler::new(0),
@@ -237,7 +237,7 @@ pub mod tests {
         ];
         let levels = Levels {
             levels,
-            l0: Some(generate_l0_with_overlap(vec![])),
+            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
         };
         let levels_handler = vec![
             LevelHandler::new(0),

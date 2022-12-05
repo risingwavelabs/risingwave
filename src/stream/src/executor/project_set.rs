@@ -13,17 +13,15 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
 
 use either::{for_both, Either};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, ArrayRef, DataChunk, I64ArrayBuilder, StreamChunk};
+use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
@@ -35,6 +33,7 @@ impl ProjectSetExecutor {
         pk_indices: PkIndices,
         select_list: Vec<ProjectSetSelectItem>,
         executor_id: u64,
+        chunk_size: usize,
     ) -> Self {
         let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
         fields.extend(
@@ -52,6 +51,7 @@ impl ProjectSetExecutor {
             input,
             info,
             select_list,
+            chunk_size,
         }
     }
 }
@@ -64,6 +64,7 @@ pub struct ProjectSetExecutor {
     info: ExecutorInfo,
     /// Expressions of the current project_section.
     select_list: Vec<ProjectSetSelectItem>,
+    chunk_size: usize,
 }
 
 impl Debug for ProjectSetExecutor {
@@ -83,7 +84,7 @@ impl Executor for ProjectSetExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -106,18 +107,21 @@ impl ProjectSetExecutor {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+
                 Message::Chunk(chunk) => {
-                    let chunk = chunk.compact()?;
+                    let chunk = chunk.compact();
 
                     let (data_chunk, ops) = chunk.into_parts();
 
                     // First column will be `projected_row_id`, which represents the index in the
                     // output table
-                    let mut projected_row_id_builder =
-                        I64ArrayBuilder::new(DEFAULT_CHUNK_BUFFER_SIZE);
+                    let mut projected_row_id_builder = I64ArrayBuilder::new(self.chunk_size);
                     let mut builders = data_types
                         .iter()
-                        .map(|ty| ty.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
+                        .map(|ty| ty.create_array_builder(self.chunk_size))
                         .collect_vec();
                     let mut ret_ops = vec![];
 
@@ -151,22 +155,28 @@ impl ProjectSetExecutor {
                             .max()
                             .unwrap();
 
+                        // ProjectSet cannot preserve that U- is followed by U+,
+                        // so we rewrite update to insert/delete.
+                        let op = match op {
+                            Op::Delete | Op::UpdateDelete => Op::Delete,
+                            Op::Insert | Op::UpdateInsert => Op::Insert,
+                        };
                         ret_ops.extend(vec![op; max_tf_len]);
                         for i in 0..max_tf_len {
-                            projected_row_id_builder.append(Some(i as i64))?;
+                            projected_row_id_builder.append(Some(i as i64));
                         }
 
                         for (item, builder) in items.into_iter().zip_eq(builders.iter_mut()) {
                             match item {
                                 Either::Left(array_ref) => {
-                                    builder.append_array(&array_ref)?;
+                                    builder.append_array(&array_ref);
                                     for _ in 0..(max_tf_len - array_ref.len()) {
-                                        builder.append_null()?;
+                                        builder.append_null();
                                     }
                                 }
                                 Either::Right(datum_ref) => {
                                     for _ in 0..max_tf_len {
-                                        builder.append_datum_ref(datum_ref)?;
+                                        builder.append_datum(datum_ref);
                                     }
                                 }
                             }
@@ -174,12 +184,11 @@ impl ProjectSetExecutor {
                     }
 
                     let mut columns = Vec::with_capacity(self.select_list.len() + 1);
-                    let projected_row_id: ArrayRef =
-                        Arc::new(projected_row_id_builder.finish()?.into());
+                    let projected_row_id: Column = projected_row_id_builder.finish().into();
                     let cardinality = projected_row_id.len();
-                    columns.push(Column::new(projected_row_id));
+                    columns.push(projected_row_id);
                     for builder in builders {
-                        columns.push(Column::new(Arc::new(builder.finish()?)))
+                        columns.push(builder.finish().into())
                     }
 
                     let chunk = DataChunk::new(columns, cardinality);
@@ -207,6 +216,8 @@ mod tests {
     use super::super::test_utils::MockSource;
     use super::super::*;
     use super::*;
+
+    const CHUNK_SIZE: usize = 1024;
 
     #[tokio::test]
     async fn test_project_set() {
@@ -236,7 +247,8 @@ mod tests {
             DataType::Int64,
             Box::new(left_expr),
             Box::new(right_expr),
-        );
+        )
+        .unwrap();
         let tf1 = repeat_tf(
             LiteralExpression::new(DataType::Int32, Some(1_i32.into())).boxed(),
             1,
@@ -251,6 +263,7 @@ mod tests {
             vec![],
             vec![test_expr.into(), tf1.into(), tf2.into()],
             1,
+            CHUNK_SIZE,
         ));
 
         let expected = vec![

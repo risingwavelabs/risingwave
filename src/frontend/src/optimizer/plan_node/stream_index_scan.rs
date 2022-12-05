@@ -18,10 +18,11 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
-use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
+use super::{LogicalScan, PlanBase, PlanNodeId, StreamNode};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamIndexScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -67,23 +68,21 @@ impl StreamIndexScan {
 impl_plan_tree_node_for_leaf! { StreamIndexScan }
 
 impl fmt::Display for StreamIndexScan {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamIndexScan");
 
-        builder
-            .field("index", &format_args!("{}", self.logical.table_name()))
-            .field(
-                "columns",
-                &format_args!(
-                    "[{}]",
-                    match verbose {
-                        false => self.logical.column_names(),
-                        true => self.logical.column_names_with_table_prefix(),
-                    }
-                    .join(", ")
-                ),
-            );
+        builder.field("index", &self.logical.table_name()).field(
+            "columns",
+            &format_args!(
+                "[{}]",
+                match verbose {
+                    false => self.logical.column_names(),
+                    true => self.logical.column_names_with_table_prefix(),
+                }
+                .join(", ")
+            ),
+        );
 
         if verbose {
             builder.field(
@@ -94,7 +93,7 @@ impl fmt::Display for StreamIndexScan {
                 },
             );
             builder.field(
-                "distribution",
+                "dist",
                 &DistributionDisplay {
                     distribution: self.distribution(),
                     input_schema: &self.base.schema,
@@ -106,8 +105,8 @@ impl fmt::Display for StreamIndexScan {
     }
 }
 
-impl ToStreamProst for StreamIndexScan {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamIndexScan {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         unreachable!("stream index scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }
@@ -150,7 +149,7 @@ impl StreamIndexScan {
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
                 same_worker_node: true,
-                disable_rearrange: true,
+                chain_type: ChainType::Chain as i32,
                 // The fields from upstream
                 upstream_fields: self
                     .logical
@@ -170,6 +169,7 @@ impl StreamIndexScan {
                     .map(|&i| i as _)
                     .collect(),
                 is_singleton: false,
+                table_desc: Some(self.logical.table_desc().to_protobuf()),
             })),
             stream_key,
             operator_id: self.base.id.0 as u64,

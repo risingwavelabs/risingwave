@@ -20,11 +20,13 @@ use std::collections::HashMap;
 
 pub use enumerator::*;
 use serde::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 pub use source::*;
 pub use split::*;
 
 pub const DATAGEN_CONNECTOR: &str = "datagen";
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatagenProperties {
     /// split_num means data source partition
@@ -38,7 +40,8 @@ pub struct DatagenProperties {
         rename = "datagen.rows.per.second",
         default = "default_rows_per_second"
     )]
-    pub rows_per_second: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub rows_per_second: u64,
 
     /// Some connector options of the datagen source's fields
     /// for example: create datagen source with column v1 int, v2 float
@@ -52,6 +55,6 @@ pub struct DatagenProperties {
     fields: HashMap<String, String>,
 }
 
-fn default_rows_per_second() -> String {
-    "10".to_string()
+fn default_rows_per_second() -> u64 {
+    10
 }

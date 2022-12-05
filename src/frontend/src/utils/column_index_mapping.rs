@@ -153,6 +153,17 @@ impl ColIndexMapping {
         Self::new(map)
     }
 
+    // TODO(yuchao): isn't this the same as `with_remaining_columns`?
+    pub fn with_included_columns(cols: &[usize], src_size: usize) -> Self {
+        let mut map = vec![None; src_size];
+        for (tar, &src) in cols.iter().enumerate() {
+            if map[src].is_none() {
+                map[src] = Some(tar);
+            }
+        }
+        Self::new(map)
+    }
+
     /// Remove the given columns, and maps the remaining columns to a consecutive range starting
     /// from 0.
     ///
@@ -234,6 +245,9 @@ impl ColIndexMapping {
         *self.map.get(index)?
     }
 
+    /// # Panics
+    ///
+    /// Will panic if `index >= self.source_size()`
     pub fn map(&self, index: usize) -> usize {
         self.try_map(index).unwrap()
     }
@@ -291,23 +305,35 @@ impl ColIndexMapping {
             })
     }
 
+    /// Rewrite the distribution key and will return None if **any** index of the key disappear
+    /// after the mapping
+    pub fn rewrite_dist_key(&self, key: &[usize]) -> Option<Vec<usize>> {
+        key.iter()
+            .map(|col_idx| self.try_map(*col_idx))
+            .collect::<Option<Vec<_>>>()
+    }
+
     /// Rewrite the provided distribution's field index. It will try its best to give the most
     /// accurate distribution.
     /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
     /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `SomeShard`.
     pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
-        match dist {
-            Distribution::HashShard(col_idxes) | Distribution::UpstreamHashShard(col_idxes) => {
-                let mapped_dist = col_idxes
-                    .iter()
-                    .map(|col_idx| self.try_map(*col_idx))
-                    .collect::<Option<Vec<_>>>();
-                match mapped_dist {
-                    Some(col_idx) => Distribution::HashShard(col_idx),
-                    None => Distribution::SomeShard,
-                }
+        let mapped_dist_key = self.rewrite_dist_key(dist.dist_column_indices());
+
+        match (mapped_dist_key, dist) {
+            (None, Distribution::HashShard(_)) | (None, Distribution::UpstreamHashShard(_, _)) => {
+                Distribution::SomeShard
             }
-            _ => dist.clone(),
+            (Some(mapped_dist_key), Distribution::HashShard(_)) => {
+                Distribution::HashShard(mapped_dist_key)
+            }
+            (Some(mapped_dist_key), Distribution::UpstreamHashShard(_, table_id)) => {
+                Distribution::UpstreamHashShard(mapped_dist_key, *table_id)
+            }
+            _ => {
+                assert!(dist.dist_column_indices().is_empty());
+                dist.clone()
+            }
         }
     }
 
@@ -328,10 +354,7 @@ impl ColIndexMapping {
             }
             RequiredDist::PhysicalDist(dist) => match dist {
                 Distribution::HashShard(keys) => {
-                    let keys = keys
-                        .iter()
-                        .map(|key| self.try_map(*key))
-                        .collect::<Option<Vec<_>>>();
+                    let keys = self.rewrite_dist_key(keys);
                     match keys {
                         Some(keys) => RequiredDist::PhysicalDist(Distribution::HashShard(keys)),
                         None => RequiredDist::Any,

@@ -15,7 +15,7 @@
 use std::mem;
 
 use rand::Rng;
-use risingwave_frontend::expr::DataTypeName;
+use risingwave_common::types::DataTypeName;
 use risingwave_sqlparser::ast::{
     DataType, FunctionArg, FunctionArgExpr, TableAlias, TableFactor, TableWithJoins,
 };
@@ -35,6 +35,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn restore_context(&mut self, (old_cols, old_rels): Context) {
         self.bound_relations = old_rels;
         self.bound_columns = old_cols;
+    }
+
+    // TODO: <https://github.com/risingwavelabs/risingwave/pull/4431#issuecomment-1327417328>
+    pub(crate) fn _clone_local_context(&mut self) -> Context {
+        let current_bound_relations = self.bound_relations.clone();
+        let current_bound_columns = self.bound_columns.clone();
+        (current_bound_columns, current_bound_relations)
     }
 }
 
@@ -60,7 +67,6 @@ pub(crate) fn create_table_factor_from_table(table: &Table) -> TableFactor {
     TableFactor::Table {
         name: ObjectName(vec![Ident::new(&table.name)]),
         alias: None,
-        args: vec![],
     }
 }
 
@@ -101,6 +107,7 @@ pub fn data_type_name_to_ast_data_type(type_name: DataTypeName) -> Option<DataTy
         DataTypeName::Float32 => Some(DataType::Real),
         DataTypeName::Float64 => Some(DataType::Double),
         DataTypeName::Varchar => Some(DataType::Varchar),
+        DataTypeName::Bytea => Some(DataType::Bytea),
         DataTypeName::Date => Some(DataType::Date),
         DataTypeName::Timestamp => Some(DataType::Timestamp(false)),
         DataTypeName::Timestampz => Some(DataType::Timestamp(true)),

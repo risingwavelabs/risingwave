@@ -19,15 +19,21 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
+use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalProject};
 use crate::optimizer::PlanRef;
+use crate::utils::Condition;
 
 pub struct ApplyScanRule {}
 impl Rule for ApplyScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, _correlated_id, correlated_indices) =
+        let (left, right, on, join_type, _correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
+
+        if max_one_row {
+            return None;
+        }
+
         let apply_left_len = left.schema().len();
         assert_eq!(join_type, JoinType::Inner);
 
@@ -59,10 +65,8 @@ impl Rule for ApplyScanRule {
             // Replace `LogicalApply` with `LogicalProject` and insert the `InputRef`s which is
             // equal to `CorrelatedInputRef` at the beginning of `LogicalProject`.
             // See the fourth section of Unnesting Arbitrary Queries for how to do the optimization.
-            let mut exprs: Vec<ExprImpl> = correlated_indices
-                .into_iter()
-                .enumerate()
-                .map(|(i, _)| {
+            let mut exprs: Vec<ExprImpl> = (0..correlated_indices.len())
+                .map(|i| {
                     let (col_index, data_type) = column_mapping.get(&i).unwrap();
                     InputRef::new(*col_index - apply_left_len, data_type.clone()).into()
                 })
@@ -76,8 +80,29 @@ impl Rule for ApplyScanRule {
                     .map(|(index, data_type)| InputRef::new(index, data_type).into()),
             );
             let project = LogicalProject::create(right, exprs);
-            // TODO: add LogicalFilter here.
-            Some(project)
+
+            // Null reject for equal
+            let filter_exprs: Vec<ExprImpl> = (0..correlated_indices.len())
+                .map(|i| {
+                    ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
+                        ExprType::IsNotNull,
+                        vec![ExprImpl::InputRef(Box::new(InputRef::new(
+                            i,
+                            project.schema().fields[i].data_type.clone(),
+                        )))],
+                        DataType::Boolean,
+                    )))
+                })
+                .collect();
+
+            let filter = LogicalFilter::create(
+                project,
+                Condition {
+                    conjunctions: filter_exprs,
+                },
+            );
+
+            Some(filter)
         } else {
             let join = LogicalJoin::new(left, right, join_type, on);
             Some(join.into())

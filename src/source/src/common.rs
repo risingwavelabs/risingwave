@@ -12,14 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 
 use crate::SourceColumnDesc;
 
@@ -27,27 +24,31 @@ pub(crate) trait SourceChunkBuilder {
     fn build_columns<'a>(
         column_descs: &[SourceColumnDesc],
         rows: impl IntoIterator<Item = &'a Vec<Datum>>,
+        chunk_size: usize,
     ) -> Result<Vec<Column>> {
         let mut builders: Vec<_> = column_descs
             .iter()
-            .map(|k| k.data_type.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
+            .map(|k| k.data_type.create_array_builder(chunk_size))
             .collect();
 
         for row in rows {
-            row.iter()
-                .zip_eq(&mut builders)
-                .try_for_each(|(datum, builder)| builder.append_datum(datum))?
+            for (datum, builder) in row.iter().zip_eq(&mut builders) {
+                builder.append_datum(datum);
+            }
         }
 
-        builders
+        Ok(builders
             .into_iter()
-            .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-            .try_collect()
-            .map_err(Into::into)
+            .map(|builder| builder.finish().into())
+            .collect())
     }
 
-    fn build_datachunk(column_desc: &[SourceColumnDesc], rows: &[Vec<Datum>]) -> Result<DataChunk> {
-        let columns = Self::build_columns(column_desc, rows)?;
+    fn build_datachunk(
+        column_desc: &[SourceColumnDesc],
+        rows: &[Vec<Datum>],
+        chunk_size: usize,
+    ) -> Result<DataChunk> {
+        let columns = Self::build_columns(column_desc, rows, chunk_size)?;
         Ok(DataChunk::new(columns, rows.len()))
     }
 }

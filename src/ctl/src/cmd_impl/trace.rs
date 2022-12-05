@@ -30,7 +30,7 @@ pub async fn trace() -> anyhow::Result<()> {
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = ComputeClientPool::new(u64::MAX);
+    let clients = ComputeClientPool::default();
 
     let mut all_actor_traces = BTreeMap::new();
     let mut all_rpc_traces = BTreeMap::new();
@@ -54,9 +54,7 @@ pub async fn trace() -> anyhow::Result<()> {
     }
 
     if all_actor_traces.is_empty() && all_rpc_traces.is_empty() {
-        println!(
-            "No traces found. No actors are running, or `--enable-async-stack-trace` not set?"
-        );
+        println!("No traces found. No actors are running, or `--async-stack-trace` not set?");
     } else {
         println!("--- Actor Traces ---");
         for (key, trace) in all_actor_traces {

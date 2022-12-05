@@ -20,16 +20,15 @@ use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef, StreamChunk};
 
 /// Executor which can handle [`StreamChunk`]s one by one.
-pub trait SimpleExecutor: Send + 'static {
+pub trait SimpleExecutor: Send + Sync + 'static {
     /// convert a single chunk to zero or one chunks.
-    fn map_filter_chunk(&mut self, chunk: StreamChunk)
-        -> StreamExecutorResult<Option<StreamChunk>>;
+    fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>>;
 
     /// See [`super::Executor::schema`].
     fn schema(&self) -> &Schema;
 
     /// See [`super::Executor::pk_indices`].
-    fn pk_indices(&self) -> PkIndicesRef;
+    fn pk_indices(&self) -> PkIndicesRef<'_>;
 
     /// See [`super::Executor::identity`].
     fn identity(&self) -> &str;
@@ -49,7 +48,7 @@ where
         self.inner.schema()
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         self.inner.pk_indices()
     }
 
@@ -69,11 +68,14 @@ where
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let input = self.input.execute();
-        let mut inner = self.inner;
+        let inner = self.inner;
         #[for_await]
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 Message::Chunk(chunk) => match inner.map_filter_chunk(chunk)? {
                     Some(new_chunk) => yield Message::Chunk(new_chunk),
                     None => continue,

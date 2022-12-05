@@ -52,20 +52,24 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
 
 pub type BoxedTableFunction = Box<dyn TableFunction>;
 
-pub fn build_from_prost(prost: &TableFunctionProst) -> Result<BoxedTableFunction> {
+pub fn build_from_prost(
+    prost: &TableFunctionProst,
+    chunk_size: usize,
+) -> Result<BoxedTableFunction> {
     use risingwave_pb::expr::table_function::Type::*;
 
     match prost.get_function_type().unwrap() {
-        Generate => new_generate_series(prost),
-        Unnest => new_unnest(prost),
-        RegexpMatches => new_regexp_matches(prost),
+        Generate => new_generate_series::<true>(prost, chunk_size),
+        Unnest => new_unnest(prost, chunk_size),
+        RegexpMatches => new_regexp_matches(prost, chunk_size),
+        Range => new_generate_series::<false>(prost, chunk_size),
         Unspecified => unreachable!(),
     }
 }
 
 /// Helper function to create an empty array.
 fn empty_array(data_type: DataType) -> ArrayRef {
-    Arc::new(data_type.create_array_builder(0).finish().unwrap())
+    Arc::new(data_type.create_array_builder(0).finish())
 }
 
 /// Used for tests. Repeat an expression n times
@@ -88,10 +92,9 @@ pub fn repeat_tf(expr: BoxedExpression, n: usize) -> BoxedTableFunction {
             for datum_ref in array.iter() {
                 let mut builder = self.return_type().create_array_builder(self.n);
                 for _ in 0..self.n {
-                    builder.append_datum_ref(datum_ref)?;
+                    builder.append_datum(datum_ref);
                 }
-                let array = builder.finish()?;
-                res.push(Arc::new(array));
+                res.push(Arc::new(builder.finish()));
             }
 
             Ok(res)
@@ -121,10 +124,10 @@ impl From<BoxedExpression> for ProjectSetSelectItem {
 }
 
 impl ProjectSetSelectItem {
-    pub fn from_prost(prost: &SelectItemProst) -> Result<Self> {
+    pub fn from_prost(prost: &SelectItemProst, chunk_size: usize) -> Result<Self> {
         match prost.select_item.as_ref().unwrap() {
             Expr(expr) => expr_build_from_prost(expr).map(Into::into),
-            TableFunction(tf) => build_from_prost(tf).map(Into::into),
+            TableFunction(tf) => build_from_prost(tf, chunk_size).map(Into::into),
         }
     }
 

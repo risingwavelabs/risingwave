@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Display, Formatter};
-use std::str;
-
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -25,7 +22,7 @@ pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
 #[async_trait]
 pub trait Snapshot: Sync + Send + 'static {
-    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<Vec<u8>>>;
+    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>>;
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>>;
 }
 
@@ -41,7 +38,8 @@ pub trait MetaStore: Clone + Sync + Send + 'static {
     async fn txn(&self, trx: Transaction) -> MetaStoreResult<()>;
 
     async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<Vec<u8>>> {
-        self.snapshot().await.list_cf(cf).await
+        let kvs = self.snapshot().await.list_cf(cf).await?;
+        Ok(kvs.into_iter().map(|(_k, v)| v).collect())
     }
 
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>> {
@@ -52,26 +50,12 @@ pub trait MetaStore: Clone + Sync + Send + 'static {
 // Error of metastore
 #[derive(Debug, Error)]
 pub enum MetaStoreError {
+    #[error("item not found: {0}")]
     ItemNotFound(String),
+    #[error("transaction abort")]
     TransactionAbort(),
+    #[error("internal error: {0}")]
     Internal(anyhow::Error),
 }
 
 pub type MetaStoreResult<T> = std::result::Result<T, MetaStoreError>;
-
-impl Display for MetaStoreError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MetaStoreError::ItemNotFound(s) => {
-                write!(f, "{}", s)
-            }
-            MetaStoreError::TransactionAbort() => {
-                // TODO: refine it
-                write!(f, "TransactionAbort")
-            }
-            MetaStoreError::Internal(err) => {
-                write!(f, "{}", err)
-            }
-        }
-    }
-}

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -21,12 +19,11 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 
-use super::aggregation::{
-    agg_call_filter_res, create_streaming_agg_state, generate_agg_schema, AggCall,
-    StreamingAggStateImpl,
-};
+use super::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
+use super::aggregation::{agg_call_filter_res, generate_agg_schema, AggCall};
 use super::error::StreamExecutorError;
 use super::*;
+use crate::error::StreamResult;
 
 pub struct LocalSimpleAggExecutor {
     ctx: ActorContextRef,
@@ -44,7 +41,7 @@ impl Executor for LocalSimpleAggExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -58,30 +55,36 @@ impl LocalSimpleAggExecutor {
         ctx: &ActorContextRef,
         identity: &str,
         agg_calls: &[AggCall],
-        states: &mut [Box<dyn StreamingAggStateImpl>],
+        aggregators: &mut [Box<dyn StreamingAggImpl>],
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
-        agg_calls
+        let visibilities: Vec<_> = agg_calls
             .iter()
-            .zip_eq(states.iter_mut())
-            .try_for_each(|(agg_call, state)| {
-                let vis_map = agg_call_filter_res(
+            .map(|agg_call| {
+                agg_call_filter_res(
                     ctx,
                     identity,
                     agg_call,
                     &columns,
                     visibility.as_ref(),
                     capacity,
-                )?;
-                let cols = agg_call
+                )
+            })
+            .try_collect()?;
+        agg_calls
+            .iter()
+            .zip_eq(visibilities)
+            .zip_eq(aggregators)
+            .try_for_each(|((agg_call, visibility), state)| {
+                let col_refs = agg_call
                     .args
                     .val_indices()
                     .iter()
                     .map(|idx| columns[*idx].array_ref())
                     .collect_vec();
-                state.apply_batch(&ops, vis_map.as_ref(), &cols[..])
+                state.apply_batch(&ops, visibility.as_ref(), &col_refs)
             })?;
         Ok(())
     }
@@ -96,10 +99,10 @@ impl LocalSimpleAggExecutor {
         } = self;
         let input = input.execute();
         let mut is_dirty = false;
-        let mut states: Vec<_> = agg_calls
+        let mut aggregators: Vec<_> = agg_calls
             .iter()
             .map(|agg_call| {
-                create_streaming_agg_state(
+                create_streaming_agg_impl(
                     agg_call.args.arg_types(),
                     &agg_call.kind,
                     &agg_call.return_type,
@@ -112,8 +115,12 @@ impl LocalSimpleAggExecutor {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut states, chunk)?;
+                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, chunk)?;
                     is_dirty = true;
                 }
                 m @ Message::Barrier(_) => {
@@ -121,22 +128,19 @@ impl LocalSimpleAggExecutor {
                         is_dirty = false;
 
                         let mut builders = info.schema.create_array_builders(1);
-                        states.iter_mut().zip_eq(builders.iter_mut()).try_for_each(
-                            |(state, builder)| {
+                        aggregators
+                            .iter_mut()
+                            .zip_eq(builders.iter_mut())
+                            .try_for_each(|(state, builder)| {
                                 let data = state.get_output()?;
                                 trace!("append_datum: {:?}", data);
-                                builder.append_datum(&data)?;
+                                builder.append_datum(&data);
                                 state.reset();
                                 Ok::<_, StreamExecutorError>(())
-                            },
-                        )?;
+                            })?;
                         let columns: Vec<Column> = builders
                             .into_iter()
-                            .map(|builder| {
-                                Ok::<_, StreamExecutorError>(Column::new(Arc::new(
-                                    builder.finish()?,
-                                )))
-                            })
+                            .map(|builder| Ok::<_, StreamExecutorError>(builder.finish().into()))
                             .try_collect()?;
                         let ops = vec![Op::Insert; 1];
 
@@ -157,7 +161,7 @@ impl LocalSimpleAggExecutor {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamResult<Self> {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
         let info = ExecutorInfo {
             schema,
@@ -181,7 +185,6 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::schema_test_utils;
-    use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::AggKind;
 
@@ -191,7 +194,7 @@ mod tests {
     use crate::executor::{Executor, LocalSimpleAggExecutor};
 
     #[tokio::test]
-    async fn test_no_chunk() -> Result<()> {
+    async fn test_no_chunk() {
         let schema = schema_test_utils::ii();
         let (mut tx, source) = MockSource::channel(schema, vec![2]);
         tx.push_barrier(1, false);
@@ -207,13 +210,16 @@ mod tests {
             filter: None,
         }];
 
-        let simple_agg = Box::new(LocalSimpleAggExecutor::new(
-            ActorContext::create(123),
-            Box::new(source),
-            agg_calls,
-            vec![],
-            1,
-        )?);
+        let simple_agg = Box::new(
+            LocalSimpleAggExecutor::new(
+                ActorContext::create(123),
+                Box::new(source),
+                agg_calls,
+                vec![],
+                1,
+            )
+            .unwrap(),
+        );
         let mut simple_agg = simple_agg.execute();
 
         assert_matches!(
@@ -228,12 +234,10 @@ mod tests {
             simple_agg.next().await.unwrap().unwrap(),
             Message::Barrier { .. }
         );
-
-        Ok(())
     }
 
     #[tokio::test]
-    async fn test_local_simple_agg() -> Result<()> {
+    async fn test_local_simple_agg() {
         let schema = schema_test_utils::iii();
         let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk\
         tx.push_barrier(1, false);
@@ -281,13 +285,16 @@ mod tests {
             },
         ];
 
-        let simple_agg = Box::new(LocalSimpleAggExecutor::new(
-            ActorContext::create(123),
-            Box::new(source),
-            agg_calls,
-            vec![],
-            1,
-        )?);
+        let simple_agg = Box::new(
+            LocalSimpleAggExecutor::new(
+                ActorContext::create(123),
+                Box::new(source),
+                agg_calls,
+                vec![],
+                1,
+            )
+            .unwrap(),
+        );
         let mut simple_agg = simple_agg.execute();
 
         // Consume the init barrier
@@ -315,7 +322,5 @@ mod tests {
                 + -1 0 0"
             )
         );
-
-        Ok(())
     }
 }

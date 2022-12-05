@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -23,7 +22,7 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
-use crate::barrier::BarrierManagerRef;
+use crate::barrier::BarrierScheduler;
 use crate::manager::{FragmentManagerRef, MetaSrvEnv};
 use crate::storage::MetaStore;
 
@@ -35,7 +34,7 @@ where
     S: MetaStore,
 {
     env: MetaSrvEnv<S>,
-    barrier_manager: BarrierManagerRef<S>,
+    barrier_scheduler: BarrierScheduler<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
 
@@ -45,12 +44,12 @@ where
 {
     pub fn new(
         env: MetaSrvEnv<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        barrier_scheduler: BarrierScheduler<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         StreamServiceImpl {
             env,
-            barrier_manager,
+            barrier_scheduler,
             fragment_manager,
         }
     }
@@ -64,14 +63,12 @@ where
     #[cfg_attr(coverage, no_coverage)]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         self.env.idle_manager().record_activity();
-        let _req = request.into_inner();
+        let req = request.into_inner();
 
-        let max_committed_epoch = self.barrier_manager.flush().await?;
+        let snapshot = self.barrier_scheduler.flush(req.checkpoint).await?;
         Ok(Response::new(FlushResponse {
             status: None,
-            snapshot: Some(HummockSnapshot {
-                epoch: max_committed_epoch,
-            }),
+            snapshot: Some(snapshot),
         }))
     }
 

@@ -20,9 +20,10 @@ use std::sync::Arc;
 use itertools::{multizip, Itertools};
 use paste::paste;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk, Row, Utf8Array,
-    Utf8ArrayBuilder,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, StringWriter, Utf8Array, Utf8ArrayBuilder,
+    WrittenGuard,
 };
+use risingwave_common::row::Row;
 use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
@@ -42,18 +43,18 @@ macro_rules! gen_eval {
                     Some(bitmap) => {
                         for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
                             if !visible {
-                                output_array.append_null()?;
+                                output_array.append_null();
                                 continue;
                             }
                             $macro!(self, output_array, $([<v_ $arg:lower>],)*)
                         }
-                        output_array.finish()?.into()
+                        output_array.finish().into()
                     }
                     None => {
                         for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
                             $macro!(self, output_array, $([<v_ $arg:lower>],)*)
                         }
-                        output_array.finish()?.into()
+                        output_array.finish().into()
                     }
                 }))
             }
@@ -81,9 +82,9 @@ macro_rules! eval_normal {
         if let ($(Some($arg), )*) = ($($arg, )*) {
             let ret = ($self.func)($($arg, )*)?;
             let output = Some(ret.as_scalar_ref());
-            $output_array.append(output)?;
+            $output_array.append(output);
         } else {
-            $output_array.append(None)?;
+            $output_array.append(None);
         }
     }
 }
@@ -165,20 +166,22 @@ macro_rules! gen_expr_normal {
 macro_rules! eval_bytes {
     ($self:ident, $output_array:ident, $($arg:ident,)*) => {
         if let ($(Some($arg), )*) = ($($arg, )*) {
-            let writer = $output_array.writer();
-            let guard = ($self.func)($($arg, )* writer)?;
-            $output_array = guard.into_inner();
+            {
+                let writer = $output_array.writer();
+                let _guard = ($self.func)($($arg, )* writer)?;
+            }
         } else {
-            $output_array.append(None)?;
+            $output_array.append(None);
         }
     }
 }
 macro_rules! eval_bytes_row {
     ($self:ident, $($arg:ident,)*) => {
         if let ($(Some($arg), )*) = ($($arg, )*) {
-            let writer = Utf8ArrayBuilder::new(1).writer();
-            let guard = ($self.func)($($arg, )* writer)?;
-            let array = guard.into_inner().finish()?;
+            let mut builder = Utf8ArrayBuilder::new(1);
+            let writer = builder.writer();
+            let _guard = ($self.func)($($arg, )* writer)?;
+            let array = builder.finish();
             array.into_single_value() // take the single value from the array
         } else {
             None
@@ -191,7 +194,7 @@ macro_rules! gen_expr_bytes {
         paste! {
             pub struct $ty_name<
                 $($arg: Array, )*
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )* BytesWriter) -> $crate::Result<BytesGuard>,
+                F: for<$($lt),*, 'writer> Fn($($arg::RefItem<$lt>, )* StringWriter<'writer>) -> $crate::Result<WrittenGuard>,
             > {
                 $([<expr_ $arg:lower>]: BoxedExpression,)*
                 return_type: DataType,
@@ -200,7 +203,7 @@ macro_rules! gen_expr_bytes {
             }
 
             impl<$($arg: Array, )*
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )* BytesWriter) -> $crate::Result<BytesGuard> + Sized + Sync + Send,
+                F: for<$($lt),*, 'writer> Fn($($arg::RefItem<$lt>, )* StringWriter<'writer>) -> $crate::Result<WrittenGuard> + Sized + Sync + Send,
             > fmt::Debug for $ty_name<$($arg, )* F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($ty_name))
@@ -212,7 +215,7 @@ macro_rules! gen_expr_bytes {
             }
 
             impl<$($arg: Array, )*
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )* BytesWriter) -> $crate::Result<BytesGuard> + Sized + Sync + Send,
+                F: for<$($lt),*, 'writer> Fn($($arg::RefItem<$lt>, )* StringWriter<'writer>) -> $crate::Result<WrittenGuard> + Sized + Sync + Send,
             > Expression for $ty_name<$($arg, )* F>
             where
                 $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
@@ -225,7 +228,7 @@ macro_rules! gen_expr_bytes {
             }
 
             impl<$($arg: Array, )*
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )* BytesWriter) -> $crate::Result<BytesGuard> + Sized + Sync + Send,
+                F: for<$($lt),*, 'writer> Fn($($arg::RefItem<$lt>, )* StringWriter<'writer>) -> $crate::Result<WrittenGuard> + Sized + Sync + Send,
             > $ty_name<$($arg, )* F> {
                 pub fn new(
                     $([<expr_ $arg:lower>]: BoxedExpression, )*
@@ -248,7 +251,7 @@ macro_rules! eval_nullable {
     ($self:ident, $output_array:ident, $($arg:ident,)*) => {
         {
             let ret = ($self.func)($($arg,)*)?;
-            $output_array.append(option_as_scalar_ref(&ret))?;
+            $output_array.append(option_as_scalar_ref(&ret));
         }
     }
 }
@@ -378,6 +381,7 @@ macro_rules! for_all_cmp_variants {
             { decimal, decimal, decimal, $general_f },
             { float32, decimal, float64, $general_f },
             { float64, decimal, float64, $general_f },
+            { timestampz, timestampz, timestampz, $general_f },
             { timestamp, timestamp, timestamp, $general_f },
             { interval, interval, interval, $general_f },
             { time, time, time, $general_f },

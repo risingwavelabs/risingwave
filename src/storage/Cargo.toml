@@ -1,10 +1,15 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.11"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
+arc-swap = "1"
 async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
 auto_enums = { version = "0.7", features = ["futures"] }
@@ -27,14 +32,11 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 hyper = "0.14"
 itertools = "0.10"
-lazy_static = "1"
 libc = "0.2"
 lz4 = "1.23.1"
-memcomparable = { path = "../utils/memcomparable" }
 minitrace = "0.4"
 minstant = "0.1"
-moka = { version = "0.9", features = ["future"] }
-nix = { version = "0.24.1", features = ["fs", "mman"] }
+nix = { version = "0.25", features = ["fs", "mman"] }
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -44,6 +46,7 @@ prost = "0.11"
 rand = "0.8"
 regex = "1"
 risingwave_common = { path = "../common" }
+risingwave_common_service = { path = "../common/common_service" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
@@ -55,8 +58,10 @@ scopeguard = "1"
 #     "static_libcpp",
 # ], optional = true }
 serde = { version = "1", features = ["derive"] }
+sled = "0.34.7"
 smallvec = "1"
 spin = "0.9"
+sync-point = { path = "../utils/sync-point" }
 tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
@@ -72,14 +77,17 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-metrics = "0.1.0"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
-tonic = { version = "0.2.1", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 twox-hash = "1"
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
 zstd = "0.11.2"
 
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
+
 [dev-dependencies]
-criterion = { version = "0.3", features = ["async_futures"] }
+criterion = { version = "0.4", features = ["async_futures"] }
+moka = { version = "0.9", features = ["future"] }
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 
@@ -91,6 +99,7 @@ fiemap = "0.1.1"
 # tikv = ["tikv-client"]
 test = []
 failpoints = ["fail/failpoints"]
+bpf = []
 
 [[bench]]
 name = "bench_block_iter"
@@ -118,3 +127,6 @@ harness = false
 name = "bench_compactor"
 harness = false
 
+[[bench]]
+name = "bench_multi_builder"
+harness = false

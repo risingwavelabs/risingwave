@@ -49,7 +49,7 @@ impl BatchUnion {
 }
 
 impl fmt::Display for BatchUnion {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.logical.fmt_with_name(f, "BatchUnion")
     }
 }
@@ -62,6 +62,7 @@ impl PlanTreeNode for BatchUnion {
     }
 
     fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
+        // For batch query, we don't need to clone `source_col`, so just use new.
         Self::new(LogicalUnion::new(self.logical.all(), inputs.to_owned())).into()
     }
 }

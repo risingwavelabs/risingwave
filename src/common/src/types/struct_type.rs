@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Display, Formatter};
+
+use itertools::Itertools;
+
 use super::DataType;
 use crate::array::ArrayMeta;
 
@@ -43,6 +47,23 @@ impl StructType {
     pub fn to_array_meta(&self) -> ArrayMeta {
         ArrayMeta::Struct {
             children: self.fields.clone().into(),
+        }
+    }
+}
+
+impl Display for StructType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.field_names.is_empty() {
+            write!(f, "record")
+        } else {
+            write!(
+                f,
+                "struct<{}>",
+                (self.fields.iter())
+                    .zip_eq(self.field_names.iter())
+                    .map(|(d, s)| format!("{} {}", s, d))
+                    .join(",")
+            )
         }
     }
 }

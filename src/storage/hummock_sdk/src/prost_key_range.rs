@@ -17,7 +17,7 @@ use std::cmp;
 use risingwave_pb::hummock::KeyRange;
 
 use crate::key_range::KeyRangeCommon;
-use crate::{impl_key_range_common, key_range_cmp, VersionedComparator};
+use crate::{impl_key_range_common, key_range_cmp, user_key, KeyComparator};
 
 impl_key_range_common!(KeyRange);
 
@@ -25,6 +25,8 @@ pub trait KeyRangeExt {
     fn inf() -> Self;
     fn new(left: Vec<u8>, right: Vec<u8>) -> Self;
     fn compare(&self, other: &Self) -> cmp::Ordering;
+    fn start_bound_inf(&self) -> bool;
+    fn end_bound_inf(&self) -> bool;
 }
 
 impl KeyRangeExt for KeyRange {
@@ -32,7 +34,7 @@ impl KeyRangeExt for KeyRange {
         Self {
             left: vec![],
             right: vec![],
-            inf: true,
+            right_exclusive: false,
         }
     }
 
@@ -40,12 +42,22 @@ impl KeyRangeExt for KeyRange {
         Self {
             left,
             right,
-            inf: false,
+            right_exclusive: false,
         }
     }
 
     fn compare(&self, other: &Self) -> cmp::Ordering {
         key_range_cmp!(self, other)
+    }
+
+    #[inline]
+    fn start_bound_inf(&self) -> bool {
+        self.left.is_empty()
+    }
+
+    #[inline]
+    fn end_bound_inf(&self) -> bool {
+        self.right.is_empty()
     }
 }
 
@@ -68,8 +80,8 @@ mod tests {
         assert_eq!(a1.cmp(&a1), cmp::Ordering::Equal);
         assert_eq!(a2.cmp(&a2), cmp::Ordering::Equal);
         assert_eq!(b1.cmp(&b1), cmp::Ordering::Equal);
-        assert_eq!(a1.cmp(&a2), cmp::Ordering::Greater);
-        assert_eq!(a2.cmp(&a1), cmp::Ordering::Less);
+        assert_eq!(a1.cmp(&a2), cmp::Ordering::Less);
+        assert_eq!(a2.cmp(&a1), cmp::Ordering::Greater);
         assert_eq!(a1.cmp(&b1), cmp::Ordering::Less);
         assert_eq!(b1.cmp(&a1), cmp::Ordering::Greater);
         assert_eq!(a2.cmp(&b1), cmp::Ordering::Less);
@@ -90,7 +102,7 @@ mod tests {
 
         let kr_inf = KeyRange::inf();
         assert_eq!(kr_inf.compare(&kr_inf), cmp::Ordering::Equal);
-        assert_eq!(kr1.compare(&kr_inf), cmp::Ordering::Less);
+        assert_eq!(kr1.compare(&kr_inf), cmp::Ordering::Greater);
     }
 
     #[test]

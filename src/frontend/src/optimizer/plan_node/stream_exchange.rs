@@ -17,8 +17,9 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamExchange` imposes a particular distribution on its input
 /// without changing its content.
@@ -46,18 +47,15 @@ impl StreamExchange {
 }
 
 impl fmt::Display for StreamExchange {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamExchange");
         builder
             .field(
                 "dist",
-                &format_args!(
-                    "{:?}",
-                    DistributionDisplay {
-                        distribution: &self.base.dist,
-                        input_schema: self.input.schema()
-                    }
-                ),
+                &DistributionDisplay {
+                    distribution: &self.base.dist,
+                    input_schema: self.input.schema(),
+                },
             )
             .finish()
     }
@@ -74,8 +72,8 @@ impl PlanTreeNodeUnary for StreamExchange {
 }
 impl_plan_tree_node_for_unary! {StreamExchange}
 
-impl ToStreamProst for StreamExchange {
-    fn to_stream_prost_body(&self) -> NodeBody {
+impl StreamNode for StreamExchange {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
         NodeBody::Exchange(ExchangeNode {
             strategy: Some(DispatchStrategy {
                 r#type: match &self.base.dist {

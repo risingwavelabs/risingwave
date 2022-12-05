@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use num_traits::Zero;
+
 /// A more general version of [`num_traits::CheckedAdd`] that allows `Rhs` and `Output` to be
 /// different.
 ///
@@ -31,5 +33,16 @@ impl<T: num_traits::CheckedAdd> CheckedAdd for T {
 
     fn checked_add(self, rhs: T) -> Option<Self> {
         num_traits::CheckedAdd::checked_add(&self, &rhs)
+    }
+}
+
+/// A simplified version of [`num_traits::Signed`].
+pub trait IsNegative: Zero {
+    fn is_negative(&self) -> bool;
+}
+
+impl<T: num_traits::Signed> IsNegative for T {
+    fn is_negative(&self) -> bool {
+        num_traits::Signed::is_negative(self)
     }
 }

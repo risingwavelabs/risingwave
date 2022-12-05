@@ -15,28 +15,32 @@
 use std::ops::{Bound, RangeBounds};
 
 use itertools::Itertools;
+use paste::paste;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
-use crate::array::Row;
-use crate::types::{ScalarImpl, VirtualNode};
-use crate::util::hash_util::CRC32FastBuilder;
+use super::value_encoding::serialize_datum_to_bytes;
+use crate::hash::VirtualNode;
+use crate::row::{Row2, RowExt};
+use crate::types::{Datum, ScalarImpl};
+use crate::util::hash_util::Crc32FastBuilder;
+use crate::util::value_encoding::serialize_datum;
 
 /// See also [`ScanRangeProst`]
 #[derive(Debug, Clone)]
 pub struct ScanRange {
-    pub eq_conds: Vec<ScalarImpl>,
+    pub eq_conds: Vec<Datum>,
     pub range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
 }
 
 fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundProst> {
     match bound {
         Bound::Included(literal) => Some(BoundProst {
-            value: literal.to_protobuf(),
+            value: serialize_datum_to_bytes(Some(literal)),
             inclusive: true,
         }),
         Bound::Excluded(literal) => Some(BoundProst {
-            value: literal.to_protobuf(),
+            value: serialize_datum_to_bytes(Some(literal)),
             inclusive: false,
         }),
         Bound::Unbounded => None,
@@ -46,7 +50,15 @@ fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundProst> {
 impl ScanRange {
     pub fn to_protobuf(&self) -> ScanRangeProst {
         ScanRangeProst {
-            eq_conds: self.eq_conds.iter().map(|lit| lit.to_protobuf()).collect(),
+            eq_conds: self
+                .eq_conds
+                .iter()
+                .map(|datum| {
+                    let mut encoded = vec![];
+                    serialize_datum(datum, &mut encoded);
+                    encoded
+                })
+                .collect(),
             lower_bound: bound_to_proto(&self.range.0),
             upper_bound: bound_to_proto(&self.range.1),
         }
@@ -91,13 +103,10 @@ impl ScanRange {
             return None;
         }
 
-        let pk_prefix_value = Row(self
-            .eq_conds
-            .iter()
-            .map(|scalar| Some(scalar.clone()))
-            .collect());
+        let pk_prefix_value = &self.eq_conds;
         let vnode = pk_prefix_value
-            .hash_by_indices(&dist_key_in_pk_indices, &CRC32FastBuilder {})
+            .project(&dist_key_in_pk_indices)
+            .hash(Crc32FastBuilder)
             .to_vnode();
         Some(vnode)
     }
@@ -112,9 +121,60 @@ pub fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
         && matches!(bounds.end_bound(), Bound::Unbounded)
 }
 
+macro_rules! for_all_scalar_int_variants {
+    ($macro:ident) => {
+        $macro! {
+            { Int16 },
+            { Int32 },
+            { Int64 }
+        }
+    };
+}
+
+macro_rules! impl_split_small_range {
+    ($( { $type_name:ident} ),*) => {
+        paste! {
+            impl ScanRange {
+                /// `Precondition`: make sure the first order key is int type if you call this method.
+                /// Optimize small range scan. It turns x between 0 and 5 into x in (0, 1, 2, 3, 4, 5).s
+                pub fn split_small_range(&self, max_gap: u64) -> Option<Vec<Self>> {
+                     if self.eq_conds.is_empty() {
+                        match self.range {
+                            $(
+                                (
+                                    Bound::Included(ScalarImpl::$type_name(ref left)),
+                                    Bound::Included(ScalarImpl::$type_name(ref right)),
+                                ) => {
+                                    if (right - left + 1) as u64 <= max_gap {
+                                        return Some(
+                                            (*left..=*right)
+                                                .into_iter()
+                                                .map(|i| ScanRange {
+                                                    eq_conds: vec![Some(ScalarImpl::$type_name(i))],
+                                                    range: full_range(),
+                                                })
+                                                .collect(),
+                                        );
+                                    }
+                                }
+                            )*
+                            _ => {}
+                        }
+                    }
+
+                    None
+                }
+            }
+        }
+    };
+}
+
+for_all_scalar_int_variants! { impl_split_small_range }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::row::Row;
 
     // dist_key is prefix of pk
     #[test]
@@ -125,15 +185,16 @@ mod tests {
         let mut scan_range = ScanRange::full_table_scan();
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
-        scan_range.eq_conds.push(ScalarImpl::from(114));
+        scan_range.eq_conds.push(Some(ScalarImpl::from(114)));
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
-        scan_range.eq_conds.push(ScalarImpl::from(514));
-        let vnode = Row(vec![
+        scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
+        let vnode = Row::new(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
         ])
-        .hash_by_indices(&[0, 1], &CRC32FastBuilder {})
+        .project(&[0, 1])
+        .hash(Crc32FastBuilder)
         .to_vnode();
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }
@@ -147,19 +208,20 @@ mod tests {
         let mut scan_range = ScanRange::full_table_scan();
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
-        scan_range.eq_conds.push(ScalarImpl::from(114));
+        scan_range.eq_conds.push(Some(ScalarImpl::from(114)));
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
-        scan_range.eq_conds.push(ScalarImpl::from(514));
+        scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
-        scan_range.eq_conds.push(ScalarImpl::from(114514));
-        let vnode = Row(vec![
+        scan_range.eq_conds.push(Some(ScalarImpl::from(114514)));
+        let vnode = Row::new(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
             Some(ScalarImpl::from(114514)),
         ])
-        .hash_by_indices(&[2, 1], &CRC32FastBuilder {})
+        .project(&[2, 1])
+        .hash(Crc32FastBuilder)
         .to_vnode();
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }

@@ -52,7 +52,7 @@ impl LogicalTableFunction {
 impl_plan_tree_node_for_leaf! { LogicalTableFunction }
 
 impl fmt::Display for LogicalTableFunction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "LogicalTableFunction {{ {:?} }}", self.table_function)
     }
 }

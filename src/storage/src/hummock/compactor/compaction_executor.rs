@@ -14,21 +14,15 @@
 
 use std::future::Future;
 
-use futures::future::RemoteHandle;
-use futures::FutureExt;
-
-use crate::hummock::compactor::CompactOutput;
-use crate::hummock::HummockResult;
+use tokio::task::JoinHandle;
 
 /// `CompactionExecutor` is a dedicated runtime for compaction's CPU intensive jobs.
 pub struct CompactionExecutor {
     /// Runtime for compaction tasks.
-    #[cfg(not(madsim))]
     runtime: &'static tokio::runtime::Runtime,
 }
 
 impl CompactionExecutor {
-    #[cfg(not(madsim))]
     pub fn new(worker_threads_num: Option<usize>) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -46,23 +40,12 @@ impl CompactionExecutor {
         }
     }
 
-    // FIXME: simulation doesn't support new thread or tokio runtime.
-    //        this is a workaround to make it compile.
-    #[cfg(madsim)]
-    pub fn new(_worker_threads_num: Option<usize>) -> Self {
-        Self {}
-    }
-
-    /// Send a request to the executor, returns a [`RemoteHandle`] to retrieve the result.
-    pub fn send_request<T>(&self, t: T) -> RemoteHandle<HummockResult<CompactOutput>>
+    /// Send a request to the executor, returns a [`JoinHandle`] to retrieve the result.
+    pub fn spawn<F, T>(&self, t: F) -> JoinHandle<T>
     where
-        T: Future<Output = HummockResult<CompactOutput>> + Send + 'static,
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
     {
-        let (t, handle) = t.remote_handle();
-        #[cfg(not(madsim))]
-        let _ = self.runtime.spawn(t);
-        #[cfg(madsim)]
-        let _ = tokio::spawn(t);
-        handle
+        self.runtime.spawn(t)
     }
 }

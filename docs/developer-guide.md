@@ -2,9 +2,9 @@
 
 This guide is intended to be used by contributors to learn about how to develop RisingWave. The instructions about how to submit code changes are included in [contributing guidelines](../CONTRIBUTING.md).
 
-If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/singularity-data/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
+If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/risingwavelabs/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
 
-To report bugs, create a [GitHub issue](https://github.com/singularity-data/risingwave/issues/new/choose).
+To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/risingwave/issues/new/choose).
 
 
 ## Table of contents
@@ -16,6 +16,7 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
   - [Set up the development environment](#set-up-the-development-environment)
   - [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
     - [Configure additional components](#configure-additional-components)
+    - [Configure system variables](#configure-system-variables)
     - [Start the playground with RiseDev](#start-the-playground-with-risedev)
     - [Start the playground with cargo](#start-the-playground-with-cargo)
   - [Develop the dashboard](#develop-the-dashboard)
@@ -33,6 +34,8 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
     - [Planner tests](#planner-tests)
     - [End-to-end tests](#end-to-end-tests)
     - [End-to-end tests on CI](#end-to-end-tests-on-ci)
+    - [DocSlt tests](#docslt-tests)
+    - [Deterministic simulation tests](#deterministic-simulation-tests)
   - [Miscellaneous checks](#miscellaneous-checks)
   - [Update Grafana dashboard](#update-grafana-dashboard)
   - [Add new files](#add-new-files)
@@ -43,6 +46,8 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
 ## Read the design docs
 
 Before you start to make code changes, ensure that you understand the design and implementation of RisingWave. We recommend that you read the design docs listed in [docs/README.md](README.md) first.
+
+You can also read the [crate level documentation](https://risingwavelabs.github.io/risingwave/) for implementation details. You can also run `./risedev doc` to read it locally. Note that you need to [set up the development environment](#set-up-the-development-environment) first.
 
 ## Learn about the code structure
 
@@ -62,18 +67,19 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 * OpenSSL
 * PostgreSQL (psql) (>= 14.1)
 * Tmux
+* LLVM 15 (To workaround some bugs in macOS toolchain, see https://github.com/risingwavelabs/risingwave/issues/6205).
 
 To install the dependencies on macOS, run:
 
 ```shell
-brew install postgresql cmake protobuf openssl tmux
+brew install postgresql cmake protobuf openssl tmux cyrus-sasl llvm
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
+sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -156,6 +162,13 @@ For example, you can modify the default section to:
 Now you can run `./risedev d` to start a new dev cluster. The new dev cluster will contain components as configured in the yaml file. RiseDev will automatically configure the components to use the available storage service and to monitor the target.
 
 You may also add multiple compute nodes in the cluster. The `ci-3cn-1fe` config is an example.
+
+### Configure system variables
+
+You can check `src/common/src/config.rs` to see all the configurable variables. 
+If additional variables are needed, 
+include them in the correct sections (such as `[server]` or `[storage]`) in `src/config/risingwave.toml`.
+
 
 ### Start the playground with RiseDev
 
@@ -277,7 +290,7 @@ If you want to see the coverage report, run this command:
 
 ### Planner tests
 
-RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/test_runner/README.md).
+RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/planner_test/README.md).
 
 ### End-to-end tests
 
@@ -337,6 +350,71 @@ Basically, CI is using the following two configurations to run the full e2e test
 ```
 
 You can adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
+
+### DocSlt tests
+
+As introduced in [#5117](https://github.com/risingwavelabs/risingwave/issues/5117), DocSlt tool allows you to write SQL examples in sqllogictest syntax in Rust doc comments. After adding or modifying any such SQL examples, you should run the following commands to generate and run e2e tests for them.
+
+```shell
+# generate e2e tests from doc comments for all default packages
+./risedev docslt
+# or, generate for only modified package
+./risedev docslt -p risingwave_expr
+
+# run all generated e2e tests
+./risedev slt-generated -p 4566 -d dev
+# or, run only some of them
+./risedev slt -p 4566 -d dev './e2e_test/generated/docslt/risingwave_expr/**/*.slt'
+```
+
+These will be run on CI as well.
+
+### Deterministic simulation tests
+
+Deterministic simulation is a powerful tool to efficiently search bugs and reliably reproduce them.
+In case you are not familiar with this technique, here is a [talk](https://www.youtube.com/watch?v=4fFDFbi3toc) and a [blog post](https://sled.rs/simulation.html) for brief introduction.
+
+In RisingWave, deterministic simulation is supported in both unit test and end-to-end test. You can run them using the following commands:
+
+```sh
+# run deterministic unit test
+./risedev stest
+# run deterministic end-to-end test
+./risedev sslt -- './e2e_test/path/to/directory/**/*.slt'
+```
+
+When your program panics, the simulator will print the random seed of this run:
+
+```sh
+thread '<unnamed>' panicked at '...',
+note: run with `MADSIM_TEST_SEED=1` environment variable to reproduce this error
+```
+
+Then you can reproduce the bug with the given seed:
+
+```sh
+# set the random seed to reproduce a run
+MADSIM_TEST_SEED=1 RUST_LOG=info ./risedev sslt -- './e2e_test/path/to/directory/**/*.slt'
+```
+
+More advanced usages are listed below:
+
+```sh
+# run multiple times with different seeds to test reliability
+# it's recommended to build in release mode for a fast run
+MADSIM_TEST_NUM=100 ./risedev sslt --release -- './e2e_test/path/to/directory/**/*.slt'
+
+# configure cluster nodes (by default: 2fe+3cn)
+./risedev sslt -- --compute-nodes 2 './e2e_test/path/to/directory/**/*.slt'
+
+# inject failures to test fault recovery
+./risedev sslt -- --kill-meta --etcd-timeout-rate=0.01 './e2e_test/path/to/directory/**/*.slt'
+
+# see more usages
+./risedev sslt -- --help  
+```
+
+Deterministic test is included in CI as well. See [CI script](../ci/scripts/deterministic-e2e-test.sh) for details.
 
 ## Miscellaneous checks
 

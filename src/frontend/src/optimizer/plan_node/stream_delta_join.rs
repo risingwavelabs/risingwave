@@ -19,10 +19,11 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToStreamProst};
+use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, StreamNode};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
 /// inputs to be indexes.
@@ -50,9 +51,7 @@ impl StreamDeltaJoin {
         let dist = StreamHashJoin::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
-            &logical
-                .l2i_col_mapping()
-                .composite(&logical.i2o_col_mapping()),
+            &logical,
         );
 
         // TODO: derive from input
@@ -79,23 +78,20 @@ impl StreamDeltaJoin {
 }
 
 impl fmt::Display for StreamDeltaJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamDeltaJoin");
-        builder.field("type", &format_args!("{:?}", self.logical.join_type()));
+        builder.field("type", &self.logical.join_type());
 
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
         builder.field(
             "predicate",
-            &format_args!(
-                "{}",
-                EqJoinPredicateDisplay {
-                    eq_join_predicate: self.eq_join_predicate(),
-                    input_schema: &concat_schema
-                }
-            ),
+            &EqJoinPredicateDisplay {
+                eq_join_predicate: self.eq_join_predicate(),
+                input_schema: &concat_schema,
+            },
         );
 
         if verbose {
@@ -110,13 +106,10 @@ impl fmt::Display for StreamDeltaJoin {
             } else {
                 builder.field(
                     "output",
-                    &format_args!(
-                        "{:?}",
-                        &IndicesDisplay {
-                            indices: self.logical.output_indices(),
-                            input_schema: &concat_schema,
-                        }
-                    ),
+                    &IndicesDisplay {
+                        indices: self.logical.output_indices(),
+                        input_schema: &concat_schema,
+                    },
                 );
             }
         }
@@ -144,8 +137,8 @@ impl PlanTreeNodeBinary for StreamDeltaJoin {
 
 impl_plan_tree_node_for_binary! { StreamDeltaJoin }
 
-impl ToStreamProst for StreamDeltaJoin {
-    fn to_stream_prost_body(&self) -> NodeBody {
+impl StreamNode for StreamDeltaJoin {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
         let left = self.left();
         let right = self.right();
         let left_table = left.as_stream_index_scan().unwrap();

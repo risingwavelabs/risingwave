@@ -14,20 +14,20 @@
 
 use std::cmp::{max, min};
 
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use risingwave_common::array::{StringWriter, WrittenGuard};
 
 use crate::{bail, Result};
 
 #[inline(always)]
-pub fn substr_start(s: &str, start: i32, writer: BytesWriter) -> Result<BytesGuard> {
+pub fn substr_start(s: &str, start: i32, writer: StringWriter<'_>) -> Result<WrittenGuard> {
     let start = min(max(start - 1, 0) as usize, s.len());
-    writer.write_ref(&s[start..]).map_err(Into::into)
+    Ok(writer.write_ref(&s[start..]))
 }
 
 #[inline(always)]
-pub fn substr_for(s: &str, count: i32, writer: BytesWriter) -> Result<BytesGuard> {
+pub fn substr_for(s: &str, count: i32, writer: StringWriter<'_>) -> Result<WrittenGuard> {
     let end = min(count as usize, s.len());
-    writer.write_ref(&s[..end]).map_err(Into::into)
+    Ok(writer.write_ref(&s[..end]))
 }
 
 #[inline(always)]
@@ -35,14 +35,14 @@ pub fn substr_start_for(
     s: &str,
     start: i32,
     count: i32,
-    writer: BytesWriter,
-) -> Result<BytesGuard> {
+    writer: StringWriter<'_>,
+) -> Result<WrittenGuard> {
     if count < 0 {
         bail!("length in substr should be non-negative: {}", count);
     }
     let begin = max(start - 1, 0) as usize;
     let end = min(max(start - 1 + count, 0) as usize, s.len());
-    writer.write_ref(&s[begin..end]).map_err(Into::into)
+    Ok(writer.write_ref(&s[begin..end]))
 }
 
 #[cfg(test)]
@@ -65,23 +65,25 @@ mod tests {
         ];
 
         for (s, off, len, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let guard = match (off, len) {
-                (Some(off), Some(len)) => {
-                    let result = substr_start_for(&s, off, len, writer);
-                    if len < 0 {
-                        assert!(result.is_err());
-                        continue;
-                    } else {
-                        result?
+            let mut builder = Utf8ArrayBuilder::new(1);
+            let _guard = {
+                let writer = builder.writer();
+                match (off, len) {
+                    (Some(off), Some(len)) => {
+                        let result = substr_start_for(&s, off, len, writer);
+                        if len < 0 {
+                            assert!(result.is_err());
+                            continue;
+                        } else {
+                            result?
+                        }
                     }
+                    (Some(off), None) => substr_start(&s, off, writer)?,
+                    (None, Some(len)) => substr_for(&s, len, writer)?,
+                    _ => unreachable!(),
                 }
-                (Some(off), None) => substr_start(&s, off, writer)?,
-                (None, Some(len)) => substr_for(&s, len, writer)?,
-                _ => unreachable!(),
             };
-            let array = guard.into_inner().finish().unwrap();
+            let array = builder.finish();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }

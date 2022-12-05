@@ -4,24 +4,24 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table left (row_time timestamp, num int, id varchar);
+create table LeftTable (row_time timestamp, num int, id varchar);
 
 statement ok
-create table right (row_time timestamp, num int, id varchar);
+create table RightTable (row_time timestamp, num int, id varchar);
 
 statement ok
-insert into left values (timestamp '2020-04-15 12:02', 1, 'L1'), (timestamp '2020-04-15 12:06', 2, 'L2'), (timestamp '2020-04-15 12:03', 3, 'L3');
+insert into LeftTable values (timestamp '2020-04-15 12:02', 1, 'L1'), (timestamp '2020-04-15 12:06', 2, 'L2'), (timestamp '2020-04-15 12:03', 3, 'L3');
 
 statement ok
-insert into right values (timestamp '2020-04-15 12:01', 2, 'R2'), (timestamp '2020-04-15 12:04', 3, 'R3'), (timestamp '2020-04-15 12:05', 4, 'R4');
+insert into RightTable values (timestamp '2020-04-15 12:01', 2, 'R2'), (timestamp '2020-04-15 12:04', 3, 'R3'), (timestamp '2020-04-15 12:05', 4, 'R4');
 
 query ITITTT rowsort
 SELECT L.num AS L_Num, L.id AS L_Id, R.num AS R_Num, R.id AS R_Id,
     COALESCE(L.window_start, R.window_start) AS window_start,
     COALESCE(L.window_end, R.window_end) AS window_end
-FROM TUMBLE(left, row_time, interval '5' minute) AS L
+FROM TUMBLE(LeftTable, row_time, interval '5' minute) AS L
 FULL JOIN
-TUMBLE(right, row_time, interval '5' minute) AS R
+TUMBLE(RightTable, row_time, interval '5' minute) AS R
 ON L.num = R.num AND L.window_start = R.window_start AND L.window_end = R.window_end;
 ----
 1    L1   NULL NULL 2020-04-15 12:00:00 2020-04-15 12:05:00
@@ -31,7 +31,7 @@ NULL NULL 2    R2   2020-04-15 12:00:00 2020-04-15 12:05:00
 NULL NULL 4    R4   2020-04-15 12:05:00 2020-04-15 12:10:00
 
 statement ok
-drop table left;
+drop table LeftTable;
 
 statement ok
-drop table right;
+drop table RightTable;

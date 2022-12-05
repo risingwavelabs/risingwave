@@ -13,8 +13,9 @@
 // limitations under the License.
 
 #![cfg_attr(coverage, feature(no_coverage))]
+#![feature(let_chains)]
 
-use stats_alloc::TaskLocalAlloc;
+use task_stats_alloc::TaskLocalAlloc;
 use tikv_jemallocator::Jemalloc;
 
 #[global_allocator]
@@ -42,10 +43,7 @@ fn main() -> Result<()> {
 
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from(args);
 
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(
-                    opts.enable_jaeger_tracing,
-                    false,
-                ));
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(false));
 
                 risingwave_rt::main_okk(risingwave_compute::start(opts));
 

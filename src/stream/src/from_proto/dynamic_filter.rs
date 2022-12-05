@@ -13,23 +13,26 @@
 // limitations under the License.
 use std::sync::Arc;
 
-use risingwave_common::error::{internal_error, Result};
+use risingwave_common::bail;
 use risingwave_pb::expr::expr_node::Type::*;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::DynamicFilterExecutor;
 
 pub struct DynamicFilterExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for DynamicFilterExecutorBuilder {
-    fn new_boxed_executor(
+    type Node = DynamicFilterNode;
+
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::DynamicFilter)?;
+    ) -> StreamResult<BoxedExecutor> {
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
         let key_l = node.get_left_key() as usize;
 
@@ -45,23 +48,21 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             comparator,
             GreaterThan | GreaterThanOrEqual | LessThan | LessThanOrEqual
         ) {
-            return Err(internal_error(
+            bail!(
                 "`DynamicFilterExecutor` only supports comparators:\
                 GreaterThan | GreaterThanOrEqual | LessThan | LessThanOrEqual",
-            ));
+            );
         }
 
-        // Only write the RHS value if this actor is in charge of vnode 0
-        let is_right_table_writer = vnodes.is_set(0)?;
-
-        let state_table_l = RowBasedStateTable::from_table_catalog(
+        let state_table_l = StateTable::from_table_catalog(
             node.get_left_table()?,
             store.clone(),
-            Some(vnodes),
-        );
+            Some(vnodes.clone()),
+        )
+        .await;
 
         let state_table_r =
-            RowBasedStateTable::from_table_catalog(node.get_right_table()?, store, None);
+            StateTable::from_table_catalog(node.get_right_table()?, store, None).await;
 
         Ok(Box::new(DynamicFilterExecutor::new(
             params.actor_context,
@@ -73,8 +74,9 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             comparator,
             state_table_l,
             state_table_r,
-            is_right_table_writer,
             params.executor_stats,
+            params.env.config().developer.stream_chunk_size,
+            vnodes,
         )))
     }
 }

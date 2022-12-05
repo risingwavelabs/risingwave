@@ -49,7 +49,7 @@ impl BatchFilter {
 }
 
 impl fmt::Display for BatchFilter {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.logical.fmt_with_name(f, "BatchFilter")
     }
 }

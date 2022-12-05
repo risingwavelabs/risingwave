@@ -17,47 +17,8 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
-use super::{Expr, ExprImpl, ExprRewriter};
-use crate::optimizer::property::Direction;
+use super::{Expr, ExprImpl, OrderBy};
 use crate::utils::Condition;
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct AggOrderByExpr {
-    pub expr: ExprImpl,
-    pub direction: Direction,
-    pub nulls_first: bool,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct AggOrderBy {
-    pub sort_exprs: Vec<AggOrderByExpr>,
-}
-
-impl AggOrderBy {
-    pub fn any() -> Self {
-        Self {
-            sort_exprs: Vec::new(),
-        }
-    }
-
-    pub fn new(sort_exprs: Vec<AggOrderByExpr>) -> Self {
-        Self { sort_exprs }
-    }
-
-    pub fn rewrite_expr(self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {
-        Self {
-            sort_exprs: self
-                .sort_exprs
-                .into_iter()
-                .map(|e| AggOrderByExpr {
-                    expr: rewriter.rewrite_expr(e.expr),
-                    direction: e.direction,
-                    nulls_first: e.nulls_first,
-                })
-                .collect(),
-        }
-    }
-}
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
@@ -65,7 +26,7 @@ pub struct AggCall {
     return_type: DataType,
     inputs: Vec<ExprImpl>,
     distinct: bool,
-    order_by: AggOrderBy,
+    order_by: OrderBy,
     filter: Condition,
 }
 
@@ -103,9 +64,9 @@ impl AggCall {
         // The function signatures are aligned with postgres, see
         // https://www.postgresql.org/docs/current/functions-aggregate.html.
         let return_type = match (&agg_kind, inputs) {
-            // Min, Max
-            (AggKind::Min | AggKind::Max, [input]) => input.clone(),
-            (AggKind::Min | AggKind::Max, _) => return invalid(),
+            // Min, Max, FirstValue
+            (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
+            (AggKind::Min | AggKind::Max | AggKind::FirstValue, _) => return invalid(),
 
             // Avg
             (AggKind::Avg, [input]) => match input {
@@ -131,6 +92,9 @@ impl AggCall {
             },
             (AggKind::Sum, _) => return invalid(),
 
+            (AggKind::Sum0, [DataType::Int64]) => DataType::Int64,
+            (AggKind::Sum0, _) => return invalid(),
+
             // ApproxCountDistinct
             (AggKind::ApproxCountDistinct, [_]) => DataType::Int64,
             (AggKind::ApproxCountDistinct, _) => return invalid(),
@@ -143,14 +107,11 @@ impl AggCall {
             (AggKind::StringAgg, [DataType::Varchar, DataType::Varchar]) => DataType::Varchar,
             (AggKind::StringAgg, _) => return invalid(),
 
+            // ArrayAgg
             (AggKind::ArrayAgg, [input]) => DataType::List {
                 datatype: Box::new(input.clone()),
             },
             (AggKind::ArrayAgg, _) => return invalid(),
-
-            // SingleValue
-            (AggKind::SingleValue, [input]) => input.clone(),
-            (AggKind::SingleValue, _) => return invalid(),
         };
 
         Ok(return_type)
@@ -162,7 +123,7 @@ impl AggCall {
         agg_kind: AggKind,
         inputs: Vec<ExprImpl>,
         distinct: bool,
-        order_by: AggOrderBy,
+        order_by: OrderBy,
         filter: Condition,
     ) -> Result<Self> {
         let data_types = inputs.iter().map(ExprImpl::return_type).collect_vec();
@@ -177,7 +138,7 @@ impl AggCall {
         })
     }
 
-    pub fn decompose(self) -> (AggKind, Vec<ExprImpl>, bool, AggOrderBy, Condition) {
+    pub fn decompose(self) -> (AggKind, Vec<ExprImpl>, bool, OrderBy, Condition) {
         (
             self.agg_kind,
             self.inputs,
@@ -198,6 +159,22 @@ impl AggCall {
 
     pub fn inputs_mut(&mut self) -> &mut [ExprImpl] {
         self.inputs.as_mut()
+    }
+
+    pub fn order_by(&self) -> &OrderBy {
+        &self.order_by
+    }
+
+    pub fn order_by_mut(&mut self) -> &mut OrderBy {
+        &mut self.order_by
+    }
+
+    pub fn filter(&self) -> &Condition {
+        &self.filter
+    }
+
+    pub fn filter_mut(&mut self) -> &mut Condition {
+        &mut self.filter
     }
 }
 

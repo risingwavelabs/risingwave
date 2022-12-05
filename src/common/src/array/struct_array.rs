@@ -14,33 +14,29 @@
 
 use core::fmt;
 use std::cmp::Ordering;
-use std::fmt::{Debug, Display};
-use std::hash::{Hash, Hasher};
+use std::fmt::Debug;
+use std::hash::Hash;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
-use prost::Message;
-use risingwave_pb::data::{
-    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, StructArrayData,
-};
-use risingwave_pb::expr::StructValue as ProstStructValue;
+use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
-    NULL_VAL_FOR_HASH,
 };
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
+    deserialize_datum_from, hash_datum, serialize_datum_into, DataType, Datum, DatumRef, Scalar,
+    ScalarRefImpl, ToDatumRef,
 };
 
 #[derive(Debug)]
 pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
-    children_array: Vec<ArrayBuilderImpl>,
+    pub(super) children_array: Vec<ArrayBuilderImpl>,
     children_type: Arc<[DataType]>,
     len: usize,
 }
@@ -80,12 +76,12 @@ impl ArrayBuilder for StructArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<StructRef<'_>>) -> ArrayResult<()> {
+    fn append(&mut self, value: Option<StructRef<'_>>) {
         match value {
             None => {
                 self.bitmap.append(false);
                 for child in &mut self.children_array {
-                    child.append_datum_ref(None)?;
+                    child.append_datum(Datum::None);
                 }
             }
             Some(v) => {
@@ -93,36 +89,46 @@ impl ArrayBuilder for StructArrayBuilder {
                 let fields = v.fields_ref();
                 assert_eq!(fields.len(), self.children_array.len());
                 for (field_idx, f) in fields.into_iter().enumerate() {
-                    self.children_array[field_idx].append_datum_ref(f)?;
+                    self.children_array[field_idx].append_datum(f);
                 }
             }
         }
         self.len += 1;
-        Ok(())
     }
 
-    fn append_array(&mut self, other: &StructArray) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &StructArray) {
         self.bitmap.append_bitmap(&other.bitmap);
-        self.children_array
-            .iter_mut()
-            .enumerate()
-            .try_for_each(|(i, a)| a.append_array(&other.children[i]))?;
+        for (i, a) in self.children_array.iter_mut().enumerate() {
+            a.append_array(&other.children[i]);
+        }
         self.len += other.len();
-        Ok(())
     }
 
-    fn finish(self) -> ArrayResult<StructArray> {
+    fn pop(&mut self) -> Option<()> {
+        if self.bitmap.pop().is_some() {
+            for child in &mut self.children_array {
+                child.pop().unwrap()
+            }
+            self.len -= 1;
+
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    fn finish(self) -> StructArray {
         let children = self
             .children_array
             .into_iter()
-            .map(|b| Ok(Arc::new(b.finish()?)))
-            .collect::<ArrayResult<Vec<ArrayRef>>>()?;
-        Ok(StructArray {
+            .map(|b| Arc::new(b.finish()))
+            .collect::<Vec<ArrayRef>>();
+        StructArray {
             bitmap: self.bitmap.finish(),
             children,
             children_type: self.children_type,
             len: self.len,
-        })
+        }
     }
 }
 
@@ -135,15 +141,14 @@ pub struct StructArray {
 }
 
 impl StructArrayBuilder {
-    pub fn append_array_refs(&mut self, refs: Vec<ArrayRef>, len: usize) -> ArrayResult<()> {
+    pub fn append_array_refs(&mut self, refs: Vec<ArrayRef>, len: usize) {
         for _ in 0..len {
             self.bitmap.append(true);
         }
         self.len += len;
-        self.children_array
-            .iter_mut()
-            .zip_eq(refs.iter())
-            .try_for_each(|(a, r)| a.append_array(r))
+        for (a, r) in self.children_array.iter_mut().zip_eq(refs.iter()) {
+            a.append_array(r);
+        }
     }
 }
 
@@ -204,22 +209,14 @@ impl Array for StructArray {
         self.bitmap = bitmap;
     }
 
-    fn hash_at<H: std::hash::Hasher>(&self, idx: usize, state: &mut H) {
-        if !self.is_null(idx) {
-            self.children.iter().for_each(|a| a.hash_at(idx, state))
-        } else {
-            NULL_VAL_FOR_HASH.hash(state);
-        }
-    }
-
-    fn create_builder(&self, capacity: usize) -> ArrayResult<super::ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = StructArrayBuilder::with_meta(
             capacity,
             ArrayMeta::Struct {
                 children: self.children_type.clone(),
             },
         );
-        Ok(ArrayBuilderImpl::Struct(array_builder))
+        ArrayBuilderImpl::Struct(array_builder)
     }
 
     fn array_meta(&self) -> ArrayMeta {
@@ -270,16 +267,16 @@ impl StructArray {
         null_bitmap: &[bool],
         children: Vec<ArrayImpl>,
         children_type: Vec<DataType>,
-    ) -> ArrayResult<StructArray> {
+    ) -> StructArray {
         let cardinality = null_bitmap.len();
         let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
         let children = children.into_iter().map(Arc::new).collect_vec();
-        Ok(StructArray {
+        StructArray {
             bitmap,
             children_type: children_type.into(),
             len: cardinality,
             children,
-        })
+        }
     }
 
     #[cfg(test)]
@@ -292,33 +289,9 @@ impl StructArray {
     }
 }
 
-#[derive(Clone, Debug, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Hash)]
 pub struct StructValue {
     fields: Box<[Datum]>,
-}
-
-impl fmt::Display for StructValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "({})",
-            self.fields
-                .iter()
-                .map(|f| {
-                    match f {
-                        Some(f) => format!("{}", f),
-                        None => " ".to_string(),
-                    }
-                })
-                .join(", ")
-        )
-    }
-}
-
-impl PartialEq for StructValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.fields == other.fields
-    }
 }
 
 impl PartialOrd for StructValue {
@@ -333,12 +306,6 @@ impl Ord for StructValue {
     }
 }
 
-impl Hash for StructValue {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.fields.hash(state);
-    }
-}
-
 impl StructValue {
     pub fn new(fields: Vec<Datum>) -> Self {
         Self {
@@ -348,27 +315,6 @@ impl StructValue {
 
     pub fn fields(&self) -> &[Datum] {
         &self.fields
-    }
-
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
-        self.as_scalar_ref().to_protobuf_owned()
-    }
-
-    pub fn from_protobuf_bytes(data_type: ProstDataType, b: &Vec<u8>) -> ArrayResult<Self> {
-        let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
-        let fields: Vec<Datum> = struct_value
-            .fields
-            .iter()
-            .zip_eq(data_type.field_type.iter())
-            .map(|(b, d)| {
-                if b.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(ScalarImpl::from_proto_bytes(b, d)?))
-                }
-            })
-            .collect::<ArrayResult<Vec<Datum>>>()?;
-        Ok(StructValue::new(fields))
     }
 
     pub fn deserialize(
@@ -389,6 +335,7 @@ pub enum StructRef<'a> {
     ValueRef { val: &'a StructValue },
 }
 
+#[macro_export]
 macro_rules! iter_fields_ref {
     ($self:ident, $it:ident, { $($body:tt)* }) => {
         match $self {
@@ -397,25 +344,7 @@ macro_rules! iter_fields_ref {
                 $($body)*
             }
             StructRef::ValueRef { val } => {
-                let $it = val.fields.iter().map(to_datum_ref);
-                $($body)*
-            }
-        }
-    };
-}
-
-macro_rules! iter_fields {
-    ($self:ident, $it:ident, { $($body:tt)* }) => {
-        match &$self {
-            StructRef::Indexed { arr, idx } => {
-                let $it = arr
-                    .children
-                    .iter()
-                    .map(|a| a.value_at(*idx).to_owned_datum());
-                $($body)*
-            }
-            StructRef::ValueRef { val } => {
-                let $it = val.fields.iter();
+                let $it = val.fields.iter().map(ToDatumRef::to_datum_ref);
                 $($body)*
             }
         }
@@ -427,38 +356,24 @@ impl<'a> StructRef<'a> {
         iter_fields_ref!(self, it, { it.collect() })
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
-        let fields = iter_fields!(self, it, {
-            it.map(|f| match f {
-                None => {
-                    vec![]
-                }
-                Some(s) => s.to_protobuf(),
-            })
-            .collect_vec()
-        });
-        ProstStructValue { fields }.encode_to_vec()
-    }
-
     pub fn serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl BufMut>,
     ) -> memcomparable::Result<()> {
         iter_fields_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_ref_into(&datum_ref, serializer)?
+                serialize_datum_into(datum_ref, serializer)?
             }
             Ok(())
         })
     }
-}
 
-impl Hash for StructRef<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            StructRef::Indexed { arr, idx } => arr.hash_at(*idx, state),
-            StructRef::ValueRef { val } => val.hash(state),
-        }
+    pub fn hash_scalar_inner<H: std::hash::Hasher>(&self, state: &mut H) {
+        iter_fields_ref!(self, it, {
+            for datum_ref in it {
+                hash_datum(datum_ref, state);
+            }
+        })
     }
 }
 
@@ -489,7 +404,7 @@ impl PartialOrd for StructRef<'_> {
     }
 }
 
-fn cmp_struct_field(l: &Option<ScalarRefImpl>, r: &Option<ScalarRefImpl>) -> Ordering {
+fn cmp_struct_field(l: &Option<ScalarRefImpl<'_>>, r: &Option<ScalarRefImpl<'_>>) -> Ordering {
     match (l, r) {
         // Comparability check was performed by frontend beforehand.
         (Some(sl), Some(sr)) => sl.partial_cmp(sr).unwrap(),
@@ -511,10 +426,13 @@ impl Debug for StructRef<'_> {
     }
 }
 
-impl Display for StructRef<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToText for StructRef<'_> {
+    fn to_text(&self) -> String {
         iter_fields_ref!(self, it, {
-            write!(f, "({})", it.map(display_datum_ref).join(","))
+            format!(
+                "({})",
+                it.map(|x| x.to_text()).collect::<Vec<String>>().join(",")
+            )
         })
     }
 }
@@ -540,7 +458,7 @@ mod tests {
     // `CREATE TYPE foo_empty as ();`, e.g.
     #[test]
     fn test_struct_new_empty() {
-        let arr = StructArray::from_slices(&[true, false, true, false], vec![], vec![]).unwrap();
+        let arr = StructArray::from_slices(&[true, false, true, false], vec![], vec![]);
         let actual = StructArray::from_protobuf(&arr.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::Struct(arr), actual);
     }
@@ -555,8 +473,7 @@ mod tests {
                 array! { F32Array, [None, Some(3.0), None, Some(4.0)] }.into(),
             ],
             vec![DataType::Int32, DataType::Float32],
-        )
-        .unwrap();
+        );
         let actual = StructArray::from_protobuf(&arr.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::Struct(arr), actual);
 
@@ -584,12 +501,10 @@ mod tests {
                 children: Arc::new([DataType::Int32, DataType::Float32]),
             },
         );
-        struct_values.iter().for_each(|v| {
-            builder
-                .append(v.as_ref().map(|s| s.as_scalar_ref()))
-                .unwrap()
-        });
-        let arr = builder.finish().unwrap();
+        for v in &struct_values {
+            builder.append(v.as_ref().map(|s| s.as_scalar_ref()));
+        }
+        let arr = builder.finish();
         assert_eq!(arr.values_vec(), struct_values);
     }
 
@@ -604,10 +519,9 @@ mod tests {
                 array! { F32Array, [Some(2.0)] }.into(),
             ],
             vec![DataType::Int32, DataType::Float32],
-        )
-        .unwrap();
-        let builder = arr.create_builder(4).unwrap();
-        let arr2 = try_match_expand!(builder.finish().unwrap(), ArrayImpl::Struct).unwrap();
+        );
+        let builder = arr.create_builder(4);
+        let arr2 = try_match_expand!(builder.finish(), ArrayImpl::Struct).unwrap();
         assert_eq!(arr.array_meta(), arr2.array_meta());
     }
 
@@ -636,43 +550,21 @@ mod tests {
     }
 
     #[test]
-    fn test_to_protobuf_owned() {
-        use crate::array::*;
-        let arr = StructArray::from_slices(
-            &[true],
-            vec![
-                array! { I32Array, [Some(1)] }.into(),
-                array! { F32Array, [Some(2.0)] }.into(),
-            ],
-            vec![DataType::Int32, DataType::Float32],
-        )
-        .unwrap();
-        let struct_ref = arr.value_at(0).unwrap();
-        let output = struct_ref.to_protobuf_owned();
-        let expect = StructValue::new(vec![
-            Some(1i32.to_scalar_value()),
-            Some(OrderedF32::from(2.0f32).to_scalar_value()),
-        ])
-        .to_protobuf_owned();
-        assert_eq!(output, expect);
-    }
-
-    #[test]
     fn test_serialize_deserialize() {
         let value = StructValue::new(vec![
             Some(OrderedF32::from(3.2).to_scalar_value()),
-            Some("abcde".to_string().to_scalar_value()),
+            Some("abcde".into()),
             Some(
                 StructValue::new(vec![
                     Some(OrderedF64::from(1.3).to_scalar_value()),
-                    Some("a".to_string().to_scalar_value()),
+                    Some("a".into()),
                     None,
                     Some(StructValue::new(vec![]).to_scalar_value()),
                 ])
                 .to_scalar_value(),
             ),
             None,
-            Some("".to_string().to_scalar_value()),
+            Some("".into()),
             None,
             Some(StructValue::new(vec![]).to_scalar_value()),
             Some(12345.to_scalar_value()),
@@ -711,8 +603,8 @@ mod tests {
                 children: Arc::new(fields.clone()),
             },
         );
-        builder.append(Some(struct_ref)).unwrap();
-        let array = builder.finish().unwrap();
+        builder.append(Some(struct_ref));
+        let array = builder.finish();
         let struct_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);
         struct_ref.serialize(&mut serializer).unwrap();
@@ -752,19 +644,16 @@ mod tests {
                 Ordering::Greater,
             ),
             (
-                StructValue::new(vec![Some("".to_string().to_scalar_value())]),
+                StructValue::new(vec![Some("".into())]),
                 StructValue::new(vec![None]),
                 vec![DataType::Varchar],
                 Ordering::Less,
             ),
             (
-                StructValue::new(vec![Some("abcd".to_string().to_scalar_value()), None]),
+                StructValue::new(vec![Some("abcd".into()), None]),
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 vec![
                     DataType::Varchar,
@@ -774,18 +663,12 @@ mod tests {
             ),
             (
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 vec![
                     DataType::Varchar,
@@ -818,13 +701,9 @@ mod tests {
                     children: Arc::from(fields),
                 },
             );
-            builder
-                .append(Some(StructRef::ValueRef { val: &lhs }))
-                .unwrap();
-            builder
-                .append(Some(StructRef::ValueRef { val: &rhs }))
-                .unwrap();
-            let array = builder.finish().unwrap();
+            builder.append(Some(StructRef::ValueRef { val: &lhs }));
+            builder.append(Some(StructRef::ValueRef { val: &rhs }));
+            let array = builder.finish();
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 array

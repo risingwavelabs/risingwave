@@ -1,0 +1,179 @@
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int2 + 1::int2) as t(v);
+----
+2 smallint
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int2 + 1::int4) as t(v);
+----
+2 integer
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int2 + 1::int8) as t(v);
+----
+2 bigint
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int2 + 1::decimal) as t(v);
+----
+2 numeric
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int2 + 1::float4) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int2 + 1::float8) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int4 + 1::int2) as t(v);
+----
+2 integer
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int4 + 1::int4) as t(v);
+----
+2 integer
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int4 + 1::int8) as t(v);
+----
+2 bigint
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int4 + 1::decimal) as t(v);
+----
+2 numeric
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int4 + 1::float4) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int4 + 1::float8) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int8 + 1::int2) as t(v);
+----
+2 bigint
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int8 + 1::int4) as t(v);
+----
+2 bigint
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int8 + 1::int8) as t(v);
+----
+2 bigint
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int8 + 1::decimal) as t(v);
+----
+2 numeric
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int8 + 1::float4) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int8 + 1::float8) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::decimal + 1::int2) as t(v);
+----
+2 numeric
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::decimal + 1::int4) as t(v);
+----
+2 numeric
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::decimal + 1::int8) as t(v);
+----
+2 numeric
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::decimal + 1::decimal) as t(v);
+----
+2 numeric
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::decimal + 1::float4) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::decimal + 1::float8) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::float4 + 1::int2) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::float4 + 1::int4) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::float4 + 1::int8) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::float4 + 1::decimal) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::float4 + 1::float4) as t(v);
+----
+2 real
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::float4 + 1::float8) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::float8 + 1::int2) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::float8 + 1::int4) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::float8 + 1::int8) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::float8 + 1::decimal) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::float8 + 1::float4) as t(v);
+----
+2 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::float8 + 1::float8) as t(v);
+----
+2 double precision

@@ -70,7 +70,7 @@ impl LogicalDelete {
         Ok(Self::new(input, table_source_name, source_id, table_id))
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         write!(f, "{} {{ table: {} }}", name, self.table_source_name)
     }
 

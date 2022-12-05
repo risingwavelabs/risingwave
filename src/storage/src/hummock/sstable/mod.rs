@@ -26,6 +26,9 @@ mod bloom;
 use bloom::Bloom;
 pub mod builder;
 pub use builder::*;
+pub mod writer;
+use risingwave_common::catalog::TableId;
+pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
 use bytes::{Buf, BufMut};
@@ -33,12 +36,18 @@ use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::key::{TableKey, UserKey};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
+mod delete_range_aggregator;
 mod sstable_id_manager;
 mod utils;
+pub use delete_range_aggregator::{
+    get_delete_range_epoch_from_sstable, DeleteRangeAggregator, DeleteRangeAggregatorBuilder,
+    RangeTombstonesCollector, SstableDeleteRangeIterator,
+};
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
@@ -50,7 +59,63 @@ const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
 const VERSION: u32 = 1;
 
+#[derive(Clone, PartialEq, Eq, Debug)]
+// delete keys located in [start_user_key, end_user_key)
+pub struct DeleteRangeTombstone {
+    pub start_user_key: UserKey<Vec<u8>>,
+    pub end_user_key: UserKey<Vec<u8>>,
+    pub sequence: HummockEpoch,
+}
+
+impl PartialOrd for DeleteRangeTombstone {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DeleteRangeTombstone {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.start_user_key
+            .cmp(&other.start_user_key)
+            .then_with(|| self.end_user_key.cmp(&other.end_user_key))
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
+}
+
+impl DeleteRangeTombstone {
+    pub fn new(
+        table_id: TableId,
+        start_table_key: Vec<u8>,
+        end_table_key: Vec<u8>,
+        sequence: HummockEpoch,
+    ) -> Self {
+        Self {
+            start_user_key: UserKey::new(table_id, TableKey(start_table_key)),
+            end_user_key: UserKey::new(table_id, TableKey(end_table_key)),
+            sequence,
+        }
+    }
+
+    pub fn encode(&self, buf: &mut Vec<u8>) {
+        self.start_user_key.encode_length_prefixed(buf);
+        self.end_user_key.encode_length_prefixed(buf);
+        buf.put_u64_le(self.sequence);
+    }
+
+    pub fn decode(buf: &mut &[u8]) -> Self {
+        let start_user_key = UserKey::decode_length_prefixed(buf);
+        let end_user_key = UserKey::decode_length_prefixed(buf);
+        let sequence = buf.get_u64_le();
+        Self {
+            start_user_key,
+            end_user_key,
+            sequence,
+        }
+    }
+}
+
 /// [`Sstable`] is a handle for accessing SST.
+#[derive(Clone)]
 pub struct Sstable {
     pub id: HummockSstableId,
     pub meta: SstableMeta,
@@ -58,7 +123,7 @@ pub struct Sstable {
 
 impl Debug for Sstable {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GrpcExchangeSource")
+        f.debug_struct("Sstable")
             .field("id", &self.id)
             .field("meta", &self.meta)
             .finish()
@@ -104,10 +169,14 @@ impl Sstable {
             key_range: Some(KeyRange {
                 left: self.meta.smallest_key.clone(),
                 right: self.meta.largest_key.clone(),
-                inf: false,
+                right_exclusive: false,
             }),
             file_size: self.meta.estimated_size as u64,
             table_ids: vec![],
+            meta_offset: self.meta.meta_offset,
+            stale_key_count: 0,
+            total_key_count: self.meta.key_count as u64,
+            divide_version: 0,
         }
     }
 }
@@ -117,6 +186,7 @@ pub struct BlockMeta {
     pub smallest_key: Vec<u8>,
     pub offset: u32,
     pub len: u32,
+    pub uncompressed_size: u32,
 }
 
 impl BlockMeta {
@@ -128,23 +198,26 @@ impl BlockMeta {
     pub fn encode(&self, buf: &mut Vec<u8>) {
         buf.put_u32_le(self.offset);
         buf.put_u32_le(self.len);
+        buf.put_u32_le(self.uncompressed_size);
         put_length_prefixed_slice(buf, &self.smallest_key);
     }
 
     pub fn decode(buf: &mut &[u8]) -> Self {
         let offset = buf.get_u32_le();
         let len = buf.get_u32_le();
+        let uncompressed_size = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         Self {
             smallest_key,
             offset,
             len,
+            uncompressed_size,
         }
     }
 
     #[inline]
     pub fn encoded_size(&self) -> usize {
-        12 /* offset + len + key len */ + self.smallest_key.len()
+        16 /* offset + len + key len + uncompressed size */ + self.smallest_key.len()
     }
 }
 
@@ -156,6 +229,8 @@ pub struct SstableMeta {
     pub key_count: u32,
     pub smallest_key: Vec<u8>,
     pub largest_key: Vec<u8>,
+    pub meta_offset: u64,
+    pub range_tombstone_list: Vec<DeleteRangeTombstone>,
     /// Format version, for further compatibility.
     pub version: u32,
 }
@@ -170,24 +245,35 @@ impl SstableMeta {
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
+    /// | range-tombstone 0 | ... | range-tombstone M-1 |
     /// | checksum (8B) | version (4B) | magic (4B) |
     /// ```
     pub fn encode_to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(DEFAULT_META_BUFFER_CAPACITY);
+        self.encode_to(&mut buf);
+        buf
+    }
+
+    pub fn encode_to(&self, buf: &mut Vec<u8>) {
+        let start_offset = buf.len();
         buf.put_u32_le(self.block_metas.len() as u32);
         for block_meta in &self.block_metas {
-            block_meta.encode(&mut buf);
+            block_meta.encode(buf);
         }
-        put_length_prefixed_slice(&mut buf, &self.bloom_filter);
-        buf.put_u32_le(self.estimated_size as u32);
-        buf.put_u32_le(self.key_count as u32);
-        put_length_prefixed_slice(&mut buf, &self.smallest_key);
-        put_length_prefixed_slice(&mut buf, &self.largest_key);
-        let checksum = xxhash64_checksum(&buf);
+        put_length_prefixed_slice(buf, &self.bloom_filter);
+        buf.put_u32_le(self.estimated_size);
+        buf.put_u32_le(self.key_count);
+        put_length_prefixed_slice(buf, &self.smallest_key);
+        put_length_prefixed_slice(buf, &self.largest_key);
+        buf.put_u64_le(self.meta_offset);
+        buf.put_u32_le(self.range_tombstone_list.len() as u32);
+        for tombstone in &self.range_tombstone_list {
+            tombstone.encode(buf);
+        }
+        let checksum = xxhash64_checksum(&buf[start_offset..]);
         buf.put_u64_le(checksum);
         buf.put_u32_le(VERSION);
         buf.put_u32_le(MAGIC);
-        buf
     }
 
     pub fn decode(buf: &mut &[u8]) -> HummockResult<Self> {
@@ -220,6 +306,13 @@ impl SstableMeta {
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
+        let meta_offset = buf.get_u64_le();
+        let range_del_count = buf.get_u32_le() as usize;
+        let mut range_tombstone_list = Vec::with_capacity(range_del_count);
+        for _ in 0..range_del_count {
+            let tombstone = DeleteRangeTombstone::decode(buf);
+            range_tombstone_list.push(tombstone);
+        }
 
         Ok(Self {
             block_metas,
@@ -228,6 +321,8 @@ impl SstableMeta {
             key_count,
             smallest_key,
             largest_key,
+            meta_offset,
+            range_tombstone_list,
             version,
         })
     }
@@ -240,6 +335,12 @@ impl SstableMeta {
             .iter()
             .map(|block_meta| block_meta.encoded_size())
             .sum::<usize>()
+            + 4 // delete range tombstones len
+            + self
+            .range_tombstone_list
+            .iter()
+            .map(| tombstone| 16 + tombstone.start_user_key.encoded_len() + tombstone.end_user_key.encoded_len())
+            .sum::<usize>()
             + 4 // bloom filter len
             + self.bloom_filter.len()
             + 4 // estimated size
@@ -248,6 +349,7 @@ impl SstableMeta {
             + self.smallest_key.len()
             + 4 // key len
             + self.largest_key.len()
+            + 8 // footer
             + 8 // checksum
             + 4 // version
             + 4 // magic
@@ -271,11 +373,13 @@ mod tests {
                     smallest_key: b"0-smallest-key".to_vec(),
                     offset: 0,
                     len: 100,
+                    uncompressed_size: 0,
                 },
                 BlockMeta {
                     smallest_key: b"5-some-key".to_vec(),
                     offset: 100,
                     len: 100,
+                    uncompressed_size: 0,
                 },
             ],
             bloom_filter: b"0123456789".to_vec(),
@@ -283,9 +387,13 @@ mod tests {
             key_count: 123,
             smallest_key: b"0-smallest-key".to_vec(),
             largest_key: b"9-largest-key".to_vec(),
+            meta_offset: 123,
+            range_tombstone_list: vec![],
             version: VERSION,
         };
+        let sz = meta.encoded_size();
         let buf = meta.encode_to_bytes();
+        assert_eq!(sz, buf.len());
         let decoded_meta = SstableMeta::decode(&mut &buf[..]).unwrap();
         assert_eq!(decoded_meta, meta);
     }

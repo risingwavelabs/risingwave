@@ -14,6 +14,8 @@
 
 //! Configures the RisingWave binary, including logging, locks, panic handler, etc.
 
+#![feature(panic_update_hook)]
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -51,8 +53,6 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
 }
 
 pub struct LoggerSettings {
-    /// Enable Jaeger tracing.
-    enable_jaeger_tracing: bool,
     /// Enable tokio console output.
     enable_tokio_console: bool,
     /// Enable colorful output in console.
@@ -61,12 +61,11 @@ pub struct LoggerSettings {
 
 impl LoggerSettings {
     pub fn new_default() -> Self {
-        Self::new(false, false)
+        Self::new(false)
     }
 
-    pub fn new(enable_jaeger_tracing: bool, enable_tokio_console: bool) -> Self {
+    pub fn new(enable_tokio_console: bool) -> Self {
         Self {
-            enable_jaeger_tracing,
             enable_tokio_console,
             colorful: console::colors_enabled_stderr(),
         }
@@ -74,15 +73,17 @@ impl LoggerSettings {
 }
 
 /// Set panic hook to abort the process (without losing debug info and stack trace).
-pub fn set_panic_abort() {
-    use std::panic;
-
-    let default_hook = panic::take_hook();
-
-    panic::set_hook(Box::new(move |info| {
+pub fn set_panic_hook() {
+    std::panic::update_hook(|default_hook, info| {
         default_hook(info);
+
+        if let Some(context) = async_stack_trace::current_context() {
+            println!("\n\n*** async stack trace context of current task ***\n");
+            println!("{}\n", context);
+        }
+
         std::process::abort();
-    }));
+    });
 }
 
 /// Init logger for RisingWave binaries.
@@ -94,13 +95,18 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_ansi(settings.colorful);
 
         let filter = filter::Targets::new()
+            .with_target("aws_sdk_s3", Level::INFO)
+            .with_target("aws_config", Level::WARN)
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("hyper", Level::WARN)
             .with_target("h2", Level::WARN)
             .with_target("tower", Level::WARN)
+            .with_target("tonic", Level::WARN)
             .with_target("isahc", Level::WARN)
-            .with_target("console_subscriber", Level::WARN);
+            .with_target("console_subscriber", Level::WARN)
+            .with_target("reqwest", Level::WARN)
+            .with_target("sled", Level::INFO);
 
         // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
         // needed.
@@ -113,10 +119,6 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
         fmt_layer.with_filter(filter)
     };
-
-    if settings.enable_jaeger_tracing {
-        todo!("jaeger tracing is not supported for now, and it will be replaced with minitrace jaeger tracing. Tracking issue: https://github.com/singularity-data/risingwave/issues/4120");
-    }
 
     let tokio_console_layer = if settings.enable_tokio_console {
         let (console_layer, server) = console_subscriber::ConsoleLayer::builder()
@@ -225,7 +227,7 @@ pub fn main_okk<F>(f: F) -> F::Output
 where
     F: Future + Send + 'static,
 {
-    set_panic_abort();
+    set_panic_hook();
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
 

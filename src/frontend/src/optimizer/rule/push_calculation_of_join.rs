@@ -94,9 +94,7 @@ impl Rule for PushCalculationOfJoinRule {
             right = new_input(right, right_exprs);
         }
 
-        Some(
-            LogicalJoin::new_with_output_indices(left, right, join_type, on, output_indices).into(),
-        )
+        Some(LogicalJoin::with_output_indices(left, right, join_type, on, output_indices).into())
     }
 }
 
@@ -131,9 +129,8 @@ impl PushCalculationOfJoinRule {
                 continue;
             }
             let (ty, left, right) = func.clone().decompose_as_binary();
-            // we just cast the return types of inputs of equal conditions for `HashJoin`.
-            // non-equal conditions don't need unnecessary explicit cast.
-            let can_cast = ty == Type::Equal;
+            // we just cast the return types of inputs of binary predicates for `HashJoin` and
+            // `DynamicFilter`.
             let left_input_bits = left.collect_input_refs(left_col_num + right_col_num);
             let right_input_bits = right.collect_input_refs(left_col_num + right_col_num);
             let (mut left, mut right) = if left_input_bits.is_subset(&left_bit_map)
@@ -147,19 +144,16 @@ impl PushCalculationOfJoinRule {
             } else {
                 continue;
             };
-            // when both `left` and `right` are `input_ref`, and they have the same return type or
-            // `func` is non-equal comparison expression, there is no need to calculate them in
-            // project.
+            // when both `left` and `right` are `input_ref`, and they have the same return type
+            // there is no need to calculate them in project.
             if left.as_input_ref().is_some()
                 && right.as_input_ref().is_some()
-                && (left.return_type() == right.return_type() || !can_cast)
+                && left.return_type() == right.return_type()
             {
                 continue;
             }
-            if can_cast {
-                // align return types to avoid error when executing join.
-                align_types([&mut left, &mut right].into_iter()).unwrap();
-            }
+            // align return types to avoid error when executing join.
+            align_types([&mut left, &mut right].into_iter()).unwrap();
             left_exprs.push(left);
             {
                 let mut shift_with_offset = ColIndexMapping::with_shift_offset(

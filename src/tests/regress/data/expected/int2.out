@@ -51,7 +51,7 @@ SELECT * FROM INT2_TBL;
  -32767
 (5 rows)
 
-SELECT i.* FROM INT2_TBL i WHERE i.f1 <> int2 '0';
+SELECT i.* FROM INT2_TBL i WHERE i.f1 <> smallint '0';
    f1   
 --------
    1234
@@ -60,7 +60,7 @@ SELECT i.* FROM INT2_TBL i WHERE i.f1 <> int2 '0';
  -32767
 (4 rows)
 
-SELECT i.* FROM INT2_TBL i WHERE i.f1 <> int4 '0';
+SELECT i.* FROM INT2_TBL i WHERE i.f1 <> int '0';
    f1   
 --------
    1234
@@ -69,33 +69,33 @@ SELECT i.* FROM INT2_TBL i WHERE i.f1 <> int4 '0';
  -32767
 (4 rows)
 
-SELECT i.* FROM INT2_TBL i WHERE i.f1 = int2 '0';
+SELECT i.* FROM INT2_TBL i WHERE i.f1 = smallint '0';
  f1 
 ----
   0
 (1 row)
 
-SELECT i.* FROM INT2_TBL i WHERE i.f1 = int4 '0';
+SELECT i.* FROM INT2_TBL i WHERE i.f1 = int '0';
  f1 
 ----
   0
 (1 row)
 
-SELECT i.* FROM INT2_TBL i WHERE i.f1 < int2 '0';
+SELECT i.* FROM INT2_TBL i WHERE i.f1 < smallint '0';
    f1   
 --------
   -1234
  -32767
 (2 rows)
 
-SELECT i.* FROM INT2_TBL i WHERE i.f1 < int4 '0';
+SELECT i.* FROM INT2_TBL i WHERE i.f1 < int '0';
    f1   
 --------
   -1234
  -32767
 (2 rows)
 
-SELECT i.* FROM INT2_TBL i WHERE i.f1 <= int2 '0';
+SELECT i.* FROM INT2_TBL i WHERE i.f1 <= smallint '0';
    f1   
 --------
       0
@@ -103,7 +103,7 @@ SELECT i.* FROM INT2_TBL i WHERE i.f1 <= int2 '0';
  -32767
 (3 rows)
 
-SELECT i.* FROM INT2_TBL i WHERE i.f1 <= int4 '0';
+SELECT i.* FROM INT2_TBL i WHERE i.f1 <= int '0';
    f1   
 --------
       0
@@ -111,21 +111,21 @@ SELECT i.* FROM INT2_TBL i WHERE i.f1 <= int4 '0';
  -32767
 (3 rows)
 
-SELECT i.* FROM INT2_TBL i WHERE i.f1 > int2 '0';
+SELECT i.* FROM INT2_TBL i WHERE i.f1 > smallint '0';
   f1   
 -------
   1234
  32767
 (2 rows)
 
-SELECT i.* FROM INT2_TBL i WHERE i.f1 > int4 '0';
+SELECT i.* FROM INT2_TBL i WHERE i.f1 > int '0';
   f1   
 -------
   1234
  32767
 (2 rows)
 
-SELECT i.* FROM INT2_TBL i WHERE i.f1 >= int2 '0';
+SELECT i.* FROM INT2_TBL i WHERE i.f1 >= smallint '0';
   f1   
 -------
      0
@@ -133,7 +133,7 @@ SELECT i.* FROM INT2_TBL i WHERE i.f1 >= int2 '0';
  32767
 (3 rows)
 
-SELECT i.* FROM INT2_TBL i WHERE i.f1 >= int4 '0';
+SELECT i.* FROM INT2_TBL i WHERE i.f1 >= int '0';
   f1   
 -------
      0
@@ -142,14 +142,14 @@ SELECT i.* FROM INT2_TBL i WHERE i.f1 >= int4 '0';
 (3 rows)
 
 -- positive odds
-SELECT i.* FROM INT2_TBL i WHERE (i.f1 % int2 '2') = int2 '1';
+SELECT i.* FROM INT2_TBL i WHERE (i.f1 % smallint '2') = smallint '1';
   f1   
 -------
  32767
 (1 row)
 
 -- any evens
-SELECT i.* FROM INT2_TBL i WHERE (i.f1 % int4 '2') = int2 '0';
+SELECT i.* FROM INT2_TBL i WHERE (i.f1 % int '2') = smallint '0';
   f1   
 -------
      0
@@ -157,9 +157,9 @@ SELECT i.* FROM INT2_TBL i WHERE (i.f1 % int4 '2') = int2 '0';
  -1234
 (3 rows)
 
-SELECT i.f1, i.f1 * int2 '2' AS x FROM INT2_TBL i;
+SELECT i.f1, i.f1 * smallint '2' AS x FROM INT2_TBL i;
 ERROR:  smallint out of range
-SELECT i.f1, i.f1 * int2 '2' AS x FROM INT2_TBL i
+SELECT i.f1, i.f1 * smallint '2' AS x FROM INT2_TBL i
 WHERE abs(f1) < 16384;
   f1   |   x   
 -------+-------
@@ -168,7 +168,7 @@ WHERE abs(f1) < 16384;
  -1234 | -2468
 (3 rows)
 
-SELECT i.f1, i.f1 * int4 '2' AS x FROM INT2_TBL i;
+SELECT i.f1, i.f1 * int '2' AS x FROM INT2_TBL i;
    f1   |   x    
 --------+--------
       0 |      0
@@ -178,9 +178,9 @@ SELECT i.f1, i.f1 * int4 '2' AS x FROM INT2_TBL i;
  -32767 | -65534
 (5 rows)
 
-SELECT i.f1, i.f1 + int2 '2' AS x FROM INT2_TBL i;
+SELECT i.f1, i.f1 + smallint '2' AS x FROM INT2_TBL i;
 ERROR:  smallint out of range
-SELECT i.f1, i.f1 + int2 '2' AS x FROM INT2_TBL i
+SELECT i.f1, i.f1 + smallint '2' AS x FROM INT2_TBL i
 WHERE f1 < 32766;
    f1   |   x    
 --------+--------
@@ -190,7 +190,7 @@ WHERE f1 < 32766;
  -32767 | -32765
 (4 rows)
 
-SELECT i.f1, i.f1 + int4 '2' AS x FROM INT2_TBL i;
+SELECT i.f1, i.f1 + int '2' AS x FROM INT2_TBL i;
    f1   |   x    
 --------+--------
       0 |      2
@@ -200,9 +200,9 @@ SELECT i.f1, i.f1 + int4 '2' AS x FROM INT2_TBL i;
  -32767 | -32765
 (5 rows)
 
-SELECT i.f1, i.f1 - int2 '2' AS x FROM INT2_TBL i;
+SELECT i.f1, i.f1 - smallint '2' AS x FROM INT2_TBL i;
 ERROR:  smallint out of range
-SELECT i.f1, i.f1 - int2 '2' AS x FROM INT2_TBL i
+SELECT i.f1, i.f1 - smallint '2' AS x FROM INT2_TBL i
 WHERE f1 > -32767;
   f1   |   x   
 -------+-------
@@ -212,7 +212,7 @@ WHERE f1 > -32767;
  32767 | 32765
 (4 rows)
 
-SELECT i.f1, i.f1 - int4 '2' AS x FROM INT2_TBL i;
+SELECT i.f1, i.f1 - int '2' AS x FROM INT2_TBL i;
    f1   |   x    
 --------+--------
       0 |     -2
@@ -222,7 +222,7 @@ SELECT i.f1, i.f1 - int4 '2' AS x FROM INT2_TBL i;
  -32767 | -32769
 (5 rows)
 
-SELECT i.f1, i.f1 / int2 '2' AS x FROM INT2_TBL i;
+SELECT i.f1, i.f1 / smallint '2' AS x FROM INT2_TBL i;
    f1   |   x    
 --------+--------
       0 |      0
@@ -232,7 +232,7 @@ SELECT i.f1, i.f1 / int2 '2' AS x FROM INT2_TBL i;
  -32767 | -16383
 (5 rows)
 
-SELECT i.f1, i.f1 / int4 '2' AS x FROM INT2_TBL i;
+SELECT i.f1, i.f1 / int '2' AS x FROM INT2_TBL i;
    f1   |   x    
 --------+--------
       0 |      0
@@ -306,3 +306,4 @@ FROM (VALUES (-2.5::numeric),
   2.5 |          3
 (7 rows)
 
+DROP TABLE INT2_TBL;

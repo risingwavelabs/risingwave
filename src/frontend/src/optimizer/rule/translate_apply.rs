@@ -40,15 +40,16 @@ impl Rule for TranslateApplyRule {
         let mut data_types = HashMap::new();
         let mut index = 0;
 
-        let new_apply_left = {
-            let rewritten_left = Self::rewrite(
-                &left,
-                correlated_indices.clone(),
-                0,
-                &mut index_mapping,
-                &mut data_types,
-                &mut index,
-            )?;
+        // First try to rewrite the left side of the apply if it is SPJ.
+        // TODO: remove the rewrite and always use the general way to calculate the domain.
+        let domain: PlanRef = if let Some(rewritten_left) = Self::rewrite(
+            &left,
+            correlated_indices.clone(),
+            0,
+            &mut index_mapping,
+            &mut data_types,
+            &mut index,
+        ) {
             // This `LogicalProject` is used to make sure that after `LogicalApply`'s left was
             // rewritten, the new index of `correlated_index` is always at its position in
             // `correlated_indices`.
@@ -67,20 +68,28 @@ impl Rule for TranslateApplyRule {
             let distinct =
                 LogicalAgg::new(vec![], (0..project.schema().len()).collect_vec(), project);
             distinct.into()
+        } else {
+            // The left side of the apply is not SPJ. We need to use the general way to calculate
+            // the domain. Distinct + Project + The Left of Apply
+            let distinct = LogicalAgg::new(
+                vec![],
+                correlated_indices.clone().into_iter().collect_vec(),
+                left,
+            );
+            distinct.into()
         };
 
         let eq_predicates = correlated_indices
             .into_iter()
             .enumerate()
             .map(|(i, correlated_index)| {
-                assert_eq!(i, index_mapping.map(correlated_index));
                 let shifted_index = i + apply_left_len;
-                let data_type = data_types.get(&correlated_index).unwrap().clone();
+                let data_type = domain.schema().fields()[i].data_type.clone();
                 let left = InputRef::new(correlated_index, data_type.clone());
                 let right = InputRef::new(shifted_index, data_type);
-                // TODO: use is not distinct from instead of equal
+                // use null-safe equal
                 FunctionCall::new_unchecked(
-                    ExprType::Equal,
+                    ExprType::IsNotDistinctFrom,
                     vec![left.into(), right.into()],
                     DataType::Boolean,
                 )
@@ -88,7 +97,7 @@ impl Rule for TranslateApplyRule {
             })
             .collect::<Vec<ExprImpl>>();
 
-        let new_node = apply.clone().translate_apply(new_apply_left, eq_predicates);
+        let new_node = apply.clone().translate_apply(domain, eq_predicates);
         Some(new_node)
     }
 }

@@ -17,9 +17,10 @@ use std::sync::Arc;
 
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListValue, Row,
+    ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListValue,
     StructArrayBuilder, StructValue,
 };
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -52,11 +53,8 @@ impl Expression for NestedConstructExpression {
                     children: t.fields.clone().into(),
                 },
             );
-            builder.append_array_refs(columns, input.capacity())?;
-            builder
-                .finish()
-                .map(|a| Arc::new(ArrayImpl::Struct(a)))
-                .map_err(Into::into)
+            builder.append_array_refs(columns, input.capacity());
+            Ok(Arc::new(ArrayImpl::Struct(builder.finish())))
         } else if let DataType::List { datatype } = &self.data_type {
             let columns = columns.into_iter().map(Column::new).collect();
             let chunk = DataChunk::new(columns, input.vis().clone());
@@ -66,17 +64,14 @@ impl Expression for NestedConstructExpression {
                     datatype: datatype.clone(),
                 },
             );
-            chunk.rows_with_holes().try_for_each(|row| {
+            for row in chunk.rows_with_holes() {
                 if let Some(row) = row {
-                    builder.append_row_ref(row)
+                    builder.append_row_ref(row);
                 } else {
-                    builder.append_null()
+                    builder.append_null();
                 }
-            })?;
-            builder
-                .finish()
-                .map(|a| Arc::new(ArrayImpl::List(a)))
-                .map_err(Into::into)
+            }
+            Ok(Arc::new(ArrayImpl::List(builder.finish())))
         } else {
             Err(ExprError::UnsupportedFunction(
                 "expects struct or list type".to_string(),
@@ -132,7 +127,8 @@ impl<'a> TryFrom<&'a ExprNode> for NestedConstructExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{DataChunk, ListValue, Row};
+    use risingwave_common::array::{DataChunk, ListValue};
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 
     use super::NestedConstructExpression;

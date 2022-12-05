@@ -12,118 +12,79 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::fmt;
 
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::utils::TableCatalogBuilder;
-use super::{PlanBase, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{Distribution, Order, OrderDisplay};
-use crate::{PlanRef, TableCatalog};
+use super::{LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::property::{Order, OrderDisplay};
+use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::PlanRef;
 
 #[derive(Debug, Clone)]
 pub struct StreamGroupTopN {
     pub base: PlanBase,
-    input: PlanRef,
-    group_key: Vec<usize>,
-    limit: usize,
-    offset: usize,
-    order: Order,
+    logical: LogicalTopN,
+    /// an optional column index which is the vnode of each row computed by the input's consistent
+    /// hash distribution
+    vnode_col_idx: Option<usize>,
 }
 
 impl StreamGroupTopN {
-    pub fn new(
-        input: PlanRef,
-        group_key: Vec<usize>,
-        limit: usize,
-        offset: usize,
-        order: Order,
-    ) -> Self {
-        let dist = match input.distribution() {
-            Distribution::HashShard(_) => Distribution::HashShard(group_key.clone()),
-            Distribution::UpstreamHashShard(_) => {
-                Distribution::UpstreamHashShard(group_key.clone())
-            }
-            _ => input.distribution().clone(),
-        };
+    pub fn new(logical: LogicalTopN, vnode_col_idx: Option<usize>) -> Self {
+        assert!(!logical.group_key().is_empty());
+        assert!(logical.limit() > 0);
+        let input = logical.input();
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             input.logical_pk().to_vec(),
             input.functional_dependency().clone(),
-            dist,
+            input.distribution().clone(),
             false,
         );
         StreamGroupTopN {
             base,
-            input,
-            group_key,
-            limit,
-            offset,
-            order,
+            logical,
+            vnode_col_idx,
         }
     }
 
-    pub fn infer_internal_table_catalog(&self) -> TableCatalog {
-        let schema = &self.base.schema;
-        let dist_keys = self.base.dist.dist_column_indices().to_vec();
-        let pk_indices = &self.base.logical_pk;
-        let columns_fields = schema.fields().to_vec();
-        let field_order = &self.order.field_order;
-        let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+    pub fn limit(&self) -> u64 {
+        self.logical.limit()
+    }
 
-        columns_fields.iter().for_each(|field| {
-            internal_table_catalog_builder.add_column(field);
-        });
+    pub fn offset(&self) -> u64 {
+        self.logical.offset()
+    }
 
-        // Here we want the state table to store the states in the order we want, fisrtly in
-        // ascending order by the columns specified by the group key, then by the columns specified
-        // by `order`. If we do that, when the later group topN operator does a prefix scannimg with
-        // the group key, we can fetch the data in the desired order.
+    pub fn topn_order(&self) -> &Order {
+        self.logical.topn_order()
+    }
 
-        // Used to prevent duplicate additions
-        let mut order_cols = HashSet::new();
-        // order by group key first
-        self.group_key.iter().for_each(|idx| {
-            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
-            order_cols.insert(*idx);
-        });
+    pub fn group_key(&self) -> &[usize] {
+        self.logical.group_key()
+    }
 
-        // order by field order recorded in `order` secondly.
-        field_order.iter().for_each(|field_order| {
-            if !order_cols.contains(&field_order.index) {
-                internal_table_catalog_builder
-                    .add_order_column(field_order.index, OrderType::from(field_order.direct));
-                order_cols.insert(field_order.index);
-            }
-        });
-
-        // record pk indices in table catalog
-        pk_indices.iter().for_each(|idx| {
-            if !order_cols.contains(idx) {
-                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
-                order_cols.insert(*idx);
-            }
-        });
-        internal_table_catalog_builder.build(dist_keys, self.base.append_only)
+    pub fn with_ties(&self) -> bool {
+        self.logical.with_ties()
     }
 }
 
-impl ToStreamProst for StreamGroupTopN {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+impl StreamNode for StreamGroupTopN {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let group_key = self.group_key.iter().map(|idx| *idx as u32).collect();
-
-        if self.limit == 0 {
-            panic!("topN's limit shouldn't be 0.");
-        }
+        let table = self
+            .logical
+            .infer_internal_table_catalog(self.vnode_col_idx)
+            .with_id(state.gen_table_id_wrapped());
         let group_topn_node = GroupTopNNode {
-            limit: self.limit as u64,
-            offset: self.offset as u64,
-            group_key,
-            table: Some(self.infer_internal_table_catalog().to_state_table_prost()),
+            limit: self.limit(),
+            offset: self.offset(),
+            with_ties: self.with_ties(),
+            group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
+            table: Some(table.to_internal_table_prost()),
+            order_by_len: self.topn_order().len() as u32,
         };
 
         ProstStreamNode::GroupTopN(group_topn_node)
@@ -131,7 +92,7 @@ impl ToStreamProst for StreamGroupTopN {
 }
 
 impl fmt::Display for StreamGroupTopN {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamGroupTopN");
         let input = self.input();
         let input_schema = input.schema();
@@ -140,16 +101,19 @@ impl fmt::Display for StreamGroupTopN {
             &format!(
                 "{}",
                 OrderDisplay {
-                    order: self.order(),
+                    order: self.topn_order(),
                     input_schema
                 }
             ),
         );
         builder
-            .field("limit", &format_args!("{}", self.limit))
-            .field("offset", &format_args!("{}", self.offset))
-            .field("group_key", &format_args!("{:?}", self.group_key))
-            .finish()
+            .field("limit", &self.limit())
+            .field("offset", &self.offset())
+            .field("group_key", &self.group_key());
+        if self.with_ties() {
+            builder.field("with_ties", &format_args!("{}", "true"));
+        }
+        builder.finish()
     }
 }
 
@@ -157,16 +121,10 @@ impl_plan_tree_node_for_unary! { StreamGroupTopN }
 
 impl PlanTreeNodeUnary for StreamGroupTopN {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.logical.input()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(
-            input,
-            self.group_key.clone(),
-            self.limit,
-            self.offset,
-            self.order.clone(),
-        )
+        Self::new(self.logical.clone_with_input(input), self.vnode_col_idx)
     }
 }

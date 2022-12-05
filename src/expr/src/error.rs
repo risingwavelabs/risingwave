@@ -17,6 +17,7 @@ use regex;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
+use risingwave_pb::ProstFieldNotFound;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -31,7 +32,7 @@ pub enum ExprError {
     #[error("Can't cast {0:?} to {1:?}")]
     Cast2(DataType, DataType),
 
-    #[error("Out of range")]
+    #[error("Numeric out of range")]
     NumericOutOfRange,
 
     #[error("Division by zero")]
@@ -45,6 +46,9 @@ pub enum ExprError {
 
     #[error("Array error: {0}")]
     Array(#[from] ArrayError),
+
+    #[error("More than one row returned by {0} used as an expression")]
+    MaxOneRow(&'static str),
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
@@ -62,5 +66,14 @@ impl From<regex::Error> for ExprError {
             name: "pattern",
             reason: re.to_string(),
         }
+    }
+}
+
+impl From<ProstFieldNotFound> for ExprError {
+    fn from(err: ProstFieldNotFound) -> Self {
+        Self::Internal(anyhow::anyhow!(
+            "Failed to decode prost: field not found `{}`",
+            err.0
+        ))
     }
 }

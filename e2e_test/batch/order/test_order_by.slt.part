@@ -108,7 +108,7 @@ SELECT b, a FROM test WHERE a < 13 ORDER BY b DESC;
 21	12
 
 # order by expression
-# https://github.com/singularity-data/risingwave/issues/4681
+# https://github.com/risingwavelabs/risingwave/issues/4681
 # query IR
 # SELECT b % 2 AS f, SUM(a) FROM test GROUP BY f ORDER BY b % 2;
 query II

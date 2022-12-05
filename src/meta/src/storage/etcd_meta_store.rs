@@ -16,13 +16,13 @@ use std::sync::atomic::{self, AtomicI64};
 
 use anyhow;
 use async_trait::async_trait;
-use etcd_client::{
-    Client, Compare, CompareOp, Error as EtcdError, GetOptions, KvClient, Txn, TxnOp,
-};
+use etcd_client::{Client, Compare, CompareOp, Error as EtcdError, GetOptions, Txn, TxnOp};
 use futures::Future;
+use itertools::Itertools;
 use tokio::sync::Mutex;
 
 use super::{Key, MetaStore, MetaStoreError, MetaStoreResult, Snapshot, Transaction, Value};
+use crate::storage::etcd_retry_client::EtcdRetryClient as KvClient;
 
 impl From<EtcdError> for MetaStoreError {
     fn from(err: EtcdError) -> Self {
@@ -34,7 +34,7 @@ const REVISION_UNINITIALIZED: i64 = -1;
 
 #[derive(Clone)]
 pub struct EtcdMetaStore {
-    client: Client,
+    client: KvClient,
 }
 pub struct EtcdSnapshot {
     client: KvClient,
@@ -123,7 +123,7 @@ struct ListViewer {
 }
 
 impl SnapshotViewer for ListViewer {
-    type Output = Vec<Vec<u8>>;
+    type Output = Vec<(Vec<u8>, Vec<u8>)>;
 
     type OutputFuture<'a> = impl Future<Output = MetaStoreResult<(i64, Self::Output)>> + 'a;
 
@@ -142,19 +142,28 @@ impl SnapshotViewer for ListViewer {
                     "Etcd response missing header"
                 )));
             };
-            let value = res.kvs().iter().map(|kv| kv.value().to_vec()).collect();
-            Ok((new_revision, value))
+            let kv = res
+                .kvs()
+                .iter()
+                .map(|kv| (kv.key().to_vec(), kv.value().to_vec()))
+                .collect();
+            Ok((new_revision, kv))
         }
     }
 }
 
 #[async_trait]
 impl Snapshot for EtcdSnapshot {
-    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<Vec<u8>>> {
+    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>> {
         let view = ListViewer {
             key: encode_etcd_key(cf, &[]),
         };
-        self.view_inner(view).await
+        let cf_bytes = cf.as_bytes().len() + 1;
+        self.view_inner(view).await.map(|kvs| {
+            kvs.into_iter()
+                .map(|(mut k, v)| (k.drain(cf_bytes..).collect_vec(), v))
+                .collect()
+        })
     }
 
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>> {
@@ -167,7 +176,9 @@ impl Snapshot for EtcdSnapshot {
 
 impl EtcdMetaStore {
     pub fn new(client: Client) -> Self {
-        Self { client }
+        Self {
+            client: KvClient::new(client.kv_client()),
+        }
     }
 }
 
@@ -177,7 +188,7 @@ impl MetaStore for EtcdMetaStore {
 
     async fn snapshot(&self) -> Self::Snapshot {
         EtcdSnapshot {
-            client: self.client.kv_client(),
+            client: self.client.clone(),
             revision: AtomicI64::new(REVISION_UNINITIALIZED),
             init_lock: Default::default(),
         }
@@ -185,17 +196,13 @@ impl MetaStore for EtcdMetaStore {
 
     async fn put_cf(&self, cf: &str, key: Key, value: Value) -> MetaStoreResult<()> {
         self.client
-            .kv_client()
             .put(encode_etcd_key(cf, &key), value, None)
             .await?;
         Ok(())
     }
 
     async fn delete_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<()> {
-        self.client
-            .kv_client()
-            .delete(encode_etcd_key(cf, key), None)
-            .await?;
+        self.client.delete(encode_etcd_key(cf, key), None).await?;
         Ok(())
     }
 
@@ -229,7 +236,7 @@ impl MetaStore for EtcdMetaStore {
             .collect::<Vec<_>>();
 
         let etcd_txn = Txn::new().when(when).and_then(then);
-        if !self.client.kv_client().txn(etcd_txn).await?.succeeded() {
+        if !self.client.txn(etcd_txn).await?.succeeded() {
             Err(MetaStoreError::TransactionAbort())
         } else {
             Ok(())

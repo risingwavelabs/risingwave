@@ -17,6 +17,7 @@ use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
@@ -25,7 +26,7 @@ pub async fn handle_create_database(
     context: OptimizerContext,
     database_name: ObjectName,
     if_not_exist: bool,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let database_name = Binder::resolve_database_name(database_name)?;
 
@@ -33,7 +34,7 @@ pub async fn handle_create_database(
         let user_reader = session.env().user_info_reader();
         let reader = user_reader.read_guard();
         if let Some(info) = reader.get_user_by_name(session.user_name()) {
-            if !info.can_create_db && !info.is_supper {
+            if !info.can_create_db && !info.is_super {
                 return Err(PermissionDenied("Do not have the privilege".to_string()).into());
             }
         } else {
@@ -49,7 +50,7 @@ pub async fn handle_create_database(
             return if if_not_exist {
                 Ok(PgResponse::empty_result_with_notice(
                     StatementType::CREATE_DATABASE,
-                    format!("database {} exists, skipping", database_name),
+                    format!("database \"{}\" exists, skipping", database_name),
                 ))
             } else {
                 Err(CatalogError::Duplicated("database", database_name).into())

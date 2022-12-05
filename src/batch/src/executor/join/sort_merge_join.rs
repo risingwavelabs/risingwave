@@ -18,6 +18,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
+use risingwave_common::row::RowExt;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -37,9 +38,9 @@ pub struct SortMergeJoinExecutor {
     sort_order: OrderType,
     /// Currently only inner join is supported.
     join_type: JoinType,
-    /// Original output schema
+    /// Original output schema.
     original_schema: Schema,
-    /// Actual output schema
+    /// Actual output schema.
     schema: Schema,
     /// We may only need certain columns.
     /// output_indices are the indices of the columns that we needed.
@@ -52,8 +53,10 @@ pub struct SortMergeJoinExecutor {
     probe_side_source: BoxedExecutor,
     /// Build side source (right table).
     build_side_source: BoxedExecutor,
-    /// Identity string of the executor
+    /// Identity string of the executor.
     identity: String,
+    /// The maximum size of the chunk produced by executor at a time.
+    chunk_size: usize,
 }
 
 impl Executor for SortMergeJoinExecutor {
@@ -83,7 +86,7 @@ impl SortMergeJoinExecutor {
     async fn do_execute(self: Box<Self>) {
         let data_types = self.original_schema.data_types();
 
-        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types);
+        let mut chunk_builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
         // TODO: support more join types
         let stream = match (self.sort_order, self.join_type) {
@@ -104,7 +107,7 @@ impl SortMergeJoinExecutor {
         }
 
         // Handle remaining chunk
-        if let Some(chunk) = chunk_builder.consume_all()? {
+        if let Some(chunk) = chunk_builder.consume_all() {
             yield chunk.reorder_columns(&self.output_indices)
         }
     }
@@ -133,7 +136,7 @@ impl SortMergeJoinExecutor {
                 if let Some(last_probe_key) = &last_probe_key && *last_probe_key == probe_key {
                     for (chunk, row_idx) in &last_matched_build_rows {
                         let build_row = chunk.row_at_unchecked_vis(*row_idx);
-                        if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(probe_row.values().chain(build_row.values()))? {
+                        if let Some(spilled) = chunk_builder.append_one_row((&probe_row).chain(build_row)) {
                             yield spilled
                         }
                     }
@@ -150,7 +153,7 @@ impl SortMergeJoinExecutor {
                             // [`ScalarPartialOrd`].
                             if probe_key == build_key {
                                 last_matched_build_rows.push((build_chunk.clone(), next_build_row_idx));
-                                if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(probe_row.values().chain(build_row.values()))? {
+                                if let Some(spilled) = chunk_builder.append_one_row((&probe_row).chain(build_row)) {
                                     yield spilled
                                 }
                             } else if ASCENDING && probe_key < build_key || !ASCENDING && probe_key > build_key {
@@ -186,6 +189,7 @@ impl SortMergeJoinExecutor {
         probe_side_source: BoxedExecutor,
         build_side_source: BoxedExecutor,
         identity: String,
+        chunk_size: usize,
     ) -> Self {
         let original_schema = match join_type {
             JoinType::Inner => Schema::from_iter(
@@ -214,6 +218,7 @@ impl SortMergeJoinExecutor {
             probe_side_source,
             build_side_source,
             identity,
+            chunk_size,
         }
     }
 }
@@ -221,7 +226,7 @@ impl SortMergeJoinExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for SortMergeJoinExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> risingwave_common::error::Result<BoxedExecutor> {
         let [left_child, right_child]: [_; 2] = inputs.try_into().unwrap();
@@ -261,7 +266,8 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
             build_key_idxs,
             left_child,
             right_child,
-            "SortMergeJoinExecutor".into(),
+            source.plan_node().get_identity().clone(),
+            source.context.get_config().developer.batch_chunk_size,
         )))
     }
 }
@@ -278,6 +284,8 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
+
+    const CHUNK_SIZE: usize = 1024;
 
     struct TestFixture {
         left_types: Vec<DataType>,
@@ -397,6 +405,7 @@ mod tests {
                 left_child,
                 right_child,
                 "SortMergeJoinExecutor2".to_string(),
+                CHUNK_SIZE,
             ))
         }
 

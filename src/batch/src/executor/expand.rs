@@ -30,6 +30,7 @@ pub struct ExpandExecutor {
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
+    chunk_size: usize,
 }
 
 impl Executor for ExpandExecutor {
@@ -49,11 +50,12 @@ impl Executor for ExpandExecutor {
 impl ExpandExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        let mut data_chunk_builder = DataChunkBuilder::with_default_size(self.schema.data_types());
+        let mut data_chunk_builder =
+            DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk: DataChunk = data_chunk?.compact()?;
+            let data_chunk: DataChunk = data_chunk?.compact();
             assert!(
                 data_chunk.dimension() > 0,
                 "The input data chunk of expand can't be dummy chunk."
@@ -70,12 +72,28 @@ impl ExpandExecutor {
                 for data_chunk in
                     data_chunk_builder.trunc_data_chunk(DataChunk::new(new_columns?, vis.clone()))
                 {
-                    yield data_chunk?;
+                    yield data_chunk;
                 }
             }
         }
-        if let Some(chunk) = data_chunk_builder.consume_all()? {
+        if let Some(chunk) = data_chunk_builder.consume_all() {
             yield chunk;
+        }
+    }
+
+    pub fn new(input: BoxedExecutor, column_subsets: Vec<Vec<usize>>, chunk_size: usize) -> Self {
+        let schema = {
+            let mut fields = input.schema().clone().into_fields();
+            fields.extend(fields.clone());
+            fields.push(Field::with_name(DataType::Int64, "flag"));
+            Schema::new(fields)
+        };
+        Self {
+            column_subsets,
+            child: input,
+            schema,
+            identity: "ExpandExecutor".into(),
+            chunk_size,
         }
     }
 }
@@ -83,11 +101,9 @@ impl ExpandExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for ExpandExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        let [child]: [_; 1] = inputs.try_into().unwrap();
-
         let expand_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Expand
@@ -105,17 +121,12 @@ impl BoxedExecutorBuilder for ExpandExecutor {
             })
             .collect_vec();
 
-        let mut schema = child.schema().clone();
-        schema
-            .fields
-            .push(Field::with_name(DataType::Int64, "flag"));
-
-        Ok(Box::new(Self {
+        let [input]: [_; 1] = inputs.try_into().unwrap();
+        Ok(Box::new(Self::new(
+            input,
             column_subsets,
-            child,
-            schema,
-            identity: "ExpandExecutor".to_string(),
-        }))
+            source.context.get_config().developer.batch_chunk_size,
+        )))
     }
 }
 
@@ -130,6 +141,8 @@ mod tests {
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::Executor;
 
+    const CHUNK_SIZE: usize = 1024;
+
     #[tokio::test]
     async fn test_expand_executor() {
         let mock_schema = Schema {
@@ -141,6 +154,9 @@ mod tests {
         };
         let expand_schema = Schema {
             fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
                 Field::unnamed(DataType::Int32),
                 Field::unnamed(DataType::Int32),
                 Field::unnamed(DataType::Int32),
@@ -159,15 +175,16 @@ mod tests {
             child: Box::new(mock_executor),
             schema: expand_schema,
             identity: "ExpandExecutor".to_string(),
+            chunk_size: CHUNK_SIZE,
         });
         let mut stream = expand_executor.execute();
         let res = stream.next().await.unwrap().unwrap();
         let expected_chunk = DataChunk::from_pretty(
-            "i i i I
-             1 2 . 0
-             2 3 . 0
-             . 2 3 1
-             . 3 4 1",
+            "i i i i i i I
+             1 2 . 1 2 3 0
+             2 3 . 2 3 4 0
+             . 2 3 1 2 3 1
+             . 3 4 2 3 4 1",
         );
         assert_eq!(res, expected_chunk);
     }

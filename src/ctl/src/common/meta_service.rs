@@ -38,13 +38,12 @@ impl MetaServiceOpts {
                 const MESSAGE: &str = "env variable `RW_META_ADDR` not found.
 
 For `./risedev d` use cases, please do the following:
-* use `./risedev d for-ctl` to start the cluster.
 * use `./risedev ctl` to use risectl.
 
 For `./risedev apply-compose-deploy` users,
 * `RW_META_ADDR` will be printed out when deploying. Please copy the bash exports to your console.
 
-risectl requires a full persistent cluster to operate. Please make sure you're not running in minimum mode.";
+Note: the default value of `RW_META_ADDR` is 'http://127.0.0.1:5690'.";
                 bail!(MESSAGE);
             }
         };
@@ -53,14 +52,17 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
 
     /// Create meta client from options, and register as rise-ctl worker
     pub async fn create_meta_client(&self) -> Result<MetaClient> {
-        let mut client = MetaClient::new(&self.meta_addr).await?;
+        let client = MetaClient::register_new(
+            &self.meta_addr,
+            WorkerType::RiseCtl,
+            &"127.0.0.1:2333".parse().unwrap(),
+            0,
+        )
+        .await?;
         // FIXME: don't use 127.0.0.1 for ctl
-        let worker_id = client
-            .register(WorkerType::RiseCtl, &"127.0.0.1:2333".parse().unwrap(), 0)
-            .await?;
+        let worker_id = client.worker_id();
         tracing::info!("registered as RiseCtl worker, worker_id = {}", worker_id);
         // TODO: remove worker node
-        client.set_worker_id(worker_id);
         Ok(client)
     }
 }

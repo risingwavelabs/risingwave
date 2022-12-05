@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
 };
 use risingwave_pb::hummock::{
-    pin_version_response, CompactTask, CompactionGroup, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use tonic::Streaming;
 
@@ -25,19 +27,23 @@ use crate::error::Result;
 
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
-    async fn pin_version(
-        &self,
-        last_pinned: HummockVersionId,
-    ) -> Result<pin_version_response::Payload>;
-    async fn unpin_version(&self) -> Result<()>;
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
-    async fn pin_snapshot(&self) -> Result<HummockEpoch>;
+    async fn get_current_version(&self) -> Result<HummockVersion>;
+    async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
     async fn unpin_snapshot(&self) -> Result<()>;
     async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;
-    async fn get_epoch(&self) -> Result<HummockEpoch>;
+    async fn get_epoch(&self) -> Result<HummockSnapshot>;
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange>;
-    async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()>;
-    // We keep `commit_epoch` only for test/benchmark like ssbench.
+    async fn report_compaction_task(
+        &self,
+        compact_task: CompactTask,
+        table_stats_change: TableStatsMap,
+    ) -> Result<()>;
+    async fn report_compaction_task_progress(
+        &self,
+        progress: Vec<CompactTaskProgress>,
+    ) -> Result<()>;
+    // We keep `commit_epoch` only for test/benchmark.
     async fn commit_epoch(
         &self,
         epoch: HummockEpoch,

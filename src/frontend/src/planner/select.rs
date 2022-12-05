@@ -12,24 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::JoinType;
 
-use crate::binder::BoundSelect;
+use crate::binder::{BoundDistinct, BoundSelect};
 use crate::expr::{
     CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Subquery,
     SubqueryKind,
 };
+use crate::optimizer::plan_node::generic::{Project, ProjectBuilder};
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalJoin, LogicalProject, LogicalProjectSet, LogicalValues,
-    PlanAggCall, PlanRef,
+    LogicalAgg, LogicalApply, LogicalOverAgg, LogicalProject, LogicalProjectSet, LogicalTopN,
+    LogicalValues, PlanAggCall, PlanRef,
 };
+use crate::optimizer::property::{FieldOrder, Order};
 use crate::planner::Planner;
 use crate::utils::Condition;
+
 impl Planner {
     pub(super) fn plan_select(
         &mut self,
@@ -43,15 +49,42 @@ impl Planner {
             ..
         }: BoundSelect,
         extra_order_exprs: Vec<ExprImpl>,
+        order: &[FieldOrder],
     ) -> Result<PlanRef> {
         // Append expressions in ORDER BY.
-        if distinct && !extra_order_exprs.is_empty() {
+        if distinct.is_distinct() && !extra_order_exprs.is_empty() {
             return Err(ErrorCode::InvalidInputSyntax(
                 "for SELECT DISTINCT, ORDER BY expressions must appear in select list".into(),
             )
             .into());
         }
         select_items.extend(extra_order_exprs);
+        // The DISTINCT ON expression(s) must match the leftmost ORDER BY expression(s).
+        if let BoundDistinct::DistinctOn(exprs) = &distinct {
+            let mut distinct_on_exprs: HashMap<ExprImpl, bool> =
+                exprs.iter().map(|expr| (expr.clone(), false)).collect();
+            let mut uncovered_distinct_on_exprs_cnt = distinct_on_exprs.len();
+            let mut order_iter = order
+                .iter()
+                .map(|FieldOrder { index, .. }| &select_items[*index]);
+            while uncovered_distinct_on_exprs_cnt > 0 && let Some(order_expr) = order_iter.next() {
+                match distinct_on_exprs.get_mut(order_expr) {
+                    Some(has_been_covered) => {
+                        if !*has_been_covered {
+                            *has_been_covered = true;
+                            uncovered_distinct_on_exprs_cnt -= 1;
+                        }
+                    }
+                    None => {
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "the SELECT DISTINCT ON expressions must match the leftmost SELECT DISTINCT ON expressions"
+                                .into(),
+                        )
+                        .into());
+                    }
+                }
+            }
+        }
 
         // Plan the FROM clause.
         let mut root = match from {
@@ -77,13 +110,72 @@ impl Planner {
         if select_items.iter().any(|e| e.has_subquery()) {
             (root, select_items) = self.substitute_subqueries(root, select_items)?;
         }
+        if select_items.iter().any(|e| e.has_window_function()) {
+            (root, select_items) = LogicalOverAgg::create(root, select_items)?;
+        }
+
+        let original_select_items_len = select_items.len();
+
+        // variable `distinct_list_index_to_select_items_index` is meaningful iff
+        // `matches!(&distinct, BoundDistinct::DistinctOn(_))`
+        let mut distinct_list_index_to_select_items_index = vec![];
+        if let BoundDistinct::DistinctOn(distinct_list) = &distinct {
+            distinct_list_index_to_select_items_index.reserve(distinct_list.len());
+            let mut builder_index_to_select_items_index =
+                Vec::with_capacity(original_select_items_len);
+            let mut input_proj_builder = ProjectBuilder::default();
+            for (select_item_index, select_item) in select_items.iter().enumerate() {
+                let builder_index = input_proj_builder
+                    .add_expr(select_item)
+                    .map_err(|msg| ExprError::UnsupportedFunction(String::from(msg)))?;
+                if builder_index >= builder_index_to_select_items_index.len() {
+                    debug_assert_eq!(builder_index, builder_index_to_select_items_index.len());
+                    builder_index_to_select_items_index.push(select_item_index);
+                }
+            }
+            for distinct_expr in distinct_list {
+                let builder_index = input_proj_builder
+                    .add_expr(distinct_expr)
+                    .map_err(|msg| ExprError::UnsupportedFunction(String::from(msg)))?;
+                if builder_index >= builder_index_to_select_items_index.len() {
+                    debug_assert_eq!(builder_index, builder_index_to_select_items_index.len());
+                    select_items.push(distinct_expr.clone());
+                    builder_index_to_select_items_index.push(select_items.len() - 1);
+                }
+                distinct_list_index_to_select_items_index
+                    .push(builder_index_to_select_items_index[builder_index]);
+            }
+        }
+
+        let need_restore_select_items = select_items.len() > original_select_items_len;
+
         if select_items.iter().any(|e| e.has_table_function()) {
             root = LogicalProjectSet::create(root, select_items)
         } else {
             root = LogicalProject::create(root, select_items);
         }
 
-        if distinct {
+        if matches!(&distinct, BoundDistinct::DistinctOn(_)) {
+            root = LogicalTopN::with_group(
+                root,
+                1,
+                0,
+                false,
+                Order::new(order.to_vec()),
+                distinct_list_index_to_select_items_index,
+            )
+            .into();
+        }
+
+        if need_restore_select_items {
+            root = LogicalProject::with_core(Project::with_out_col_idx(
+                root,
+                0..original_select_items_len,
+            ))
+            .into();
+        }
+
+        if let BoundDistinct::Distinct = distinct {
             let group_key = (0..root.schema().fields().len()).collect();
             root = LogicalAgg::new(vec![], group_key, root).into();
         }
@@ -113,10 +205,9 @@ impl Planner {
     }
 
     /// For `(NOT) EXISTS subquery` or `(NOT) IN subquery`, we can plan it as
-    /// `LeftSemi/LeftAnti` [`LogicalApply`] (correlated) or [`LogicalJoin`].
-    ///
-    /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] (correlated) or
-    /// [`LogicalJoin`] using [`Self::substitute_subqueries`].
+    /// `LeftSemi/LeftAnti` [`LogicalApply`]
+    /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] using
+    /// [`Self::substitute_subqueries`].
     fn plan_where(&mut self, mut input: PlanRef, where_clause: ExprImpl) -> Result<PlanRef> {
         if !where_clause.has_subquery() {
             return Ok(LogicalFilter::create_with_expr(input, where_clause));
@@ -180,7 +271,7 @@ impl Planner {
         let correlated_id = self.ctx.next_correlated_id();
         let mut subquery = expr.into_subquery().unwrap();
         let correlated_indices =
-            subquery.collect_correlated_indices_by_depth_and_assign_id(correlated_id);
+            subquery.collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
         let output_column_type = subquery.query.data_types()[0].clone();
         let right_plan = self.plan_query(subquery.query)?.into_subplan();
         let on = match subquery.kind {
@@ -197,13 +288,14 @@ impl Planner {
                 .into())
             }
         };
-        *input = Self::create_join(
+        *input = Self::create_apply(
             correlated_id,
             correlated_indices,
             input.clone(),
             right_plan,
             on,
             join_type,
+            false,
         );
         Ok(())
     }
@@ -211,8 +303,8 @@ impl Planner {
     /// Substitutes all [`Subquery`] in `exprs`.
     ///
     /// Each time a [`Subquery`] is found, it is replaced by a new [`InputRef`]. And `root` is
-    /// replaced by a new `LeftOuter` [`LogicalApply`] (correlated) or [`LogicalJoin`]
-    /// (uncorrelated) node, whose left side is `root` and right side is the planned subquery.
+    /// replaced by a new `LeftOuter` [`LogicalApply`] whose left side is `root` and right side is
+    /// the planned subquery.
     ///
     /// The [`InputRef`]s' indexes start from `root.schema().len()`,
     /// which means they are additional columns beyond the original `root`.
@@ -234,7 +326,8 @@ impl Planner {
                 let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
                 self.input_col_num += 1;
                 self.correlated_indices_collection.push(
-                    subquery.collect_correlated_indices_by_depth_and_assign_id(self.correlated_id),
+                    subquery
+                        .collect_correlated_indices_by_depth_and_assign_id(0, self.correlated_id),
                 );
                 self.subqueries.push(subquery);
                 input_ref
@@ -274,37 +367,36 @@ impl Planner {
                 }
             }
 
-            root = Self::create_join(
+            root = Self::create_apply(
                 correlated_id,
                 correlated_indices,
                 root,
                 right,
                 ExprImpl::literal_bool(true),
                 JoinType::LeftOuter,
+                true,
             );
         }
         Ok((root, exprs))
     }
 
-    fn create_join(
+    fn create_apply(
         correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
         left: PlanRef,
         right: PlanRef,
         on: ExprImpl,
         join_type: JoinType,
+        max_one_row: bool,
     ) -> PlanRef {
-        if !correlated_indices.is_empty() {
-            LogicalApply::create(
-                left,
-                right,
-                join_type,
-                Condition::with_expr(on),
-                correlated_id,
-                correlated_indices,
-            )
-        } else {
-            LogicalJoin::create(left, right, join_type, on)
-        }
+        LogicalApply::create(
+            left,
+            right,
+            join_type,
+            Condition::with_expr(on),
+            correlated_id,
+            correlated_indices,
+            max_one_row,
+        )
     }
 }

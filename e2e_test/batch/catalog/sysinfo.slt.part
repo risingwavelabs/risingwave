@@ -3,3 +3,7 @@ SELECT current_schema();
 ----
 public
 
+query T
+SELECT pg_catalog.pg_get_userbyid(1);
+----
+root

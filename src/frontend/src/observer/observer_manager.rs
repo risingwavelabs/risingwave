@@ -16,22 +16,20 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::compress::decompress_data;
-use risingwave_common_service::observer_manager::ObserverNodeImpl;
+use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::TableId;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;
 
-pub(crate) struct FrontendObserverNode {
+pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
     catalog: Arc<RwLock<Catalog>>,
     catalog_updated_tx: Sender<CatalogVersion>,
@@ -40,7 +38,9 @@ pub(crate) struct FrontendObserverNode {
     hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
-impl ObserverNodeImpl for FrontendObserverNode {
+impl ObserverState for FrontendObserverNode {
+    type SubscribeType = SubscribeFrontend;
+
     fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
@@ -52,7 +52,8 @@ impl ObserverNodeImpl for FrontendObserverNode {
             | Info::Table(_)
             | Info::Source(_)
             | Info::Index(_)
-            | Info::Sink(_) => {
+            | Info::Sink(_)
+            | Info::View(_) => {
                 self.handle_catalog_notification(resp);
             }
             Info::Node(node) => {
@@ -61,7 +62,7 @@ impl ObserverNodeImpl for FrontendObserverNode {
             Info::User(_) => {
                 self.handle_user_notification(resp);
             }
-            Info::ParallelUnitMapping(_) => self.handle_table_mapping_notification(resp),
+            Info::ParallelUnitMapping(_) => self.handle_fragment_mapping_notification(resp),
             Info::Snapshot(_) => {
                 panic!(
                     "receiving a snapshot in the middle is unsupported now {:?}",
@@ -77,60 +78,68 @@ impl ObserverNodeImpl for FrontendObserverNode {
         }
     }
 
-    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
+    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
         let mut catalog_guard = self.catalog.write();
         let mut user_guard = self.user_info_manager.write();
         catalog_guard.clear();
         user_guard.clear();
-        match resp.info {
-            Some(Info::Snapshot(snapshot)) => {
-                for db in snapshot.databases {
-                    catalog_guard.create_database(db)
-                }
-                for schema in snapshot.schemas {
-                    catalog_guard.create_schema(schema)
-                }
-                for table in snapshot.tables {
-                    catalog_guard.create_table(&table)
-                }
-                for source in snapshot.sources {
-                    catalog_guard.create_source(source)
-                }
-                for user in snapshot.users {
-                    user_guard.create_user(user)
-                }
-                for index in snapshot.indexes {
-                    catalog_guard.create_index(&index)
-                }
-                self.worker_node_manager.refresh(
-                    snapshot.nodes,
-                    snapshot
-                        .parallel_unit_mappings
-                        .iter()
-                        .map(|mapping| {
-                            (
-                                TableId::new(mapping.table_id),
-                                decompress_data(&mapping.original_indices, &mapping.data),
-                            )
-                        })
-                        .collect(),
-                );
-                self.hummock_snapshot_manager
-                    .update_epoch(snapshot.hummock_snapshot.unwrap().get_epoch());
-            }
-            _ => {
-                return Err(ErrorCode::InternalError(format!(
-                    "the first notify should be frontend snapshot, but get {:?}",
-                    resp
-                ))
-                .into())
-            }
+
+        let Some(Info::Snapshot(snapshot)) = resp.info else {
+            unreachable!();
+        };
+
+        for db in snapshot.databases {
+            catalog_guard.create_database(&db)
         }
-        catalog_guard.set_version(resp.version);
-        self.catalog_updated_tx.send(resp.version).unwrap();
-        Ok(())
+        for schema in snapshot.schemas {
+            catalog_guard.create_schema(&schema)
+        }
+        for table in snapshot.tables {
+            catalog_guard.create_table(&table)
+        }
+        for source in snapshot.sources {
+            catalog_guard.create_source(&source)
+        }
+        for user in snapshot.users {
+            user_guard.create_user(user)
+        }
+        for index in snapshot.indexes {
+            catalog_guard.create_index(&index)
+        }
+        for sink in snapshot.sinks {
+            catalog_guard.create_sink(&sink)
+        }
+        for view in snapshot.views {
+            catalog_guard.create_view(&view)
+        }
+        self.worker_node_manager.refresh(
+            snapshot.nodes,
+            snapshot
+                .parallel_unit_mappings
+                .iter()
+                .map(|mapping| {
+                    (
+                        mapping.fragment_id,
+                        decompress_data(&mapping.original_indices, &mapping.data),
+                    )
+                })
+                .collect(),
+        );
+        self.hummock_snapshot_manager
+            .update_epoch(snapshot.hummock_snapshot.unwrap());
+
+        let snapshot_version = snapshot.version.unwrap();
+        catalog_guard.set_version(snapshot_version.catalog_version);
+        self.catalog_updated_tx
+            .send(snapshot_version.catalog_version)
+            .unwrap();
+        user_guard.set_version(snapshot_version.catalog_version);
+        self.user_info_updated_tx
+            .send(snapshot_version.catalog_version)
+            .unwrap();
     }
 }
+
 impl FrontendObserverNode {
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
@@ -158,12 +167,12 @@ impl FrontendObserverNode {
         let mut catalog_guard = self.catalog.write();
         match info {
             Info::Database(database) => match resp.operation() {
-                Operation::Add => catalog_guard.create_database(database.clone()),
+                Operation::Add => catalog_guard.create_database(database),
                 Operation::Delete => catalog_guard.drop_database(database.id),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Schema(schema) => match resp.operation() {
-                Operation::Add => catalog_guard.create_schema(schema.clone()),
+                Operation::Add => catalog_guard.create_schema(schema),
                 Operation::Delete => catalog_guard.drop_schema(schema.database_id, schema.id),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
@@ -176,14 +185,14 @@ impl FrontendObserverNode {
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Source(source) => match resp.operation() {
-                Operation::Add => catalog_guard.create_source(source.clone()),
+                Operation::Add => catalog_guard.create_source(source),
                 Operation::Delete => {
                     catalog_guard.drop_source(source.database_id, source.schema_id, source.id)
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Sink(sink) => match resp.operation() {
-                Operation::Add => catalog_guard.create_sink(sink.clone()),
+                Operation::Add => catalog_guard.create_sink(sink),
                 Operation::Delete => {
                     catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
                 }
@@ -193,6 +202,13 @@ impl FrontendObserverNode {
                 Operation::Add => catalog_guard.create_index(index),
                 Operation::Delete => {
                     catalog_guard.drop_index(index.database_id, index.schema_id, index.id.into())
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Info::View(view) => match resp.operation() {
+                Operation::Add => catalog_guard.create_view(view),
+                Operation::Delete => {
+                    catalog_guard.drop_view(view.database_id, view.schema_id, view.id)
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
@@ -233,33 +249,34 @@ impl FrontendObserverNode {
         self.user_info_updated_tx.send(resp.version).unwrap();
     }
 
-    fn handle_table_mapping_notification(&mut self, resp: SubscribeResponse) {
+    fn handle_fragment_mapping_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
         match info {
             Info::ParallelUnitMapping(parallel_unit_mapping) => match resp.operation() {
                 Operation::Add => {
-                    let table_id = TableId::new(parallel_unit_mapping.table_id);
+                    let fragment_id = parallel_unit_mapping.fragment_id;
                     let mapping = decompress_data(
                         &parallel_unit_mapping.original_indices,
                         &parallel_unit_mapping.data,
                     );
                     self.worker_node_manager
-                        .insert_table_mapping(table_id, mapping);
+                        .insert_fragment_mapping(fragment_id, mapping);
                 }
                 Operation::Delete => {
-                    let table_id = TableId::new(parallel_unit_mapping.table_id);
-                    self.worker_node_manager.remove_table_mapping(&table_id);
+                    let fragment_id = parallel_unit_mapping.fragment_id;
+                    self.worker_node_manager
+                        .remove_fragment_mapping(&fragment_id);
                 }
                 Operation::Update => {
-                    let table_id = TableId::new(parallel_unit_mapping.table_id);
+                    let fragment_id = parallel_unit_mapping.fragment_id;
                     let mapping = decompress_data(
                         &parallel_unit_mapping.original_indices,
                         &parallel_unit_mapping.data,
                     );
                     self.worker_node_manager
-                        .update_table_mapping(table_id, mapping);
+                        .update_fragment_mapping(fragment_id, mapping);
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
@@ -276,7 +293,7 @@ impl FrontendObserverNode {
             Info::HummockSnapshot(hummock_snapshot) => match resp.operation() {
                 Operation::Update => {
                     self.hummock_snapshot_manager
-                        .update_epoch(hummock_snapshot.get_epoch());
+                        .update_epoch(hummock_snapshot.clone());
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
