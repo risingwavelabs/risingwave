@@ -54,45 +54,45 @@ SELECT 'nan'::float4 / 'nan'::float4;
 SELECT 'nan'::float4 / '0'::float4;
 --@ SELECT 'nan'::numeric::float4;
 
---@ SELECT * FROM FLOAT4_TBL;
+SELECT * FROM FLOAT4_TBL;
 
---@ SELECT f.* FROM FLOAT4_TBL f WHERE f.f1 <> '1004.3';
+SELECT f.* FROM FLOAT4_TBL f WHERE f.f1 <> '1004.3';
 
 SELECT f.* FROM FLOAT4_TBL f WHERE f.f1 = '1004.3';
 
---@ SELECT f.* FROM FLOAT4_TBL f WHERE '1004.3' > f.f1;
+SELECT f.* FROM FLOAT4_TBL f WHERE '1004.3' > f.f1;
 
---@ SELECT f.* FROM FLOAT4_TBL f WHERE  f.f1 < '1004.3';
+SELECT f.* FROM FLOAT4_TBL f WHERE  f.f1 < '1004.3';
 
---@ SELECT f.* FROM FLOAT4_TBL f WHERE '1004.3' >= f.f1;
+SELECT f.* FROM FLOAT4_TBL f WHERE '1004.3' >= f.f1;
 
---@ SELECT f.* FROM FLOAT4_TBL f WHERE  f.f1 <= '1004.3';
+SELECT f.* FROM FLOAT4_TBL f WHERE  f.f1 <= '1004.3';
 
---@ SELECT f.f1, f.f1 * '-10' AS x FROM FLOAT4_TBL f
---@    WHERE f.f1 > '0.0';
+SELECT f.f1, f.f1 * '-10' AS x FROM FLOAT4_TBL f
+   WHERE f.f1 > '0.0';
 
---@ SELECT f.f1, f.f1 + '-10' AS x FROM FLOAT4_TBL f
---@    WHERE f.f1 > '0.0';
+SELECT f.f1, f.f1 + '-10' AS x FROM FLOAT4_TBL f
+   WHERE f.f1 > '0.0';
 
---@ SELECT f.f1, f.f1 / '-10' AS x FROM FLOAT4_TBL f
---@    WHERE f.f1 > '0.0';
+SELECT f.f1, f.f1 / '-10' AS x FROM FLOAT4_TBL f
+   WHERE f.f1 > '0.0';
 
---@ SELECT f.f1, f.f1 - '-10' AS x FROM FLOAT4_TBL f
---@    WHERE f.f1 > '0.0';
+SELECT f.f1, f.f1 - '-10' AS x FROM FLOAT4_TBL f
+   WHERE f.f1 > '0.0';
 
 -- test divide by zero
 --@ SELECT f.f1 / '0.0' from FLOAT4_TBL f;
 
---@ SELECT * FROM FLOAT4_TBL;
+SELECT * FROM FLOAT4_TBL;
 
 -- test the unary float4abs operator
 --@ SELECT f.f1, @f.f1 AS abs_f1 FROM FLOAT4_TBL f;
 
---@ UPDATE FLOAT4_TBL
---@    SET f1 = FLOAT4_TBL.f1 * '-1'
---@    WHERE FLOAT4_TBL.f1 > '0.0';
+UPDATE FLOAT4_TBL
+   SET f1 = FLOAT4_TBL.f1 * '-1'
+   WHERE FLOAT4_TBL.f1 > '0.0';
 
---@ SELECT * FROM FLOAT4_TBL;
+SELECT * FROM FLOAT4_TBL;
 
 -- test edge-case coercions to integer
 --@ SELECT '32767.4'::float4::int2;
@@ -100,7 +100,7 @@ SELECT f.* FROM FLOAT4_TBL f WHERE f.f1 = '1004.3';
 --@ SELECT '-32768.4'::float4::int2;
 --@ SELECT '-32768.6'::float4::int2;
 --@ SELECT '2147483520'::float4::int4;
-SELECT '2147483647'::float4::int4;
+--@ SELECT '2147483647'::float4::int4;
 --@ SELECT '-2147483648.5'::float4::int4;
 SELECT '-2147483900'::float4::int4;
 --@ SELECT '9223369837831520256'::float4::int8;

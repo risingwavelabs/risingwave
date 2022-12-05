@@ -43,7 +43,10 @@ impl Binder {
     }
 
     pub(super) fn bind_string(&mut self, s: String) -> Result<Literal> {
-        Ok(Literal::new(Some(ScalarImpl::Utf8(s)), DataType::Varchar))
+        Ok(Literal::new(
+            Some(ScalarImpl::Utf8(s.into())),
+            DataType::Varchar,
+        ))
     }
 
     fn bind_bool(&mut self, b: bool) -> Result<Literal> {

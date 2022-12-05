@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::Hasher;
+
 use super::*;
 use crate::array::list_array::{ListRef, ListValue};
 use crate::array::struct_array::{StructRef, StructValue};
@@ -58,17 +60,30 @@ macro_rules! impl_all_native_scalar {
 
 for_all_native_types! { impl_all_native_scalar }
 
-/// Implement `Scalar` for `String`.
-/// `String` could be converted to `&str`.
-impl Scalar for String {
+/// Implement `Scalar` for `Box<str>`.
+/// `Box<str>` could be converted to `&str`.
+impl Scalar for Box<str> {
     type ScalarRefType<'a> = &'a str;
 
     fn as_scalar_ref(&self) -> &str {
-        self.as_str()
+        self.as_ref()
     }
 
     fn to_scalar_value(self) -> ScalarImpl {
         ScalarImpl::Utf8(self)
+    }
+}
+
+/// Implement `Scalar` for `Bytes`.
+impl Scalar for Box<[u8]> {
+    type ScalarRefType<'a> = &'a [u8];
+
+    fn as_scalar_ref(&self) -> &[u8] {
+        self
+    }
+
+    fn to_scalar_value(self) -> ScalarImpl {
+        ScalarImpl::Bytea(self)
     }
 }
 
@@ -98,13 +113,13 @@ impl Scalar for ListValue {
     }
 }
 
-/// Implement `ScalarRef` for `String`.
-/// `String` could be converted to `&str`.
+/// Implement `ScalarRef` for `Box<str>`.
+/// `Box<str>` could be converted to `&str`.
 impl<'a> ScalarRef<'a> for &'a str {
-    type ScalarType = String;
+    type ScalarType = Box<str>;
 
-    fn to_owned_scalar(&self) -> String {
-        self.to_string()
+    fn to_owned_scalar(&self) -> Box<str> {
+        (*self).into()
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -112,9 +127,21 @@ impl<'a> ScalarRef<'a> for &'a str {
     }
 }
 
-impl ScalarPartialOrd for String {
+impl<'a> ScalarRef<'a> for &'a [u8] {
+    type ScalarType = Box<[u8]>;
+
+    fn to_owned_scalar(&self) -> Box<[u8]> {
+        self.to_vec().into()
+    }
+
+    fn hash_scalar<H: Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
+}
+
+impl ScalarPartialOrd for Box<str> {
     fn scalar_cmp(&self, other: &str) -> Option<std::cmp::Ordering> {
-        self.as_str().partial_cmp(other)
+        self.as_ref().partial_cmp(other)
     }
 }
 
@@ -143,8 +170,7 @@ impl Scalar for bool {
     }
 }
 
-/// Implement `Scalar` and `ScalarRef` for `String`.
-/// `String` could be converted to `&str`.
+/// Implement `ScalarRef` for `bool`.
 impl<'a> ScalarRef<'a> for bool {
     type ScalarType = bool;
 

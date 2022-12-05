@@ -37,7 +37,7 @@ impl Planner {
         } = query;
 
         let extra_order_exprs_len = extra_order_exprs.len();
-        let mut plan = self.plan_set_expr(body, extra_order_exprs)?;
+        let mut plan = self.plan_set_expr(body, extra_order_exprs, &order)?;
         let order = Order { field_order: order };
         if limit.is_some() || offset.is_some() {
             let limit = limit.unwrap_or(LIMIT_ALL_COUNT);

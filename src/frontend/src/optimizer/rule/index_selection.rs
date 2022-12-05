@@ -699,6 +699,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Timestampz => size_of::<i64>(),
             DataType::Interval => size_of::<IntervalUnit>(),
             DataType::Varchar => 20,
+            DataType::Bytea => 20,
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
         }
