@@ -30,7 +30,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use crate::source::cdc::{
-    CdcProperties, CdcSplit, CdcSplitEnumerator, CdcSplitReader, CDC_CONNECTOR,
+    CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, CDC_CONNECTOR,
 };
 use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
@@ -119,7 +119,7 @@ pub enum SplitEnumeratorImpl {
     Kinesis(KinesisSplitEnumerator),
     Nexmark(NexmarkSplitEnumerator),
     Datagen(DatagenSplitEnumerator),
-    Cdc(CdcSplitEnumerator),
+    Cdc(DebeziumSplitEnumerator),
     GooglePubsub(PubsubSplitEnumerator),
 }
 
@@ -153,7 +153,7 @@ impl_split_enumerator! {
     { Kinesis, KinesisSplitEnumerator },
     { Nexmark, NexmarkSplitEnumerator },
     { Datagen, DatagenSplitEnumerator },
-    { Cdc, CdcSplitEnumerator },
+    { Cdc, DebeziumSplitEnumerator },
     { GooglePubsub, PubsubSplitEnumerator}
 }
 
