@@ -172,7 +172,6 @@ impl<S: StateStore> StateTable<S> {
                     })
             })
             .collect_vec();
-
         let local_state_store = store.new_local(table_id).await;
 
         let pk_data_types = pk_indices
@@ -192,9 +191,12 @@ impl<S: StateStore> StateTable<S> {
             None => Distribution::fallback(),
         };
 
-        let distribution_key_start_index_in_pk = match dist_key_indices.is_empty() {
-            true => None,
-            false => Some(dist_key_in_pk_indices[0]),
+        let distribution_key_start_index_in_pk = match !dist_key_in_pk_indices.is_empty()
+            && *dist_key_in_pk_indices.iter().min().unwrap() + dist_key_in_pk_indices.len() - 1
+                == *dist_key_in_pk_indices.iter().max().unwrap()
+        {
+            false => None,
+            true => Some(dist_key_in_pk_indices[0]),
         };
         let vnode_col_idx_in_pk = table_catalog
             .vnode_col_idx

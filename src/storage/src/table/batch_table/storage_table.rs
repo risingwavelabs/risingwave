@@ -199,9 +199,12 @@ impl<S: StateStore> StorageTable<S> {
                     })
             })
             .collect_vec();
-        let distribution_key_start_index_in_pk = match dist_key_indices.is_empty() {
-            true => None,
-            false => Some(dist_key_in_pk_indices[0]),
+        let distribution_key_start_index_in_pk = match !dist_key_in_pk_indices.is_empty()
+            && *dist_key_in_pk_indices.iter().min().unwrap() + dist_key_in_pk_indices.len() - 1
+                == *dist_key_in_pk_indices.iter().max().unwrap()
+        {
+            false => None,
+            true => Some(dist_key_in_pk_indices[0]),
         };
         Self {
             table_id,
