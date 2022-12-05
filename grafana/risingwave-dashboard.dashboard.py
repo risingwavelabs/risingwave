@@ -993,6 +993,16 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytes(
+                    "Actor Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            "rate(actor_memory_usage[$__rate_interval])",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_percentage(
                     "Actor Input Blocking Time Ratio",
                     "",
