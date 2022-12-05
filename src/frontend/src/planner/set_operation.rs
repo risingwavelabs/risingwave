@@ -28,8 +28,8 @@ impl Planner {
     ) -> Result<PlanRef> {
         match op {
             BoundSetOperation::Union => {
-                let left = self.plan_set_expr(left, vec![])?;
-                let right = self.plan_set_expr(right, vec![])?;
+                let left = self.plan_set_expr(left, vec![], &[])?;
+                let right = self.plan_set_expr(right, vec![], &[])?;
                 Ok(LogicalUnion::create(all, vec![left, right]))
             }
             BoundSetOperation::Except | BoundSetOperation::Intersect => {

@@ -4274,19 +4274,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "postgres-openssl"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1de0ea6504e07ca78355a6fb88ad0f36cafe9e696cbc6717f16a207f3a60be72"
-dependencies = [
- "futures",
- "openssl",
- "tokio",
- "tokio-openssl",
- "tokio-postgres",
-]
-
-[[package]]
 name = "postgres-protocol"
 version = "0.6.4"
 source = "git+https://github.com/madsim-rs/rust-postgres.git?rev=87ca1dc#87ca1dc0d0708a6eb7f02f7601660a30e154b715"
@@ -5146,8 +5133,10 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "hex",
  "humantime",
  "itertools",
+ "itoa",
  "libc",
  "lru 0.7.6",
  "mach",
@@ -5169,6 +5158,7 @@ dependencies = [
  "regex",
  "risingwave_pb",
  "rust_decimal",
+ "ryu",
  "serde",
  "serde_derive",
  "serde_json",
@@ -5429,6 +5419,7 @@ dependencies = [
  "crc32fast",
  "dyn-clone",
  "either",
+ "hex",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
@@ -5743,39 +5734,15 @@ dependencies = [
 name = "risingwave_simulation"
 version = "0.1.0"
 dependencies = [
- "async-trait",
- "clap 3.2.23",
- "futures",
- "glob",
- "madsim",
- "madsim-etcd-client",
- "madsim-rdkafka",
- "madsim-tokio",
- "openssl",
- "postgres-openssl",
- "rand 0.8.5",
- "risingwave_compactor",
- "risingwave_compute",
- "risingwave_frontend",
- "risingwave_meta",
- "risingwave_sqlsmith",
- "sqllogictest",
- "tempfile",
- "tokio-postgres",
- "tracing",
- "workspace-hack",
-]
-
-[[package]]
-name = "risingwave_simulation_scale"
-version = "0.1.0"
-dependencies = [
  "anyhow",
  "async-trait",
  "clap 3.2.23",
  "futures",
+ "glob",
  "itertools",
  "madsim",
+ "madsim-etcd-client",
+ "madsim-rdkafka",
  "madsim-tokio",
  "paste",
  "rand 0.8.5",
@@ -5786,10 +5753,11 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_pb",
+ "risingwave_sqlsmith",
+ "sqllogictest",
  "tempfile",
  "tokio-postgres",
  "tracing",
- "workspace-hack",
 ]
 
 [[package]]
