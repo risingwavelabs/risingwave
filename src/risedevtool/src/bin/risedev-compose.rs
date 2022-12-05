@@ -20,6 +20,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
+use itertools::Itertools;
 use risedev::{
     compose_deploy, compute_risectl_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
     ComposeService, ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
@@ -90,12 +91,13 @@ fn main() -> Result<()> {
                             .map(|(k, v)| (k.clone(), v.clone())),
                     )
                     .collect(),
-            )?,
+            )?
+            .1,
             Some(compose_deploy_config),
         )
     } else {
         (
-            ConfigExpander::expand(&risedev_config_content, &opts.profile)?,
+            ConfigExpander::expand(&risedev_config_content, &opts.profile)?.1,
             None,
         )
     };
@@ -110,7 +112,7 @@ fn main() -> Result<()> {
         config_directory: opts.directory.clone(),
     };
 
-    let (steps, services) = ConfigExpander::select(&risedev_config, &opts.profile)?;
+    let services = ConfigExpander::deserialize(&risedev_config, &opts.profile)?;
 
     let mut compose_services: BTreeMap<String, BTreeMap<String, ComposeService>> = BTreeMap::new();
     let mut service_on_node: BTreeMap<String, String> = BTreeMap::new();
@@ -119,8 +121,9 @@ fn main() -> Result<()> {
     let mut log_buffer = String::new();
     use std::fmt::Write;
 
-    for step in &steps {
-        let service = services.get(step).unwrap();
+    for service in &services {
+        let step = service.id();
+
         let compose_deploy_config = compose_deploy_config.as_ref();
         let (address, mut compose) = match service {
             ServiceConfig::Minio(c) => {
@@ -240,7 +243,7 @@ fn main() -> Result<()> {
             .entry(address.clone())
             .or_default()
             .insert(step.to_string(), compose);
-        service_on_node.insert(step.clone(), address);
+        service_on_node.insert(step.to_string(), address);
     }
 
     if opts.deploy {
@@ -289,7 +292,7 @@ fn main() -> Result<()> {
 
         compose_deploy(
             Path::new(&opts.directory),
-            &steps,
+            &services.iter().map(|s| s.id().to_string()).collect_vec(),
             &compose_deploy_config.as_ref().unwrap().instances,
             &compose_config,
             &service_on_node,
