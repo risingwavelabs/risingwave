@@ -16,7 +16,7 @@ statement ok
 CREATE TABLE integers2(k int, l int);
 
 statement ok
-INSERT INTO integers SELECT a k, 2 l FROM generate_series(2000, 3999, 1) t1(a);
+INSERT INTO integers2 SELECT a k, 2 l FROM generate_series(2000, 3999, 1) t1(a);
 
 # equality join
 query I
