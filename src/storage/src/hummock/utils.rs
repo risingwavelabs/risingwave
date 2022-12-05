@@ -134,6 +134,18 @@ where
     .saturating_sub(1) // considering the boundary of 0
 }
 
+/// Search the SST containing the specified key within a level, using binary search.
+pub(crate) fn search_sst_idx_in_level<B>(ssts: &[SstableInfo], key: &B) -> usize
+    where
+        B: AsRef<[u8]> + Send + ?Sized,
+{
+    ssts.partition_point(|table| {
+        let ord = user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
+        ord == Ordering::Less || ord == Ordering::Equal
+    })
+        .saturating_sub(1) // considering the boundary of 0
+}
+
 struct MemoryLimiterInner {
     total_size: AtomicU64,
     notify: Notify,
