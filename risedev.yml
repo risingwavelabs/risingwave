@@ -540,14 +540,15 @@ risedev:
       - use: compactor
 
   ci-1cn-1fe-with-recovery:
-    - use: minio
-    - use: etcd
-    - use: meta-node
-      enable-committed-sst-sanity-check: true
-    - use: compute-node
-      enable-tiered-cache: true
-    - use: frontend
-    - use: compactor
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
 
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
