@@ -447,7 +447,7 @@ pub async fn run_elections<S: MetaStore>(
 /// Followers will check if the leader is still alive
 ///
 /// ## Returns
-/// True if the leader is still in power.
+/// True if the leader defined in leader_ifo is still in power.
 /// False if the leader failed.
 /// None if there was an error.
 async fn manage_term<S: MetaStore>(
@@ -474,6 +474,15 @@ async fn manage_term<S: MetaStore>(
         return Some(false);
     }
 
+    match leader_changed(leader_info, meta_store).await {
+        None => return None,
+        Some(has_new_leader) => {
+            if has_new_leader {
+                return Some(false);
+            }
+        }
+    }
+
     // delete lease and run new election if lease is expired for some time
     let some_time = lease_time_sec / 2;
     let lease_info = MetaLeaseInfo::decode(&mut lease_info.as_slice()).unwrap();
@@ -495,8 +504,41 @@ async fn manage_term<S: MetaStore>(
         return Some(false);
     }
 
-    // lease exists and leader continues term
+    // lease exists and the same leader continues term
     Some(true)
+}
+
+// True if leader changed
+// False if leader is still the leader defined in leader_info
+// None on error
+async fn leader_changed<S: MetaStore>(
+    leader_info: &MetaLeaderInfo,
+    meta_store: &Arc<S>,
+) -> Option<bool> {
+    let mut txn = Transaction::default();
+    txn.check_equal(
+        META_CF_NAME.to_string(),
+        META_LEADER_KEY.as_bytes().to_vec(),
+        leader_info.encode_to_vec(),
+    );
+
+    return match meta_store.txn(txn).await {
+        Err(e) => match e {
+            MetaStoreError::TransactionAbort() => Some(true),
+            MetaStoreError::Internal(e) => {
+                tracing::warn!(
+                    "Renew/acquire lease: try again later, MetaStoreError: {:?}",
+                    e
+                );
+                return None;
+            }
+            MetaStoreError::ItemNotFound(e) => {
+                tracing::warn!("Renew/acquire lease: MetaStoreError: {:?}", e);
+                return None;
+            }
+        },
+        Ok(_) => Some(false),
+    };
 }
 
 // TODOs:
@@ -514,8 +556,6 @@ async fn manage_term<S: MetaStore>(
 mod tests {
 
     use core::panic;
-
-    use mockall::mock;
 
     use super::*;
     use crate::storage::MemStore;
@@ -614,7 +654,6 @@ mod tests {
 
         // TODO: Is this expected behavior?
         // Leader: If nobody was elected leader renewing lease fails and leader is marked as failed
-        let now = since_epoch();
         let leader_info = MetaLeaderInfo {
             node_address: "localhost:1234".into(),
             lease_id: 123 as u64,
@@ -633,6 +672,7 @@ mod tests {
         );
 
         // if node is leader lease should be renewed
+        let now = since_epoch();
         let lease_info = MetaLeaseInfo {
             leader: Some(leader_info.clone()),
             lease_register_time: now.as_secs(),
@@ -643,18 +683,21 @@ mod tests {
             manage_term(true, &leader_info, lease_timeout, &mock_meta_store)
                 .await
                 .unwrap(),
-            "Leader should still be in power if leader extends lease"
+            "Leader should still be in power after updating lease"
         );
         let (_, new_lease_info) = get_infos_obj(&mock_meta_store).await.unwrap();
         assert_eq!(
             now.as_secs() + lease_timeout,
             new_lease_info.get_lease_expire_time(),
-            "Lease was not extended by {}s, but by {}",
+            "Lease was not extended by {}s, but by {}s",
             lease_timeout,
             new_lease_info.get_lease_expire_time() - lease_info.get_lease_expire_time()
         );
 
+        // TODO: split all these tests up in separate tests
+
         // If node is follower, lease should not be renewed
+        let now = since_epoch();
         let lease_info = MetaLeaseInfo {
             leader: Some(leader_info.clone()),
             lease_register_time: now.as_secs(),
@@ -684,7 +727,14 @@ mod tests {
             !manage_term(true, &other_leader_info, lease_timeout, &mock_meta_store)
                 .await
                 .unwrap(),
-            "If new leader w    as elected old leader should NOT renew lease"
+            "Leader: If new leader was elected old leader should NOT renew lease"
+        );
+        // Follower: If new leader was, start election cycle
+        assert!(
+            !manage_term(false, &other_leader_info, lease_timeout, &mock_meta_store)
+                .await
+                .unwrap(),
+            "Follower: If new leader was elected, follower should enter election cycle"
         );
 
         // Follower: If lease is outdated, follower should delete leader and lease
