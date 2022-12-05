@@ -22,3 +22,6 @@ query II
 SELECT MAX(i1.i), MIN(i2.i) FROM integers i1, integers i2
 ----
 499	0
+
+statement ok
+DROP  VIEW integers
