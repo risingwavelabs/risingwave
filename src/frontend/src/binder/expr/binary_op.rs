@@ -74,7 +74,6 @@ impl Binder {
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
             BinaryOperator::Like => ExprType::Like,
-            // Err(zehua): `select 'a' not like any(array['b']);`
             BinaryOperator::NotLike => {
                 func_types.push(ExprType::Not);
                 ExprType::Like
