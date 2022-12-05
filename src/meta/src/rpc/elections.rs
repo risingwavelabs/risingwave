@@ -331,8 +331,7 @@ pub async fn run_elections<S: MetaStore>(
 
         // define all follow up elections and terms in handle
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let (leader_tx, leader_rx) =
-            tokio::sync::watch::channel((initial_leader.clone(), is_initial_leader));
+        let (leader_tx, leader_rx) = tokio::sync::watch::channel(Some(initial_leader.clone()));
         let handle = tokio::spawn(async move {
             // runs all followup elections
             let mut ticker = tokio::time::interval(Duration::from_millis(
@@ -378,7 +377,7 @@ pub async fn run_elections<S: MetaStore>(
 
                 // signal to observers if there is a change in leadership
                 leader_tx
-                    .send((leader_info.clone(), is_leader))
+                    .send(Some(leader_info.clone()))
                     .expect("Leader receiver dropped");
 
                 // election done. Enter the term of the current leader

@@ -66,7 +66,6 @@ use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction,
 };
 use crate::rpc::metrics::MetaMetrics;
-use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 use crate::storage::{MetaStore, Transaction};
 
 mod compaction_group_manager;
@@ -196,6 +195,7 @@ pub(crate) use start_measure_real_process_timer;
 use self::compaction_group_manager::CompactionGroupManagerInner;
 use super::Compactor;
 use crate::hummock::manager::worker::HummockManagerEventSender;
+use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 
 static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     [

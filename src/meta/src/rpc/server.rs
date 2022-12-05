@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use etcd_client::ConnectOptions;
-use risingwave_common::util::addr::leader_info_to_host_addr;
 use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::oneshot::channel as OneChannel;
 use tokio::sync::watch::{
@@ -25,10 +24,11 @@ use tokio::sync::watch::{
 };
 use tokio::task::JoinHandle;
 
-use super::elections::run_elections;
 use super::follower_svc::start_follower_srv;
-use super::leader_svc::{start_leader_srv, ElectionCoordination};
+use super::leader_svc::ElectionCoordination;
 use crate::manager::MetaOpts;
+use crate::rpc::election_client::{ElectionClient, ElectionContext, KvBasedElectionClient};
+use crate::rpc::leader_svc::start_leader_srv;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::MetaResult;
 
@@ -79,12 +79,20 @@ pub async fn rpc_serve(
             if let Some((username, password)) = &credentials {
                 options = options.with_user(username, password)
             }
-            let client = EtcdClient::connect(endpoints, Some(options), credentials.is_some())
-                .await
-                .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
+            let client = EtcdClient::connect(
+                endpoints.clone(),
+                Some(options.clone()),
+                credentials.is_some(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
+
+            let election_client = Box::new(KvBasedElectionClient::new(meta_store.clone()));
+
             rpc_serve_with_store(
                 meta_store,
+                election_client,
                 address_info,
                 max_heartbeat_interval,
                 lease_interval_secs,
@@ -94,8 +102,10 @@ pub async fn rpc_serve(
         }
         MetaStoreBackend::Mem => {
             let meta_store = Arc::new(MemStore::new());
+            let election_client = Box::new(KvBasedElectionClient::new(meta_store.clone()));
             rpc_serve_with_store(
                 meta_store,
+                election_client,
                 address_info,
                 max_heartbeat_interval,
                 lease_interval_secs,
@@ -106,55 +116,42 @@ pub async fn rpc_serve(
     }
 }
 
-fn node_is_leader(leader_rx: &WatchReceiver<(MetaLeaderInfo, bool)>) -> bool {
-    leader_rx.borrow().clone().1
+fn node_is_leader(leader_rx: &WatchReceiver<Option<MetaLeaderInfo>>, id: &str) -> bool {
+    match &*leader_rx.borrow() {
+        None => false,
+        Some(leader) => leader.node_address == *id,
+    }
 }
 
-pub async fn rpc_serve_with_store<S: MetaStore>(
+pub async fn rpc_serve_with_store<S: MetaStore, C: ElectionClient>(
     meta_store: Arc<S>,
+    election_client: Box<C>,
     address_info: AddressInfo,
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
-    // Initialize managers
-    let (_, election_handle, election_shutdown, mut leader_rx) = run_elections(
-        address_info.listen_addr.clone().to_string(),
-        meta_store.clone(),
-        lease_interval_secs,
-    )
-    .await?;
+    let id = address_info.listen_addr.clone().to_string();
 
-    let mut services_leader_rx = leader_rx.clone();
-    let mut note_status_leader_rx = leader_rx.clone();
+    let ctx = election_client
+        .start(id.clone(), lease_interval_secs as i64)
+        .await?;
 
-    // print current leader/follower status of this node
-    tokio::spawn(async move {
-        let _ = tracing::span!(tracing::Level::INFO, "node_status").enter();
-        loop {
-            if note_status_leader_rx.changed().await.is_err() {
-                tracing::error!("Leader sender dropped");
-                return;
-            }
+    let ElectionContext {
+        events,
+        handle,
+        stop_sender,
+        leader,
+    } = ctx;
 
-            let (leader_info, is_leader) = note_status_leader_rx.borrow().clone();
-            let leader_addr = leader_info_to_host_addr(leader_info);
-
-            tracing::info!(
-                "This node currently is a {} at {}:{}",
-                if is_leader {
-                    "leader. Serving"
-                } else {
-                    "follower. Leader serving"
-                },
-                leader_addr.host,
-                leader_addr.port
-            );
-        }
-    });
+    let election_handle = handle;
+    let election_shutdown = stop_sender;
+    let mut leader_rx = events;
 
     let (svc_shutdown_tx, mut svc_shutdown_rx) = WatchChannel(());
     let f_leader_rx = leader_rx.clone();
+
+    let mut services_leader_rx = leader_rx.clone();
 
     let join_handle = tokio::spawn(async move {
         let span = tracing::span!(tracing::Level::INFO, "services");
@@ -169,7 +166,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // run follower services until node becomes leader
         let svc_shutdown_rx_clone = svc_shutdown_rx.clone();
         let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
-        let follower_handle: Option<JoinHandle<()>> = if !node_is_leader(&leader_rx) {
+        let follower_handle: Option<JoinHandle<()>> = if !node_is_leader(&leader_rx, &id) {
             let address_info_clone = address_info.clone();
             Some(tokio::spawn(async move {
                 let _ = tracing::span!(tracing::Level::INFO, "follower services").enter();
@@ -186,7 +183,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         };
 
         // wait until this node becomes a leader
-        while !node_is_leader(&leader_rx) {
+        while !node_is_leader(&leader_rx, &id) {
             tokio::select! {
                 _ = leader_rx.changed() => {}
                 res = svc_shutdown_rx.changed() => {
@@ -215,13 +212,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             leader_rx,
         };
 
-        let current_leader = services_leader_rx.borrow().0.clone();
         start_leader_srv(
             meta_store,
             address_info,
             max_heartbeat_interval,
             opts,
-            current_leader,
+            leader,
             elect_coord,
             svc_shutdown_rx,
         )
@@ -274,6 +270,7 @@ mod tests {
             node_controllers.push(
                 rpc_serve_with_store(
                     meta_store.clone(),
+                    Box::new(KvBasedElectionClient::new(meta_store.clone())),
                     info,
                     Duration::from_secs(4),
                     1,
