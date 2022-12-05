@@ -157,7 +157,7 @@ fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
     );
 }
 
-pub fn is_continous_subset<T: Eq>(
+pub fn is_continuous_subset<T: Eq>(
     mut sub_iter: impl Iterator<Item = T>,
     mut iter: impl Iterator<Item = T>,
 ) -> bool {
