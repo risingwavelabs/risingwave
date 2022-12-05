@@ -21,7 +21,6 @@ use std::sync::{Arc, Mutex};
 // use tokio::sync::Mutex;
 use std::time::Duration;
 
-use futures::pin_mut;
 use parking_lot::{RwLock, RwLockReadGuard};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
@@ -785,11 +784,10 @@ impl Session<PgResponseStream> for SessionImpl {
         }
         let stmt = stmts.swap_remove(0);
         let rsp = {
-            let handle_fut = handle(self, stmt, sql, format);
+            let mut handle_fut = Box::pin(handle(self, stmt, sql, format));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
-                pin_mut!(handle_fut);
                 loop {
                     match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
                         Ok(result) => break result,
