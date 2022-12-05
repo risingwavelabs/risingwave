@@ -161,12 +161,10 @@ where
     /// will be no-op.
     pub async fn seal_current(
         &mut self,
-        delete_ranges: Vec<DeleteRangeTombstone>,
+        range_tombstones: Vec<DeleteRangeTombstone>,
     ) -> HummockResult<()> {
         if let Some(mut builder) = self.current_builder.take() {
-            for tombstone in delete_ranges {
-                builder.add_delete_range(tombstone);
-            }
+            builder.add_delete_range(range_tombstones);
             let builder_output = builder.finish().await?;
             {
                 // report
@@ -433,5 +431,33 @@ mod tests {
             key_range.right,
             FullKey::for_test(table_id, b"kkk", u64::MAX).encode()
         );
+    }
+
+    #[tokio::test]
+    async fn test_only_delete_range() {
+        let block_size = 1 << 10;
+        let table_capacity = 4 * block_size;
+        let opts = SstableBuilderOptions {
+            capacity: table_capacity,
+            block_capacity: block_size,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: 0.1,
+            compression_algorithm: CompressionAlgorithm::None,
+        };
+        let table_id = TableId::new(1);
+        let mut builder = DeleteRangeAggregatorBuilder::default();
+        builder.add_tombstone(vec![
+            DeleteRangeTombstone::new(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
+            DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
+        ]);
+        let builder = CapacitySplitTableBuilder::new(
+            LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
+            Arc::new(StateStoreMetrics::unused()),
+            None,
+            builder.build(0, false),
+            KeyRange::inf(),
+        );
+        let results = builder.finish().await.unwrap();
+        assert_eq!(results[0].sst_info.sst_info.table_ids, vec![1]);
     }
 }
