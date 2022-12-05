@@ -17,6 +17,8 @@ use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use risingwave_common::types::to_text::ToText;
+
 use itertools::Itertools;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
@@ -247,8 +249,6 @@ impl Sink for KafkaSink {
         // &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {     return Ok(())
         // }
 
-        println!("sink chunk {:?}", chunk);
-
         match self.config.format.as_str() {
             "append_only" => self.append_only(chunk, &self.schema).await,
             "debezium" => {
@@ -318,6 +318,8 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 
     let data_type = field.data_type();
 
+    tracing::info!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
+
     let value = match (data_type, scalar_ref) {
         (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
             json!(v)
@@ -344,8 +346,20 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             // fixme
             json!(v.to_string())
         }
-        (DataType::Time, ScalarRefImpl::NaiveTime(_v)) => {
-            unimplemented!()
+        (DataType::Date, ScalarRefImpl::NaiveDate(v)) => {
+            json!(v.to_text())
+        }
+        (DataType::Time, ScalarRefImpl::NaiveTime(v)) => {
+            json!(v.to_text())
+        }
+        (DataType::TIMESTAMP, ScalarRefImpl::NaiveDateTime(v)) => {
+            json!(v.to_text())
+        }
+        (DataType::TIMESTAMPZ, ScalarRefImpl::Int64(v)) => {
+            json!(v)
+        }
+        (DataType::Interval, ScalarRefImpl::Interval(v)) => {
+            json!(v.to_string())
         }
         (DataType::List { .. }, ScalarRefImpl::List(list_ref)) => {
             let mut vec = Vec::with_capacity(field.sub_fields.len());
@@ -383,6 +397,7 @@ fn record_to_json(row: RowRef<'_>, schema: Vec<Field>) -> Result<Map<String, Val
         let key = field.name.clone();
         let value = datum_to_json_object(field, datum_ref)
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
+            tracing::info!("value {:?}", value.to_string());
         mappings.insert(key, value);
     }
     Ok(mappings)
@@ -489,7 +504,7 @@ impl KafkaTransactionConductor {
 #[cfg(test)]
 mod test {
     use maplit::hashmap;
-    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::{test_prelude::StreamChunkTestExt, types::NaiveDateWrapper};
 
     use super::*;
 
