@@ -5574,6 +5574,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
+ "memcomparable",
  "mime_guess",
  "num-integer",
  "num-traits",

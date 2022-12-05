@@ -47,8 +47,10 @@ pub enum BackupError {
         #[source]
         BoxedError,
     ),
-    #[error("Checksum mismatch: expected {expected}, found: {found}.")]
+    #[error("Checksum mismatch: expected {expected}, found: {found}")]
     ChecksumMismatch { expected: u64, found: u64 },
+    #[error("Meta storage is not empty before being restored")]
+    NonemptyMetaStorage,
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

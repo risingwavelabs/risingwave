@@ -37,7 +37,7 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
-mod backup_restore;
+pub mod backup_restore;
 mod barrier;
 #[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
@@ -58,7 +58,7 @@ use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
 #[derive(Copy, Clone, Debug, ArgEnum)]
-enum Backend {
+pub enum Backend {
     Mem,
     Etcd,
 }

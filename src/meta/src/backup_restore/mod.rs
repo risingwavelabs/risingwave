@@ -16,17 +16,20 @@
 
 mod backup_manager;
 pub use backup_manager::*;
-mod error;
+pub mod error;
 mod meta_snapshot;
 mod storage;
 pub use storage::*;
+mod restore;
 mod utils;
+pub use restore::*;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{HummockSstableId, HummockVersionId};
 use risingwave_pb::hummock::HummockVersion;
 use serde::{Deserialize, Serialize};
 
 pub type MetaSnapshotId = u64;
+pub type MetaBackupJobId = u64;
 
 /// `MetaSnapshotMetadata` is metadata of `MetaSnapshot`.
 #[derive(Serialize, Deserialize, Clone)]

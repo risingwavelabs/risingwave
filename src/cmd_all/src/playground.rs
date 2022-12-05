@@ -60,7 +60,6 @@ pub async fn playground() -> Result<()> {
     } else {
         "playground".to_string()
     };
-    let force_shared_hummock_in_mem = std::env::var("FORCE_SHARED_HUMMOCK_IN_MEM").is_ok();
 
     let apply_config_file = |cmd: &mut Command, config_path: Option<&str>| {
         let path = Path::new(config_path.unwrap_or("src/config/risingwave.toml"));
@@ -98,7 +97,7 @@ pub async fn playground() -> Result<()> {
                         ComputeNodeService::apply_command_args(
                             &mut command,
                             c,
-                            if force_shared_hummock_in_mem || compute_node_count > 1 {
+                            if compute_node_count > 1 {
                                 HummockInMemoryStrategy::Shared
                             } else {
                                 HummockInMemoryStrategy::Isolated
@@ -206,8 +205,6 @@ pub async fn playground() -> Result<()> {
             }
         }
     }
-
-    sync_point::sync_point!("CLUSTER_READY");
 
     // wait for log messages to be flushed
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

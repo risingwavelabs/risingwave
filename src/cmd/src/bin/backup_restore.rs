@@ -12,12 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod backup_meta;
-mod cluster_info;
-mod pause_resume;
-mod reschedule;
+#![cfg_attr(coverage, feature(no_coverage))]
 
-pub use backup_meta::*;
-pub use cluster_info::*;
-pub use pause_resume::*;
-pub use reschedule::*;
+use risingwave_meta::backup_restore::error::BackupResult;
+
+#[cfg_attr(coverage, no_coverage)]
+fn main() -> BackupResult<()> {
+    use clap::StructOpt;
+    let opts = risingwave_meta::backup_restore::RestoreOpts::parse();
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(risingwave_meta::backup_restore::restore(opts))
+}

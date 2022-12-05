@@ -23,7 +23,7 @@ use crate::backup_restore::error::{BackupError, BackupResult};
 use crate::backup_restore::meta_snapshot::MetaSnapshot;
 use crate::backup_restore::{MetaSnapshotId, MetaSnapshotMetadata};
 
-pub type BackupStorageRef = Box<dyn MetaSnapshotStorage>;
+pub type BackupStorageRef = Arc<dyn MetaSnapshotStorage>;
 
 #[async_trait::async_trait]
 pub trait MetaSnapshotStorage: 'static + Sync + Send {
