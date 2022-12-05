@@ -17,8 +17,9 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_common::must_match;
 use risingwave_common::types::DataType;
+use risingwave_common::{must_match, try_match_expand};
+use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::generic::{self, GenericPlanNode};
@@ -198,7 +199,7 @@ fn convert_comparator_to_priority(comparator: Type) -> i32 {
         Type::Equal => 0,
         Type::GreaterThan | Type::GreaterThanOrEqual => 1,
         Type::LessThan | Type::LessThanOrEqual => 2,
-        _ => panic!(),
+        _ => -1,
     }
 }
 
@@ -213,6 +214,47 @@ impl ToStream for LogicalFilter {
             .any(|cond| cond.count_nows() > 0);
         if has_now {
             let mut conjunctions = predicate.conjunctions.clone();
+            // Check if the now expr is valid
+            for conjunction in &conjunctions {
+                if conjunction.count_nows() > 0 {
+                    let comparator_expr = try_match_expand!(conjunction, ExprImpl::FunctionCall)?;
+                    if convert_comparator_to_priority(comparator_expr.get_expr_type()) < 0 {
+                        return Err(ExprError::InvalidParam {
+                            name: "now",
+                            reason: String::from("now expression must be placed in a comparison"),
+                        }
+                        .into());
+                    }
+                    try_match_expand!(&comparator_expr.inputs()[0], ExprImpl::InputRef)?;
+                    let now_expr =
+                        try_match_expand!(&comparator_expr.inputs()[1], ExprImpl::FunctionCall)?;
+                    match now_expr.get_expr_type() {
+                        Type::Now => {
+                            // Do nothing.
+                        }
+                        Type::Add | Type::Subtract => {
+                            if try_match_expand!(&now_expr.inputs()[0], ExprImpl::FunctionCall)?
+                                .get_expr_type()
+                                != Type::Now
+                            {
+                                return Err(ExprError::InvalidParam {
+                                    name: "now",
+                                    reason: String::from("now() must appear in the left side of the now delta expression directly"),
+                                }
+                                .into());
+                            }
+                        }
+                        _ => {
+                            return Err(ExprError::InvalidParam {
+                                name: "now",
+                                reason: String::from("now delta expression must be a trivial add/subtract expression"),
+                            }
+                            .into());
+                        }
+                    }
+                }
+            }
+
             let mut now_conds = conjunctions
                 .drain_filter(|cond| cond.count_nows() > 0)
                 .map(|cond| {
