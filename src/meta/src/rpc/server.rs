@@ -383,41 +383,37 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         leader_rx: leader_rx.clone(),
     };
 
-    // print current leader/follower status of this node
+    // print current leader/follower status of this node + fencing mechanism
     tokio::spawn(async move {
+        let mut was_leader = false;
         loop {
             if leader_rx.changed().await.is_err() {
                 tracing::error!("Leader status: issue receiving leader value from channel");
                 continue;
             }
 
-            let (host_addr, is_leader) = leader_rx.borrow().clone();
-            tracing::info!(
-                "This node currently is a {}",
-                if is_leader { "leader" } else { "follower" }
-            );
-            if is_leader {
-                // Implementation of naive fencing mechanism:
-                // leader nodes should panic if they loose their leader position
-                tracing::info!("Starting fencing mechanism on leader");
-                loop {
-                    if leader_rx.changed().await.is_err() {
-                        tracing::error!("Fencing: issue receiving leader value from channel");
-                    }
-                    // This node was a leader and lost its lease
-                    let (new_host_addr, is_leader) = leader_rx.borrow().to_owned();
-                    panic!(
-                        "This node is no longer leader: {}. New host address is {}:{}. Killing node",
-                        is_leader, new_host_addr.host, new_host_addr.port
-                    )
-                }
-            } else {
-                tracing::info!(
-                    "Current leader is serving at {}:{}",
-                    host_addr.host,
-                    host_addr.port
-                );
+            let (leader_addr, is_leader) = leader_rx.borrow().clone();
+
+            // Implementation of naive fencing mechanism:
+            // leader nodes should panic if they loose their leader position
+            if was_leader {
+                // && !is_leader {
+                panic!(
+                    "This node lost its leadership. New host address is {}:{}. Killing node",
+                    leader_addr.host, leader_addr.port
+                )
             }
+            was_leader = is_leader;
+            tracing::info!(
+                "This node currently is a {} at {}:{}",
+                if is_leader {
+                    "leader. Serving"
+                } else {
+                    "follower. Leader serving"
+                },
+                leader_addr.host,
+                leader_addr.port
+            );
         }
     });
 
