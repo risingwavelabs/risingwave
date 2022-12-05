@@ -801,5 +801,60 @@ mod tests {
         )
     }
 
-    // test renew_lease function
+    #[tokio::test]
+    async fn test_leader_not_changed() {
+        // leader_changed should return false, if leader did not change. Independent of lease
+        // changes
+        let (lease_timeout, mock_meta_store, leader_info, _, old_lease_reg_time) =
+            default_setup().await;
+        assert!(
+            !leader_changed(&leader_info, &mock_meta_store)
+                .await
+                .unwrap(),
+            "Leader not changed and lease not changed"
+        );
+        let new_lease = MetaLeaseInfo {
+            leader: Some(leader_info.clone()),
+            lease_register_time: old_lease_reg_time.as_secs() + lease_timeout / 2,
+            lease_expire_time: old_lease_reg_time.as_secs() + lease_timeout / 2 + lease_timeout,
+        };
+        put_lease_info(&new_lease, &mock_meta_store).await;
+        assert!(
+            !leader_changed(&leader_info, &mock_meta_store)
+                .await
+                .unwrap(),
+            "Leader not changed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_leader_changed() {
+        // leader_changed should return true, if leader did change. Independent of if lease changed
+        let (lease_timeout, mock_meta_store, leader_info, _, old_lease_reg_time) =
+            default_setup().await;
+
+        let new_lease = MetaLeaseInfo {
+            leader: Some(leader_info.clone()),
+            lease_register_time: old_lease_reg_time.as_secs() + lease_timeout / 2,
+            lease_expire_time: old_lease_reg_time.as_secs() + lease_timeout / 2 + lease_timeout,
+        };
+        let new_leader = MetaLeaderInfo {
+            node_address: "other:789".to_owned(),
+            lease_id: gen_rand_lease_id(),
+        };
+        put_leader_info(&new_leader, &mock_meta_store).await;
+        assert!(
+            leader_changed(&leader_info, &mock_meta_store)
+                .await
+                .unwrap(),
+            "Leader changed and lease not changed"
+        );
+        put_lease_info(&new_lease, &mock_meta_store).await;
+        assert!(
+            leader_changed(&leader_info, &mock_meta_store)
+                .await
+                .unwrap(),
+            "Leader changed and lease changed"
+        );
+    }
 }
