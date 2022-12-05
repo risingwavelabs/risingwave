@@ -72,6 +72,7 @@ fn serialize_value(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Float32(v) => buf.put_f32_le(v.into_inner()),
         ScalarRefImpl::Float64(v) => buf.put_f64_le(v.into_inner()),
         ScalarRefImpl::Utf8(v) => serialize_str(v.as_bytes(), buf),
+        ScalarRefImpl::Bytea(v) => serialize_str(v, buf),
         ScalarRefImpl::Bool(v) => buf.put_u8(v as u8),
         ScalarRefImpl::Decimal(v) => serialize_decimal(&v, buf),
         ScalarRefImpl::Interval(v) => serialize_interval(&v, buf),
@@ -83,7 +84,7 @@ fn serialize_value(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
             serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
-        ScalarRefImpl::List(list) => serialize_list(list, buf),
+        ScalarRefImpl::List(v) => serialize_list(v, buf),
     }
 }
 
@@ -154,6 +155,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Timestampz => ScalarImpl::Int64(data.get_i64_le()),
         DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
+        DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
         DataType::List {
             datatype: item_type,
         } => deserialize_list(item_type, data)?,
@@ -186,6 +188,13 @@ fn deserialize_str(data: &mut impl Buf) -> Result<Box<str>> {
     String::from_utf8(bytes)
         .map(String::into_boxed_str)
         .map_err(ValueEncodingError::InvalidUtf8)
+}
+
+fn deserialize_bytea(data: &mut impl Buf) -> Vec<u8> {
+    let len = data.get_u32_le();
+    let mut bytes = vec![0; len as usize];
+    data.copy_to_slice(&mut bytes);
+    bytes
 }
 
 fn deserialize_bool(data: &mut impl Buf) -> Result<bool> {

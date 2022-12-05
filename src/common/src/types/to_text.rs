@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Write;
+
 use super::{DatumRef, ScalarRefImpl};
 
 // Used to convert ScalarRef to text format
@@ -51,6 +53,13 @@ impl ToText for bool {
     }
 }
 
+/// Convert bytes in `Bytea` type to String.
+pub fn format_bytes(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(2 * bytes.len());
+    write!(s, "\\x{}", hex::encode(bytes)).unwrap();
+    s
+}
+
 impl ToText for ScalarRefImpl<'_> {
     fn to_text(&self) -> String {
         match self {
@@ -68,6 +77,7 @@ impl ToText for ScalarRefImpl<'_> {
             ScalarRefImpl::List(l) => l.to_text(),
             ScalarRefImpl::Struct(s) => s.to_text(),
             ScalarRefImpl::Utf8(v) => v.to_text(),
+            ScalarRefImpl::Bytea(v) => format_bytes(v),
         }
     }
 }
