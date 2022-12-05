@@ -96,11 +96,15 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
         buf
     }
 
+    /// Serializes the row with memcomparable encoding, into the given `buf`. As each datum may have
+    /// different order type, a `serde` should be provided.
     #[inline]
     fn memcmp_serialize_into(&self, serde: &OrderedRowSerde, buf: impl BufMut) {
         serde.serialize(self, buf);
     }
 
+    /// Serializes the row with memcomparable encoding and return the bytes. As each datum may have
+    /// different order type, a `serde` should be provided.
     #[inline]
     fn memcmp_serialize(&self, serde: &OrderedRowSerde) -> Vec<u8> {
         let mut buf = Vec::with_capacity(self.len()); // each datum is at least 1 byte
@@ -244,7 +248,8 @@ impl<R: Row2> Row2 for Box<R> {
 
     deref_forward_row!();
 
-    // Manually implemented in case `R` has a more efficient implementation.
+    // Manually implemented in case the `Cow` is `Owned` and `R` has a more efficient
+    // implementation.
     fn into_owned_row(self) -> Row {
         (*self).into_owned_row()
     }

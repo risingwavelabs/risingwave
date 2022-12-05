@@ -78,6 +78,10 @@ impl JoinEntryState {
 
     /// Note: To make the estimated size accurate, the caller should ensure that it does not mutate
     /// the size (or capacity) of the [`StateValueType`].
+    ///
+    /// Note: the first item in the tuple is the mutable reference to the value in this entry, while
+    /// the second item is the decoded value. To mutate the degree, one **must not** forget to apply
+    /// the changes to the first item.
     pub fn values_mut<'a>(
         &'a mut self,
         data_types: &'a [DataType],

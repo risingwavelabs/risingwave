@@ -26,9 +26,7 @@ pub struct CompactedRow {
 impl CompactedRow {
     /// Deserialize [`CompactedRow`] into [`Row`] with given types.
     pub fn deserialize(&self, data_types: &[DataType]) -> value_encoding::Result<Row> {
-        let deserializer = RowDeserializer::new(data_types);
-        let row = deserializer.deserialize(self.row.as_slice())?;
-        Ok(row)
+        RowDeserializer::new(data_types).deserialize(self.row.as_slice())
     }
 }
 

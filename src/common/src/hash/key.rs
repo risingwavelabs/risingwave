@@ -37,7 +37,7 @@ use crate::array::{
 };
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::vnode::VirtualNode;
-use crate::row::Row;
+use crate::row::{Row, RowDeserializer};
 use crate::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
     OrderedF32, OrderedF64, ScalarRef,
@@ -669,6 +669,7 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
     type S = FixedSizeKeySerializer<N>;
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<Row> {
+        // TODO: directly deserialize to Row
         let mut builders: Vec<_> = data_types
             .iter()
             .map(|dt| dt.create_array_builder(1))
@@ -704,12 +705,9 @@ impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<Row> {
-        let mut key_buffer = self.key.as_slice();
-        let mut values = Vec::with_capacity(data_types.len());
-        for ty in data_types {
-            values.push(deserialize_datum(&mut key_buffer, ty).map_err(ArrayError::internal)?);
-        }
-        Ok(Row::new(values))
+        RowDeserializer::new(data_types)
+            .deserialize(self.key.as_slice())
+            .map_err(ArrayError::internal)
     }
 
     fn deserialize_to_builders(
@@ -726,10 +724,6 @@ impl HashKey for SerializedKey {
             array_builder.append_datum(&datum_result.map_err(ArrayError::internal)?);
         }
         Ok(())
-    }
-
-    fn has_null(&self) -> bool {
-        !self.null_bitmap().is_clear()
     }
 
     fn null_bitmap(&self) -> &FixedBitSet {
