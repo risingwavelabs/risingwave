@@ -245,6 +245,8 @@ export interface LocalLookupJoinNode {
   joinType: JoinType;
   condition: ExprNode | undefined;
   outerSideKey: number[];
+  innerSideKey: number[];
+  lookupPrefixLen: number;
   innerSideTableDesc: StorageTableDesc | undefined;
   innerSideVnodeMapping: number[];
   innerSideColumnIds: number[];
@@ -265,6 +267,8 @@ export interface DistributedLookupJoinNode {
   joinType: JoinType;
   condition: ExprNode | undefined;
   outerSideKey: number[];
+  innerSideKey: number[];
+  lookupPrefixLen: number;
   innerSideTableDesc: StorageTableDesc | undefined;
   innerSideColumnIds: number[];
   outputIndices: number[];
@@ -1575,6 +1579,8 @@ function createBaseLocalLookupJoinNode(): LocalLookupJoinNode {
     joinType: JoinType.UNSPECIFIED,
     condition: undefined,
     outerSideKey: [],
+    innerSideKey: [],
+    lookupPrefixLen: 0,
     innerSideTableDesc: undefined,
     innerSideVnodeMapping: [],
     innerSideColumnIds: [],
@@ -1590,6 +1596,8 @@ export const LocalLookupJoinNode = {
       joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       condition: isSet(object.condition) ? ExprNode.fromJSON(object.condition) : undefined,
       outerSideKey: Array.isArray(object?.outerSideKey) ? object.outerSideKey.map((e: any) => Number(e)) : [],
+      innerSideKey: Array.isArray(object?.innerSideKey) ? object.innerSideKey.map((e: any) => Number(e)) : [],
+      lookupPrefixLen: isSet(object.lookupPrefixLen) ? Number(object.lookupPrefixLen) : 0,
       innerSideTableDesc: isSet(object.innerSideTableDesc)
         ? StorageTableDesc.fromJSON(object.innerSideTableDesc)
         : undefined,
@@ -1617,6 +1625,12 @@ export const LocalLookupJoinNode = {
     } else {
       obj.outerSideKey = [];
     }
+    if (message.innerSideKey) {
+      obj.innerSideKey = message.innerSideKey.map((e) => Math.round(e));
+    } else {
+      obj.innerSideKey = [];
+    }
+    message.lookupPrefixLen !== undefined && (obj.lookupPrefixLen = Math.round(message.lookupPrefixLen));
     message.innerSideTableDesc !== undefined && (obj.innerSideTableDesc = message.innerSideTableDesc
       ? StorageTableDesc.toJSON(message.innerSideTableDesc)
       : undefined);
@@ -1655,6 +1669,8 @@ export const LocalLookupJoinNode = {
       ? ExprNode.fromPartial(object.condition)
       : undefined;
     message.outerSideKey = object.outerSideKey?.map((e) => e) || [];
+    message.innerSideKey = object.innerSideKey?.map((e) => e) || [];
+    message.lookupPrefixLen = object.lookupPrefixLen ?? 0;
     message.innerSideTableDesc = (object.innerSideTableDesc !== undefined && object.innerSideTableDesc !== null)
       ? StorageTableDesc.fromPartial(object.innerSideTableDesc)
       : undefined;
@@ -1672,6 +1688,8 @@ function createBaseDistributedLookupJoinNode(): DistributedLookupJoinNode {
     joinType: JoinType.UNSPECIFIED,
     condition: undefined,
     outerSideKey: [],
+    innerSideKey: [],
+    lookupPrefixLen: 0,
     innerSideTableDesc: undefined,
     innerSideColumnIds: [],
     outputIndices: [],
@@ -1685,6 +1703,8 @@ export const DistributedLookupJoinNode = {
       joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       condition: isSet(object.condition) ? ExprNode.fromJSON(object.condition) : undefined,
       outerSideKey: Array.isArray(object?.outerSideKey) ? object.outerSideKey.map((e: any) => Number(e)) : [],
+      innerSideKey: Array.isArray(object?.innerSideKey) ? object.innerSideKey.map((e: any) => Number(e)) : [],
+      lookupPrefixLen: isSet(object.lookupPrefixLen) ? Number(object.lookupPrefixLen) : 0,
       innerSideTableDesc: isSet(object.innerSideTableDesc)
         ? StorageTableDesc.fromJSON(object.innerSideTableDesc)
         : undefined,
@@ -1706,6 +1726,12 @@ export const DistributedLookupJoinNode = {
     } else {
       obj.outerSideKey = [];
     }
+    if (message.innerSideKey) {
+      obj.innerSideKey = message.innerSideKey.map((e) => Math.round(e));
+    } else {
+      obj.innerSideKey = [];
+    }
+    message.lookupPrefixLen !== undefined && (obj.lookupPrefixLen = Math.round(message.lookupPrefixLen));
     message.innerSideTableDesc !== undefined && (obj.innerSideTableDesc = message.innerSideTableDesc
       ? StorageTableDesc.toJSON(message.innerSideTableDesc)
       : undefined);
@@ -1734,6 +1760,8 @@ export const DistributedLookupJoinNode = {
       ? ExprNode.fromPartial(object.condition)
       : undefined;
     message.outerSideKey = object.outerSideKey?.map((e) => e) || [];
+    message.innerSideKey = object.innerSideKey?.map((e) => e) || [];
+    message.lookupPrefixLen = object.lookupPrefixLen ?? 0;
     message.innerSideTableDesc = (object.innerSideTableDesc !== undefined && object.innerSideTableDesc !== null)
       ? StorageTableDesc.fromPartial(object.innerSideTableDesc)
       : undefined;

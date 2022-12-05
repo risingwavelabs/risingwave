@@ -86,7 +86,7 @@ mod tests {
             assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int64(1)));
             assert_eq!(
                 row.value_at(1).to_owned_datum(),
-                (Some(ScalarImpl::Utf8("mike".to_owned())))
+                (Some(ScalarImpl::Utf8("mike".into())))
             );
             assert_eq!(
                 row.value_at(2).to_owned_datum(),
@@ -114,7 +114,7 @@ mod tests {
             assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int64(1)));
             assert_eq!(
                 row.value_at(1).to_owned_datum(),
-                (Some(ScalarImpl::Utf8("mike".to_owned())))
+                (Some(ScalarImpl::Utf8("mike".into())))
             );
             assert_eq!(
                 row.value_at(2).to_owned_datum(),

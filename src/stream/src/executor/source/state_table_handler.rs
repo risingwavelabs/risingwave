@@ -47,7 +47,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     }
 
     fn string_to_scalar(rhs: impl Into<String>) -> ScalarImpl {
-        ScalarImpl::Utf8(rhs.into())
+        ScalarImpl::Utf8(rhs.into().into_boxed_str())
     }
 
     pub(crate) async fn get(&self, key: SplitId) -> StreamExecutorResult<Option<Row>> {

@@ -7,7 +7,7 @@ source ci/scripts/common.env.sh
 
 echo "--- Build Java connector node"
 # clone a released version(tag)
-git clone --branch v0.0.1 --depth 1 https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
+git clone --branch v0.0.2 --depth 1 https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
 cd risingwave-connector-node
 mvn package -Dmaven.test.skip=true
 echo "--- Upload Java artifacts"

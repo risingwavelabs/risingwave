@@ -28,7 +28,6 @@ futures-async-stream = "0.2"
 hyper = "0.14"
 itertools = "0.10"
 maplit = "1.0.2"
-memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"

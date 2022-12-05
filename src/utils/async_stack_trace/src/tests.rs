@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
 use futures::future::{join_all, select_all};
 use futures::{FutureExt, StreamExt};
 use futures_async_stream::stream;
@@ -133,17 +131,12 @@ async fn test_stack_trace_display() {
         }
     });
 
-    TraceReporter { tx: watch_tx }
-        .trace(
-            hello(),
-            "actor 233",
-            TraceConfig {
-                report_detached: true,
-                verbose: true,
-                interval: Duration::from_millis(50),
-            },
-        )
-        .await;
+    TraceReporter {
+        tx: watch_tx,
+        config: TraceConfig::for_test(),
+    }
+    .trace(hello(), "actor 233")
+    .await;
 
     collector.await.unwrap();
 }

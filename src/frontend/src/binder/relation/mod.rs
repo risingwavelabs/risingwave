@@ -70,13 +70,13 @@ impl Relation {
         }
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn is_correlated(&self, depth: Depth) -> bool {
         match self {
-            Relation::Subquery(subquery) => subquery.query.is_correlated(),
+            Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
             Relation::Join(join) => {
-                join.cond.has_correlated_input_ref_by_depth()
-                    || join.left.is_correlated()
-                    || join.right.is_correlated()
+                join.cond.has_correlated_input_ref_by_depth(depth)
+                    || join.left.is_correlated(depth)
+                    || join.right.is_correlated(depth)
             }
             _ => false,
         }
@@ -167,11 +167,6 @@ impl Binder {
     /// return the `index_name`
     pub fn resolve_index_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "index name")
-    }
-
-    /// return the `sink_name`
-    pub fn resolve_sink_name(name: ObjectName) -> Result<String> {
-        Self::resolve_single_name(name.0, "sink name")
     }
 
     /// return the `user_name`
