@@ -458,9 +458,9 @@ pub async fn run_elections<S: MetaStore>(
 /// Followers will check if the leader is still alive
 ///
 /// ## Returns
-/// True if the leader is still in power
-/// False if the leader failed
-/// None if there was an error
+/// True if the leader is still in power.
+/// False if the leader failed.
+/// None if there was an error.
 async fn manage_term<S: MetaStore>(
     is_leader: bool,
     leader_info: &MetaLeaderInfo,
@@ -472,11 +472,7 @@ async fn manage_term<S: MetaStore>(
         match renew_lease(leader_info, lease_time_sec, meta_store).await {
             None => return Some(false),
             Some(val) => {
-                if val {
-                    // TODO: should this be true or this be None?
-                    return Some(true);
-                    return None; // node is leader and lease was renewed
-                }
+                return Some(val);
             }
         }
     };
@@ -690,11 +686,19 @@ mod tests {
             new_lease_info.get_lease_expire_time() - lease_info.get_lease_expire_time()
         );
 
-        // if lease is outdated, lease should get deleted
+        // Leader: If new leader was elected old leader should NOT renew lease
+        let other_leader_info = MetaLeaderInfo {
+            node_address: "other:1234".into(),
+            lease_id: 456 as u64,
+        };
+        assert!(
+            !manage_term(true, &other_leader_info, lease_timeout, &mock_meta_store)
+                .await
+                .unwrap(),
+            "If new leader w    as elected old leader should NOT renew lease"
+        );
 
-        // If you delete the lease, follower or leader should say that old leader is down
-
-        // If lease is outdated, follower should delete lease and lease
+        // Follower: If lease is outdated, follower should delete leader and lease
         // TODO: in the future, the follower should directly write new lease
         let mock_meta_store = Arc::new(MemStore::new());
         let leader_info = MetaLeaderInfo {
