@@ -212,7 +212,7 @@ impl SchemaFilterKeyExtractor {
                 == *dist_key_in_pk_indices.iter().max().unwrap()
         {
             false => None,
-            true => Some(dist_key_in_pk_indices[0]),
+            true => Some(*dist_key_in_pk_indices.iter().min().unwrap()),
         };
 
         let distribution_key_end_index_in_pk =
