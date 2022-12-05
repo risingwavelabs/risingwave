@@ -115,7 +115,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 }
 
 impl KafkaSplitEnumerator {
-    async fn list_splits_batch(
+    pub async fn list_splits_batch(
         &mut self,
         expect_start_timestamp_millis: Option<i64>,
         expect_stop_timestamp_millis: Option<i64>,
@@ -299,28 +299,3 @@ impl KafkaSplitEnumerator {
             .collect())
     }
 }
-
-// #[cfg(test)]
-// mod test {
-//     use maplit;
-//     #[test]
-//     fn test() {
-//         let mut x: Option<std::collections::HashMap<i32, Option<i64>>> = Some(maplit::hashmap! {
-//             0 => Some(1),
-//             1 => Some(2),
-//             2 => Some(3),
-//             3 => None,
-//         });
-//         x = None;
-//         let (low, high) = (-1, 4);
-
-//         for ele in [0, 1, 2, 3] {
-//             let start = x
-//                 .as_mut()
-//                 .map(|m| m.remove(&ele).unwrap_or(Some(low)))
-//                 .unwrap_or(Some(low))
-//                 .unwrap_or(low);
-//             println!("{}", start);
-//         }
-//     }
-// }
