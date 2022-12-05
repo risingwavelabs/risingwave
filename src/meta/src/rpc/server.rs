@@ -427,6 +427,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     // If leader also start a thread that checks if status changed.
     //      If leader lost lease it should panic
 
+    // health service should start on follower
+
     // Start services.
     tokio::spawn(async move {
         tonic::transport::Server::builder()

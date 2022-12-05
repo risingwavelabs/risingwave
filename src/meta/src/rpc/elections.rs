@@ -495,6 +495,9 @@ async fn manage_term<S: MetaStore>(
     if lease_info.get_lease_expire_time() + some_time < since_epoch().as_secs() {
         tracing::warn!("Detected that leader is down");
         let mut txn = Transaction::default();
+        // TODO: No deletion here
+        // just do election straight away.
+        // Overwrite current leader info
         txn.delete(
             META_CF_NAME.to_string(),
             META_LEADER_KEY.as_bytes().to_vec(),
@@ -506,6 +509,7 @@ async fn manage_term<S: MetaStore>(
         }
         return Some(false);
     }
+
     // lease exists and leader continues term
     Some(true)
 }
