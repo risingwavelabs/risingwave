@@ -422,6 +422,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     // else start follower service (See design doc)
     // If leader also start a thread that checks if status changed.
     //      If leader lost lease it should panic
+    // Remove the interceptor pattern again
 
     // health service should start on follower
 

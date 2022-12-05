@@ -541,17 +541,6 @@ async fn leader_changed<S: MetaStore>(
     };
 }
 
-// TODOs:
-// Do not use Mockall framework
-// Mock meta store using MemStore implementation of MetaStore
-//
-// meta node on every write has to check that it is still leader
-// if not leader, panic and K8s restarts pod
-//
-// Do not Not start service if follower
-// Only start service if it is elected leader
-// Remove the interceptor pattern again
-
 #[cfg(test)]
 mod tests {
 
