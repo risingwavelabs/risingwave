@@ -115,7 +115,11 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 }
 
 impl KafkaSplitEnumerator {
-    async fn list_splits_batch(&mut self, expect_start_timestamp_millis: Option<i64>, expect_stop_timestamp_millis: Option<i64>) -> anyhow::Result<Vec<KafkaSplit>> {
+    async fn list_splits_batch(
+        &mut self,
+        expect_start_timestamp_millis: Option<i64>,
+        expect_stop_timestamp_millis: Option<i64>,
+    ) -> anyhow::Result<Vec<KafkaSplit>> {
         let topic_partitions = self.fetch_topic_partition().await.map_err(|e| {
             anyhow!(format!(
                 "failed to fetch metadata from kafka ({}), error: {}",
@@ -123,22 +127,55 @@ impl KafkaSplitEnumerator {
             ))
         })?;
         let mut expect_start_offset = if let Some(ts) = expect_start_timestamp_millis {
-            Some(self.fetch_offset_for_time(topic_partitions.as_ref(), ts).await?)
-        } else { None };
+            Some(
+                self.fetch_offset_for_time(topic_partitions.as_ref(), ts)
+                    .await?,
+            )
+        } else {
+            None
+        };
         let mut expect_stop_offset = if let Some(ts) = expect_stop_timestamp_millis {
-            Some(self.fetch_offset_for_time(topic_partitions.as_ref(), ts).await?)
-        } else { None };
+            Some(
+                self.fetch_offset_for_time(topic_partitions.as_ref(), ts)
+                    .await?,
+            )
+        } else {
+            None
+        };
 
-        let fetch_watermark = |topic_partitions: &[i32]| -> anyhow::Result<HashMap<i32, (i64, i64)>> {
+        let mut watermarks = {
             let mut ret = HashMap::new();
-            for partition in topic_partitions.partitions() {
-                let (low, high) = self.client.fetch_watermarks(&self.topic, partition, KAFKA_SYNC_CALL_TIMEOUT).unwrap();
-                ret.insert(partition, (low, high));
+            for partition in &topic_partitions {
+                let (low, high) = self
+                    .client
+                    .fetch_watermarks(self.topic.as_str(), *partition, KAFKA_SYNC_CALL_TIMEOUT)
+                    .await?;
+                ret.insert(partition, (low - 1, high));
             }
             ret
         };
 
-        Ok(())
+        topic_partitions.iter().map(|partition| {
+            let (low, high) = watermarks.remove(&partition).unwrap();
+            let start_offset = {
+                let start = expect_start_offset.as_mut().map(|m| m.remove(partition).unwrap_or(Some(low))).unwrap_or(Some(low)).unwrap_or(low);
+                i64::max(start, low)
+            };
+            let stop_offset = {
+                let stop = expect_stop_offset.as_mut().map(|m| m.remove(partition).unwrap_or(Some(high))).unwrap_or(Some(high)).unwrap_or(high);
+                i64::min(stop, high)
+            };
+
+            if start_offset > stop_offset {
+                return Err(anyhow!(format!("topic {} partition {}: requested start offset {} is greater than stop offset {}",self.topic, partition, start_offset, stop_offset)));
+            }
+            Ok(KafkaSplit {
+                topic: self.topic.clone(),
+                partition: *partition,
+                start_offset: Some(start_offset),
+                stop_offset: Some(stop_offset),
+            })
+        }).collect::<anyhow::Result<Vec<KafkaSplit>>>()
     }
 
     async fn fetch_stop_offset(
@@ -262,3 +299,28 @@ impl KafkaSplitEnumerator {
             .collect())
     }
 }
+
+// #[cfg(test)]
+// mod test {
+//     use maplit;
+//     #[test]
+//     fn test() {
+//         let mut x: Option<std::collections::HashMap<i32, Option<i64>>> = Some(maplit::hashmap! {
+//             0 => Some(1),
+//             1 => Some(2),
+//             2 => Some(3),
+//             3 => None,
+//         });
+//         x = None;
+//         let (low, high) = (-1, 4);
+
+//         for ele in [0, 1, 2, 3] {
+//             let start = x
+//                 .as_mut()
+//                 .map(|m| m.remove(&ele).unwrap_or(Some(low)))
+//                 .unwrap_or(Some(low))
+//                 .unwrap_or(low);
+//             println!("{}", start);
+//         }
+//     }
+// }
