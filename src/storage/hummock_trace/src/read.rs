@@ -41,13 +41,8 @@ pub trait Deserializer<R: Read> {
 }
 
 /// Decodes bincode format serialized data
+#[derive(Default)]
 pub struct BincodeDeserializer;
-
-impl BincodeDeserializer {
-    fn new() -> Self {
-        Self
-    }
-}
 
 impl<R: Read> Deserializer<R> for BincodeDeserializer {
     fn deserialize(&self, reader: &mut R) -> Result<Record> {
@@ -62,7 +57,7 @@ pub struct TraceReaderImpl<R: Read, D: Deserializer<R>> {
 }
 
 impl<R: Read, D: Deserializer<R>> TraceReaderImpl<R, D> {
-    pub fn new(mut reader: R, deserializer: D) -> Result<Self> {
+    pub fn try_new(mut reader: R, deserializer: D) -> Result<Self> {
         // Read the 32-bit unsigned integer from the reader using the BigEndian byte order.
         let magic_bytes = reader.read_u32::<BigEndian>()?;
 
@@ -84,8 +79,8 @@ impl<R: Read, D: Deserializer<R>> TraceReaderImpl<R, D> {
 
 impl<R: Read> TraceReaderImpl<R, BincodeDeserializer> {
     pub fn new_bincode(reader: R) -> Result<Self> {
-        let deserializer = BincodeDeserializer::new();
-        Self::new(reader, deserializer)
+        let deserializer = BincodeDeserializer::default();
+        Self::try_new(reader, deserializer)
     }
 }
 
@@ -97,7 +92,7 @@ impl<R: Read, D: Deserializer<R>> TraceReader for TraceReaderImpl<R, D> {
 
 #[cfg(test)]
 mod test {
-    use std::io::{Read, Result, Write};
+    use std::io::{Cursor, Read, Result, Write};
     use std::mem::size_of;
 
     use bincode::config::{self};
@@ -119,36 +114,9 @@ mod test {
         }
     }
 
-    #[derive(Default)]
-    pub(crate) struct MemTraceStore(Vec<u8>);
-
-    impl Write for MemTraceStore {
-        fn write(&mut self, buf: &[u8]) -> Result<usize> {
-            let size = self.0.write(buf)?;
-            Ok(size)
-        }
-
-        fn flush(&mut self) -> Result<()> {
-            self.0.flush()?;
-            Ok(())
-        }
-    }
-
-    impl Read for MemTraceStore {
-        fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-            if self.0.is_empty() {
-                return Ok(0);
-            }
-            let end = std::cmp::min(buf.len(), self.0.len());
-            let v = self.0.drain(0..end);
-            buf.copy_from_slice(v.as_slice());
-            Ok(v.len())
-        }
-    }
-
     #[test]
     fn test_bincode_deserialize() {
-        let deserializer = BincodeDeserializer::new();
+        let deserializer = BincodeDeserializer::default();
         let op = Operation::get(
             traced_bytes![5, 5, 15, 6],
             7564,
@@ -160,10 +128,12 @@ mod test {
         );
         let expected = Record::new_local_none(54433, op);
 
-        let mut buf = MemTraceStore::default();
+        let mut buf = Cursor::new(Vec::new());
 
         let record_bytes = encode_to_vec(expected.clone(), config::standard()).unwrap();
         let _ = buf.write(&record_bytes).unwrap();
+
+        buf.set_position(0);
 
         let actual = deserializer.deserialize(&mut buf).unwrap();
 
@@ -171,7 +141,7 @@ mod test {
     }
     #[test]
     fn test_bincode_serialize_resp() {
-        let deserializer = BincodeDeserializer::new();
+        let deserializer = BincodeDeserializer::default();
         let resp = TraceSubResp(SubscribeResponse {
             status: Some(Status {
                 code: 0,
@@ -184,10 +154,11 @@ mod test {
         let op = Operation::MetaMessage(Box::new(resp));
         let expected = Record::new_local_none(123, op);
 
-        let mut buf = MemTraceStore::default();
+        let mut buf = Cursor::new(Vec::new());
 
         let record_bytes = encode_to_vec(expected.clone(), config::standard()).unwrap();
         let _ = buf.write(&record_bytes).unwrap();
+        buf.set_position(0);
 
         let actual = deserializer.deserialize(&mut buf).unwrap();
 
@@ -196,7 +167,7 @@ mod test {
     #[test]
     fn test_bincode_deserialize_many() {
         let count = 5000;
-        let mut buf = MemTraceStore::default();
+        let mut buf = Cursor::new(Vec::new());
         let mut records = Vec::new();
 
         for i in 0..count {
@@ -209,7 +180,8 @@ mod test {
             let _ = buf.write(&record_bytes).unwrap();
         }
 
-        let deserializer = BincodeDeserializer::new();
+        buf.set_position(0);
+        let deserializer = BincodeDeserializer::default();
 
         for expected in records {
             let actual = deserializer.deserialize(&mut buf).unwrap();
@@ -217,7 +189,7 @@ mod test {
         }
 
         assert!(deserializer.deserialize(&mut buf).is_err());
-        assert_eq!(buf.0.len(), 0);
+        assert!(buf.is_empty());
     }
 
     #[test]
@@ -241,7 +213,7 @@ mod test {
             .times(count)
             .returning(move |_| Ok(return_expected.clone()));
 
-        let mut trace_reader = TraceReaderImpl::new(mock_reader, mock_deserializer).unwrap();
+        let mut trace_reader = TraceReaderImpl::try_new(mock_reader, mock_deserializer).unwrap();
 
         for _ in 0..count {
             let actual = trace_reader.read().unwrap();

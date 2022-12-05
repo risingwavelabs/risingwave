@@ -21,8 +21,10 @@ use mockall::{automock, mock};
 
 use super::record::Record;
 use crate::error::Result;
+use crate::TraceError;
 
-pub(crate) static MAGIC_BYTES: u32 = 0x484D5452; // HMTR
+pub(crate) type MagicBytes = u32;
+pub(crate) static MAGIC_BYTES: MagicBytes = 0x484D5452; // HMTR
 
 #[cfg_attr(test, automock)]
 pub(crate) trait TraceWriter {
@@ -64,22 +66,25 @@ pub(crate) struct TraceWriterImpl<W: Write, S: Serializer<W>> {
 }
 
 impl<W: Write, S: Serializer<W>> TraceWriterImpl<W, S> {
-    pub(crate) fn new(mut writer: W, serializer: S) -> Result<Self> {
-        assert_eq!(
-            writer
-                .write(&MAGIC_BYTES.to_be_bytes())
-                .expect("failed to write magic bytes"),
-            size_of::<u32>()
-        );
+    pub(crate) fn try_new(writer: W, serializer: S) -> Result<Self> {
+        let mut writer = Self { writer, serializer };
+        writer.write_magic_bytes()?;
+        Ok(writer)
+    }
 
-        Ok(Self { writer, serializer })
+    fn write_magic_bytes(&mut self) -> Result<()> {
+        let size = self.writer.write(&MAGIC_BYTES.to_be_bytes())?;
+        if size != size_of::<MagicBytes>() {
+            Err(TraceError::Other("failed to write magic bytes"))
+        } else {
+            Ok(())
+        }
     }
 }
 
 impl<W: Write> TraceWriterImpl<W, BincodeSerializer> {
-    pub(crate) fn new_bincode(writer: W) -> Result<Self> {
-        let s = BincodeSerializer::new();
-        Self::new(writer, s)
+    pub(crate) fn try_new_bincode(writer: W) -> Result<Self> {
+        Self::try_new(writer, BincodeSerializer::new())
     }
 }
 
@@ -103,7 +108,10 @@ impl<W: Write, S: Serializer<W>> Drop for TraceWriterImpl<W, S> {
 
 #[cfg(test)]
 mod test {
+    use std::io::Cursor;
+
     use bincode::{config, decode_from_slice, encode_to_vec};
+    use byteorder::{BigEndian, ReadBytesExt};
 
     use super::*;
     use crate::{traced_bytes, Operation};
@@ -140,6 +148,22 @@ mod test {
     }
 
     #[test]
+    fn test_new_writer_impl() {
+        // Create a Cursor that can be used as a mock writer.
+        let mut buf = Cursor::new(Vec::new());
+
+        {
+            // Create a TraceWriterImpl instance using the mock writer and a BincodeSerializer.
+            let mut writer = TraceWriterImpl::try_new_bincode(&mut buf).unwrap();
+
+            writer.flush().unwrap();
+        }
+        buf.set_position(0);
+        let magic_bytes = buf.read_u32::<BigEndian>().unwrap();
+        assert_eq!(magic_bytes, MAGIC_BYTES);
+    }
+
+    #[test]
     fn test_writer_impl_write() {
         let mut mock_writer = MockWrite::new();
         let key = traced_bytes![123];
@@ -164,7 +188,7 @@ mod test {
             .times(1)
             .returning(move |_, _| Ok(r_len));
 
-        let mut writer = TraceWriterImpl::new(mock_writer, mock_serializer).unwrap();
+        let mut writer = TraceWriterImpl::try_new(mock_writer, mock_serializer).unwrap();
 
         writer.write(record).unwrap();
     }

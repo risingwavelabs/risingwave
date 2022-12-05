@@ -47,6 +47,9 @@ pub enum TraceError {
 
     #[error("failed to sync  {0}")]
     SyncFailed(String),
+
+    #[error("{0}")]
+    Other(&'static str),
 }
 
 impl From<EncodeError> for TraceError {

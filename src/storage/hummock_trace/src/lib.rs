@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(once_cell)]
+#![feature(cursor_remaining)]
 
 mod collector;
 mod error;
