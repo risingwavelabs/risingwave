@@ -101,44 +101,7 @@ mod tests {
         let storage_type4 = StorageType::Global;
 
         let actor_1 = vec![
-            (
-                0,
-                Operation::get(
-                    traced_bytes![0, 1, 2, 3],
-                    123,
-                    None,
-                    true,
-                    Some(12),
-                    table_id1,
-                    false,
-                ),
-            ),
-            (
-                0,
-                Operation::Result(OperationResult::Get(TraceResult::Ok(Some(
-                    get_result.clone(),
-                )))),
-            ),
-            (0, Operation::Finish),
-            (
-                3,
-                Operation::ingest(
-                    vec![(traced_bytes![123], Some(traced_bytes![123]))],
-                    vec![],
-                    4,
-                    table_id1,
-                ),
-            ),
-            (
-                3,
-                Operation::Result(OperationResult::Ingest(TraceResult::Ok(ingest_result))),
-            ),
-            (3, Operation::Finish),
-        ]
-        .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type1, record_id, op)));
-
-        let actor_2 = vec![
+            (0, Operation::NewLocalStorage),
             (
                 1,
                 Operation::get(
@@ -147,7 +110,7 @@ mod tests {
                     None,
                     true,
                     Some(12),
-                    table_id2,
+                    table_id1,
                     false,
                 ),
             ),
@@ -164,7 +127,7 @@ mod tests {
                     vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
                     4,
-                    table_id2,
+                    table_id1,
                 ),
             ),
             (
@@ -172,13 +135,55 @@ mod tests {
                 Operation::Result(OperationResult::Ingest(TraceResult::Ok(ingest_result))),
             ),
             (2, Operation::Finish),
+            (3, Operation::DropLocalStorage),
+        ]
+        .into_iter()
+        .map(|(record_id, op)| Ok(Record::new(storage_type1, record_id, op)));
+
+        let actor_2 = vec![
+            (4, Operation::NewLocalStorage),
+            (
+                5,
+                Operation::get(
+                    traced_bytes![0, 1, 2, 3],
+                    123,
+                    None,
+                    true,
+                    Some(12),
+                    table_id2,
+                    false,
+                ),
+            ),
+            (
+                5,
+                Operation::Result(OperationResult::Get(TraceResult::Ok(Some(
+                    get_result.clone(),
+                )))),
+            ),
+            (5, Operation::Finish),
+            (
+                6,
+                Operation::ingest(
+                    vec![(traced_bytes![123], Some(traced_bytes![123]))],
+                    vec![],
+                    4,
+                    table_id2,
+                ),
+            ),
+            (
+                6,
+                Operation::Result(OperationResult::Ingest(TraceResult::Ok(ingest_result))),
+            ),
+            (6, Operation::Finish),
+            (7, Operation::DropLocalStorage),
         ]
         .into_iter()
         .map(|(record_id, op)| Ok(Record::new(storage_type2, record_id, op)));
 
         let actor_3 = vec![
+            (8, Operation::NewLocalStorage),
             (
-                4,
+                9,
                 Operation::get(
                     traced_bytes![0, 1, 2, 3],
                     123,
@@ -190,14 +195,14 @@ mod tests {
                 ),
             ),
             (
-                4,
+                9,
                 Operation::Result(OperationResult::Get(TraceResult::Ok(Some(
                     get_result.clone(),
                 )))),
             ),
-            (4, Operation::Finish),
+            (9, Operation::Finish),
             (
-                5,
+                10,
                 Operation::ingest(
                     vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
@@ -206,23 +211,24 @@ mod tests {
                 ),
             ),
             (
-                5,
+                10,
                 Operation::Result(OperationResult::Ingest(TraceResult::Ok(ingest_result))),
             ),
-            (5, Operation::Finish),
+            (10, Operation::Finish),
+            (11, Operation::DropLocalStorage),
         ]
         .into_iter()
         .map(|(record_id, op)| Ok(Record::new(storage_type3, record_id, op)));
 
         let mut non_local: Vec<Result<Record>> = vec![
-            (6, Operation::Seal(seal_id, seal_checkpoint)),
-            (6, Operation::Finish),
-            (7, Operation::Sync(sync_id)),
+            (12, Operation::Seal(seal_id, seal_checkpoint)),
+            (12, Operation::Finish),
+            (13, Operation::Sync(sync_id)),
             (
-                7,
+                13,
                 Operation::Result(OperationResult::Sync(TraceResult::Ok(0))),
             ),
-            (7, Operation::Finish),
+            (13, Operation::Finish),
         ]
         .into_iter()
         .map(|(record_id, op)| Ok(Record::new(storage_type4, record_id, op)))

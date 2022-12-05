@@ -231,7 +231,7 @@ where
     }
 
     #[cfg(any(test, feature = "test"))]
-    pub async fn notify_hummock_with_version(
+    pub fn notify_hummock_with_version(
         &self,
         operation: Operation,
         info: Info,

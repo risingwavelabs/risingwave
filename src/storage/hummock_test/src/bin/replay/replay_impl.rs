@@ -129,8 +129,7 @@ impl ReplayStateStore for GlobalReplayInterface {
         };
 
         self.notifier
-            .notify_hummock_with_version(op, info, Some(version))
-            .await;
+            .notify_hummock_with_version(op, info, Some(version));
 
         // wait till version updated
         if let Some(prev_version_id) = prev_version_id {

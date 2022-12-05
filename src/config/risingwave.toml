@@ -4,7 +4,7 @@ max_heartbeat_interval_secs = 600
 connection_pool_size = 16
 
 [meta]
-vacuum_interval_sec = 3000000
+
 
 [batch]
 

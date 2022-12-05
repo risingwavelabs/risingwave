@@ -207,8 +207,9 @@ impl ReplayWorker {
             } => {
                 let iter = match storage_type {
                     StorageType::Global => replay.iter(key_range, epoch, read_options).await,
-                    StorageType::Local(_, _) => {
-                        let s = local_storages.get_mut(&read_options.table_id).unwrap();
+                    StorageType::Local(_, table_id) => {
+                        assert_eq!(table_id, read_options.table_id);
+                        let s = local_storages.get_mut(&table_id).unwrap();
                         s.iter(key_range, epoch, read_options).await
                     }
                 };
@@ -243,7 +244,7 @@ impl ReplayWorker {
             }
             Operation::NewLocalStorage => {
                 if let StorageType::Local(_, table_id) = storage_type {
-                    local_storages.insert(table_id, &replay).await;
+                    local_storages.insert(table_id, replay).await;
                 }
             }
             Operation::DropLocalStorage => {
@@ -395,8 +396,8 @@ mod tests {
         };
 
         let mut should_exit = false;
-
-        let record = Record::new(StorageType::Local(0, 0), 0, op);
+        let get_storage_type = StorageType::Local(0, read_options.table_id);
+        let record = Record::new(get_storage_type, 1, op);
         let mut mock_replay = MockGlobalReplayInterface::new();
 
         mock_replay.expect_new_local().times(1).returning(move |_| {
@@ -437,6 +438,17 @@ mod tests {
         });
 
         let replay = Arc::new(mock_replay);
+
+        ReplayWorker::handle_record(
+            Record(get_storage_type, 0, Operation::NewLocalStorage),
+            &replay,
+            &mut res_rx,
+            &mut iters_map,
+            &mut local_storages,
+            &mut should_exit,
+        )
+        .await;
+
         res_tx
             .send(OperationResult::Get(TraceResult::Ok(Some(traced_bytes![
                 120
@@ -458,9 +470,22 @@ mod tests {
         let op = Operation::Iter {
             key_range: (Bound::Unbounded, Bound::Unbounded),
             epoch: 45,
-            read_options: iter_read_options,
+            read_options: iter_read_options.clone(),
         };
-        let record = Record::new(StorageType::Local(0, 0), 1, op);
+
+        let iter_storage_type = StorageType::Local(0, iter_read_options.table_id);
+
+        ReplayWorker::handle_record(
+            Record(iter_storage_type, 2, Operation::NewLocalStorage),
+            &replay,
+            &mut res_rx,
+            &mut iters_map,
+            &mut local_storages,
+            &mut should_exit,
+        )
+        .await;
+
+        let record = Record::new(iter_storage_type, 1, op);
         res_tx
             .send(OperationResult::Iter(TraceResult::Ok(())))
             .unwrap();
@@ -479,7 +504,7 @@ mod tests {
         assert_eq!(iters_map.len(), 1);
 
         let op = Operation::IterNext(1);
-        let record = Record::new(StorageType::Local(0, 0), 2, op);
+        let record = Record::new(iter_storage_type, 3, op);
         res_tx
             .send(OperationResult::IterNext(TraceResult::Ok(Some((
                 traced_bytes![1],
