@@ -142,7 +142,7 @@ impl StreamChunkBuilder {
     ///
     /// A [`StreamChunk`] will be returned when `size == capacity`
     #[must_use]
-    pub fn append_row_update(&mut self, op: Op, row_update: &RowRef<'_>) -> Option<StreamChunk> {
+    pub fn append_row_update(&mut self, op: Op, row_update: RowRef<'_>) -> Option<StreamChunk> {
         self.ops.push(op);
         for &(update_idx, output_idx) in &self.update_to_output {
             self.column_builders[output_idx].append_datum(row_update.value_at(update_idx));

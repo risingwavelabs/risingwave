@@ -28,12 +28,12 @@ use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::row;
 use risingwave_common::row::{CompactedRow, Row, Row2, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::{bail, row};
 use risingwave_storage::StateStore;
 
 use self::iter_utils::zip_by_order_key;
@@ -63,19 +63,6 @@ impl<R: Row2> JoinRow<R> {
 
     pub fn is_zero_degree(&self) -> bool {
         self.degree == 0
-    }
-
-    pub fn inc_degree(&mut self) -> DegreeType {
-        self.degree += 1;
-        self.degree
-    }
-
-    pub fn dec_degree(&mut self) -> StreamExecutorResult<DegreeType> {
-        if self.degree == 0 {
-            bail!("Tried to decrement zero join row degree");
-        }
-        self.degree -= 1;
-        Ok(self.degree)
     }
 
     /// Return row and degree in `Row` format. The degree part will be inserted in degree table
@@ -116,36 +103,6 @@ impl EncodedJoinRow {
     fn decode_row(&self, data_types: &[DataType]) -> StreamExecutorResult<Row> {
         let row = self.compacted_row.deserialize(data_types)?;
         Ok(row)
-    }
-
-    pub fn inc_degree(&mut self) -> DegreeType {
-        self.degree += 1;
-        self.degree
-    }
-
-    pub fn dec_degree(&mut self) -> StreamExecutorResult<DegreeType> {
-        if self.degree == 0 {
-            bail!("Tried to decrement zero join row degree");
-        }
-        self.degree -= 1;
-        Ok(self.degree)
-    }
-
-    // TODO(yuhao): only need to decode part of the encoded row.
-    // TODO(yuhao): add kv api in state table to avoid manually append pk prefix.
-    /// Get a row with the schema in degree state table
-    ///
-    /// * `state_order_key_indices` - the order key of `row`
-    pub fn get_schemaed_degree<'a>(
-        &'_ self,
-        row_data_types: &'_ [DataType],
-        state_order_key_indices: &'a [usize],
-    ) -> StreamExecutorResult<impl Row2 + 'a> {
-        let order_key = self
-            .decode_row(row_data_types)?
-            .project(state_order_key_indices);
-        let schemaed_degree = build_degree_row(order_key, self.degree);
-        Ok(schemaed_degree)
     }
 }
 
@@ -265,6 +222,7 @@ struct TableInner<S: StateStore> {
     // This should be identical to the pk in state table.
     order_key_indices: Vec<usize>,
     // This should be identical to the data types in table schema.
+    #[expect(dead_code)]
     all_data_types: Vec<DataType>,
     pub(crate) table: StateTable<S>,
 }
@@ -522,26 +480,42 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.put(key.clone(), HashValueWrapper(Some(state)));
     }
 
-    pub fn inc_degree(&mut self, join_row: &mut StateValueType) -> StreamExecutorResult<()> {
+    /// Manipulate the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
+    /// memory and in the degree table.
+    fn manipulate_degree(
+        &mut self,
+        join_row_ref: &mut StateValueType,
+        join_row: &mut JoinRow<Row>,
+        action: impl Fn(&mut DegreeType),
+    ) {
+        // TODO: no need to `into_owned_row` here due to partial borrow.
         let old_degree = join_row
-            .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
-        join_row.inc_degree();
-        let new_degree = join_row
-            .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
+            .to_table_rows(&self.state.order_key_indices)
+            .1
+            .into_owned_row();
+
+        action(&mut join_row_ref.degree);
+        action(&mut join_row.degree);
+
+        let new_degree = join_row.to_table_rows(&self.state.order_key_indices).1;
 
         self.degree_state.table.update(old_degree, new_degree);
-        Ok(())
     }
 
-    pub fn dec_degree(&mut self, join_row: &mut StateValueType) -> StreamExecutorResult<()> {
-        let old_degree = join_row
-            .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
-        join_row.dec_degree()?;
-        let new_degree = join_row
-            .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
+    /// Increment the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
+    /// memory and in the degree table.
+    pub fn inc_degree(&mut self, join_row_ref: &mut StateValueType, join_row: &mut JoinRow<Row>) {
+        self.manipulate_degree(join_row_ref, join_row, |d| *d += 1)
+    }
 
-        self.degree_state.table.update(old_degree, new_degree);
-        Ok(())
+    /// Decrement the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
+    /// memory and in the degree table.
+    pub fn dec_degree(&mut self, join_row_ref: &mut StateValueType, join_row: &mut JoinRow<Row>) {
+        self.manipulate_degree(join_row_ref, join_row, |d| {
+            *d = d
+                .checked_sub(1)
+                .expect("Tried to decrement zero join row degree")
+        })
     }
 
     /// Evict the cache.

@@ -366,7 +366,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     }
 
     #[inline]
-    fn forward_exactly_once_if_matched(&mut self, op: Op, row: &RowRef<'_>) -> Option<StreamChunk> {
+    fn forward_exactly_once_if_matched(&mut self, op: Op, row: RowRef<'_>) -> Option<StreamChunk> {
         // if it's a semi join and the side needs to be maintained.
         if is_semi(T) && forward_exactly_once(T, SIDE) {
             self.stream_chunk_builder.append_row_update(op, row)
@@ -376,7 +376,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     }
 
     #[inline]
-    fn forward_if_not_matched(&mut self, op: Op, row: &RowRef<'_>) -> Option<StreamChunk> {
+    fn forward_if_not_matched(&mut self, op: Op, row: RowRef<'_>) -> Option<StreamChunk> {
         // if it's outer join or anti join and the side needs to be maintained.
         if (is_anti(T) && forward_exactly_once(T, SIDE)) || is_outer_side(T, SIDE) {
             self.stream_chunk_builder.append_row_update(op, row)
@@ -819,8 +819,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     }
                                 }
                                 if side_match.need_degree_table {
-                                    side_match.ht.inc_degree(matched_row_ref)?;
-                                    matched_row.inc_degree();
+                                    side_match.ht.inc_degree(matched_row_ref, &mut matched_row);
                                 }
                             }
                             // If the stream is append-only and the join key covers pk in both side,
@@ -835,19 +834,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(op, &row)
+                                hashjoin_chunk_builder.forward_if_not_matched(op, row)
                             {
                                 yield Message::Chunk(chunk);
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, &row)
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, row)
                         {
                             yield Message::Chunk(chunk);
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(op, &row)
+                        hashjoin_chunk_builder.forward_if_not_matched(op, row)
                     {
                         yield Message::Chunk(chunk);
                     }
@@ -870,8 +869,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             if check_join_condition(&row, &matched_row.row) {
                                 degree += 1;
                                 if side_match.need_degree_table {
-                                    side_match.ht.dec_degree(matched_row_ref)?;
-                                    matched_row.dec_degree()?;
+                                    side_match.ht.dec_degree(matched_row_ref, &mut matched_row);
                                 }
                                 if !forward_exactly_once(T, SIDE) {
                                     if let Some(chunk) = hashjoin_chunk_builder
@@ -884,23 +882,25 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(op, &row)
+                                hashjoin_chunk_builder.forward_if_not_matched(op, row)
                             {
                                 yield Message::Chunk(chunk);
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, &row)
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, row)
                         {
                             yield Message::Chunk(chunk);
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(op, &row)
+                        hashjoin_chunk_builder.forward_if_not_matched(op, row)
                     {
                         yield Message::Chunk(chunk);
                     }
-                    if side_update.need_degree_table {
+                    if append_only_optimize {
+                        unreachable!();
+                    } else if side_update.need_degree_table {
                         side_update.ht.delete(key, JoinRow::new(row, degree));
                     } else {
                         side_update.ht.delete_row(key, row);
