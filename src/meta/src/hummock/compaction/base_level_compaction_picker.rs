@@ -125,7 +125,9 @@ impl CompactionPicker for LevelCompactionPicker {
             let all_level_amplification =
                 cal_file_size(&levels.get_level(self.target_level).table_infos) * 100
                     / l0_total_file_size;
-            if all_level_amplification > MAX_WRITE_AMPLIFICATION {
+            if all_level_amplification > MAX_WRITE_AMPLIFICATION
+                && l0_total_file_size < self.config.max_compaction_bytes
+            {
                 return None;
             }
             // reverse because the ix of low sub-level is smaller.

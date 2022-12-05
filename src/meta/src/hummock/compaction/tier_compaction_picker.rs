@@ -98,7 +98,9 @@ impl TierCompactionPicker {
                 });
             }
 
-            if compact_file_count < self.config.level0_tier_compact_file_number as usize {
+            if compact_file_count < self.config.level0_tier_compact_file_number as usize
+                && compaction_bytes < max_compaction_bytes
+            {
                 continue;
             }
 
@@ -110,7 +112,10 @@ impl TierCompactionPicker {
                 max_level_size * self.config.level0_tier_compact_file_number / 2 > compaction_bytes;
 
             // do not pick a compact task with large write amplification.
-            if level.level_type == non_overlapping_type && is_write_amp_large {
+            if level.level_type == non_overlapping_type
+                && is_write_amp_large
+                && compaction_bytes < max_compaction_bytes
+            {
                 continue;
             }
 

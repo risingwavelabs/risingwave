@@ -474,7 +474,6 @@ pub mod tests {
             .max_level(4)
             .max_bytes_for_level_multiplier(5)
             .max_compaction_bytes(1)
-            .level0_trigger_file_number(1)
             .level0_tier_compact_file_number(2)
             .compaction_mode(CompactionMode::Range as i32)
             .build();
@@ -547,7 +546,6 @@ pub mod tests {
             .max_level(4)
             .max_bytes_for_level_multiplier(5)
             .max_compaction_bytes(10000)
-            .level0_trigger_file_number(8)
             .level0_tier_compact_file_number(4)
             .compaction_mode(CompactionMode::Range as i32)
             .build();
@@ -584,7 +582,6 @@ pub mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         let config = CompactionConfigBuilder::with_config(config)
             .max_bytes_for_level_base(100)
-            .level0_trigger_file_number(8)
             .compaction_filter_mask(compaction_filter_flag.into())
             .build();
         let selector = DynamicLevelSelector::new(
