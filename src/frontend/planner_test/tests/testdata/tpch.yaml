@@ -3429,9 +3429,7 @@
         └─LogicalAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [sum(lineitem.l_quantity)] }
           └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(partsupp.ps_partkey, lineitem.l_partkey) AND IsNotDistinctFrom(partsupp.ps_suppkey, lineitem.l_suppkey), output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity] }
             ├─LogicalAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [] }
-            | └─LogicalJoin { type: LeftSemi, on: (partsupp.ps_partkey = part.p_partkey), output: all }
-            |   ├─LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey] }
-            |   └─LogicalScan { table: part, output_columns: [part.p_partkey], required_columns: [p_partkey, p_name], predicate: Like(part.p_name, 'forest%':Varchar) }
+            | └─LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey] }
             └─LogicalScan { table: lineitem, output_columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity], required_columns: [l_partkey, l_suppkey, l_quantity, l_shipdate], predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
   batch_plan: |
     BatchExchange { order: [supplier.s_name ASC], dist: Single }
@@ -3462,14 +3460,8 @@
                   └─BatchHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [sum(lineitem.l_quantity)] }
                     └─BatchHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM lineitem.l_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity] }
                       ├─BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                      | └─BatchHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [] }
-                      |   └─BatchHashJoin { type: LeftSemi, predicate: partsupp.ps_partkey = part.p_partkey, output: all }
-                      |     ├─BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
-                      |     | └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                      |     └─BatchExchange { order: [], dist: HashShard(part.p_partkey) }
-                      |       └─BatchProject { exprs: [part.p_partkey] }
-                      |         └─BatchFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
-                      |           └─BatchScan { table: part, columns: [part.p_partkey, part.p_name], distribution: UpstreamHashShard(part.p_partkey) }
+                      | └─BatchSortAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [] }
+                      |   └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                       └─BatchExchange { order: [], dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
                         └─BatchProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity] }
                           └─BatchFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
@@ -3504,13 +3496,7 @@
                     ├─StreamExchange { dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                     | └─StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey] }
                     |   └─StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count] }
-                    |     └─StreamHashJoin { type: LeftSemi, predicate: partsupp.ps_partkey = part.p_partkey, output: all }
-                    |       ├─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
-                    |       | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                    |       └─StreamExchange { dist: HashShard(part.p_partkey) }
-                    |         └─StreamProject { exprs: [part.p_partkey] }
-                    |           └─StreamFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
-                    |             └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
+                    |     └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                     └─StreamExchange { dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
                       └─StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
                         └─StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
@@ -3554,7 +3540,7 @@
                 StreamHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM lineitem.l_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, lineitem.l_suppkey] }
                     left table: 17, right table 19, left degree table: 18, right degree table: 20,
                   StreamExchange Hash([0, 1]) from 8
-                  StreamExchange Hash([0, 1]) from 11
+                  StreamExchange Hash([0, 1]) from 9
 
     Fragment 5
       StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty::Decimal] }
@@ -3579,24 +3565,11 @@
       StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey] }
         StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count] }
             result table: 21, state tables: []
-          StreamHashJoin { type: LeftSemi, predicate: partsupp.ps_partkey = part.p_partkey, output: all }
-              left table: 22, right table 24, left degree table: 23, right degree table: 25,
-            StreamExchange Hash([0]) from 9
-            StreamExchange Hash([0]) from 10
-
-    Fragment 9
-      Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-        Upstream
-        BatchPlanNode
-
-    Fragment 10
-      StreamProject { exprs: [part.p_partkey] }
-        StreamFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
-          Chain { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
+          Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
             Upstream
             BatchPlanNode
 
-    Fragment 11
+    Fragment 9
       StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
           Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
@@ -3624,11 +3597,7 @@
      Table 18 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_partkey_0, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1] }
      Table 19 { columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $1 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0, 1] }
      Table 20 { columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1] }
-     Table 21 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, count], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 22 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 23 { columns: [partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
-     Table 24 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
-     Table 25 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 21 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, count], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0, 1] }
      Table 4294967294 { columns: [s_name, s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], primary key: [$0 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [2] }
 - id: tpch_q21
   before:

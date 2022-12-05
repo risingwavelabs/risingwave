@@ -181,8 +181,15 @@ impl TranslateApplyRule {
         data_types: &mut HashMap<usize, DataType>,
         index: &mut usize,
     ) -> Option<PlanRef> {
-        // Only accept inner join.
-        if !matches!(join.join_type(), JoinType::Inner) {
+        // Only accept join which doesn't generate null columns.
+        if !matches!(
+            join.join_type(),
+            JoinType::Inner
+                | JoinType::LeftSemi
+                | JoinType::RightSemi
+                | JoinType::LeftAnti
+                | JoinType::RightAnti
+        ) {
             return None;
         }
 
