@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-#[cfg(test)]
 use thiserror::Error;
 
 use crate::storage::transaction::Transaction;

@@ -628,7 +628,7 @@ mod tests {
         let lease_timeout = 10;
 
         // TODO: Is this expected behavior?
-        // If nobody was elected leader renewing lease fails and leader is marked as failed
+        // Leader: If nobody was elected leader renewing lease fails and leader is marked as failed
         let now = since_epoch();
         let leader_info = MetaLeaderInfo {
             node_address: "localhost:1234".into(),
@@ -640,11 +640,18 @@ mod tests {
                 .unwrap()
         );
 
+        // Follower: If nobody was elected leader renewing lease also fails
+        assert!(
+            !manage_term(false, &leader_info, lease_timeout, &mock_meta_store)
+                .await
+                .unwrap()
+        );
+
         // if node is leader lease should be renewed
         let lease_info = MetaLeaseInfo {
             leader: Some(leader_info.clone()),
             lease_register_time: now.as_secs(),
-            lease_expire_time: now.as_secs(),
+            lease_expire_time: now.as_secs() + lease_timeout,
         };
         put_leader_lease(&leader_info, &lease_info, &mock_meta_store).await;
         assert!(
@@ -655,18 +662,18 @@ mod tests {
         );
         let (_, new_lease_info) = get_infos_obj(&mock_meta_store).await.unwrap();
         assert_eq!(
-            lease_info.get_lease_expire_time() + lease_timeout,
+            now.as_secs() + lease_timeout,
             new_lease_info.get_lease_expire_time(),
             "Lease was not extended by {}s, but by {}",
             lease_timeout,
             new_lease_info.get_lease_expire_time() - lease_info.get_lease_expire_time()
         );
 
-        // If node is NOT a leader, lease should not be renewed
+        // If node is follower, lease should not be renewed
         let lease_info = MetaLeaseInfo {
             leader: Some(leader_info.clone()),
             lease_register_time: now.as_secs(),
-            lease_expire_time: now.as_secs(),
+            lease_expire_time: now.as_secs() + lease_timeout,
         };
         put_leader_lease(&leader_info, &lease_info, &mock_meta_store).await;
         assert!(
@@ -684,6 +691,36 @@ mod tests {
         );
 
         // if lease is outdated, lease should get deleted
+
+        // If you delete the lease, follower or leader should say that old leader is down
+
+        // If lease is outdated, follower should delete lease and lease
+        // TODO: in the future, the follower should directly write new lease
+        let mock_meta_store = Arc::new(MemStore::new());
+        let leader_info = MetaLeaderInfo {
+            node_address: "localhost:1234".into(),
+            lease_id: 123 as u64,
+        };
+        let now = since_epoch();
+        // lease is expired
+        let lease_info = MetaLeaseInfo {
+            leader: Some(leader_info.clone()),
+            lease_register_time: now.as_secs() - 2 * lease_timeout,
+            lease_expire_time: now.as_secs() - lease_timeout,
+        };
+        put_leader_lease(&leader_info, &lease_info, &mock_meta_store).await;
+        assert!(
+            !manage_term(false, &leader_info, lease_timeout, &mock_meta_store)
+                .await
+                .unwrap(),
+            "Should have determined that new election is needed if lease is no longer valid"
+        );
+        let (leader, lease) = get_infos(&mock_meta_store).await.unwrap();
+        assert!(
+            leader.is_empty() && lease.is_empty(),
+            "Expected that leader and lease were deleted after lease expired. leader.is_empty: {}. lease.is_empty(): {}",
+            leader.is_empty(), lease.is_empty()
+        )
 
         // more test cases?
     }
