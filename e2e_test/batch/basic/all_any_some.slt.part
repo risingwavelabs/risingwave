@@ -72,3 +72,37 @@ select 1 = SOME(1);
 
 statement error
 select 1 < ANY(array[null])
+
+statement ok
+create table tmp(id int, vec int[]);
+
+statement ok
+insert into tmp values(1, array[2,3]);
+
+statement ok
+insert into tmp values(2, array[2,3]);
+
+statement ok
+create materialized view mv1 as select id, vec from tmp where id = any(vec);
+
+query TT
+select id, vec from mv1;
+----
+2 {2,3}
+
+statement ok
+create materialized view mv2 as select id, vec from tmp where id <> ALL(vec);
+
+query TT
+select id, vec from mv2;
+----
+1 {2,3}
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop table tmp;
