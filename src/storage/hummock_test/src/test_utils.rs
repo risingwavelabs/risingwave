@@ -182,7 +182,7 @@ fn assert_result_eq<Item: PartialEq + Debug, E>(
     }
 }
 
-pub(crate) struct LocalGlobalStateStoreHolder<L, G> {
+pub struct LocalGlobalStateStoreHolder<L, G> {
     pub(crate) local: L,
     pub(crate) global: G,
 }
@@ -309,7 +309,7 @@ where
 }
 
 impl<G: StateStore> LocalGlobalStateStoreHolder<G::Local, G> {
-    pub(crate) async fn new(state_store: G, table_id: TableId) -> Self {
+    pub async fn new(state_store: G, table_id: TableId) -> Self {
         LocalGlobalStateStoreHolder {
             local: state_store.new_local(table_id).await,
             global: state_store,
@@ -317,7 +317,7 @@ impl<G: StateStore> LocalGlobalStateStoreHolder<G::Local, G> {
     }
 }
 
-pub(crate) type HummockV2MixedStateStore =
+pub type HummockV2MixedStateStore =
     LocalGlobalStateStoreHolder<LocalHummockStorage, HummockStorage>;
 
 impl Deref for HummockV2MixedStateStore {
@@ -340,7 +340,7 @@ impl HummockStateStoreTestTrait for HummockStorageV1 {
     }
 }
 
-pub(crate) async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHummockMetaClient>) {
+pub async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHummockMetaClient>) {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -364,7 +364,7 @@ pub(crate) async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHumm
     (hummock_storage, meta_client)
 }
 
-pub(crate) async fn with_hummock_storage_v2(
+pub async fn with_hummock_storage_v2(
     table_id: TableId,
 ) -> (HummockV2MixedStateStore, Arc<MockHummockMetaClient>) {
     let sstable_store = mock_sstable_store();
