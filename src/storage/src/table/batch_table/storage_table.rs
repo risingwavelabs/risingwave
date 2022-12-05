@@ -204,7 +204,7 @@ impl<S: StateStore> StorageTable<S> {
                 == *dist_key_in_pk_indices.iter().max().unwrap()
         {
             false => None,
-            true => Some(*dist_key_in_pk_indices.iter().min().unwrap()),
+            true => Some(dist_key_in_pk_indices[0]),
         };
         Self {
             table_id,

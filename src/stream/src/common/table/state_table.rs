@@ -196,7 +196,7 @@ impl<S: StateStore> StateTable<S> {
                 == *dist_key_in_pk_indices.iter().max().unwrap()
         {
             false => None,
-            true => Some(*dist_key_in_pk_indices.iter().min().unwrap()),
+            true => Some(dist_key_in_pk_indices[0]),
         };
         let vnode_col_idx_in_pk = table_catalog
             .vnode_col_idx

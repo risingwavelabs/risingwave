@@ -212,7 +212,7 @@ impl SchemaFilterKeyExtractor {
                 == *dist_key_in_pk_indices.iter().max().unwrap()
         {
             false => None,
-            true => Some(*dist_key_in_pk_indices.iter().min().unwrap()),
+            true => Some(dist_key_in_pk_indices[0]),
         };
 
         let distribution_key_end_index_in_pk =
@@ -534,7 +534,7 @@ mod tests {
         let schema = vec![DataType::Varchar, DataType::Int64];
         let serializer = OrderedRowSerde::new(schema, order_types);
         let row = Row::new(vec![
-            Some(ScalarImpl::Utf8("abc".to_string())),
+            Some(ScalarImpl::Utf8("abc".to_string().into())),
             Some(ScalarImpl::Int64(100)),
         ]);
         let mut row_bytes = vec![];
@@ -569,21 +569,19 @@ mod tests {
             let schema = vec![DataType::Varchar, DataType::Int64];
             let serializer = OrderedRowSerde::new(schema, order_types);
             let row = Row::new(vec![
-                Some(ScalarImpl::Utf8("abc".to_string())),
+                Some(ScalarImpl::Utf8("abc".to_string().into())),
                 Some(ScalarImpl::Int64(100)),
             ]);
-            let mut row_bytes = vec![];
-            serializer.serialize(&row, &mut row_bytes);
+            let vnode_prefix = "v".as_bytes();
+            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
 
             let table_prefix = {
                 let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
                 buf.put_u32(1);
                 buf.to_vec()
             };
-
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
-
+            let mut row_bytes = vec![];
+            serializer.serialize(&row, &mut row_bytes);
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
@@ -608,10 +606,11 @@ mod tests {
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
             let row = Row::new(vec![
-                Some(ScalarImpl::Utf8("abc".to_string())),
+                Some(ScalarImpl::Utf8("abc".to_string().into())),
                 Some(ScalarImpl::Int64(100)),
             ]);
             let mut row_bytes = vec![];
+            serializer.serialize(&row, &mut row_bytes);
             serializer.serialize(&row, &mut row_bytes);
 
             let table_prefix = {

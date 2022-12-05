@@ -159,9 +159,9 @@ mod tests {
         let orders = vec![OrderType::Descending, OrderType::Ascending];
         let data_types = vec![DataType::Int16, DataType::Varchar];
         let serializer = OrderedRowSerde::new(data_types, orders);
-        let row1 = Row::new(vec![Some(Int16(5)), Some(Utf8("abc".to_string()))]);
-        let row2 = Row::new(vec![Some(Int16(5)), Some(Utf8("abd".to_string()))]);
-        let row3 = Row::new(vec![Some(Int16(6)), Some(Utf8("abc".to_string()))]);
+        let row1 = Row::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
+        let row2 = Row::new(vec![Some(Int16(5)), Some(Utf8("abd".into()))]);
+        let row3 = Row::new(vec![Some(Int16(6)), Some(Utf8("abc".into()))]);
         let rows = vec![row1, row2, row3];
         let mut array = vec![];
         for row in &rows {
@@ -186,9 +186,9 @@ mod tests {
 
             let schema = vec![DataType::Varchar, DataType::Int16];
             let serde = OrderedRowSerde::new(schema, order_types);
-            let row1 = Row::new(vec![Some(Utf8("abc".to_string())), Some(Int16(5))]);
-            let row2 = Row::new(vec![Some(Utf8("abd".to_string())), Some(Int16(5))]);
-            let row3 = Row::new(vec![Some(Utf8("abc".to_string())), Some(Int16(6))]);
+            let row1 = Row::new(vec![Some(Utf8("abc".into())), Some(Int16(5))]);
+            let row2 = Row::new(vec![Some(Utf8("abd".into())), Some(Int16(5))]);
+            let row3 = Row::new(vec![Some(Utf8("abc".into())), Some(Int16(6))]);
             let rows = vec![row1.clone(), row2.clone(), row3.clone()];
             let mut array = vec![];
             for row in &rows {
@@ -209,15 +209,15 @@ mod tests {
             let schema = vec![DataType::Varchar, DataType::Decimal];
             let serde = OrderedRowSerde::new(schema, order_types);
             let row1 = Row::new(vec![
-                Some(Utf8("abc".to_string())),
+                Some(Utf8("abc".into())),
                 Some(ScalarImpl::Decimal(Decimal::NaN)),
             ]);
             let row2 = Row::new(vec![
-                Some(Utf8("abd".to_string())),
+                Some(Utf8("abd".into())),
                 Some(ScalarImpl::Decimal(Decimal::PositiveInf)),
             ]);
             let row3 = Row::new(vec![
-                Some(Utf8("abc".to_string())),
+                Some(Utf8("abc".into())),
                 Some(ScalarImpl::Decimal(Decimal::NegativeInf)),
             ]);
             let rows = vec![row1.clone(), row2.clone(), row3.clone()];
@@ -239,7 +239,7 @@ mod tests {
 
         let schema = vec![DataType::Varchar, DataType::Int16];
         let serde = OrderedRowSerde::new(schema, order_types);
-        let row1 = Row::new(vec![Some(Utf8("abc".to_string())), Some(Int16(5))]);
+        let row1 = Row::new(vec![Some(Utf8("abc".into())), Some(Int16(5))]);
         let rows = vec![row1.clone()];
         let mut array = vec![];
         for row in &rows {
@@ -259,7 +259,7 @@ mod tests {
             let prefix_slice = &array[0][0..row_0_idx_0_len];
             assert_eq!(
                 deserde.deserialize(prefix_slice).unwrap(),
-                Row::new(vec![Some(Utf8("abc".to_string()))])
+                Row::new(vec![Some(Utf8("abc".into()))])
             );
         }
 
@@ -293,10 +293,10 @@ mod tests {
         ];
         let serde = OrderedRowSerde::new(schema, order_types);
         let row1 = Row::new(vec![
-            Some(Utf8("aaa".to_string())),
+            Some(Utf8("aaa".to_string().into())),
             Some(Int16(5)),
-            Some(Utf8("bbb".to_string())),
-            Some(Utf8("ccc".to_string())),
+            Some(Utf8("bbb".to_string().into())),
+            Some(Utf8("ccc".to_string().into())),
         ]);
         let rows = vec![row1];
         let mut array = vec![];
@@ -323,7 +323,7 @@ mod tests {
             let prefix_slice = &array[0][0..dist_key_start_position];
             assert_eq!(
                 deserde.deserialize(prefix_slice).unwrap(),
-                Row::new(vec![Some(Utf8("aaa".to_string()))])
+                Row::new(vec![Some(Utf8("aaa".to_string().into()))])
             );
 
             let schema = vec![DataType::INT16, DataType::VARCHAR];
@@ -333,7 +333,7 @@ mod tests {
                 &array[0][dist_key_start_position..dist_key_start_position + dist_key_len];
             assert_eq!(
                 deserde.deserialize(dist_key_slice).unwrap(),
-                Row::new(vec![Some(Int16(5)), Some(Utf8("bbb".to_string()))])
+                Row::new(vec![Some(Int16(5)), Some(Utf8("bbb".to_string().into()))])
             );
         }
     }
@@ -499,7 +499,7 @@ mod tests {
                 {
                     // test varchar
                     let varchar = "abcdefghijklmn";
-                    let row = Row::new(vec![Some(Utf8(varchar.to_string()))]);
+                    let row = Row::new(vec![Some(Utf8(varchar.into()))]);
                     let mut row_bytes = vec![];
                     serde.serialize(&row, &mut row_bytes);
                     let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
@@ -518,7 +518,7 @@ mod tests {
                         let schema = vec![DataType::Varchar];
                         let serde = OrderedRowSerde::new(schema, order_types);
                         let varchar = "abcdefghijklmnopq";
-                        let row = Row::new(vec![Some(Utf8(varchar.to_string()))]);
+                        let row = Row::new(vec![Some(Utf8(varchar.into()))]);
                         let mut row_bytes = vec![];
                         serde.serialize(&row, &mut row_bytes);
                         let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);

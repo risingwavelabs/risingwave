@@ -685,7 +685,7 @@ mod tests {
 
             match state_1.get_output(&table_1, group_key.as_ref()).await? {
                 Some(ScalarImpl::Utf8(s)) => {
-                    assert_eq!(&s, "a");
+                    assert_eq!(s.as_ref(), "a");
                 }
                 _ => panic!("unexpected output"),
             }
@@ -1120,7 +1120,7 @@ mod tests {
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
-                    assert_eq!(s, "c,a".to_string());
+                    assert_eq!(s.as_ref(), "c,a".to_string());
                 }
                 _ => panic!("unexpected output"),
             }
@@ -1143,7 +1143,7 @@ mod tests {
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
-                    assert_eq!(s, "d_c,a+e".to_string());
+                    assert_eq!(s.as_ref(), "d_c,a+e".to_string());
                 }
                 _ => panic!("unexpected output"),
             }
