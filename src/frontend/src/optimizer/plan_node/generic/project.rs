@@ -186,6 +186,12 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         self.o2i_col_mapping().inverse()
     }
 
+    pub fn is_all_inputref(&self) -> bool {
+        self.exprs
+            .iter()
+            .all(|expr| matches!(expr, ExprImpl::InputRef(_)))
+    }
+
     pub fn is_identity(&self) -> bool {
         self.exprs.len() == self.input.schema().len()
         && self

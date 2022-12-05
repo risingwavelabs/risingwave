@@ -37,6 +37,7 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
+mod backup_restore;
 mod barrier;
 #[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
@@ -183,6 +184,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
+                backup_storage_url: config.backup.storage_url,
+                backup_storage_directory: config.backup.storage_directory,
             },
         )
         .await

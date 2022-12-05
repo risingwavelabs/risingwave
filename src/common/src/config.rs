@@ -58,6 +58,9 @@ pub struct RwConfig {
 
     #[serde(default)]
     pub storage: StorageConfig,
+
+    #[serde(default)]
+    pub backup: BackupConfig,
 }
 
 /// The section `[meta]` in `risingwave.toml`.
@@ -372,6 +375,24 @@ impl Default for DeveloperConfig {
     }
 }
 
+/// Configs for meta node backup
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackupConfig {
+    /// Remote storage url for storing snapshots.
+    #[serde(default = "default::backup::storage_url")]
+    pub storage_url: String,
+    /// Remote directory for storing snapshots.
+    #[serde(default = "default::backup::storage_directory")]
+    pub storage_directory: String,
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
 mod default {
     pub mod meta {
         pub fn min_sst_retention_time_sec() -> u64 {
@@ -585,6 +606,16 @@ mod default {
 
         pub fn stream_chunk_size() -> usize {
             1024
+        }
+    }
+
+    pub mod backup {
+        pub fn storage_url() -> String {
+            "memory".to_string()
+        }
+
+        pub fn storage_directory() -> String {
+            "backup".to_string()
         }
     }
 }

@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn test_struct_to_value_encoding() {
         let value = StructValue::new(vec![
-            Some(ScalarImpl::Utf8("".to_string())),
+            Some(ScalarImpl::Utf8("".into())),
             Some(2.into()),
             Some(3.into()),
         ]);
@@ -124,9 +124,9 @@ mod tests {
     #[test]
     fn test_list_to_value_encoding() {
         let value = ListValue::new(vec![
-            Some(ScalarImpl::Utf8("1".to_owned())),
-            Some(ScalarImpl::Utf8("2".to_owned())),
-            Some(ScalarImpl::Utf8("".to_owned())),
+            Some(ScalarImpl::Utf8("1".into())),
+            Some(ScalarImpl::Utf8("2".into())),
+            Some(ScalarImpl::Utf8("".into())),
         ]);
         let data = Some(ScalarImpl::List(value.clone()));
         let node = literal_to_value_encoding(&data);
