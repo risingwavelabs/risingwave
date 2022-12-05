@@ -647,6 +647,27 @@ mod tests {
         put_lease_info(lease, meta_store).await;
     }
 
+    /// Default setup
+    /// ## Returns:
+    /// lease timeout, meta store, leader info, lease info, lease registration time
+    async fn default_setup() -> (u64, Arc<MemStore>, MetaLeaderInfo, MetaLeaseInfo, Duration) {
+        let lease_timeout = 10;
+        let mock_meta_store = Arc::new(MemStore::new());
+        let leader_info = MetaLeaderInfo {
+            node_address: "localhost:1234".into(),
+            lease_id: 123 as u64,
+        };
+        let now = since_epoch();
+        let lease_info = MetaLeaseInfo {
+            leader: Some(leader_info.clone()),
+            lease_register_time: now.as_secs(),
+            lease_expire_time: now.as_secs() + lease_timeout,
+        };
+        put_leader_lease(&leader_info, &lease_info, &mock_meta_store).await;
+        (lease_timeout, mock_meta_store, leader_info, lease_info, now)
+    }
+    // TODO: more test cases?
+
     #[tokio::test]
     async fn test_manage_term() {
         let mock_meta_store = Arc::new(MemStore::new());
@@ -670,8 +691,12 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
 
+    #[tokio::test]
+    async fn leader_should_renew_lease() {
         // if node is leader lease should be renewed
+        let (lease_timeout, mock_meta_store, leader_info, _, _) = default_setup().await;
         let now = since_epoch();
         let lease_info = MetaLeaseInfo {
             leader: Some(leader_info.clone()),
@@ -693,10 +718,12 @@ mod tests {
             lease_timeout,
             new_lease_info.get_lease_expire_time() - lease_info.get_lease_expire_time()
         );
+    }
 
-        // TODO: split all these tests up in separate tests
-
+    #[tokio::test]
+    async fn follower_cannot_renew_lease() {
         // If node is follower, lease should not be renewed
+        let (lease_timeout, mock_meta_store, leader_info, _, _) = default_setup().await;
         let now = since_epoch();
         let lease_info = MetaLeaseInfo {
             leader: Some(leader_info.clone()),
@@ -717,7 +744,11 @@ mod tests {
             "Lease should not be extended by follower, but was extended by by {}s",
             new_lease_info.get_lease_expire_time() - lease_info.get_lease_expire_time()
         );
+    }
 
+    #[tokio::test]
+    async fn not_renew_lease() {
+        let (lease_timeout, mock_meta_store, _, _, _) = default_setup().await;
         // Leader: If new leader was elected old leader should NOT renew lease
         let other_leader_info = MetaLeaderInfo {
             node_address: "other:1234".into(),
@@ -736,9 +767,13 @@ mod tests {
                 .unwrap(),
             "Follower: If new leader was elected, follower should enter election cycle"
         );
+    }
 
+    #[tokio::test]
+    async fn lease_outdated() {
         // Follower: If lease is outdated, follower should delete leader and lease
         // TODO: in the future, the follower should directly write new lease
+        let lease_timeout = 10;
         let mock_meta_store = Arc::new(MemStore::new());
         let leader_info = MetaLeaderInfo {
             node_address: "localhost:1234".into(),
@@ -764,8 +799,6 @@ mod tests {
             "Expected that leader and lease were deleted after lease expired. leader.is_empty: {}. lease.is_empty(): {}",
             leader.is_empty(), lease.is_empty()
         )
-
-        // more test cases?
     }
 
     // test renew_lease function
