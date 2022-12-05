@@ -365,3 +365,8 @@
       ├─StreamFilter { predicate: true }
       | └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamNow { output: [now] }
+- name: invalid now expression
+  sql: |
+    create table t (v1 timestamp, v2 timestamp);
+    select * from t where v1 >= now() or v2 >= now();
+  stream_error: 'Expr error: Invalid parameter now: now expression must be placed in a comparison'
