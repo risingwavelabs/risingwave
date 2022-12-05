@@ -5,7 +5,6 @@ connection_pool_size = 16
 
 [meta]
 
-
 [batch]
 
 [streaming]
