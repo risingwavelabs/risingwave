@@ -239,16 +239,16 @@ pub mod verify {
     use std::ops::{Bound, Deref};
 
     use bytes::Bytes;
-    use futures::pin_mut;
-    use futures::stream::StreamExt;
-    use futures_async_stream::stream;
+    use futures::{pin_mut, TryStreamExt};
+    use futures_async_stream::try_stream;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
+    use crate::error::StorageError;
     use crate::storage_value::StorageValue;
     use crate::store::*;
-    use crate::store_impl::{AsHummockTrait, HummockTrait, StorageResult};
+    use crate::store_impl::{AsHummockTrait, HummockTrait};
     use crate::{StateStore, StateStoreIter};
 
     fn assert_result_eq<Item: PartialEq + Debug, E>(
@@ -343,7 +343,7 @@ pub mod verify {
         }
     }
 
-    #[stream(item = StorageResult<StateStoreIterItem>)]
+    #[try_stream(ok = StateStoreIterItem, error = StorageError)]
     async fn verify_stream(
         actual: impl StateStoreReadIterStream,
         expected: Option<impl StateStoreReadIterStream>,
@@ -353,13 +353,10 @@ pub mod verify {
         let mut expected = expected.as_pin_mut();
 
         loop {
-            let actual = actual.next().await;
+            let actual = actual.try_next().await?;
             if let Some(expected) = expected.as_mut() {
-                let expected = expected.next().await;
-                assert_eq!(actual.is_some(), expected.is_some());
-                if let Some(actual) = actual.as_ref() {
-                    assert_result_eq(actual, expected.as_ref().unwrap());
-                }
+                let expected = expected.try_next().await?;
+                assert_eq!(actual, expected);
             }
             if let Some(actual) = actual {
                 yield actual;
