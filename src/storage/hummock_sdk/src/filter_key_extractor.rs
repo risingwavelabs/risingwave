@@ -491,7 +491,7 @@ mod tests {
         let serializer = OrderedRowSerde::new(schema, order_types);
         let row = Row::new(vec![
             Some(ScalarImpl::Int64(100)),
-            Some(ScalarImpl::Utf8("abc".to_string())),
+            Some(ScalarImpl::Utf8("abc".into())),
         ]);
         let mut row_bytes = vec![];
         serializer.serialize(&row, &mut row_bytes);
@@ -529,7 +529,7 @@ mod tests {
             let serializer = OrderedRowSerde::new(schema, order_types);
             let row = Row::new(vec![
                 Some(ScalarImpl::Int64(100)),
-                Some(ScalarImpl::Utf8("abc".to_string())),
+                Some(ScalarImpl::Utf8("abc".into())),
             ]);
             let mut row_bytes = vec![];
             serializer.serialize(&row, &mut row_bytes);
@@ -572,7 +572,7 @@ mod tests {
             let serializer = OrderedRowSerde::new(schema, order_types);
             let row = Row::new(vec![
                 Some(ScalarImpl::Int64(100)),
-                Some(ScalarImpl::Utf8("abc".to_string())),
+                Some(ScalarImpl::Utf8("abc".into())),
             ]);
             let mut row_bytes = vec![];
             serializer.serialize(&row, &mut row_bytes);

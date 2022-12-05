@@ -35,7 +35,7 @@ pub struct Utf8Array {
 impl Array for Utf8Array {
     type Builder = Utf8ArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
-    type OwnedItem = String;
+    type OwnedItem = Box<str>;
     type RefItem<'a> = &'a str;
 
     fn value_at(&self, idx: usize) -> Option<&str> {
@@ -136,10 +136,10 @@ impl Utf8Array {
     }
 
     /// Retrieve the ownership of the single string value. Panics if there're multiple or no values.
-    pub fn into_single_value(self) -> Option<String> {
+    pub fn into_single_value(self) -> Option<Box<str>> {
         assert_eq!(self.len(), 1);
         if !self.is_null(0) {
-            Some(unsafe { String::from_utf8_unchecked(self.data) })
+            Some(unsafe { String::from_utf8_unchecked(self.data).into_boxed_str() })
         } else {
             None
         }
