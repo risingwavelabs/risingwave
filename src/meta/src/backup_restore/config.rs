@@ -14,13 +14,14 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Configs for meta node backup
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackupConfig {
-    /// Remote storage url for storing db snapshots.
+    /// Remote storage url for storing snapshots.
     #[serde(default = "default::storage_url")]
     pub storage_url: String,
-    /// Remote directory for storing db snapshots.
+    /// Remote directory for storing snapshots.
     #[serde(default = "default::storage_directory")]
     pub storage_directory: String,
 }

@@ -28,18 +28,18 @@ use risingwave_pb::user::UserInfo;
 
 use crate::backup_restore::error::{BackupError, BackupResult};
 use crate::backup_restore::utils::{xxhash64_checksum, xxhash64_verify};
-use crate::backup_restore::DbSnapshotId;
+use crate::backup_restore::MetaSnapshotId;
 use crate::model::MetadataModel;
 use crate::storage::{MetaStore, Snapshot, DEFAULT_COLUMN_FAMILY};
 
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct DbSnapshot {
-    pub id: DbSnapshotId,
+pub struct MetaSnapshot {
+    pub id: MetaSnapshotId,
     /// Snapshot of meta store.
-    pub metadata: MetadataSnapshot,
+    pub metadata: ClusterMetadata,
 }
 
-impl DbSnapshot {
+impl MetaSnapshot {
     pub fn encode(&self) -> Vec<u8> {
         let mut buf = vec![];
         buf.put_u64_le(self.id);
@@ -53,26 +53,26 @@ impl DbSnapshot {
         let checksum = (&buf[buf.len() - 8..]).get_u64_le();
         xxhash64_verify(&buf[..buf.len() - 8], checksum)?;
         let id = buf.get_u64_le();
-        let metadata = MetadataSnapshot::decode(buf)?;
+        let metadata = ClusterMetadata::decode(buf)?;
         Ok(Self { id, metadata })
     }
 }
 
-pub struct DbSnapshotBuilder<S> {
-    db_snapshot: DbSnapshot,
+pub struct MetaSnapshotBuilder<S> {
+    snapshot: MetaSnapshot,
     meta_store: Arc<S>,
 }
 
-impl<S: MetaStore> DbSnapshotBuilder<S> {
+impl<S: MetaStore> MetaSnapshotBuilder<S> {
     pub fn new(meta_store: Arc<S>) -> Self {
         Self {
-            db_snapshot: DbSnapshot::default(),
+            snapshot: MetaSnapshot::default(),
             meta_store,
         }
     }
 
-    pub async fn build(&mut self, id: DbSnapshotId) -> BackupResult<()> {
-        self.db_snapshot.id = id;
+    pub async fn build(&mut self, id: MetaSnapshotId) -> BackupResult<()> {
+        self.snapshot.id = id;
         // Caveat: snapshot impl of etcd meta store doesn't prevent it from expiration.
         // So expired snapshot read may return error. If that happens,
         // tune auto-compaction-mode and auto-compaction-retention on demand.
@@ -123,7 +123,7 @@ impl<S: MetaStore> DbSnapshotBuilder<S> {
         let source = Source::list_at_snapshot::<S>(&meta_store_snapshot).await?;
         let view = View::list_at_snapshot::<S>(&meta_store_snapshot).await?;
 
-        self.db_snapshot.metadata = MetadataSnapshot {
+        self.snapshot.metadata = ClusterMetadata {
             default_cf,
             hummock_version,
             version_stats,
@@ -141,9 +141,9 @@ impl<S: MetaStore> DbSnapshotBuilder<S> {
         Ok(())
     }
 
-    pub fn finish(self) -> BackupResult<DbSnapshot> {
+    pub fn finish(self) -> BackupResult<MetaSnapshot> {
         // Any sanity check goes here.
-        Ok(self.db_snapshot)
+        Ok(self.snapshot)
     }
 
     async fn build_default_cf(
@@ -158,7 +158,7 @@ impl<S: MetaStore> DbSnapshotBuilder<S> {
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct MetadataSnapshot {
+pub struct ClusterMetadata {
     /// Unlike other metadata that has implemented `MetadataModel`,
     /// DEFAULT_COLUMN_FAMILY stores various single row metadata, e.g. id offset and epoch offset.
     /// So we use `default_cf` stores raw KVs for them.
@@ -182,7 +182,7 @@ pub struct MetadataSnapshot {
     pub user_info: Vec<UserInfo>,
 }
 
-impl MetadataSnapshot {
+impl ClusterMetadata {
     pub fn encode_to(&self, buf: &mut Vec<u8>) {
         let default_cf_keys = self.default_cf.keys().collect_vec();
         let default_cf_values = self.default_cf.values().collect_vec();
@@ -288,25 +288,27 @@ mod tests {
         CompactionGroup, HummockVersion, HummockVersionStats, TableStats,
     };
 
-    use crate::backup_restore::db_snapshot::{DbSnapshot, DbSnapshotBuilder, MetadataSnapshot};
     use crate::backup_restore::error::BackupError;
+    use crate::backup_restore::meta_snapshot::{
+        ClusterMetadata, MetaSnapshot, MetaSnapshotBuilder,
+    };
     use crate::model::MetadataModel;
     use crate::storage::{MemStore, MetaStore, DEFAULT_COLUMN_FAMILY};
 
     #[test]
-    fn test_db_snapshot_encoding_decoding() {
-        let mut metadata = MetadataSnapshot::default();
+    fn test_snapshot_encoding_decoding() {
+        let mut metadata = ClusterMetadata::default();
         metadata.hummock_version.id = 321;
-        let raw = DbSnapshot { id: 123, metadata };
+        let raw = MetaSnapshot { id: 123, metadata };
         let encoded = raw.encode();
-        let decoded = DbSnapshot::decode(&encoded).unwrap();
+        let decoded = MetaSnapshot::decode(&encoded).unwrap();
         assert_eq!(raw, decoded);
     }
 
     #[test]
-    fn test_metadata_snapshot_encoding_decoding() {
+    fn test_metadata_encoding_decoding() {
         let mut buf = vec![];
-        let mut raw = MetadataSnapshot::default();
+        let mut raw = ClusterMetadata::default();
         raw.default_cf.insert(vec![0, 1, 2], vec![3, 4, 5]);
         raw.hummock_version.id = 1;
         raw.version_stats.hummock_version_id = 10;
@@ -322,15 +324,15 @@ mod tests {
             ..Default::default()
         });
         raw.encode_to(&mut buf);
-        let decoded = MetadataSnapshot::decode(buf.as_slice()).unwrap();
+        let decoded = ClusterMetadata::decode(buf.as_slice()).unwrap();
         assert_eq!(raw, decoded);
     }
 
     #[tokio::test]
-    async fn test_db_snapshot_builder() {
+    async fn test_snapshot_builder() {
         let meta_store = Arc::new(MemStore::new());
 
-        let mut builder = DbSnapshotBuilder::new(meta_store.clone());
+        let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
         let err = builder.build(1).await.unwrap_err();
         let err = assert_matches!(err, BackupError::Other(e) => e);
         assert_eq!(
@@ -343,7 +345,7 @@ mod tests {
             ..Default::default()
         };
         hummock_version.insert(meta_store.deref()).await.unwrap();
-        let mut builder = DbSnapshotBuilder::new(meta_store.clone());
+        let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
         let err = builder.build(1).await.unwrap_err();
         let err = assert_matches!(err, BackupError::Other(e) => e);
         assert_eq!(
@@ -359,40 +361,30 @@ mod tests {
             .insert(meta_store.deref())
             .await
             .unwrap();
-        let mut builder = DbSnapshotBuilder::new(meta_store.clone());
+        let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
         builder.build(1).await.unwrap();
 
         let dummy_key = vec![0u8, 1u8, 2u8];
-        let mut builder = DbSnapshotBuilder::new(meta_store.clone());
+        let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
         meta_store
             .put_cf(DEFAULT_COLUMN_FAMILY, dummy_key.clone(), vec![100])
             .await
             .unwrap();
         builder.build(1).await.unwrap();
-        let db_snapshot = builder.finish().unwrap();
-        let encoded = db_snapshot.encode();
-        let decoded = DbSnapshot::decode(&encoded).unwrap();
-        assert_eq!(db_snapshot, decoded);
-        assert_eq!(db_snapshot.id, 1);
+        let snapshot = builder.finish().unwrap();
+        let encoded = snapshot.encode();
+        let decoded = MetaSnapshot::decode(&encoded).unwrap();
+        assert_eq!(snapshot, decoded);
+        assert_eq!(snapshot.id, 1);
         assert_eq!(
-            db_snapshot
-                .metadata
-                .default_cf
-                .keys()
-                .cloned()
-                .collect_vec(),
+            snapshot.metadata.default_cf.keys().cloned().collect_vec(),
             vec![dummy_key.clone()]
         );
         assert_eq!(
-            db_snapshot
-                .metadata
-                .default_cf
-                .values()
-                .cloned()
-                .collect_vec(),
+            snapshot.metadata.default_cf.values().cloned().collect_vec(),
             vec![vec![100]]
         );
-        assert_eq!(db_snapshot.metadata.hummock_version.id, 1);
-        assert_eq!(db_snapshot.metadata.version_stats.hummock_version_id, 1);
+        assert_eq!(snapshot.metadata.hummock_version.id, 1);
+        assert_eq!(snapshot.metadata.version_stats.hummock_version_id, 1);
     }
 }

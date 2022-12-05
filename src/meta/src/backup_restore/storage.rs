@@ -19,42 +19,43 @@ use itertools::Itertools;
 use risingwave_object_store::object::{ObjectError, ObjectStoreRef};
 use serde::{Deserialize, Serialize};
 
-use crate::backup_restore::db_snapshot::DbSnapshot;
 use crate::backup_restore::error::{BackupError, BackupResult};
-use crate::backup_restore::{DbSnapshotId, DbSnapshotMetadata};
+use crate::backup_restore::meta_snapshot::MetaSnapshot;
+use crate::backup_restore::{MetaSnapshotId, MetaSnapshotMetadata};
 
-pub type BackupStorageRef = Box<dyn BackupStorage>;
+pub type BackupStorageRef = Box<dyn MetaSnapshotStorage>;
 
 #[async_trait::async_trait]
-pub trait BackupStorage: 'static + Sync + Send {
-    /// Creates a db snapshot.
-    async fn create(&self, snapshot: &DbSnapshot) -> BackupResult<()>;
+pub trait MetaSnapshotStorage: 'static + Sync + Send {
+    /// Creates a snapshot.
+    async fn create(&self, snapshot: &MetaSnapshot) -> BackupResult<()>;
 
-    /// Gets a db snapshot by id.
-    async fn get(&self, id: DbSnapshotId) -> BackupResult<DbSnapshot>;
+    /// Gets a snapshot by id.
+    async fn get(&self, id: MetaSnapshotId) -> BackupResult<MetaSnapshot>;
 
-    /// List all db snapshots.
-    async fn list(&self) -> BackupResult<Vec<DbSnapshotMetadata>>;
+    /// List all snapshots' metadata.
+    async fn list(&self) -> BackupResult<Vec<MetaSnapshotMetadata>>;
 
-    /// Deletes db snapshots by ids.
-    async fn delete(&self, ids: &[DbSnapshotId]) -> BackupResult<()>;
+    /// Deletes snapshots by ids.
+    async fn delete(&self, ids: &[MetaSnapshotId]) -> BackupResult<()>;
 }
 
+/// `MetaSnapshotManifest` is the source of truth for valid `MetaSnapshot`.
 #[derive(Serialize, Deserialize, Default, Clone)]
-struct BackupManifest {
-    pub id: u64,
-    pub db_snapshots: Vec<DbSnapshotMetadata>,
+struct MetaSnapshotManifest {
+    pub manifest_id: u64,
+    pub snapshot_metadata: Vec<MetaSnapshotMetadata>,
 }
 
 #[derive(Clone)]
-pub struct ObjectStoreBackupStorage {
+pub struct ObjectStoreMetaSnapshotStorage {
     path: String,
     store: ObjectStoreRef,
-    manifest: Arc<parking_lot::RwLock<BackupManifest>>,
+    manifest: Arc<parking_lot::RwLock<MetaSnapshotManifest>>,
 }
 
-// TODO #6482: purge stale db snapshot that is not in manifest.
-impl ObjectStoreBackupStorage {
+// TODO #6482: purge stale snapshots that is not in manifest.
+impl ObjectStoreMetaSnapshotStorage {
     pub async fn new(path: &str, store: ObjectStoreRef) -> BackupResult<Self> {
         let mut instance = Self {
             path: path.to_string(),
@@ -62,14 +63,14 @@ impl ObjectStoreBackupStorage {
             manifest: Default::default(),
         };
         let manifest = match instance.get_manifest().await? {
-            None => BackupManifest::default(),
+            None => MetaSnapshotManifest::default(),
             Some(manifest) => manifest,
         };
         instance.manifest = Arc::new(parking_lot::RwLock::new(manifest));
         Ok(instance)
     }
 
-    async fn update_manifest(&self, new_manifest: BackupManifest) -> BackupResult<()> {
+    async fn update_manifest(&self, new_manifest: MetaSnapshotManifest) -> BackupResult<()> {
         let bytes =
             serde_json::to_vec(&new_manifest).map_err(|e| BackupError::Encoding(e.into()))?;
         self.store
@@ -79,7 +80,7 @@ impl ObjectStoreBackupStorage {
         Ok(())
     }
 
-    async fn get_manifest(&self) -> BackupResult<Option<BackupManifest>> {
+    async fn get_manifest(&self) -> BackupResult<Option<MetaSnapshotManifest>> {
         let manifest_path = self.get_manifest_path();
         let manifest = match self
             .store
@@ -94,7 +95,7 @@ impl ObjectStoreBackupStorage {
             Some(manifest) => manifest,
         };
         let bytes = self.store.read(&manifest.key, None).await?;
-        let manifest: BackupManifest =
+        let manifest: MetaSnapshotManifest =
             serde_json::from_slice(&bytes).map_err(|e| BackupError::Encoding(e.into()))?;
         Ok(Some(manifest))
     }
@@ -103,60 +104,62 @@ impl ObjectStoreBackupStorage {
         format!("{}/manifest.json", self.path)
     }
 
-    fn get_db_snapshot_path(&self, id: DbSnapshotId) -> String {
+    fn get_snapshot_path(&self, id: MetaSnapshotId) -> String {
         format!("{}/{}.snapshot", self.path, id)
     }
 
-    fn get_db_snapshot_id_from_path(path: &str) -> DbSnapshotId {
+    fn get_snapshot_id_from_path(path: &str) -> MetaSnapshotId {
         let split = path.split(&['/', '.']).collect_vec();
         debug_assert!(split.len() > 2);
         debug_assert!(split[split.len() - 1] == "snapshot");
         split[split.len() - 2]
-            .parse::<DbSnapshotId>()
-            .expect("valid db snapshot id")
+            .parse::<MetaSnapshotId>()
+            .expect("valid meta snapshot id")
     }
 }
 
 #[async_trait::async_trait]
-impl BackupStorage for ObjectStoreBackupStorage {
-    async fn create(&self, snapshot: &DbSnapshot) -> BackupResult<()> {
-        let path = self.get_db_snapshot_path(snapshot.id);
+impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
+    async fn create(&self, snapshot: &MetaSnapshot) -> BackupResult<()> {
+        let path = self.get_snapshot_path(snapshot.id);
         self.store.upload(&path, snapshot.encode().into()).await?;
 
         // update manifest last
         let mut new_manifest = self.manifest.read().clone();
-        new_manifest.id += 1;
-        new_manifest.db_snapshots.push(DbSnapshotMetadata::new(
-            snapshot.id,
-            &snapshot.metadata.hummock_version,
-        ));
+        new_manifest.manifest_id += 1;
+        new_manifest
+            .snapshot_metadata
+            .push(MetaSnapshotMetadata::new(
+                snapshot.id,
+                &snapshot.metadata.hummock_version,
+            ));
         self.update_manifest(new_manifest).await?;
         Ok(())
     }
 
-    async fn get(&self, id: DbSnapshotId) -> BackupResult<DbSnapshot> {
-        let path = self.get_db_snapshot_path(id);
+    async fn get(&self, id: MetaSnapshotId) -> BackupResult<MetaSnapshot> {
+        let path = self.get_snapshot_path(id);
         let data = self.store.read(&path, None).await?;
-        DbSnapshot::decode(&data)
+        MetaSnapshot::decode(&data)
     }
 
-    async fn list(&self) -> BackupResult<Vec<DbSnapshotMetadata>> {
-        Ok(self.manifest.read().db_snapshots.clone())
+    async fn list(&self) -> BackupResult<Vec<MetaSnapshotMetadata>> {
+        Ok(self.manifest.read().snapshot_metadata.clone())
     }
 
-    async fn delete(&self, ids: &[DbSnapshotId]) -> BackupResult<()> {
+    async fn delete(&self, ids: &[MetaSnapshotId]) -> BackupResult<()> {
         // update manifest first
-        let to_delete: HashSet<DbSnapshotId> = HashSet::from_iter(ids.iter().cloned());
+        let to_delete: HashSet<MetaSnapshotId> = HashSet::from_iter(ids.iter().cloned());
         let mut new_manifest = self.manifest.read().clone();
-        new_manifest.id += 1;
+        new_manifest.manifest_id += 1;
         new_manifest
-            .db_snapshots
+            .snapshot_metadata
             .retain(|m| !to_delete.contains(&m.id));
         self.update_manifest(new_manifest).await?;
 
         let paths = ids
             .iter()
-            .map(|id| self.get_db_snapshot_path(*id))
+            .map(|id| self.get_snapshot_path(*id))
             .collect_vec();
         self.store.delete_objects(&paths).await?;
         Ok(())
@@ -172,21 +175,21 @@ impl From<ObjectError> for BackupError {
 pub struct DummyBackupStorage {}
 
 #[async_trait::async_trait]
-impl BackupStorage for DummyBackupStorage {
-    async fn create(&self, _snapshot: &DbSnapshot) -> BackupResult<()> {
+impl MetaSnapshotStorage for DummyBackupStorage {
+    async fn create(&self, _snapshot: &MetaSnapshot) -> BackupResult<()> {
         panic!("should not create from DummyBackupStorage")
     }
 
-    async fn get(&self, _id: DbSnapshotId) -> BackupResult<DbSnapshot> {
+    async fn get(&self, _id: MetaSnapshotId) -> BackupResult<MetaSnapshot> {
         panic!("should not get from DummyBackupStorage")
     }
 
-    async fn list(&self) -> BackupResult<Vec<DbSnapshotMetadata>> {
+    async fn list(&self) -> BackupResult<Vec<MetaSnapshotMetadata>> {
         // Satisfy `BackupManager`
         Ok(vec![])
     }
 
-    async fn delete(&self, _ids: &[DbSnapshotId]) -> BackupResult<()> {
+    async fn delete(&self, _ids: &[MetaSnapshotId]) -> BackupResult<()> {
         panic!("should not delete from DummyBackupStorage")
     }
 }

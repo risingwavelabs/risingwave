@@ -41,7 +41,7 @@ use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
-use crate::backup_restore::{BackupManager, ObjectStoreBackupStorage};
+use crate::backup_restore::{BackupManager, ObjectStoreMetaSnapshotStorage};
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
@@ -418,8 +418,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .await,
     );
     let backup_storage = Box::new(
-        ObjectStoreBackupStorage::new(&env.opts.backup_storage_directory, backup_object_store)
-            .await?,
+        ObjectStoreMetaSnapshotStorage::new(
+            &env.opts.backup_storage_directory,
+            backup_object_store,
+        )
+        .await?,
     );
     let backup_manager = Arc::new(BackupManager::new(
         env.clone(),

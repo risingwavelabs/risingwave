@@ -19,10 +19,10 @@ use risingwave_common::bail;
 use risingwave_hummock_sdk::HummockSstableId;
 use tokio::task::JoinHandle;
 
-use crate::backup_restore::db_snapshot::DbSnapshotBuilder;
 use crate::backup_restore::error::BackupError;
+use crate::backup_restore::meta_snapshot::MetaSnapshotBuilder;
 use crate::backup_restore::storage::BackupStorageRef;
-use crate::backup_restore::DbSnapshotId;
+use crate::backup_restore::MetaSnapshotId;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
 use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::storage::MetaStore;
@@ -112,8 +112,8 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     async fn finish_backup_job(&self, job_id: u64, status: BackupJobResult) {
-        // _job_handle holds `hummock_version_safe_point` until the db snapshot is added to meta.
-        // It ensures db snapshot's SSTs won't be deleted in between.
+        // _job_handle holds `hummock_version_safe_point` until the snapshot is added to meta.
+        // It ensures snapshot's SSTs won't be deleted in between.
         let _job_handle = self
             .take_job_handle_by_job_id(job_id)
             .await
@@ -144,7 +144,7 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     /// Deletes existent backups from backup storage.
-    pub async fn delete_backups(&self, ids: &[DbSnapshotId]) -> MetaResult<()> {
+    pub async fn delete_backups(&self, ids: &[MetaSnapshotId]) -> MetaResult<()> {
         self.backup_store.delete(ids).await?;
         Ok(())
     }
@@ -176,15 +176,12 @@ impl<S: MetaStore> BackupWorker<S> {
     fn start(self, job_id: u64) -> JoinHandle<()> {
         let backup_manager_clone = self.backup_manager.clone();
         let job = async move {
-            let mut db_snapshot_builder =
-                DbSnapshotBuilder::new(backup_manager_clone.env.meta_store_ref());
-            // Reuse job id as db snapshot id.
-            db_snapshot_builder.build(job_id).await?;
-            let db_snapshot = db_snapshot_builder.finish()?;
-            backup_manager_clone
-                .backup_store
-                .create(&db_snapshot)
-                .await?;
+            let mut snapshot_builder =
+                MetaSnapshotBuilder::new(backup_manager_clone.env.meta_store_ref());
+            // Reuse job id as snapshot id.
+            snapshot_builder.build(job_id).await?;
+            let snapshot = snapshot_builder.finish()?;
+            backup_manager_clone.backup_store.create(&snapshot).await?;
             backup_manager_clone
                 .finish_backup_job(job_id, BackupJobResult::Finished)
                 .await;
