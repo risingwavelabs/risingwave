@@ -208,7 +208,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
                 self.user_key_hashes
                     .push(farmhash::fingerprint32(extract_key));
                 self.last_bloom_filter_key_length = extract_key.len();
-                self.last_extract_key = extract_key.to_vec();
+                self.last_extract_key.clear();
+                self.last_extract_key.extend_from_slice(extract_key);
             }
         } else {
             self.stale_key_count += 1;
