@@ -43,16 +43,13 @@ pub trait ExprVisitor<R: Default> {
             ExprImpl::WindowFunction(inner) => self.visit_window_function(inner),
         }
     }
-    fn visit_function_call_general(&mut self, func_call: &FunctionCall) -> R {
+    fn visit_function_call(&mut self, func_call: &FunctionCall) -> R {
         func_call
             .inputs()
             .iter()
             .map(|expr| self.visit_expr(expr))
             .reduce(Self::merge)
             .unwrap_or_default()
-    }
-    fn visit_function_call(&mut self, func_call: &FunctionCall) -> R {
-        self.visit_function_call_general(func_call)
     }
     fn visit_agg_call(&mut self, agg_call: &AggCall) -> R {
         let mut r = agg_call

@@ -404,7 +404,12 @@ impl ExprVisitor<usize> for CountNow {
         if func_call.get_expr_type() == ExprType::Now {
             1
         } else {
-            self.visit_function_call_general(func_call)
+            func_call
+                .inputs()
+                .iter()
+                .map(|expr| self.visit_expr(expr))
+                .reduce(Self::merge)
+                .unwrap_or_default()
         }
     }
 }
