@@ -207,12 +207,9 @@ impl SchemaFilterKeyExtractor {
             })
             .collect_vec();
 
-        let distribution_key_start_index_in_pk = match !dist_key_indices.is_empty() {
-            true => {
-                let min = dist_key_in_pk_indices.iter().min().unwrap();
-                Some(*min)
-            }
-            false => None,
+        let distribution_key_start_index_in_pk = match dist_key_indices.is_empty() {
+            true => None,
+            false => Some(dist_key_in_pk_indices[0]),
         };
 
         let distribution_key_end_index_in_pk =

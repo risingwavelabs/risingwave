@@ -192,12 +192,9 @@ impl<S: StateStore> StateTable<S> {
             None => Distribution::fallback(),
         };
 
-        let distribution_key_start_index_in_pk = match !dist_key_indices.is_empty() {
-            true => {
-                let min = dist_key_in_pk_indices.iter().min().unwrap();
-                Some(*min)
-            }
-            false => None,
+        let distribution_key_start_index_in_pk = match dist_key_indices.is_empty() {
+            true => None,
+            false => Some(dist_key_in_pk_indices[0]),
         };
         let vnode_col_idx_in_pk = table_catalog
             .vnode_col_idx
@@ -1027,7 +1024,6 @@ impl<S: StateStore> StateTable<S> {
         let dist_key_hint = {
             if self.dist_key_indices.is_empty()
                 || !is_subset(self.dist_key_indices.clone(), pk_prefix_indices.to_vec())
-                || self.distribution_key_start_index_in_pk.is_none()
                 || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk.unwrap()
                     > pk_prefix.len()
             {

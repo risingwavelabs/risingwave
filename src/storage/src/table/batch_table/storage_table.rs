@@ -199,12 +199,9 @@ impl<S: StateStore> StorageTable<S> {
                     })
             })
             .collect_vec();
-        let distribution_key_start_index_in_pk = match !dist_key_indices.is_empty() {
-            true => {
-                let min = dist_key_in_pk_indices.iter().min().unwrap();
-                Some(*min)
-            }
-            false => None,
+        let distribution_key_start_index_in_pk = match dist_key_indices.is_empty() {
+            true => None,
+            false => Some(dist_key_in_pk_indices[0]),
         };
         Self {
             table_id,
@@ -448,7 +445,6 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
         let dist_key_hint = if self.dist_key_indices.is_empty()
-            || self.distribution_key_start_index_in_pk.is_none()
             || !is_subset(self.dist_key_indices.clone(), pk_prefix_indices.clone())
             || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk.unwrap()
                 > pk_prefix.len()
