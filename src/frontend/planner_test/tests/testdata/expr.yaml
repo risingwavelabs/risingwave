@@ -351,3 +351,19 @@
   batch_plan: |
     BatchProject { exprs: ['integer[][]':Varchar] }
     └─BatchValues { rows: [[]] }
+- name: now expression
+  sql: |
+    create table t (v1 datetime);
+    select * from t where v1 >= now();
+  logical_plan: |
+    BatchProject { exprs: [(In(1:Int32::Decimal, 3:Int32::Decimal, (0.5:Decimal * 2:Int32)) OR (1:Int32 = min(min(t.v1))))] }
+    └─BatchSimpleAgg { aggs: [min(min(t.v1))] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchSimpleAgg { aggs: [min(t.v1)] }
+          └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+  stream_plan: |
+    BatchProject { exprs: [(In(1:Int32::Decimal, 3:Int32::Decimal, (0.5:Decimal * 2:Int32)) OR (1:Int32 = min(min(t.v1))))] }
+    └─BatchSimpleAgg { aggs: [min(min(t.v1))] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchSimpleAgg { aggs: [min(t.v1)] }
+          └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }

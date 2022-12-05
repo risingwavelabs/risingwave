@@ -104,10 +104,6 @@ impl LogicalFilter {
             }
         )
     }
-
-    fn clone_with_predicate(&self, predicate: Condition) -> Self {
-        Self::new(self.input(), predicate)
-    }
 }
 
 impl PlanTreeNodeUnary for LogicalFilter {
@@ -264,7 +260,7 @@ impl ToStream for LogicalFilter {
                 })
                 .collect_vec();
             now_conds.sort_by_key(|(comparator_priority, _)| *comparator_priority);
-            let simple_logical = self.clone_with_predicate(Condition { conjunctions });
+            let simple_logical = LogicalFilter::new(self.input(), Condition { conjunctions });
             let mut cur_streaming = PlanRef::from(StreamFilter::new(
                 simple_logical.clone_with_input(new_input),
             ));
