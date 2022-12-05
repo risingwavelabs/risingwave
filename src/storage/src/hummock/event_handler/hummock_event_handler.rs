@@ -430,7 +430,7 @@ impl HummockEventHandler {
                 Either::Right(event) => {
                     match event {
                         HummockEvent::BufferMayFlush => {
-                            self.uploader.try_flush();
+                            self.uploader.may_flush();
                         }
                         HummockEvent::AwaitSyncEpoch {
                             new_sync_epoch,
@@ -452,6 +452,7 @@ impl HummockEventHandler {
 
                         HummockEvent::ImmToUploader(imm) => {
                             self.uploader.add_imm(imm);
+                            self.uploader.may_flush();
                         }
 
                         HummockEvent::SealEpoch {

@@ -567,18 +567,18 @@ impl HummockUploader {
         }
     }
 
-    pub(crate) fn try_flush(&mut self) {
-        if self.buffer_tracker().need_more_flush() {
+    pub(crate) fn may_flush(&mut self) {
+        if self.context.buffer_tracker.need_more_flush() {
             self.sealed_data.flush(&self.context);
         }
 
         if self.context.buffer_tracker.need_more_flush() {
             // iterate from older epoch to newer epoch
             for unsealed_data in self.unsealed_data.values_mut() {
+                unsealed_data.flush(&self.context);
                 if !self.context.buffer_tracker.need_more_flush() {
                     break;
                 }
-                unsealed_data.flush(&self.context);
             }
         }
     }
@@ -1149,7 +1149,7 @@ mod tests {
         let (await_start1, finish_tx1) =
             new_task_notifier(vec![imm1_2.batch_id(), imm1_1.batch_id()]);
         let (await_start2, finish_tx2) = new_task_notifier(vec![imm2.batch_id()]);
-        uploader.try_flush();
+        uploader.may_flush();
         await_start1.await;
         await_start2.await;
 
@@ -1176,7 +1176,7 @@ mod tests {
         let imm1_3 = gen_imm_with_limiter(epoch1, memory_limiter).await;
         uploader.add_imm(imm1_3.clone());
         let (await_start1_3, finish_tx1_3) = new_task_notifier(vec![imm1_3.batch_id()]);
-        uploader.try_flush();
+        uploader.may_flush();
         await_start1_3.await;
         let imm1_4 = gen_imm_with_limiter(epoch1, memory_limiter).await;
         uploader.add_imm(imm1_4.clone());
@@ -1196,12 +1196,12 @@ mod tests {
         let imm3_1 = gen_imm_with_limiter(epoch3, memory_limiter).await;
         uploader.add_imm(imm3_1.clone());
         let (await_start3_1, finish_tx3_1) = new_task_notifier(vec![imm3_1.batch_id()]);
-        uploader.try_flush();
+        uploader.may_flush();
         await_start3_1.await;
         let imm3_2 = gen_imm_with_limiter(epoch3, memory_limiter).await;
         uploader.add_imm(imm3_2.clone());
         let (await_start3_2, finish_tx3_2) = new_task_notifier(vec![imm3_2.batch_id()]);
-        uploader.try_flush();
+        uploader.may_flush();
         await_start3_2.await;
         let imm3_3 = gen_imm_with_limiter(epoch3, memory_limiter).await;
         uploader.add_imm(imm3_3.clone());
