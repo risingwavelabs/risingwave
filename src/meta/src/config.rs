@@ -15,13 +15,16 @@
 use risingwave_common::config::StreamingConfig;
 use serde::{Deserialize, Serialize};
 
+use crate::backup_restore::BackupConfig;
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct MetaNodeConfig {
     #[serde(default)]
     pub meta: MetaConfig,
-    // Below for streaming.
     #[serde(default)]
     pub streaming: StreamingConfig,
+    #[serde(default)]
+    pub backup: BackupConfig,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
