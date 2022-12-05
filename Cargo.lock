@@ -4962,6 +4962,7 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "tempfile",
+ "toml",
  "workspace-hack",
  "yaml-rust",
 ]

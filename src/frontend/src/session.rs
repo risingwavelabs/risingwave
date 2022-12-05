@@ -71,7 +71,7 @@ use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
 use crate::utils::WithOptions;
-use crate::{FrontendConfig, FrontendOpts, PgResponseStream, TableCatalog};
+use crate::{FrontendOpts, PgResponseStream, TableCatalog};
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
@@ -258,13 +258,12 @@ impl FrontendEnv {
     pub async fn init(
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let frontend_config: FrontendConfig = load_config(&opts.config_path).unwrap();
-        let batch_config: BatchConfig = load_config(&opts.config_path).unwrap();
+        let config = load_config(&opts.config_path);
         tracing::info!(
-            "Starting frontend node with\nfrontend config {:?}\nbatch config {:?}",
-            frontend_config,
-            batch_config
+            "Starting frontend node with\nfrontend config {:?}",
+            config.server
         );
+        let batch_config = config.batch;
 
         let frontend_address: HostAddr = opts
             .client_address
@@ -288,8 +287,8 @@ impl FrontendEnv {
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(frontend_config.server.heartbeat_interval_ms as u64),
-            Duration::from_secs(frontend_config.server.max_heartbeat_interval_secs as u64),
+            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
             vec![],
         );
 
@@ -306,9 +305,8 @@ impl FrontendEnv {
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
-        let compute_client_pool = Arc::new(ComputeClientPool::new(
-            frontend_config.server.connection_pool_size,
-        ));
+        let compute_client_pool =
+            Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
@@ -339,9 +337,7 @@ impl FrontendEnv {
 
         meta_client.activate(&frontend_address).await?;
 
-        let client_pool = Arc::new(ComputeClientPool::new(
-            frontend_config.server.connection_pool_size,
-        ));
+        let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
 
         let registry = prometheus::Registry::new();
         monitor_process(&registry).unwrap();
