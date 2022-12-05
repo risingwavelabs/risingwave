@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use risingwave_common::bail;
 use risingwave_pb::expr::expr_node::Type::*;
+use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -24,13 +25,14 @@ pub struct DynamicFilterExecutorBuilder;
 
 #[async_trait::async_trait]
 impl ExecutorBuilder for DynamicFilterExecutorBuilder {
+    type Node = DynamicFilterNode;
+
     async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::DynamicFilter)?;
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
         let key_l = node.get_left_key() as usize;
 

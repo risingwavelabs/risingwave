@@ -77,3 +77,23 @@ drop materialized view mv3;
 
 statement ok
 drop table t3;
+
+query TT
+describe pg_matviews;
+----
+schemaname Varchar
+matviewname Varchar
+matviewowner Int32
+definition Varchar
+matviewid Int32
+matviewgraph Varchar
+
+query TT
+show columns from pg_catalog.pg_matviews;
+----
+schemaname Varchar
+matviewname Varchar
+matviewowner Int32
+definition Varchar
+matviewid Int32
+matviewgraph Varchar

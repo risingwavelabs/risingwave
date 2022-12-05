@@ -61,7 +61,9 @@ pub enum Components {
     PrometheusAndGrafana,
     Etcd,
     Kafka,
+    Pubsub,
     Redis,
+    ConnectorNode,
     Tracing,
     RustComponents,
     Dashboard,
@@ -78,7 +80,9 @@ impl Components {
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
             Self::Kafka => "[Component] Kafka",
+            Self::Pubsub => "[Component] Google Pubsub",
             Self::Redis => "[Component] Redis",
+            Self::ConnectorNode => "[Component] RisingWave Connector",
             Self::RustComponents => "[Build] Rust components",
             Self::Dashboard => "[Build] Dashboard v2",
             Self::Tracing => "[Component] Tracing: Jaeger",
@@ -108,6 +112,11 @@ Required if you want to persistent meta-node data.
             Self::Kafka => {
                 "
 Required if you want to create source from Kafka.
+                "
+            }
+            Self::Pubsub => {
+                "
+Required if you want to create source from Emulated Google Pub/sub.
                 "
             }
             Self::RustComponents => {
@@ -149,6 +158,11 @@ a dev cluster.
 Required if you want to sink data to redis.
                 "
             }
+            Self::ConnectorNode => {
+                "
+Required if you want to create CDC source from external Databases.
+                "
+            }
             Self::HummockTracing => {
                 "
 Required if you want to tracing operations from hummock
@@ -168,6 +182,7 @@ USE_HM_TRACE=true
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_ETCD" => Some(Self::Etcd),
             "ENABLE_KAFKA" => Some(Self::Kafka),
+            "ENABLE_PUBSUB" => Some(Self::Pubsub),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
             "ENABLE_BUILD_DASHBOARD_V2" => Some(Self::Dashboard),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
@@ -175,6 +190,7 @@ USE_HM_TRACE=true
             "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
+            "ENABLE_RW_CONNECTOR" => Some(Self::ConnectorNode),
             "ENABLE_HM_TRACE" => Some(Self::HummockTracing),
             _ => None,
         }
@@ -186,6 +202,7 @@ USE_HM_TRACE=true
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
             Self::Kafka => "ENABLE_KAFKA",
+            Self::Pubsub => "ENABLE_PUBSUB_EMU",
             Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",
@@ -193,6 +210,7 @@ USE_HM_TRACE=true
             Self::Release => "ENABLE_RELEASE_PROFILE",
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
+            Self::ConnectorNode => "ENABLE_RW_CONNECTOR",
             Self::HummockTracing => "ENABLE_HM_TRACE",
         }
         .into()

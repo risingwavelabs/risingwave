@@ -335,7 +335,7 @@ impl FrontendEnv {
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
                 .await;
-        let observer_join_handle = observer_manager.start().await?;
+        let observer_join_handle = observer_manager.start().await;
 
         meta_client.activate(&frontend_address).await?;
 
@@ -842,7 +842,7 @@ impl Session<PgResponseStream> for SessionImpl {
                 }
             },
             Statement::ShowVariable { variable } => {
-                let name = &variable[0].value.to_lowercase();
+                let name = &variable[0].real_value().to_lowercase();
                 if name.eq_ignore_ascii_case("ALL") {
                     vec![
                         PgFieldDescriptor::new(

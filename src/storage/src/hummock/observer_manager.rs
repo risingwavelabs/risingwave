@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeHummock};
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
@@ -44,19 +43,22 @@ impl ObserverState for HummockObserverNode {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
-        // used for hummock trace, do nothing if tracing is not enabled
-        hummock_trace!(METAMSG, resp);
 
-        assert!(
-            resp.version > self.version,
-            "resp version={:?}, current version={:?}",
-            resp.version,
-            self.version
-        );
+        // Used for hummock trace. Do nothing if tracing is not enabled
+        hummock_trace!(METAMSG, resp);
 
         match info.to_owned() {
             Info::Table(table_catalog) => {
+                assert!(
+                    resp.version > self.version,
+                    "resp version={:?}, current version={:?}",
+                    resp.version,
+                    self.version
+                );
+
                 self.handle_catalog_notification(resp.operation(), table_catalog);
+
+                self.version = resp.version;
             }
 
             Info::HummockVersionDeltas(hummock_version_deltas) => {
@@ -74,41 +76,31 @@ impl ObserverState for HummockObserverNode {
                 panic!("error type notification");
             }
         }
-
-        self.version = resp.version;
     }
 
-    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
-        // used for hummock trace, do nothing if tracing is not enabled
+    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
+        // Used for hummock trace. Do nothing if tracing is not enabled
         hummock_trace!(METAMSG, resp);
 
-        match resp.info {
-            Some(Info::Snapshot(snapshot)) => {
-                self.handle_catalog_snapshot(snapshot.tables);
-                let _ = self
-                    .version_update_sender
-                    .send(HummockEvent::VersionUpdate(
-                        pin_version_response::Payload::PinnedVersion(
-                            snapshot
-                                .hummock_version
-                                .expect("should get hummock version"),
-                        ),
-                    ))
-                    .inspect_err(|e| {
-                        tracing::error!("unable to send full version: {:?}", e);
-                    });
-                self.version = resp.version;
-            }
-            _ => {
-                return Err(ErrorCode::InternalError(format!(
-                    "the first notify should be compute snapshot, but get {:?}",
-                    resp
-                ))
-                .into())
-            }
-        }
+        let Some(Info::Snapshot(snapshot)) = resp.info else {
+            unreachable!();
+        };
 
-        Ok(())
+        self.handle_catalog_snapshot(snapshot.tables);
+        let _ = self
+            .version_update_sender
+            .send(HummockEvent::VersionUpdate(
+                pin_version_response::Payload::PinnedVersion(
+                    snapshot
+                        .hummock_version
+                        .expect("should get hummock version"),
+                ),
+            ))
+            .inspect_err(|e| {
+                tracing::error!("unable to send full version: {:?}", e);
+            });
+        let snapshot_version = snapshot.version.unwrap();
+        self.version = snapshot_version.catalog_version;
     }
 }
 

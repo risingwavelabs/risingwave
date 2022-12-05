@@ -32,12 +32,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, ArgEnum)]
 pub enum AsyncStackTraceOption {
     Off,
-    On,
+    On, // default
     Verbose,
 }
 
 /// Command-line arguments for compute-node.
-#[derive(Parser, Debug)]
+#[derive(Parser, Clone, Debug)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:5688")]
@@ -71,7 +71,7 @@ pub struct ComputeNodeOpts {
     pub enable_jaeger_tracing: bool,
 
     /// Enable async stack tracing for risectl.
-    #[clap(long, arg_enum, default_value_t = AsyncStackTraceOption::Off)]
+    #[clap(long, arg_enum, default_value_t = AsyncStackTraceOption::On)]
     pub async_stack_trace: AsyncStackTraceOption,
 
     /// Path to file cache data directory.
@@ -80,8 +80,8 @@ pub struct ComputeNodeOpts {
     pub file_cache_dir: String,
 
     /// Endpoint of the connector node
-    #[clap(long, default_value = "127.0.0.1:60061")]
-    pub connector_source_endpoint: String,
+    #[clap(long, env = "CONNECTOR_RPC_ENDPOINT")]
+    pub connector_rpc_endpoint: Option<String>,
 }
 
 use std::future::Future;
@@ -122,7 +122,6 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct ComputeNodeConfig {
     // For connection
     #[serde(default)]

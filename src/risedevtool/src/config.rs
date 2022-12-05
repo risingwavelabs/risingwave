@@ -121,7 +121,11 @@ impl ConfigExpander {
                     "jaeger" => ServiceConfig::Jaeger(serde_yaml::from_str(&out_str)?),
                     "aws-s3" => ServiceConfig::AwsS3(serde_yaml::from_str(&out_str)?),
                     "kafka" => ServiceConfig::Kafka(serde_yaml::from_str(&out_str)?),
+                    "pubsub" => ServiceConfig::Pubsub(serde_yaml::from_str(&out_str)?),
                     "redis" => ServiceConfig::Redis(serde_yaml::from_str(&out_str)?),
+                    "connector-node" => {
+                        ServiceConfig::ConnectorNode(serde_yaml::from_str(&out_str)?)
+                    }
                     "zookeeper" => ServiceConfig::ZooKeeper(serde_yaml::from_str(&out_str)?),
                     "redpanda" => ServiceConfig::RedPanda(serde_yaml::from_str(&out_str)?),
                     other => return Err(anyhow!("unsupported use type: {}", other)),

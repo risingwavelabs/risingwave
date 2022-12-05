@@ -70,13 +70,13 @@ impl Relation {
         }
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn is_correlated(&self, depth: Depth) -> bool {
         match self {
-            Relation::Subquery(subquery) => subquery.query.is_correlated(),
+            Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
             Relation::Join(join) => {
-                join.cond.has_correlated_input_ref_by_depth()
-                    || join.left.is_correlated()
-                    || join.right.is_correlated()
+                join.cond.has_correlated_input_ref_by_depth(depth)
+                    || join.left.is_correlated(depth)
+                    || join.right.is_correlated(depth)
             }
             _ => false,
         }
@@ -169,11 +169,6 @@ impl Binder {
         Self::resolve_single_name(name.0, "index name")
     }
 
-    /// return the `sink_name`
-    pub fn resolve_sink_name(name: ObjectName) -> Result<String> {
-        Self::resolve_single_name(name.0, "sink name")
-    }
-
     /// return the `user_name`
     pub fn resolve_user_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "user name")
@@ -203,7 +198,7 @@ impl Binder {
                 true => field.name.to_string(),
                 false => alias_iter
                     .next()
-                    .map(|t| t.value)
+                    .map(|t| t.real_value())
                     .unwrap_or_else(|| field.name.to_string()),
             };
             field.name = name.clone();
@@ -246,7 +241,7 @@ impl Binder {
     /// - a table/source/materialized view
     /// - a reference to a CTE
     /// - a logical view
-    pub(super) fn bind_relation_by_name(
+    pub fn bind_relation_by_name(
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
@@ -318,7 +313,7 @@ impl Binder {
         match table_factor {
             TableFactor::Table { name, alias } => self.bind_relation_by_name(name, alias),
             TableFactor::TableFunction { name, alias, args } => {
-                let func_name = &name.0[0].value;
+                let func_name = &name.0[0].real_value();
                 if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
                     return self.bind_internal_table(args, alias);
                 }
@@ -350,7 +345,7 @@ impl Binder {
                 }
                 let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
                     ErrorCode::NotImplemented(
-                        format!("unknown table function kind: {}", name.0[0].value),
+                        format!("unknown table function kind: {}", func_name),
                         1191.into(),
                     )
                 })?;

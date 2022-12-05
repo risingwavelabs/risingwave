@@ -22,6 +22,8 @@ use super::privilege::check_super_user;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::table_catalog::TableKind;
+use crate::catalog::CatalogError;
 use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
 
@@ -53,8 +55,13 @@ pub async fn handle_drop_mv(
                             ),
                         ))
                     } else {
-                        Err(e.into())
-                    }
+                        match e {
+                            CatalogError::NotFound(kind, name) if kind == "table" => {
+                                Err(CatalogError::NotFound("materialized view", name).into())
+                            }
+                            _ => Err(e.into()),
+                        }
+                    };
                 }
             };
 
@@ -70,18 +77,19 @@ pub async fn handle_drop_mv(
         }
 
         // If associated source is `Some`, then it is actually a materialized source / table v2.
-        if table.associated_source_id().is_some() {
-            check_source(&reader, db_name, schema_name, &table_name)?;
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP TABLE` to drop a table.".to_owned(),
-            )));
-        }
-
-        // If is index on is `Some`, then it is actually an index.
-        if table.is_index {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP INDEX` to drop an index.".to_owned(),
-            )));
+        match table.kind() {
+            TableKind::TableOrSource => {
+                check_source(&reader, db_name, schema_name, &table_name)?;
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP TABLE` to drop a table.".to_owned(),
+                )));
+            }
+            TableKind::Index => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP INDEX` to drop an index.".to_owned(),
+                )));
+            }
+            TableKind::MView => {}
         }
 
         // If the name is not valid, then it is actually an internal table.

@@ -66,6 +66,7 @@ pub struct SourceExecutor<S: StateStore> {
     stream_source_splits: Vec<SplitImpl>,
 
     source_identify: String,
+    source_name: String,
 
     split_state_store: SourceStateTableHandler<S>,
 
@@ -81,6 +82,7 @@ impl<S: StateStore> SourceExecutor<S> {
         ctx: ActorContextRef,
         source_desc_builder: SourceDescBuilder,
         source_id: TableId,
+        source_name: String,
         vnodes: Bitmap,
         state_table: SourceStateTableHandler<S>,
         column_ids: Vec<ColumnId>,
@@ -98,6 +100,7 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(Self {
             ctx,
             source_id,
+            source_name,
             source_desc_builder,
             row_id_generator: RowIdGenerator::with_epoch(
                 vnode_id as u32,
@@ -415,7 +418,10 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     self.metrics
                         .source_output_row_count
-                        .with_label_values(&[self.source_identify.as_str()])
+                        .with_label_values(&[
+                            self.source_identify.as_str(),
+                            self.source_name.as_str(),
+                        ])
                         .inc_by(chunk.cardinality() as u64);
                     yield Message::Chunk(chunk);
                 }
@@ -518,6 +524,7 @@ mod tests {
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
+    use risingwave_pb::catalog::source_info::SourceInfo as ProstSourceInfo;
     use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, StreamSourceInfo};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
@@ -525,13 +532,14 @@ mod tests {
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
         RowFormatType as ProstRowFormatType,
     };
-    use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
     use risingwave_source::table_test_utils::create_table_source_desc_builder;
     use risingwave_source::*;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
+
+    const MOCK_SOURCE_NAME: &str = "mock_source";
 
     #[tokio::test]
     async fn test_table_source() {
@@ -584,6 +592,7 @@ mod tests {
             ActorContext::create(0x3f3f3f),
             source_builder,
             table_id,
+            MOCK_SOURCE_NAME.to_string(),
             vnodes,
             state_table,
             column_ids,
@@ -687,6 +696,7 @@ mod tests {
             ActorContext::create(0x3f3f3f),
             source_builder,
             table_id,
+            MOCK_SOURCE_NAME.to_string(),
             vnodes,
             state_table,
             column_ids,
@@ -816,6 +826,7 @@ mod tests {
             ActorContext::create(0),
             source_builder,
             source_table_id,
+            MOCK_SOURCE_NAME.to_string(),
             vnodes,
             source_state_handler,
             column_ids.clone(),

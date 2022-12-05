@@ -19,9 +19,11 @@ use itertools::Itertools;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, Result};
-use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::hash::{
+    HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode, VnodeMapping,
+};
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, Datum, ParallelUnitId, VirtualNode, VnodeMapping};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
@@ -53,6 +55,7 @@ struct InnerSideExecutorBuilder<C> {
     inner_side_schema: Schema,
     inner_side_column_ids: Vec<i32>,
     inner_side_key_types: Vec<DataType>,
+    lookup_prefix_len: usize,
     context: C,
     task_id: TaskId,
     epoch: u64,
@@ -102,7 +105,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
 
         list.iter().for_each(|(scan_range, vnode)| {
             scan_ranges.push(scan_range.to_protobuf());
-            vnode_bitmap.set(*vnode as usize, true);
+            vnode_bitmap.set(vnode.to_index(), true);
         });
 
         let row_seq_scan_node = NodeBody::RowSeqScan(RowSeqScanNode {
@@ -169,8 +172,16 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
         for ((datum, outer_type), inner_type) in key_datums
             .into_iter()
-            .zip_eq(self.outer_side_key_types.iter())
-            .zip_eq(self.inner_side_key_types.iter())
+            .zip_eq(
+                self.outer_side_key_types
+                    .iter()
+                    .take(self.lookup_prefix_len),
+            )
+            .zip_eq(
+                self.inner_side_key_types
+                    .iter()
+                    .take(self.lookup_prefix_len),
+            )
         {
             let datum = if inner_type == outer_type {
                 datum
@@ -188,7 +199,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
         }
 
         let vnode = self.get_virtual_node(&scan_range)?;
-        let parallel_unit_id = self.vnode_mapping[vnode as usize];
+        let parallel_unit_id = self.vnode_mapping[vnode.to_index()];
 
         let list = self
             .pu_to_scan_range_mapping
@@ -344,15 +355,11 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             .map(|&i| outer_side_data_types[i].clone())
             .collect_vec();
 
+        let lookup_prefix_len: usize = lookup_join_node.get_lookup_prefix_len() as usize;
+
         let mut inner_side_key_idxs = vec![];
-        for pk in &table_desc.pk {
-            let key_idx = inner_side_column_ids
-                .iter()
-                .position(|&i| table_desc.columns[pk.index as usize].column_id == i)
-                .ok_or_else(|| {
-                    internal_error("Inner side key is not part of its output columns")
-                })?;
-            inner_side_key_idxs.push(key_idx);
+        for inner_side_key in lookup_join_node.get_inner_side_key() {
+            inner_side_key_idxs.push(*inner_side_key as usize)
         }
 
         let inner_side_key_types = inner_side_key_idxs
@@ -374,6 +381,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             inner_side_schema,
             inner_side_column_ids,
             inner_side_key_types: inner_side_key_types.clone(),
+            lookup_prefix_len,
             context: source.context().clone(),
             task_id: source.task_id.clone(),
             epoch: source.epoch(),
@@ -392,6 +400,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             inner_side_key_types,
             inner_side_key_idxs,
             null_safe,
+            lookup_prefix_len,
             chunk_builder: DataChunkBuilder::new(original_schema.data_types(), chunk_size),
             schema: actual_schema,
             output_indices,
@@ -412,6 +421,7 @@ struct LocalLookupJoinExecutorArgs {
     inner_side_key_types: Vec<DataType>,
     inner_side_key_idxs: Vec<usize>,
     null_safe: Vec<bool>,
+    lookup_prefix_len: usize,
     chunk_builder: DataChunkBuilder,
     schema: Schema,
     output_indices: Vec<usize>,
@@ -433,6 +443,7 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
             inner_side_key_types: self.inner_side_key_types,
             inner_side_key_idxs: self.inner_side_key_idxs,
             null_safe: self.null_safe,
+            lookup_prefix_len: self.lookup_prefix_len,
             chunk_builder: self.chunk_builder,
             schema: self.schema,
             output_indices: self.output_indices,
@@ -534,6 +545,7 @@ mod tests {
             inner_side_key_types: vec![inner_side_data_types[0].clone()],
             inner_side_key_idxs: vec![0],
             null_safe: vec![null_safe],
+            lookup_prefix_len: 1,
             chunk_builder: DataChunkBuilder::new(original_schema.data_types(), CHUNK_SIZE),
             schema: original_schema.clone(),
             output_indices: (0..original_schema.len()).into_iter().collect(),

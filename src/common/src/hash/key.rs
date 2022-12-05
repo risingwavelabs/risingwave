@@ -36,16 +36,17 @@ use crate::array::{
     StructRef,
 };
 use crate::collection::estimate_size::EstimateSize;
+use crate::hash::vnode::VirtualNode;
 use crate::row::Row;
 use crate::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode, VIRTUAL_NODE_COUNT,
+    OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum,
 };
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
 /// A wrapper for u64 hash result.
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Copy, Debug, PartialEq)]
 pub struct HashCode(pub u64);
 
 impl From<u64> for HashCode {
@@ -55,12 +56,12 @@ impl From<u64> for HashCode {
 }
 
 impl HashCode {
-    pub fn hash_code(&self) -> u64 {
+    pub fn hash_code(self) -> u64 {
         self.0
     }
 
-    pub fn to_vnode(&self) -> VirtualNode {
-        (self.0 % VIRTUAL_NODE_COUNT as u64) as VirtualNode
+    pub fn to_vnode(self) -> VirtualNode {
+        VirtualNode::from(self)
     }
 }
 
@@ -150,7 +151,7 @@ pub trait HashKey:
             .into_iter()
             .map(|builder| Ok::<_, ArrayError>(builder.finish().value_at(0).to_owned_datum()))
             .try_collect()
-            .map(Row)
+            .map(Row::new)
     }
 
     fn deserialize_to_builders(
@@ -402,6 +403,21 @@ impl<'a> HashKeySerDe<'a> for &'a str {
     /// This should never be called
     fn deserialize<R: Read>(_source: &mut R) -> Self {
         panic!("Should not serialize str for hash!")
+    }
+}
+
+/// Same as str.
+impl<'a> HashKeySerDe<'a> for &'a [u8] {
+    type S = Vec<u8>;
+
+    /// This should never be called
+    fn serialize(self) -> Self::S {
+        panic!("Should not serialize bytes for hash!")
+    }
+
+    /// This should never be called
+    fn deserialize<R: Read>(_source: &mut R) -> Self {
+        panic!("Should not serialize bytes for hash!")
     }
 }
 

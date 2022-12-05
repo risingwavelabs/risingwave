@@ -24,10 +24,12 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_connector::source::ConnectorProperties;
+use risingwave_connector::ConnectorParams;
+use risingwave_pb::catalog::source_info::SourceInfo as ProstSourceInfo;
 use risingwave_pb::catalog::ColumnIndex as ProstColumnIndex;
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
-use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
 
+use crate::connector_source::DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE;
 use crate::monitor::SourceMetrics;
 use crate::table::TableSource;
 use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
@@ -179,7 +181,7 @@ impl Default for TableSourceManager {
         TableSourceManager {
             sources: Default::default(),
             metrics: Default::default(),
-            connector_message_buffer_size: 16,
+            connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
         }
     }
 }
@@ -203,7 +205,7 @@ pub struct SourceDescBuilder {
     properties: HashMap<String, String>,
     info: ProstSourceInfo,
     source_manager: TableSourceManagerRef,
-    connector_node_addr: String,
+    connector_params: ConnectorParams,
 }
 
 impl SourceDescBuilder {
@@ -216,7 +218,7 @@ impl SourceDescBuilder {
         properties: HashMap<String, String>,
         info: ProstSourceInfo,
         source_manager: TableSourceManagerRef,
-        connector_node_addr: String,
+        connector_params: ConnectorParams,
     ) -> Self {
         Self {
             source_id,
@@ -226,7 +228,7 @@ impl SourceDescBuilder {
             properties,
             info,
             source_manager,
-            connector_node_addr,
+            connector_params,
         }
     }
 
@@ -294,10 +296,10 @@ impl SourceDescBuilder {
         // store the connector node address to properties for later use
         let mut source_props: HashMap<String, String> =
             HashMap::from_iter(self.properties.clone().into_iter());
-        source_props.insert(
-            "connector_node_addr".to_string(),
-            self.connector_node_addr.clone(),
-        );
+        self.connector_params
+            .connector_rpc_endpoint
+            .as_ref()
+            .map(|addr| source_props.insert("connector_node_addr".to_string(), addr.clone()));
         let config = ConnectorProperties::extract(source_props)
             .map_err(|e| RwError::from(ConnectorError(e.into())))?;
 
@@ -321,9 +323,10 @@ impl SourceDescBuilder {
 
 pub mod test_utils {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+    use risingwave_connector::ConnectorParams;
+    use risingwave_pb::catalog::source_info::SourceInfo as ProstSourceInfo;
     use risingwave_pb::catalog::{ColumnIndex, TableSourceInfo};
     use risingwave_pb::plan_common::ColumnCatalog;
-    use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
 
     use crate::{SourceDescBuilder, TableSourceManagerRef};
 
@@ -362,7 +365,9 @@ pub mod test_utils {
             properties: Default::default(),
             info,
             source_manager,
-            connector_node_addr: "127.0.0.1:60061".to_string(),
+            connector_params: ConnectorParams {
+                connector_rpc_endpoint: None,
+            },
         }
     }
 }
@@ -375,9 +380,9 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_connector::source::kinesis::config::kinesis_demo_properties;
+    use risingwave_pb::catalog::source_info::SourceInfo as Info;
     use risingwave_pb::catalog::{ColumnIndex, StreamSourceInfo, TableSourceInfo};
     use risingwave_pb::plan_common::ColumnCatalog;
-    use risingwave_pb::stream_plan::source_node::Info;
 
     use crate::*;
 

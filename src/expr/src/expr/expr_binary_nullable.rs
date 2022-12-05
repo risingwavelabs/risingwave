@@ -240,6 +240,7 @@ fn build_array_access_expr(
         DataType::Decimal => array_access_expression!(DecimalArray),
         DataType::Date => array_access_expression!(NaiveDateArray),
         DataType::Varchar => array_access_expression!(Utf8Array),
+        DataType::Bytea => array_access_expression!(BytesArray),
         DataType::Time => array_access_expression!(NaiveTimeArray),
         DataType::Timestamp => array_access_expression!(NaiveDateTimeArray),
         DataType::Timestampz => array_access_expression!(PrimitiveArray::<i64>),

@@ -285,6 +285,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         mock_hummock_meta_client.clone(),
         get_test_notification_client(env, hummock_manager_ref, worker_node),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(risingwave_tracing::RwTracingService::disabled()),
     )
     .await
     .unwrap();
@@ -385,7 +386,7 @@ async fn test_snapshot_v1() {
 
 #[tokio::test]
 async fn test_snapshot_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2().await;
+    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_inner(storage, meta_client, false, false).await;
 }
 
@@ -397,7 +398,7 @@ async fn test_snapshot_with_sync_v1() {
 
 #[tokio::test]
 async fn test_snapshot_with_sync_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2().await;
+    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_inner(storage, meta_client, true, false).await;
 }
 
@@ -409,7 +410,7 @@ async fn test_snapshot_with_commit_v1() {
 
 #[tokio::test]
 async fn test_snapshot_with_commit_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2().await;
+    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_inner(storage, meta_client, true, true).await;
 }
 
@@ -421,7 +422,7 @@ async fn test_snapshot_range_scan_v1() {
 
 #[tokio::test]
 async fn test_snapshot_range_scan_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2().await;
+    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, false, false).await;
 }
 
@@ -433,7 +434,7 @@ async fn test_snapshot_range_scan_with_sync_v1() {
 
 #[tokio::test]
 async fn test_snapshot_range_scan_with_sync_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2().await;
+    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, true, false).await;
 }
 
@@ -445,7 +446,7 @@ async fn test_snapshot_range_scan_with_commit_v1() {
 
 #[tokio::test]
 async fn test_snapshot_range_scan_with_commit_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2().await;
+    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, true, true).await;
 }
 

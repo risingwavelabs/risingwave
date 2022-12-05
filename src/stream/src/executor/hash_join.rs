@@ -24,7 +24,7 @@ use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, Row2};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::BoxedExpression;
@@ -752,15 +752,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         row_matched: &Row,
         matched_start_pos: usize,
     ) -> Row {
-        let mut new_row = vec![None; row_update.size() + row_matched.size()];
+        let mut new_row = vec![None; row_update.size() + row_matched.len()];
 
         for (i, datum_ref) in row_update.values().enumerate() {
             new_row[i + update_start_pos] = datum_ref.to_owned_datum();
         }
-        for i in 0..row_matched.size() {
+        for i in 0..row_matched.len() {
             new_row[i + matched_start_pos] = row_matched[i].clone();
         }
-        Row(new_row)
+        Row::new(new_row)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -817,13 +817,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
         for ((op, row), key) in chunk.rows().zip_eq(keys.iter()) {
-            let value = row.to_owned_row();
+            let value = row.into_owned_row();
             let matched_rows: Option<HashValueType> =
                 Self::hash_eq_match(key, &mut side_match.ht).await?;
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut degree = 0;
-                    let mut append_only_matched_rows = Vec::with_capacity(1);
+                    let mut append_only_matched_row = None;
                     if let Some(mut matched_rows) = matched_rows {
                         for (matched_row_ref, matched_row) in
                             matched_rows.values_mut(&side_match.all_data_types)
@@ -847,7 +847,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             // then we can remove matched rows since pk is unique and will not be
                             // inserted again
                             if append_only_optimize {
-                                append_only_matched_rows.push(matched_row.clone());
+                                // Since join key contains pk and pk is unique, there should be only
+                                // one row if matched.
+                                assert!(append_only_matched_row.is_none());
+                                append_only_matched_row = Some(matched_row);
                             }
                         }
                         if degree == 0 {
@@ -869,10 +872,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         yield Message::Chunk(chunk);
                     }
 
-                    if append_only_optimize && !append_only_matched_rows.is_empty() {
-                        // Since join key contains pk and pk is unique, there should be only
-                        // one row if matched
-                        let [row]: [_; 1] = append_only_matched_rows.try_into().unwrap();
+                    if append_only_optimize && let Some(row) = append_only_matched_row {
                         side_match.ht.delete(key, row);
                     } else if side_update.need_degree_table {
                         side_update.ht.insert(key, JoinRow::new(value, degree));

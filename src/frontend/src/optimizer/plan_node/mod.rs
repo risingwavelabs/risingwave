@@ -257,7 +257,6 @@ mod predicate_pushdown;
 pub use predicate_pushdown::*;
 
 pub mod generic;
-pub mod generic_derive;
 pub mod stream;
 pub mod stream_derive;
 
@@ -281,6 +280,7 @@ mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
 mod batch_sort_agg;
+mod batch_source;
 mod batch_table_function;
 mod batch_topn;
 mod batch_union;
@@ -307,6 +307,7 @@ mod logical_union;
 mod logical_update;
 mod logical_values;
 mod stream_delta_join;
+mod stream_dml;
 mod stream_dynamic_filter;
 mod stream_exchange;
 mod stream_expand;
@@ -321,6 +322,7 @@ mod stream_local_simple_agg;
 mod stream_materialize;
 mod stream_project;
 mod stream_project_set;
+mod stream_row_id_gen;
 mod stream_sink;
 mod stream_source;
 mod stream_table_scan;
@@ -347,6 +349,7 @@ pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
 pub use batch_sort_agg::BatchSortAgg;
+pub use batch_source::BatchSource;
 pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
@@ -363,7 +366,7 @@ pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
-pub use logical_project::{LogicalProject, LogicalProjectBuilder};
+pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
@@ -373,6 +376,7 @@ pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
 pub use stream_delta_join::StreamDeltaJoin;
+pub use stream_dml::StreamDml;
 pub use stream_dynamic_filter::StreamDynamicFilter;
 pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
@@ -387,6 +391,7 @@ pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
 pub use stream_project_set::StreamProjectSet;
+pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_sink::StreamSink;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
@@ -456,6 +461,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, ProjectSet }
             , { Batch, Union }
             , { Batch, GroupTopN }
+            , { Batch, Source }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -476,6 +482,8 @@ macro_rules! for_all_plan_nodes {
             , { Stream, ProjectSet }
             , { Stream, GroupTopN }
             , { Stream, Union }
+            , { Stream, RowIdGen }
+            , { Stream, Dml }
         }
     };
 }
@@ -539,6 +547,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, ProjectSet }
             , { Batch, Union }
             , { Batch, GroupTopN }
+            , { Batch, Source }
         }
     };
 }
@@ -568,6 +577,8 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, ProjectSet }
             , { Stream, GroupTopN }
             , { Stream, Union }
+            , { Stream, RowIdGen }
+            , { Stream, Dml }
         }
     };
 }

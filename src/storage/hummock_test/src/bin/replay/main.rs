@@ -116,6 +116,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         hummock_meta_client.clone(),
         notification_client,
         state_store_stats,
+        Arc::new(risingwave_tracing::RwTracingService::disabled()),
     )
     .await
     .expect("fail to create a HummockStorage object");

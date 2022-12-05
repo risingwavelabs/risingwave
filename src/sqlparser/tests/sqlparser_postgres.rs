@@ -754,3 +754,54 @@ fn parse_comments() {
         _ => unreachable!(),
     }
 }
+
+#[test]
+fn parse_create_function() {
+    let sql =
+        "CREATE FUNCTION add(INT, INT) RETURNS INT AS 'select $1 + $2;' LANGUAGE SQL IMMUTABLE";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            name: ObjectName(vec![Ident::new("add")]),
+            args: Some(vec![
+                CreateFunctionArg::unnamed(DataType::Int(None)),
+                CreateFunctionArg::unnamed(DataType::Int(None)),
+            ]),
+            return_type: Some(DataType::Int(None)),
+            bodies: vec![
+                CreateFunctionBody::As("select $1 + $2;".into()),
+                CreateFunctionBody::Language("SQL".into()),
+                CreateFunctionBody::Behavior(FunctionBehavior::Immutable),
+            ],
+        }
+    );
+
+    let sql = "CREATE OR REPLACE FUNCTION add(a INT, IN b INT = 1) RETURNS INT LANGUAGE SQL IMMUTABLE RETURN a + b";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: true,
+            name: ObjectName(vec![Ident::new("add")]),
+            args: Some(vec![
+                CreateFunctionArg::with_name("a", DataType::Int(None)),
+                CreateFunctionArg {
+                    mode: Some(ArgMode::In),
+                    name: Some("b".into()),
+                    data_type: DataType::Int(None),
+                    default_expr: Some(Expr::Value(Value::Number("1".into()))),
+                }
+            ]),
+            return_type: Some(DataType::Int(None)),
+            bodies: vec![
+                CreateFunctionBody::Language("SQL".into()),
+                CreateFunctionBody::Behavior(FunctionBehavior::Immutable),
+                CreateFunctionBody::Return(Expr::BinaryOp {
+                    left: Box::new(Expr::Identifier("a".into())),
+                    op: BinaryOperator::Plus,
+                    right: Box::new(Expr::Identifier("b".into())),
+                }),
+            ],
+        }
+    );
+}

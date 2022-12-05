@@ -32,7 +32,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
+use self::plan_node::{
+    BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
+    StreamRowIdGen, StreamSink,
+};
 use self::plan_visitor::{
     has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_logical_apply,
     has_logical_over_agg,
@@ -41,8 +44,10 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
+use crate::optimizer::plan_visitor::has_batch_source;
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
+use crate::WithOptions;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -308,6 +313,7 @@ impl PlanRoot {
                 // project-join merge should be applied after merge
                 // and eliminate
                 ProjectJoinRule::create(),
+                AggProjectMergeRule::create(),
             ],
             ApplyOrder::BottomUp,
         );
@@ -359,8 +365,9 @@ impl PlanRoot {
         assert_eq!(plan.distribution(), &Distribution::Single);
 
         !has_batch_exchange(plan.clone()) // there's no (single) exchange
-            && has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
-            && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table()) // and it's not a system table
+            && ((has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
+            && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table())) // and it's not a system table
+            || has_batch_source(plan.clone())) // or there's a source
 
         // TODO: join between a normal table and a system table is not supported yet
     }
@@ -438,7 +445,7 @@ impl PlanRoot {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
-        let mut plan = match self.plan.convention() {
+        let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan()?;
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
@@ -465,31 +472,53 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
-        // Rewrite joins with index to delta join
-        plan = self.optimize_by_rules(
-            plan,
-            "To IndexDeltaJoin".to_string(),
-            vec![IndexDeltaJoinRule::create()],
-            ApplyOrder::BottomUp,
-        );
+        // TODO: enable delta join
+        // // Rewrite joins with index to delta join
+        // plan = self.optimize_by_rules(
+        //     plan,
+        //     "To IndexDeltaJoin".to_string(),
+        //     vec![IndexDeltaJoinRule::create()],
+        //     ApplyOrder::BottomUp,
+        // );
 
         Ok(plan)
     }
 
     /// Optimize and generate a create materialize view plan.
-    pub fn gen_create_mv_plan(
+    pub fn gen_materialize_plan(
         &mut self,
         mv_name: String,
         definition: String,
         col_names: Option<Vec<String>>,
         handle_pk_conflict: bool,
+        enable_dml: bool,
+        row_id_index: Option<usize>,
     ) -> Result<StreamMaterialize> {
         let out_names = if let Some(col_names) = col_names {
             col_names
         } else {
             self.out_names.clone()
         };
-        let stream_plan = self.gen_stream_plan()?;
+        let mut stream_plan = self.gen_stream_plan()?;
+        if enable_dml {
+            // Insert a dml executor after the previous exector.
+            // FIXME: Store `Field` or `Schema` in `TableSource` to avoid downcasting in the future.
+            // Or do we have a better solution to this?
+            let logical_source = self.plan.downcast_ref::<LogicalSource>().unwrap();
+            let column_descs = logical_source
+                .core
+                .catalog
+                .columns
+                .iter()
+                .map(|column_catalog| column_catalog.column_desc.clone())
+                .collect_vec();
+            stream_plan = StreamDml::new(stream_plan, column_descs).into();
+        }
+        if let Some(row_id_index) = row_id_index {
+            // Insert a row id gen eexecutor after the previous executor.
+            stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
+        }
+
         StreamMaterialize::create(
             stream_plan,
             mv_name,
@@ -517,6 +546,29 @@ impl PlanRoot {
             "".into(),
             false,
         )
+    }
+
+    /// Optimize and generate a create sink plan.
+    pub fn gen_create_sink_plan(
+        &mut self,
+        sink_name: String,
+        definition: String,
+        col_names: Vec<String>,
+        properties: WithOptions,
+    ) -> Result<StreamSink> {
+        let stream_plan = self.gen_stream_plan()?;
+        StreamMaterialize::create(
+            stream_plan,
+            sink_name,
+            self.required_dist.clone(),
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            col_names,
+            false,
+            definition,
+            false,
+        )
+        .map(|plan| plan.rewrite_into_sink(properties))
     }
 
     /// Set the plan root's required dist.

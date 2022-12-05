@@ -15,6 +15,7 @@
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod bool_array;
+pub mod bytes_array;
 mod chrono_array;
 pub mod column;
 mod column_proto_readers;
@@ -39,6 +40,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub use bool_array::{BoolArray, BoolArrayBuilder};
+pub use bytes_array::{BytesArray, BytesArrayBuilder};
 pub use chrono_array::{
     NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
     NaiveTimeArray, NaiveTimeArrayBuilder,
@@ -299,7 +301,8 @@ macro_rules! for_all_variants {
             { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
             { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder },
-            { List, list, ListArray, ListArrayBuilder }
+            { List, list, ListArray, ListArrayBuilder },
+            { Bytea, bytea, BytesArray, BytesArrayBuilder}
         }
     };
 }
@@ -344,6 +347,12 @@ impl From<StructArray> for ArrayImpl {
 impl From<ListArray> for ArrayImpl {
     fn from(arr: ListArray) -> Self {
         Self::List(arr)
+    }
+}
+
+impl From<BytesArray> for ArrayImpl {
+    fn from(arr: BytesArray) -> Self {
+        Self::Bytea(arr)
     }
 }
 
@@ -432,25 +441,14 @@ macro_rules! impl_array_builder {
                 }
             }
 
-            /// Append a datum, return error while type not match.
-            pub fn append_datum(&mut self, datum: &Datum) {
-                match datum {
-                    None => self.append_null(),
-                    Some(ref scalar) => match (self, scalar) {
-                        $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
-                        _ => panic!("Invalid datum type"),
-                    },
-                }
-            }
-
-            /// Append a datum ref, return error while type not match.
-            pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) {
-                match datum_ref {
+            /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
+            pub fn append_datum(&mut self, datum: impl ToDatumRef) {
+                match datum.to_datum_ref() {
                     None => self.append_null(),
                     Some(scalar_ref) => match (self, scalar_ref) {
                         $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
                         (this_builder, this_scalar_ref) => panic!(
-                            "Failed to append datum, array builder type: {}, scalar ref type: {}",
+                            "Failed to append datum, array builder type: {}, scalar type: {}",
                             this_builder.get_ident(),
                             this_scalar_ref.get_ident()
                         ),
@@ -629,6 +627,9 @@ impl ArrayImpl {
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
             ProstArrayType::List => ListArray::from_protobuf(array)?,
             ProstArrayType::Unspecified => unreachable!(),
+            ProstArrayType::Bytea => {
+                read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
+            }
         };
         Ok(array)
     }

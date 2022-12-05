@@ -29,8 +29,8 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, hash_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarRefImpl,
+    deserialize_datum_from, hash_datum, serialize_datum_into, DataType, Datum, DatumRef, Scalar,
+    ScalarRefImpl, ToDatumRef,
 };
 
 #[derive(Debug)]
@@ -81,7 +81,7 @@ impl ArrayBuilder for StructArrayBuilder {
             None => {
                 self.bitmap.append(false);
                 for child in &mut self.children_array {
-                    child.append_datum_ref(None);
+                    child.append_datum(Datum::None);
                 }
             }
             Some(v) => {
@@ -89,7 +89,7 @@ impl ArrayBuilder for StructArrayBuilder {
                 let fields = v.fields_ref();
                 assert_eq!(fields.len(), self.children_array.len());
                 for (field_idx, f) in fields.into_iter().enumerate() {
-                    self.children_array[field_idx].append_datum_ref(f);
+                    self.children_array[field_idx].append_datum(f);
                 }
             }
         }
@@ -344,7 +344,7 @@ macro_rules! iter_fields_ref {
                 $($body)*
             }
             StructRef::ValueRef { val } => {
-                let $it = val.fields.iter().map(to_datum_ref);
+                let $it = val.fields.iter().map(ToDatumRef::to_datum_ref);
                 $($body)*
             }
         }
@@ -362,7 +362,7 @@ impl<'a> StructRef<'a> {
     ) -> memcomparable::Result<()> {
         iter_fields_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_ref_into(&datum_ref, serializer)?
+                serialize_datum_into(datum_ref, serializer)?
             }
             Ok(())
         })
@@ -371,7 +371,7 @@ impl<'a> StructRef<'a> {
     pub fn hash_scalar_inner<H: std::hash::Hasher>(&self, state: &mut H) {
         iter_fields_ref!(self, it, {
             for datum_ref in it {
-                hash_datum_ref(datum_ref, state);
+                hash_datum(datum_ref, state);
             }
         })
     }
@@ -553,18 +553,18 @@ mod tests {
     fn test_serialize_deserialize() {
         let value = StructValue::new(vec![
             Some(OrderedF32::from(3.2).to_scalar_value()),
-            Some("abcde".to_string().to_scalar_value()),
+            Some("abcde".into()),
             Some(
                 StructValue::new(vec![
                     Some(OrderedF64::from(1.3).to_scalar_value()),
-                    Some("a".to_string().to_scalar_value()),
+                    Some("a".into()),
                     None,
                     Some(StructValue::new(vec![]).to_scalar_value()),
                 ])
                 .to_scalar_value(),
             ),
             None,
-            Some("".to_string().to_scalar_value()),
+            Some("".into()),
             None,
             Some(StructValue::new(vec![]).to_scalar_value()),
             Some(12345.to_scalar_value()),
@@ -644,19 +644,16 @@ mod tests {
                 Ordering::Greater,
             ),
             (
-                StructValue::new(vec![Some("".to_string().to_scalar_value())]),
+                StructValue::new(vec![Some("".into())]),
                 StructValue::new(vec![None]),
                 vec![DataType::Varchar],
                 Ordering::Less,
             ),
             (
-                StructValue::new(vec![Some("abcd".to_string().to_scalar_value()), None]),
+                StructValue::new(vec![Some("abcd".into()), None]),
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 vec![
                     DataType::Varchar,
@@ -666,18 +663,12 @@ mod tests {
             ),
             (
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 vec![
                     DataType::Varchar,

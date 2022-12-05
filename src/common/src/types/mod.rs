@@ -47,7 +47,7 @@ pub mod to_text;
 
 mod ordered_float;
 
-use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 pub use chrono_wrapper::{
     NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,
 };
@@ -67,17 +67,7 @@ use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
     StructValue,
 };
-
-/// Parallel unit is the minimal scheduling unit.
-pub type ParallelUnitId = u32;
-pub type VnodeMapping = Vec<ParallelUnitId>;
-
-/// `VirtualNode` (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
-/// consistent hashing.
-pub type VirtualNode = u8;
-pub const VIRTUAL_NODE_SIZE: usize = std::mem::size_of::<VirtualNode>();
-pub const VNODE_BITS: usize = 8;
-pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
+use crate::error::Result as RwResult;
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -133,6 +123,9 @@ pub enum DataType {
     Struct(Arc<StructType>),
     #[display("{datatype}[]")]
     List { datatype: Box<DataType> },
+    #[display("bytea")]
+    #[from_str(regex = "(?i)^bytea$")]
+    Bytea,
 }
 
 impl std::str::FromStr for Box<DataType> {
@@ -158,6 +151,7 @@ impl DataTypeName {
             | DataTypeName::Timestamp
             | DataTypeName::Timestampz
             | DataTypeName::Time
+            | DataTypeName::Bytea
             | DataTypeName::Interval => true,
 
             DataTypeName::Struct | DataTypeName::List => false,
@@ -174,6 +168,7 @@ impl DataTypeName {
             DataTypeName::Float32 => DataType::Float32,
             DataTypeName::Float64 => DataType::Float64,
             DataTypeName::Varchar => DataType::Varchar,
+            DataTypeName::Bytea => DataType::Bytea,
             DataTypeName::Date => DataType::Date,
             DataTypeName::Timestamp => DataType::Timestamp,
             DataTypeName::Timestampz => DataType::Timestampz,
@@ -216,6 +211,7 @@ impl From<&ProstDataType> for DataType {
             TypeName::Timestampz => DataType::Timestampz,
             TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
+            TypeName::Bytea => DataType::Bytea,
             TypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
@@ -271,6 +267,7 @@ impl DataType {
                 },
             )
             .into(),
+            DataType::Bytea => BytesArrayBuilder::new(capacity).into(),
         }
     }
 
@@ -291,6 +288,7 @@ impl DataType {
             DataType::Interval => TypeName::Interval,
             DataType::Struct { .. } => TypeName::Struct,
             DataType::List { .. } => TypeName::List,
+            DataType::Bytea => TypeName::Bytea,
         }
     }
 
@@ -348,7 +346,7 @@ impl DataType {
         match self {
             Boolean | Int16 | Int32 | Int64 => true,
             Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestampz
-            | Interval => false,
+            | Interval | Bytea => false,
             Struct(t) => t.fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
             List { datatype } => datatype.mem_cmp_eq_value_enc(),
         }
@@ -374,9 +372,10 @@ impl DataType {
             DataType::Float32 => ScalarImpl::Float32(OrderedF32::neg_infinity()),
             DataType::Float64 => ScalarImpl::Float64(OrderedF64::neg_infinity()),
             DataType::Boolean => ScalarImpl::Bool(false),
-            DataType::Varchar => ScalarImpl::Utf8("".to_string()),
+            DataType::Varchar => ScalarImpl::Utf8("".into()),
+            DataType::Bytea => ScalarImpl::Bytea("".to_string().into_bytes().into()),
             DataType::Date => ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::MIN)),
-            DataType::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper(NaiveTime::from_hms(0, 0, 0))),
+            DataType::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(0, 0, 0)),
             DataType::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::MIN))
             }
@@ -472,7 +471,7 @@ macro_rules! for_all_scalar_variants {
             { Int64, int64, i64, i64 },
             { Float32, float32, OrderedF32, OrderedF32 },
             { Float64, float64, OrderedF64, OrderedF64 },
-            { Utf8, utf8, String, &'scalar str },
+            { Utf8, utf8, Box<str>, &'scalar str },
             { Bool, bool, bool, bool },
             { Decimal, decimal, Decimal, Decimal  },
             { Interval, interval, IntervalUnit, IntervalUnit },
@@ -480,7 +479,8 @@ macro_rules! for_all_scalar_variants {
             { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
             { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
             { Struct, struct, StructValue, StructRef<'scalar> },
-            { List, list, ListValue, ListRef<'scalar> }
+            { List, list, ListValue, ListRef<'scalar> },
+            { Bytea, bytea, Box<[u8]>, &'scalar [u8] }
         }
     };
 }
@@ -546,46 +546,14 @@ for_all_scalar_variants! { scalar_impl_partial_ord }
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
-/// Convert a [`Datum`] to a [`DatumRef`].
-// TODO: use `ToDatumRef::to_datum_ref` instead.
-#[inline(always)]
-pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
-    datum.as_ref().map(|d| d.as_scalar_ref_impl())
-}
-
-// TODO: specify `NULL FIRST` or `NULL LAST`.
-pub fn serialize_datum_ref_into(
-    datum_ref: &DatumRef<'_>,
-    serializer: &mut memcomparable::Serializer<impl BufMut>,
-) -> memcomparable::Result<()> {
-    // By default, `null` is treated as largest in PostgreSQL.
-    if let Some(datum_ref) = datum_ref {
-        0u8.serialize(&mut *serializer)?;
-        datum_ref.serialize(serializer)?;
-    } else {
-        1u8.serialize(serializer)?;
-    }
-    Ok(())
-}
-
-pub fn serialize_datum_ref_not_null_into(
-    datum_ref: &DatumRef<'_>,
-    serializer: &mut memcomparable::Serializer<impl BufMut>,
-) -> memcomparable::Result<()> {
-    datum_ref
-        .as_ref()
-        .expect("datum cannot be null")
-        .serialize(serializer)
-}
-
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 // TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_into(
-    datum: &Datum,
+    datum: impl ToDatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
     // By default, `null` is treated as largest in PostgreSQL.
-    if let Some(datum) = datum {
+    if let Some(datum) = datum.to_datum_ref() {
         0u8.serialize(&mut *serializer)?;
         datum.serialize(serializer)?;
     } else {
@@ -596,10 +564,11 @@ pub fn serialize_datum_into(
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 pub fn serialize_datum_not_null_into(
-    datum: &Datum,
+    datum: impl ToDatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
     datum
+        .to_datum_ref()
         .as_ref()
         .expect("datum cannot be null")
         .serialize(serializer)
@@ -628,7 +597,7 @@ pub fn deserialize_datum_not_null_from(
 
 /// This trait is to implement `to_owned_datum` for `Option<ScalarImpl>`
 pub trait ToOwnedDatum {
-    /// implement `to_owned_datum` for `DatumRef` to convert to `Datum`
+    /// Convert the datum to an owned [`Datum`].
     fn to_owned_datum(self) -> Datum;
 }
 
@@ -640,19 +609,20 @@ impl ToOwnedDatum for DatumRef<'_> {
 }
 
 pub trait ToDatumRef: PartialEq + Eq + std::fmt::Debug {
+    /// Convert the datum to [`DatumRef`].
     fn to_datum_ref(&self) -> DatumRef<'_>;
 }
 
 impl ToDatumRef for Datum {
     #[inline(always)]
     fn to_datum_ref(&self) -> DatumRef<'_> {
-        to_datum_ref(self)
+        self.as_ref().map(|d| d.as_scalar_ref_impl())
     }
 }
 impl ToDatumRef for &Datum {
     #[inline(always)]
     fn to_datum_ref(&self) -> DatumRef<'_> {
-        to_datum_ref(self)
+        self.as_ref().map(|d| d.as_scalar_ref_impl())
     }
 }
 impl ToDatumRef for DatumRef<'_> {
@@ -753,16 +723,32 @@ macro_rules! impl_convert {
 
 for_all_scalar_variants! { impl_convert }
 
-// Implement `From<raw float>` for `ScalarImpl` manually
+// Implement `From<raw float>` for `ScalarImpl::Float` as a sugar.
 impl From<f32> for ScalarImpl {
     fn from(f: f32) -> Self {
         Self::Float32(f.into())
     }
 }
-
 impl From<f64> for ScalarImpl {
     fn from(f: f64) -> Self {
         Self::Float64(f.into())
+    }
+}
+
+// Implement `From<string like>` for `ScalarImpl::Utf8` as a sugar.
+impl From<String> for ScalarImpl {
+    fn from(s: String) -> Self {
+        Self::Utf8(s.into_boxed_str())
+    }
+}
+impl From<&str> for ScalarImpl {
+    fn from(s: &str) -> Self {
+        Self::Utf8(s.into())
+    }
+}
+impl From<&String> for ScalarImpl {
+    fn from(s: &String) -> Self {
+        Self::Utf8(s.as_str().into())
     }
 }
 
@@ -820,26 +806,15 @@ macro_rules! scalar_impl_hash {
 
 for_all_scalar_variants! { scalar_impl_hash }
 
-/// Feeds the raw scalar of `datum` to the given `state`, which should behave the same as
-/// [`crate::array::Array::hash_at`], where NULL value will be carefully handled.
-///
-/// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
-/// type alias of `Datum = Option<_>`, we should manually implement [`std::hash::Hash`] for
-/// [`Datum`] in the future when it becomes a newtype. (#477)
-#[inline(always)]
-pub fn hash_datum(datum: &Datum, state: &mut impl std::hash::Hasher) {
-    hash_datum_ref(to_datum_ref(datum), state)
-}
-
-/// Feeds the raw scalar reference of `datum_ref` to the given `state`, which should behave the same
+/// Feeds the raw scalar reference of `datum` to the given `state`, which should behave the same
 /// as [`crate::array::Array::hash_at`], where NULL value will be carefully handled.
 ///
 /// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
 /// type alias of `DatumRef = Option<_>`, we should manually implement [`std::hash::Hash`] for
 /// [`DatumRef`] in the future when it becomes a newtype. (#477)
 #[inline(always)]
-pub fn hash_datum_ref(datum_ref: DatumRef<'_>, state: &mut impl std::hash::Hasher) {
-    match datum_ref {
+pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
+    match datum.to_datum_ref() {
         Some(scalar_ref) => scalar_ref.hash(state),
         None => NULL_VAL_FOR_HASH.hash(state),
     }
@@ -848,8 +823,8 @@ pub fn hash_datum_ref(datum_ref: DatumRef<'_>, state: &mut impl std::hash::Hashe
 impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
-    pub fn binary_format(&self) -> Bytes {
-        self.to_binary().unwrap()
+    pub fn binary_format(&self) -> RwResult<Bytes> {
+        self.to_binary().transpose().unwrap()
     }
 
     pub fn text_format(&self) -> String {
@@ -868,18 +843,18 @@ impl ScalarRefImpl<'_> {
             Self::Float32(v) => v.serialize(ser)?,
             Self::Float64(v) => v.serialize(ser)?,
             Self::Utf8(v) => v.serialize(ser)?,
+            Self::Bytea(v) => v.serialize(ser)?,
             Self::Bool(v) => v.serialize(ser)?,
-            Self::Decimal(v) => {
-                let (mantissa, scale) = v.mantissa_scale_for_serialization();
-                ser.serialize_decimal(mantissa, scale)?;
-            }
+            Self::Decimal(v) => ser.serialize_decimal((*v).into())?,
             Self::Interval(v) => v.serialize(ser)?,
-            Self::NaiveDate(v) => ser.serialize_naivedate(v.0.num_days_from_ce())?,
+            Self::NaiveDate(v) => v.0.num_days_from_ce().serialize(ser)?,
             Self::NaiveDateTime(v) => {
-                ser.serialize_naivedatetime(v.0.timestamp(), v.0.timestamp_subsec_nanos())?
+                v.0.timestamp().serialize(&mut *ser)?;
+                v.0.timestamp_subsec_nanos().serialize(ser)?;
             }
             Self::NaiveTime(v) => {
-                ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
+                v.0.num_seconds_from_midnight().serialize(&mut *ser)?;
+                v.0.nanosecond().serialize(ser)?;
             }
             Self::Struct(v) => v.serialize(ser)?,
             Self::List(v) => v.serialize(ser)?,
@@ -909,33 +884,29 @@ impl ScalarImpl {
             Ty::Int64 => Self::Int64(i64::deserialize(de)?),
             Ty::Float32 => Self::Float32(f32::deserialize(de)?.into()),
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
-            Ty::Varchar => Self::Utf8(String::deserialize(de)?),
+            Ty::Varchar => Self::Utf8(Box::<str>::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
-            Ty::Decimal => Self::Decimal({
-                let (mantissa, scale) = de.deserialize_decimal()?;
-                match scale {
-                    29 => Decimal::NegativeInf,
-                    30 => Decimal::PositiveInf,
-                    31 => Decimal::NaN,
-                    _ => Decimal::from_i128_with_scale(mantissa, scale as u32),
-                }
-            }),
+            Ty::Decimal => Self::Decimal(de.deserialize_decimal()?.into()),
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
             Ty::Time => Self::NaiveTime({
-                let (secs, nano) = de.deserialize_naivetime()?;
+                let secs = u32::deserialize(&mut *de)?;
+                let nano = u32::deserialize(de)?;
                 NaiveTimeWrapper::with_secs_nano(secs, nano)?
             }),
             Ty::Timestamp => Self::NaiveDateTime({
-                let (secs, nsecs) = de.deserialize_naivedatetime()?;
+                let secs = i64::deserialize(&mut *de)?;
+                let nsecs = u32::deserialize(de)?;
                 NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)?
             }),
             Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
             Ty::Date => Self::NaiveDate({
-                let days = de.deserialize_naivedate()?;
+                let days = i32::deserialize(de)?;
                 NaiveDateWrapper::with_days(days)?
             }),
             Ty::Struct(t) => StructValue::deserialize(&t.fields, de)?.to_scalar_value(),
             Ty::List { datatype } => ListValue::deserialize(datatype, de)?.to_scalar_value(),
+            // TODO: Consider directly use get bytes
+            Ty::Bytea => Self::Bytea(Bytes::deserialize(de)?.to_vec().into()),
         })
     }
 
@@ -967,16 +938,20 @@ impl ScalarImpl {
                     DataType::Boolean => size_of::<u8>(),
                     // IntervalUnit is serialized as (i32, i32, i64)
                     DataType::Interval => size_of::<(i32, i32, i64)>(),
-                    DataType::Decimal => deserializer.read_decimal_len()?,
+                    DataType::Decimal => {
+                        deserializer.deserialize_decimal()?;
+                        0 // the len is not used since decimal is not a fixed length type
+                    }
                     // these two types is var-length and should only be determine at runtime.
                     // TODO: need some test for this case (e.g. e2e test)
-                    DataType::List { .. } => deserializer.read_bytes_len()?,
+                    DataType::List { .. } => deserializer.skip_bytes()?,
                     DataType::Struct(t) => t
                         .fields
                         .iter()
                         .map(|field| Self::encoding_data_size(field, deserializer))
                         .try_fold(0, |a, b| b.map(|b| a + b))?,
-                    DataType::Varchar => deserializer.read_bytes_len()?,
+                    DataType::Varchar => deserializer.skip_bytes()?,
+                    DataType::Bytea => deserializer.skip_bytes()?,
                 };
 
                 // consume offset of fixed_type
@@ -1004,6 +979,7 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
                     | (DataType::Float32, ScalarImpl::Float32(_))
                     | (DataType::Float64, ScalarImpl::Float64(_))
                     | (DataType::Varchar, ScalarImpl::Utf8(_))
+                    | (DataType::Bytea, ScalarImpl::Bytea(_))
                     | (DataType::Date, ScalarImpl::NaiveDate(_))
                     | (DataType::Time, ScalarImpl::NaiveTime(_))
                     | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
@@ -1023,7 +999,6 @@ mod tests {
     use std::hash::{BuildHasher, Hasher};
     use std::ops::Neg;
 
-    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use itertools::Itertools;
     use rand::thread_rng;
     use strum::IntoEnumIterator;
@@ -1105,12 +1080,27 @@ mod tests {
 
     #[test]
     fn test_size() {
-        assert_eq!(std::mem::size_of::<StructValue>(), 16);
-        assert_eq!(std::mem::size_of::<ListValue>(), 16);
+        use static_assertions::const_assert_eq;
+
+        use crate::array::*;
+
+        macro_rules! assert_item_size_eq {
+            ($array:ty, $size:literal) => {
+                const_assert_eq!(std::mem::size_of::<<$array as Array>::OwnedItem>(), $size);
+            };
+        }
+
+        assert_item_size_eq!(StructArray, 16); // Box<[Datum]>
+        assert_item_size_eq!(ListArray, 16); // Box<[Datum]>
+        assert_item_size_eq!(Utf8Array, 16); // Box<str>
+        assert_item_size_eq!(IntervalArray, 16);
+        assert_item_size_eq!(NaiveDateTimeArray, 12);
+
         // TODO: try to reduce the memory usage of `Decimal`, `ScalarImpl` and `Datum`.
-        assert_eq!(std::mem::size_of::<Decimal>(), 20);
-        assert_eq!(std::mem::size_of::<ScalarImpl>(), 32);
-        assert_eq!(std::mem::size_of::<Datum>(), 32);
+        assert_item_size_eq!(DecimalArray, 20);
+
+        const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 24);
+        const_assert_eq!(std::mem::size_of::<Datum>(), 24);
     }
 
     #[test]
@@ -1148,7 +1138,7 @@ mod tests {
 
             let hash_from_datum_ref = {
                 let mut state = Crc32FastBuilder.build_hasher();
-                hash_datum_ref(to_datum_ref(&datum), &mut state);
+                hash_datum(datum.to_datum_ref(), &mut state);
                 state.finish()
             };
 
@@ -1172,18 +1162,22 @@ mod tests {
                     DataType::Decimal,
                 ),
                 DataTypeName::Date => (
-                    ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::from_ymd(2333, 3, 3))),
+                    ScalarImpl::NaiveDate(NaiveDateWrapper::from_ymd_uncheck(2333, 3, 3)),
                     DataType::Date,
                 ),
-                DataTypeName::Varchar => (ScalarImpl::Utf8("233".to_string()), DataType::Varchar),
+                DataTypeName::Varchar => (ScalarImpl::Utf8("233".into()), DataType::Varchar),
+                DataTypeName::Bytea => (
+                    ScalarImpl::Bytea("\\x233".as_bytes().into()),
+                    DataType::Bytea,
+                ),
                 DataTypeName::Time => (
-                    ScalarImpl::NaiveTime(NaiveTimeWrapper(NaiveTime::from_hms(2, 3, 3))),
+                    ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(2, 3, 3)),
                     DataType::Time,
                 ),
                 DataTypeName::Timestamp => (
-                    ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::from_timestamp(
+                    ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_timestamp_uncheck(
                         23333333, 2333,
-                    ))),
+                    )),
                     DataType::Timestamp,
                 ),
                 DataTypeName::Timestampz => (ScalarImpl::Int64(233333333), DataType::Timestampz),

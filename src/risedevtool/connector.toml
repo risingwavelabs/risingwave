@@ -1,0 +1,26 @@
+extend = "common.toml"
+
+[env]
+RW_CONNECTOR_VERSION = "0.0.2"
+RW_CONNECTOR_DOWNLOAD_PATH = "${PREFIX_TMP}/risingwave-connector-${RW_CONNECTOR_VERSION}.tar.gz"
+RW_CONNECTOR_RELEASE = "risingwave-connector-${RW_CONNECTOR_VERSION}.jar"
+
+RW_CONNECTOR_DOWNLOAD_URL = "https://github.com/risingwavelabs/risingwave-connector-release/raw/main/risingwave-connector-${RW_CONNECTOR_VERSION}.tar.gz"
+
+[tasks.download-connector]
+category = "RiseDev - Components"
+dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_RW_CONNECTOR" ] }
+description = "Download RisingWave Connector"
+script = '''
+#!/bin/bash
+set -e
+if [ -f "${PREFIX_BIN}/risingwave-connector.jar" ]; then
+    exit 0
+fi
+echo "RisingWave Connector not found, download ${RW_CONNECTOR_RELEASE}"
+curl -fL -o "${RW_CONNECTOR_DOWNLOAD_PATH}" "${RW_CONNECTOR_DOWNLOAD_URL}"
+tar -xvzf "${RW_CONNECTOR_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
+mv "${PREFIX_TMP}/${RW_CONNECTOR_RELEASE}" "${PREFIX_BIN}/risingwave-connector.jar"
+rm ${RW_CONNECTOR_DOWNLOAD_PATH}
+'''

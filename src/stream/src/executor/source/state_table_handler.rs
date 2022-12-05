@@ -17,8 +17,8 @@ use std::ops::Deref;
 use bytes::Bytes;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
-use risingwave_common::row::Row;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::row::{Row, Row2};
+use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_pb::catalog::Table as ProstTable;
@@ -47,7 +47,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     }
 
     fn string_to_scalar(rhs: impl Into<String>) -> ScalarImpl {
-        ScalarImpl::Utf8(rhs.into())
+        ScalarImpl::Utf8(rhs.into().into_boxed_str())
     }
 
     pub(crate) async fn get(&self, key: SplitId) -> StreamExecutorResult<Option<Row>> {
@@ -102,8 +102,8 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     ) -> StreamExecutorResult<Option<SplitImpl>> {
         Ok(match self.get(stream_source_split.id()).await? {
             None => None,
-            Some(row) => match row.0.get(1).unwrap() {
-                Some(ScalarImpl::Utf8(s)) => Some(SplitImpl::restore_from_bytes(s.as_bytes())?),
+            Some(row) => match row.datum_at(1) {
+                Some(ScalarRefImpl::Utf8(s)) => Some(SplitImpl::restore_from_bytes(s.as_bytes())?),
                 _ => unreachable!(),
             },
         })
