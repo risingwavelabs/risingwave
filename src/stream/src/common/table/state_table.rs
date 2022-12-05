@@ -488,7 +488,7 @@ impl<S: StateStore> StateTable<S> {
 
                 let read_options = ReadOptions {
                     dist_key_hint: None,
-                    check_bloom_filter: is_subset(self.dist_key_indices.clone(), key_indices),
+                    check_bloom_filter: self.dist_key_indices == key_indices,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,

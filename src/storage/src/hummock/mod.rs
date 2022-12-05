@@ -329,8 +329,6 @@ pub async fn get_from_sstable_info(
         get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
     };
 
-    // Todo(wcy-fdu): calculate dist_key
-
     if let Some(dist_key) = &read_options.dist_key_hint {
         if read_options.check_bloom_filter
             && !hit_sstable_bloom_filter(sstable.value(), dist_key, local_stats)

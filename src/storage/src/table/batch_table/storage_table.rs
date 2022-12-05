@@ -268,7 +268,7 @@ impl<S: StateStore> StorageTable<S> {
 
         let read_options = ReadOptions {
             dist_key_hint: None,
-            check_bloom_filter: is_subset(self.dist_key_indices.clone(), key_indices),
+            check_bloom_filter: self.dist_key_indices == key_indices,
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
@@ -334,6 +334,7 @@ impl<S: StateStore> StorageTable<S> {
         // can use a single iterator.
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
+
             let dist_key_hint = dist_key_hint.clone();
             let wait_epoch = wait_epoch.clone();
             async move {

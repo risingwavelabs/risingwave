@@ -1122,7 +1122,6 @@ pub(crate) mod tests {
         storage.wait_version(version).await;
 
         // 6. scan kv to check key table_id
-        // let mut bloom_filter_key: Vec<u8>;
         let bloom_filter_key = [
             existing_table_id.to_be_bytes().to_vec(),
             key_prefix.to_vec(),

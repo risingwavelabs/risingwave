@@ -172,9 +172,8 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
                     )
                     .unwrap();
 
-                let prefix_len = TABLE_PREFIX_LEN + VirtualNode::SIZE + dist_key_len;
-                &full_key[dist_key_start_position + TABLE_PREFIX_LEN + VirtualNode::SIZE
-                    ..dist_key_start_position + prefix_len]
+                let start_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + dist_key_start_position;
+                &full_key[start_position..start_position + dist_key_len]
             }
         }
     }
