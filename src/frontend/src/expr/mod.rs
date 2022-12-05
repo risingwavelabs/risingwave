@@ -159,8 +159,7 @@ impl ExprImpl {
     /// Count `Now`s in the expression.
     pub fn count_nows(&self) -> usize {
         let mut visitor = CountNow::default();
-        visitor.visit_expr(self);
-        visitor.into()
+        visitor.visit_expr(self)
     }
 
     /// Check whether self is literal NULL.

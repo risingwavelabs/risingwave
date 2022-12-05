@@ -391,9 +391,7 @@ impl Extend<usize> for CollectInputRef {
 
 /// Count `Now`s in the expression.
 #[derive(Clone, Default)]
-pub struct CountNow {
-    now_cnt: usize,
-}
+pub struct CountNow {}
 
 impl ExprVisitor<usize> for CountNow {
     fn merge(a: usize, b: usize) -> usize {
@@ -411,12 +409,6 @@ impl ExprVisitor<usize> for CountNow {
                 .reduce(Self::merge)
                 .unwrap_or_default()
         }
-    }
-}
-
-impl From<CountNow> for usize {
-    fn from(s: CountNow) -> Self {
-        s.now_cnt
     }
 }
 

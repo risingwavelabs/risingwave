@@ -353,17 +353,15 @@
     └─BatchValues { rows: [[]] }
 - name: now expression
   sql: |
-    create table t (v1 datetime);
+    create table t (v1 timestamp);
     select * from t where v1 >= now();
   logical_plan: |
-    BatchProject { exprs: [(In(1:Int32::Decimal, 3:Int32::Decimal, (0.5:Decimal * 2:Int32)) OR (1:Int32 = min(min(t.v1))))] }
-    └─BatchSimpleAgg { aggs: [min(min(t.v1))] }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchSimpleAgg { aggs: [min(t.v1)] }
-          └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+    LogicalProject { exprs: [t.v1] }
+    └─LogicalFilter { predicate: (t.v1 >= Now) }
+      └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |
-    BatchProject { exprs: [(In(1:Int32::Decimal, 3:Int32::Decimal, (0.5:Decimal * 2:Int32)) OR (1:Int32 = min(min(t.v1))))] }
-    └─BatchSimpleAgg { aggs: [min(min(t.v1))] }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchSimpleAgg { aggs: [min(t.v1)] }
-          └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
+    └─StreamDynamicFilter { predicate: (t.v1 >= t.v1), output: [t.v1, t._row_id] }
+      ├─StreamFilter { predicate: true }
+      | └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamNow { output: [now] }
