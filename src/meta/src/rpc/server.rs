@@ -88,7 +88,7 @@ impl Default for AddressInfo {
 }
 
 pub async fn rpc_serve(
-    address_info: AddressInfo, // has port
+    address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
