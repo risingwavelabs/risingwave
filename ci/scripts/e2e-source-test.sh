@@ -62,7 +62,7 @@ nohup java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 # wait for cdc loading
-sleep 4
+sleep 5
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
 # kill cluster
@@ -77,7 +77,7 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
 # wait cdc ingesting
-sleep 4
+sleep 6
 # check new results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 

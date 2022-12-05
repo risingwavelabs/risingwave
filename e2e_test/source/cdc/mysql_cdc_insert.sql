@@ -10,3 +10,6 @@ VALUES (default, '2022-12-01 15:08:22', 'Sam', 1000.52, 110, false);
 
 INSERT INTO shipments
 VALUES (default,10004,'Beijing','Shanghai',false);
+
+UPDATE mytable SET v3 = 'yes' where v1 = 2;
+DELETE FROM mytable where v1 = 1;
