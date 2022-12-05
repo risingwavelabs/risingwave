@@ -204,7 +204,7 @@ impl<S: StateStore> StorageTable<S> {
                 == *dist_key_in_pk_indices.iter().max().unwrap()
         {
             false => None,
-            true => Some(dist_key_in_pk_indices[0]),
+            true => Some(*dist_key_in_pk_indices.iter().min().unwrap()),
         };
         Self {
             table_id,
@@ -442,6 +442,8 @@ impl<S: StateStore> StorageTable<S> {
             false,
         );
 
+        let prefix_serializer = self.pk_serializer.prefix(pk_prefix.len());
+        let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
         assert!(pk_prefix.len() <= self.pk_indices.len());
         let pk_prefix_indices = (0..pk_prefix.len())
             .into_iter()
@@ -461,15 +463,20 @@ impl<S: StateStore> StorageTable<S> {
             );
             None
         } else {
-            let distribution_key_end_index_in_pk =
-                self.distribution_key_start_index_in_pk.unwrap() + self.dist_key_indices.len();
-            let dist_key_serializer = self.pk_serializer.dist_key_serde(
-                self.distribution_key_start_index_in_pk.unwrap(),
-                distribution_key_end_index_in_pk,
-            );
-            let dist_key = (&pk_prefix).project(&self.dist_key_in_pk_indices);
-            let serialized_dist_key = serialize_pk(&dist_key, &dist_key_serializer);
-            Some(serialized_dist_key)
+            let (dist_key_start_position, dist_key_len) = self
+                .pk_serializer
+                .deserialize_dist_key_position_with_column_indices(
+                    &encoded_prefix,
+                    0..self.dist_key_in_pk_indices.len()
+                        + self.distribution_key_start_index_in_pk.unwrap(),
+                    self.distribution_key_start_index_in_pk.unwrap(),
+                )
+                .unwrap();
+
+            Some(
+                encoded_prefix[dist_key_start_position..dist_key_len + dist_key_start_position]
+                    .to_vec(),
+            )
         };
 
         trace!(

@@ -196,7 +196,7 @@ impl<S: StateStore> StateTable<S> {
                 == *dist_key_in_pk_indices.iter().max().unwrap()
         {
             false => None,
-            true => Some(dist_key_in_pk_indices[0]),
+            true => Some(*dist_key_in_pk_indices.iter().min().unwrap()),
         };
         let vnode_col_idx_in_pk = table_catalog
             .vnode_col_idx
@@ -1035,7 +1035,7 @@ impl<S: StateStore> StateTable<S> {
                     .pk_serde
                     .deserialize_dist_key_position_with_column_indices(
                         &encoded_prefix,
-                        0..self.dist_key_indices().len()
+                        0..self.dist_key_in_pk_indices.len()
                             + self.distribution_key_start_index_in_pk.unwrap(),
                         self.distribution_key_start_index_in_pk.unwrap(),
                     )?;

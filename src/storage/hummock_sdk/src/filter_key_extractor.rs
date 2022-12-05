@@ -212,11 +212,11 @@ impl SchemaFilterKeyExtractor {
                 == *dist_key_in_pk_indices.iter().max().unwrap()
         {
             false => None,
-            true => Some(dist_key_in_pk_indices[0]),
+            true => Some(*dist_key_in_pk_indices.iter().min().unwrap()),
         };
 
         let distribution_key_end_index_in_pk =
-            table_catalog.distribution_key.len() + distribution_key_start_index_in_pk.unwrap_or(0);
+            dist_key_in_pk_indices.len() + distribution_key_start_index_in_pk.unwrap_or(0);
         // column_index in pk
 
         let data_types = pk_indices
