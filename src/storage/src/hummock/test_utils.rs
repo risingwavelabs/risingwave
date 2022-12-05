@@ -206,9 +206,7 @@ pub async fn gen_test_sstable_inner(
     for (key, value) in kv_iter {
         b.add(&key.to_ref(), value.as_slice(), true).await.unwrap();
     }
-    for tombstone in range_tombstones {
-        b.add_delete_range(tombstone);
-    }
+    b.add_delete_range(range_tombstones);
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
     let table = sstable_store
