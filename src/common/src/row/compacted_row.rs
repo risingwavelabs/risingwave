@@ -12,13 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Row2;
+use super::{Row, Row2, RowDeserializer};
+use crate::types::DataType;
+use crate::util::value_encoding;
 
 /// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
 /// Executors need to serialize Row into `CompactedRow` before writing into cache.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct CompactedRow {
     pub row: Vec<u8>,
+}
+
+impl CompactedRow {
+    /// Deserialize [`CompactedRow`] into [`Row`] with given types.
+    pub fn deserialize(&self, data_types: &[DataType]) -> value_encoding::Result<Row> {
+        let deserializer = RowDeserializer::new(data_types);
+        let row = deserializer.deserialize(self.row.as_slice())?;
+        Ok(row)
+    }
 }
 
 impl<R: Row2> From<R> for CompactedRow {

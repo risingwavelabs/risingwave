@@ -28,7 +28,7 @@ use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
-use risingwave_common::row::{CompactedRow, Row, Row2, RowDeserializer, RowExt};
+use risingwave_common::row::{CompactedRow, Row, Row2, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -55,7 +55,6 @@ pub struct JoinRow<R: Row2> {
     pub row: R,
     degree: DegreeType,
 }
-
 
 impl<R: Row2> JoinRow<R> {
     pub fn new(row: R, degree: DegreeType) -> Self {
@@ -108,17 +107,14 @@ pub struct EncodedJoinRow {
 
 impl EncodedJoinRow {
     fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<Row>> {
-        let deserializer = RowDeserializer::new(data_types.to_vec());
-        let row = deserializer.deserialize(self.compacted_row.row.as_ref())?;
         Ok(JoinRow {
-            row,
+            row: self.decode_row(data_types)?,
             degree: self.degree,
         })
     }
 
     fn decode_row(&self, data_types: &[DataType]) -> StreamExecutorResult<Row> {
-        let deserializer = RowDeserializer::new(data_types.to_vec());
-        let row = deserializer.deserialize(self.compacted_row.row.as_ref())?;
+        let row = self.compacted_row.deserialize(data_types)?;
         Ok(row)
     }
 
