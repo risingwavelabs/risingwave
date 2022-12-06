@@ -87,9 +87,11 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "")]
     pub config_path: String,
 
+    /// Total available memory in bytes, used by LRU Manager
     #[clap(long, default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
 
+    /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[clap(long, default_value_t = default_parallelism())]
     pub parallelism: usize,
 }
