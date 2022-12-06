@@ -461,8 +461,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let span = tracing::span!(tracing::Level::INFO, "services");
         let _enter = span.enter();
 
-        tracing::error!("this is a test");
-
         let intercept = InterceptorWrapper {
             leader_rx: intercept_leader_rx,
         };
