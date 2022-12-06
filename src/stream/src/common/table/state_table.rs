@@ -47,7 +47,9 @@ use risingwave_storage::store::{
 use risingwave_storage::table::streaming_table::mem_table::{
     MemTable, MemTableError, MemTableIter, RowOp,
 };
-use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
+use risingwave_storage::table::{
+    compute_chunk_vnode, compute_vnode, get_dist_key_in_pk_indices, Distribution,
+};
 use risingwave_storage::{StateStore, StateStoreIter};
 use tracing::trace;
 
@@ -158,20 +160,7 @@ impl<S: StateStore> StateTable<S> {
             .map(|col_order| col_order.index as usize)
             .collect_vec();
 
-        let dist_key_in_pk_indices = dist_key_indices
-            .iter()
-            .map(|&di| {
-                pk_indices
-                    .iter()
-                    .position(|&pi| di == pi)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "distribution key {:?} must be a subset of primary key {:?}",
-                            dist_key_indices, pk_indices
-                        )
-                    })
-            })
-            .collect_vec();
+        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         let local_state_store = store.new_local(table_id).await;
 
         let pk_data_types = pk_indices
@@ -317,20 +306,7 @@ impl<S: StateStore> StateTable<S> {
                 .collect(),
             None => table_columns.iter().map(|c| c.data_type.clone()).collect(),
         };
-        let dist_key_in_pk_indices = dist_key_indices
-            .iter()
-            .map(|&di| {
-                pk_indices
-                    .iter()
-                    .position(|&pi| di == pi)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "distribution key {:?} must be a subset of primary key {:?}",
-                            dist_key_indices, pk_indices
-                        )
-                    })
-            })
-            .collect_vec();
+        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         Self {
             table_id,
             mem_table: MemTable::new(),

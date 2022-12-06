@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
+use xxhash_rust::xxh32;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
@@ -211,8 +212,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             // 2. extract_key key is not duplicate
             if !extract_key.is_empty() && extract_key != self.last_extract_key.as_slice() {
                 // avoid duplicate add to bloom filter
-                self.user_key_hashes
-                    .push(farmhash::fingerprint32(extract_key));
+                self.user_key_hashes.push(xxh32::xxh32(extract_key, 1));
                 self.last_extract_key.clear();
                 self.last_extract_key.extend_from_slice(extract_key);
             }

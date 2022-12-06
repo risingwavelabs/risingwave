@@ -39,7 +39,7 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
-use crate::table::{compute_vnode, Distribution, TableIter};
+use crate::table::{compute_vnode, get_dist_key_in_pk_indices, Distribution, TableIter};
 use crate::{StateStore, StateStoreIter};
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
@@ -184,20 +184,7 @@ impl<S: StateStore> StorageTable<S> {
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
         let row_deserializer = RowDeserializer::new(all_data_types);
 
-        let dist_key_in_pk_indices = dist_key_indices
-            .iter()
-            .map(|&di| {
-                pk_indices
-                    .iter()
-                    .position(|&pi| di == pi)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "distribution key {:?} must be a subset of primary key {:?}",
-                            dist_key_indices, pk_indices
-                        )
-                    })
-            })
-            .collect_vec();
+        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         let distribution_key_start_index_in_pk = match !dist_key_in_pk_indices.is_empty()
             && *dist_key_in_pk_indices.iter().min().unwrap() + dist_key_in_pk_indices.len() - 1
                 == *dist_key_in_pk_indices.iter().max().unwrap()

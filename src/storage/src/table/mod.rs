@@ -156,21 +156,20 @@ fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
         vnode
     );
 }
-pub fn is_continuous_subset<T: Eq>(
-    mut sub_iter: impl Iterator<Item = T>,
-    mut iter: impl Iterator<Item = T>,
-) -> bool {
-    if let Some(first) = sub_iter.next() {
-        if !iter.any(|item| item == first) {
-            return false;
-        }
-
-        for sub_item in sub_iter {
-            if let Some(item) = iter.next() && item == sub_item {
-                continue;
-            }
-            return false;
-        }
-    }
-    true
+pub fn get_dist_key_in_pk_indices(dist_key_indices: &[usize], pk_indices: &[usize]) -> Vec<usize> {
+    let dist_key_in_pk_indices = dist_key_indices
+        .iter()
+        .map(|&di| {
+            pk_indices
+                .iter()
+                .position(|&pi| di == pi)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "distribution key {:?} must be a subset of primary key {:?}",
+                        dist_key_indices, pk_indices
+                    )
+                })
+        })
+        .collect_vec();
+    dist_key_in_pk_indices
 }

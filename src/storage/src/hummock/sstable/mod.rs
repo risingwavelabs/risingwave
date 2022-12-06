@@ -51,6 +51,7 @@ pub use delete_range_aggregator::{
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
+use xxhash_rust::xxh32;
 
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
@@ -145,7 +146,7 @@ impl Sstable {
             true
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
-            let hash = farmhash::fingerprint32(user_key);
+            let hash = xxh32::xxh32(user_key, 1);
             let bloom = Bloom::new(&self.meta.bloom_filter);
             bloom.surely_not_have_hash(hash)
         } else {
