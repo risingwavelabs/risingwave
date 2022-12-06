@@ -453,8 +453,8 @@ mod tests {
     use risingwave_storage::table::Distribution;
 
     use super::*;
-    use crate::executor::test_utils::{MessageSender, MockSource};
-    use crate::executor::ActorContext;
+    use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
+    use crate::executor::{ActorContext, StreamExecutorResult};
 
     async fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
@@ -516,7 +516,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dynamic_filter_rhs_recovery_gt() {
+    async fn test_dynamic_filter_rhs_recovery_gt() -> StreamExecutorResult<()> {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I
              + 1
@@ -552,7 +552,7 @@ mod tests {
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
         tx_r.push_barrier(1, false);
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 0th right chunk
         tx_r.push_chunk(chunk_r0);
@@ -560,14 +560,8 @@ mod tests {
         tx_l.push_barrier(2, false);
         tx_r.push_barrier(2, false);
 
-        // Get empty chunk
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
-        assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
-            StreamChunk::from_pretty(" I")
-        );
         // Get the barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // Drop executor corresponding to node failure
         drop(tx_l);
@@ -583,7 +577,7 @@ mod tests {
         tx_r.push_barrier(2, false);
 
         // Get recovery barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 1st right chunk
         tx_r.push_chunk(chunk_r1);
@@ -594,9 +588,9 @@ mod tests {
         tx_l.push_barrier(3, false);
         tx_r.push_barrier(3, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 2
@@ -604,9 +598,9 @@ mod tests {
             )
         );
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 - 2"
@@ -614,7 +608,7 @@ mod tests {
         );
 
         // Get the barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // Drop executor corresponding to node failure
         drop(tx_l);
@@ -630,13 +624,13 @@ mod tests {
         tx_r.push_barrier(3, false);
 
         // Get the barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 4
@@ -651,9 +645,9 @@ mod tests {
         tx_l.push_barrier(4, false);
         tx_r.push_barrier(4, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 2"
@@ -661,7 +655,7 @@ mod tests {
         );
 
         // Get the barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 3rd right chunk
         tx_r.push_chunk(chunk_r3);
@@ -670,19 +664,21 @@ mod tests {
         tx_l.push_barrier(5, false);
         tx_r.push_barrier(5, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 - 2
                 - 4"
             )
         );
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_dynamic_filter_greater_than() {
+    async fn test_dynamic_filter_greater_than() -> StreamExecutorResult<()> {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I
              + 1
@@ -712,7 +708,7 @@ mod tests {
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
         tx_r.push_barrier(1, false);
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
         tx_l.push_chunk(chunk_l1);
@@ -724,9 +720,9 @@ mod tests {
         tx_l.push_barrier(2, false);
         tx_r.push_barrier(2, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 3"
@@ -734,13 +730,13 @@ mod tests {
         );
 
         // Get the barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 4
@@ -755,9 +751,9 @@ mod tests {
         tx_l.push_barrier(3, false);
         tx_r.push_barrier(3, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 2"
@@ -765,7 +761,7 @@ mod tests {
         );
 
         // Get the barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 3rd right chunk
         tx_r.push_chunk(chunk_r3);
@@ -774,19 +770,21 @@ mod tests {
         tx_l.push_barrier(4, false);
         tx_r.push_barrier(4, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 - 2
                 - 4"
             )
         );
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_dynamic_filter_greater_than_or_equal() {
+    async fn test_dynamic_filter_greater_than_or_equal() -> StreamExecutorResult<()> {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I
              + 1
@@ -816,7 +814,7 @@ mod tests {
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
         tx_r.push_barrier(1, false);
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
         tx_l.push_chunk(chunk_l1);
@@ -828,9 +826,9 @@ mod tests {
         tx_l.push_barrier(2, false);
         tx_r.push_barrier(2, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 3"
@@ -838,13 +836,13 @@ mod tests {
         );
 
         // Get the barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 4
@@ -859,9 +857,9 @@ mod tests {
         tx_l.push_barrier(3, false);
         tx_r.push_barrier(3, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 2"
@@ -869,7 +867,7 @@ mod tests {
         );
 
         // Get the barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 3rd right chunk
         tx_r.push_chunk(chunk_r3);
@@ -878,19 +876,21 @@ mod tests {
         tx_l.push_barrier(4, false);
         tx_r.push_barrier(4, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 - 2
                 - 4"
             )
         );
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_dynamic_filter_less_than() {
+    async fn test_dynamic_filter_less_than() -> StreamExecutorResult<()> {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I
              + 2
@@ -920,7 +920,7 @@ mod tests {
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
         tx_r.push_barrier(1, false);
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
         tx_l.push_chunk(chunk_l1);
@@ -932,9 +932,9 @@ mod tests {
         tx_l.push_barrier(2, false);
         tx_r.push_barrier(2, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 2"
@@ -942,13 +942,13 @@ mod tests {
         );
 
         // Get the barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 1
@@ -963,9 +963,9 @@ mod tests {
         tx_l.push_barrier(3, false);
         tx_r.push_barrier(3, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 3"
@@ -973,7 +973,7 @@ mod tests {
         );
 
         // Get the barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 3rd right chunk
         tx_r.push_chunk(chunk_r3);
@@ -982,19 +982,21 @@ mod tests {
         tx_l.push_barrier(4, false);
         tx_r.push_barrier(4, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 - 1
                 - 3"
             )
         );
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_dynamic_filter_less_than_or_equal() {
+    async fn test_dynamic_filter_less_than_or_equal() -> StreamExecutorResult<()> {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I
              + 2
@@ -1024,7 +1026,7 @@ mod tests {
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
         tx_r.push_barrier(1, false);
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 1st left chunk
         tx_l.push_chunk(chunk_l1);
@@ -1036,9 +1038,9 @@ mod tests {
         tx_l.push_barrier(2, false);
         tx_r.push_barrier(2, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 2"
@@ -1046,13 +1048,13 @@ mod tests {
         );
 
         // Get the barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 1
@@ -1067,9 +1069,9 @@ mod tests {
         tx_l.push_barrier(3, false);
         tx_r.push_barrier(3, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 + 3"
@@ -1077,7 +1079,7 @@ mod tests {
         );
 
         // Get the barrier
-        dynamic_filter.next().await.unwrap().unwrap();
+        dynamic_filter.next_unwrap_ready_barrier()?;
 
         // push the 3rd right chunk
         tx_r.push_chunk(chunk_r3);
@@ -1086,14 +1088,16 @@ mod tests {
         tx_l.push_barrier(4, false);
         tx_r.push_barrier(4, false);
 
-        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
-            chunk.into_chunk().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
                 " I
                 - 1
                 - 3"
             )
         );
+
+        Ok(())
     }
 }
