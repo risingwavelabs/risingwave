@@ -726,8 +726,7 @@ mod tests {
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
     use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
-    use crate::hummock::utils::LooseMemoryLimiter;
-    use crate::hummock::{HummockError, HummockResult};
+    use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
     use crate::storage_value::StorageValue;
 
     const INITIAL_EPOCH: HummockEpoch = 5;
@@ -757,7 +756,7 @@ mod tests {
 
     async fn gen_imm_with_limiter(
         epoch: HummockEpoch,
-        limiter: Option<&LooseMemoryLimiter>,
+        limiter: Option<&MemoryLimiter>,
     ) -> ImmutableMemtable {
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(vec![(
             Bytes::from(dummy_table_key()),

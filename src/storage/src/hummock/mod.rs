@@ -98,7 +98,6 @@ use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData}
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::HummockVersionReader;
-use crate::hummock::utils::LooseMemoryLimiter;
 use crate::monitor::StoreLocalStatistic;
 use crate::store::ReadOptions;
 
@@ -246,7 +245,7 @@ impl HummockStorage {
         &self.context.filter_key_extractor_manager
     }
 
-    pub fn get_memory_limiter(&self) -> Arc<LooseMemoryLimiter> {
+    pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
         self.buffer_tracker.get_memory_limiter().clone()
     }
 
@@ -587,7 +586,7 @@ impl HummockStorageV1 {
         &self.filter_key_extractor_manager
     }
 
-    pub fn get_memory_limiter(&self) -> Arc<LooseMemoryLimiter> {
+    pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
         self.local_version_manager
             .buffer_tracker()
             .get_memory_limiter()

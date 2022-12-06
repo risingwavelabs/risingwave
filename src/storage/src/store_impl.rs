@@ -26,10 +26,9 @@ use risingwave_object_store::object::{
 use crate::error::StorageResult;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::utils::LooseMemoryLimiter;
 use crate::hummock::{
-    HummockStorage, HummockStorageV1, SstableIdManagerRef, SstableStore, TieredCache,
-    TieredCacheMetricsBuilder,
+    HummockStorage, HummockStorageV1, MemoryLimiter, SstableIdManagerRef, SstableStore,
+    TieredCache, TieredCacheMetricsBuilder,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -558,7 +557,7 @@ pub trait HummockTrait {
     fn sstable_id_manager(&self) -> &SstableIdManagerRef;
     fn sstable_store(&self) -> SstableStoreRef;
     fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef;
-    fn get_memory_limiter(&self) -> Arc<LooseMemoryLimiter>;
+    fn get_memory_limiter(&self) -> Arc<MemoryLimiter>;
     fn as_hummock(&self) -> Option<&HummockStorage>;
 }
 
@@ -575,7 +574,7 @@ impl HummockTrait for HummockStorage {
         self.filter_key_extractor_manager()
     }
 
-    fn get_memory_limiter(&self) -> Arc<LooseMemoryLimiter> {
+    fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
         self.get_memory_limiter()
     }
 
@@ -596,7 +595,7 @@ impl HummockTrait for HummockStorageV1 {
         self.filter_key_extractor_manager()
     }
 
-    fn get_memory_limiter(&self) -> Arc<LooseMemoryLimiter> {
+    fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
         self.get_memory_limiter()
     }
 

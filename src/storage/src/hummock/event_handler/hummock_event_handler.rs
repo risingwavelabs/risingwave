@@ -41,14 +41,14 @@ use crate::hummock::shared_buffer::UncommittedData;
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
-use crate::hummock::utils::{validate_table_key_range, LooseMemoryLimiter};
-use crate::hummock::{HummockError, HummockResult, SstableIdManagerRef, TrackerId};
+use crate::hummock::utils::validate_table_key_range;
+use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
 
 #[derive(Clone)]
 pub struct BufferTracker {
     flush_threshold: usize,
-    global_buffer: Arc<LooseMemoryLimiter>,
+    global_buffer: Arc<MemoryLimiter>,
     global_upload_task_size: Arc<AtomicUsize>,
 }
 
@@ -63,7 +63,7 @@ impl BufferTracker {
         assert!(capacity >= flush_threshold);
         Self {
             flush_threshold,
-            global_buffer: Arc::new(LooseMemoryLimiter::new(capacity as u64)),
+            global_buffer: Arc::new(MemoryLimiter::new(capacity as u64)),
             global_upload_task_size: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -76,7 +76,7 @@ impl BufferTracker {
         self.global_buffer.get_memory_usage() as usize
     }
 
-    pub fn get_memory_limiter(&self) -> &Arc<LooseMemoryLimiter> {
+    pub fn get_memory_limiter(&self) -> &Arc<MemoryLimiter> {
         &self.global_buffer
     }
 

@@ -29,7 +29,7 @@ use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
     HummockIteratorDirection,
 };
-use crate::hummock::utils::{range_overlap, LooseMemoryTracker};
+use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockEpoch, HummockResult};
 use crate::storage_value::StorageValue;
@@ -44,7 +44,7 @@ pub(crate) struct SharedBufferBatchInner {
     range_tombstone_list: Vec<DeleteRangeTombstone>,
     largest_table_key: Vec<u8>,
     size: usize,
-    _tracker: Option<LooseMemoryTracker>,
+    _tracker: Option<MemoryTracker>,
     batch_id: SharedBufferBatchId,
 }
 
@@ -53,7 +53,7 @@ impl SharedBufferBatchInner {
         payload: Vec<SharedBufferItem>,
         mut range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
-        _tracker: Option<LooseMemoryTracker>,
+        _tracker: Option<MemoryTracker>,
     ) -> Self {
         let mut largest_table_key = vec![];
         if !range_tombstone_list.is_empty() {
@@ -287,7 +287,7 @@ impl SharedBufferBatch {
         size: usize,
         delete_ranges: Vec<(Bytes, Bytes)>,
         table_id: TableId,
-        tracker: Option<LooseMemoryTracker>,
+        tracker: Option<MemoryTracker>,
     ) -> Self {
         let delete_range_tombstones = delete_ranges
             .into_iter()

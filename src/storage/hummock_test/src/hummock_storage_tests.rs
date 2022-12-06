@@ -36,8 +36,7 @@ use risingwave_storage::hummock::store::version::{
     read_filter_for_batch, read_filter_for_local, HummockVersionReader,
 };
 use risingwave_storage::hummock::test_utils::default_config_for_test;
-use risingwave_storage::hummock::utils::LooseMemoryLimiter;
-use risingwave_storage::hummock::{SstableIdManager, SstableStore};
+use risingwave_storage::hummock::{MemoryLimiter, SstableIdManager, SstableStore};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
@@ -130,7 +129,7 @@ async fn get_local_hummock_storage(
         basic_read_version,
         hummock_version_reader,
         event_tx.clone(),
-        LooseMemoryLimiter::unlimit(),
+        MemoryLimiter::unlimit(),
         #[cfg(not(madsim))]
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
     )

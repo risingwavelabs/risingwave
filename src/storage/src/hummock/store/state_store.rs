@@ -35,8 +35,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
-use crate::hummock::utils::LooseMemoryLimiter;
-use crate::hummock::SstableIterator;
+use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::{
@@ -59,7 +58,7 @@ pub struct HummockStorageCore {
     /// Event sender.
     event_sender: mpsc::UnboundedSender<HummockEvent>,
 
-    memory_limiter: Arc<LooseMemoryLimiter>,
+    memory_limiter: Arc<MemoryLimiter>,
 
     hummock_version_reader: HummockVersionReader,
 }
@@ -86,7 +85,7 @@ impl HummockStorageCore {
         read_version: Arc<RwLock<HummockReadVersion>>,
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
-        memory_limiter: Arc<LooseMemoryLimiter>,
+        memory_limiter: Arc<MemoryLimiter>,
     ) -> Self {
         Self {
             instance_guard,
@@ -243,7 +242,7 @@ impl LocalHummockStorage {
         read_version: Arc<RwLock<HummockReadVersion>>,
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
-        memory_limiter: Arc<LooseMemoryLimiter>,
+        memory_limiter: Arc<MemoryLimiter>,
         tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> Self {
         let storage_core = HummockStorageCore::new(
