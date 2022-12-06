@@ -91,6 +91,10 @@ impl LevelHandler {
         self.compacting_files.len()
     }
 
+    pub fn get_pending_file_ids(&self) -> Vec<HummockSstableId> {
+        self.compacting_files.keys().cloned().collect_vec()
+    }
+
     pub fn get_pending_file_size(&self) -> u64 {
         self.pending_tasks
             .iter()

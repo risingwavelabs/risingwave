@@ -1058,6 +1058,16 @@ where
         let compaction_groups: HashSet<_> =
             HashSet::from_iter(self.compaction_group_ids().await.into_iter());
         let original_keys = compaction.compaction_statuses.keys().cloned().collect_vec();
+        let compacting_ssts = compaction
+            .compaction_statuses
+            .values()
+            .flat_map(|compact_status| {
+                compact_status
+                    .level_handlers
+                    .iter()
+                    .flat_map(|level_handler| level_handler.get_pending_file_ids().into_iter())
+            })
+            .collect_vec();
         let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
         for group_id in original_keys {
             if !compaction_groups.contains(&group_id) {
@@ -1131,13 +1141,20 @@ where
                 let mut hummock_version_deltas =
                     BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
                 let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
+                let is_trivial_move = CompactStatus::is_trivial_move_task(compact_task);
+                let clean_state_sst_by_the_way = !is_trivial_move && !deterministic_mode;
                 let version_delta = gen_version_delta(
                     &mut hummock_version_deltas,
                     &mut branched_ssts,
                     current_version,
                     compact_task,
-                    CompactStatus::is_trivial_move_task(compact_task),
+                    is_trivial_move,
                     deterministic_mode,
+                    if clean_state_sst_by_the_way {
+                        Some((self.all_table_ids().await, compacting_ssts))
+                    } else {
+                        None
+                    },
                 );
                 let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
                 if let Some(table_stats_change) = table_stats_change {
@@ -2186,6 +2203,7 @@ fn gen_version_delta<'a>(
     compact_task: &CompactTask,
     trivial_move: bool,
     deterministic_mode: bool,
+    clean_info: Option<(HashSet<StateTableId>, Vec<HummockSstableId>)>,
 ) -> HummockVersionDelta {
     let mut version_delta = HummockVersionDelta {
         prev_id: old_version.id,
@@ -2230,6 +2248,57 @@ fn gen_version_delta<'a>(
         })),
     };
     group_deltas.push(group_delta);
+    if let Some((all_state_tables, compacting_ssts)) = clean_info {
+        let compacting_ssts: HashSet<HummockSstableId> = compacting_ssts.into_iter().collect();
+        for (group_id, levels) in old_version.get_levels() {
+            let levels_except_l0 = levels.get_levels();
+            let mut group_deltas = vec![];
+            for level in levels_except_l0 {
+                let delete_sst_ids = level
+                    .get_table_infos()
+                    .iter()
+                    .filter_map(|table_info| {
+                        let id = table_info.get_id();
+                        if compacting_ssts.contains(&id) {
+                            None
+                        } else {
+                            if table_info
+                                .get_table_ids()
+                                .iter()
+                                .any(|table_id| all_state_tables.contains(table_id))
+                            {
+                                None
+                            } else {
+                                Some(id)
+                            }
+                        }
+                    })
+                    .collect_vec();
+                if !delete_sst_ids.is_empty() {
+                    delete_sst_ids.iter().for_each(|id| {
+                        if drop_sst(branched_ssts, *group_id, *id) {
+                            gc_sst_ids.push(*id);
+                        }
+                    });
+                    group_deltas.push(GroupDelta {
+                        delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+                            level_idx: level.get_level_idx(),
+                            removed_table_ids: delete_sst_ids,
+                            ..Default::default()
+                        })),
+                    });
+                }
+            }
+            if !group_deltas.is_empty() {
+                version_delta
+                    .group_deltas
+                    .entry(*group_id)
+                    .or_default()
+                    .group_deltas
+                    .extend(group_deltas.into_iter());
+            }
+        }
+    }
     version_delta.gc_sst_ids.append(&mut gc_sst_ids);
     version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
     version_delta.id = old_version.id + 1;
