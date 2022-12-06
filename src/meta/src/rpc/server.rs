@@ -511,7 +511,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
 
-    // TODO: Do we still need this?
     let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
     sub_tasks.push(
         IdleManager::start_idle_checker(env.idle_manager_ref(), Duration::from_secs(30), idle_send)
