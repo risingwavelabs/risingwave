@@ -28,7 +28,6 @@ use crate::hummock::{
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
-use crate::MetaError;
 
 pub struct HummockServiceImpl<S>
 where
@@ -408,8 +407,7 @@ where
             .start_full_gc(Duration::from_secs(
                 request.into_inner().sst_retention_time_sec,
             ))
-            .await
-            .map_err(MetaError::from)?;
+            .await?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 

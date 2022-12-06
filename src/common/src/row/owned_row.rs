@@ -130,27 +130,27 @@ impl Row2 for Row {
 
 /// Deserializer of the `Row`.
 #[derive(Clone, Debug)]
-pub struct RowDeserializer {
-    data_types: Vec<DataType>,
+pub struct RowDeserializer<D: AsRef<[DataType]> = Vec<DataType>> {
+    data_types: D,
 }
 
-impl RowDeserializer {
+impl<D: AsRef<[DataType]>> RowDeserializer<D> {
     /// Creates a new `RowDeserializer` with row schema.
-    pub fn new(data_types: Vec<DataType>) -> Self {
+    pub fn new(data_types: D) -> Self {
         RowDeserializer { data_types }
     }
 
     /// Deserialize the row from value encoding bytes.
     pub fn deserialize(&self, mut data: impl bytes::Buf) -> value_encoding::Result<Row> {
-        let mut values = Vec::with_capacity(self.data_types.len());
-        for typ in &self.data_types {
+        let mut values = Vec::with_capacity(self.data_types().len());
+        for typ in self.data_types() {
             values.push(deserialize_datum(&mut data, typ)?);
         }
         Ok(Row(values))
     }
 
     pub fn data_types(&self) -> &[DataType] {
-        &self.data_types
+        self.data_types.as_ref()
     }
 }
 

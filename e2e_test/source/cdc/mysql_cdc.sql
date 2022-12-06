@@ -49,3 +49,15 @@ INSERT INTO shipments
 VALUES (default,10001,'Beijing','Shanghai',false),
        (default,10002,'Hangzhou','Shanghai',false),
        (default,10003,'Shanghai','Hangzhou',false);
+
+CREATE TABLE mytable (
+    v1 INTEGER NOT NULL PRIMARY KEY,
+    v2 INTEGER NOT NULL,
+    v3 VARCHAR(255) NOT NULL
+);
+
+INSERT INTO mytable
+VALUES (1,1,'no'),
+       (2,2,'no'),
+       (3,3,'no'),
+       (4,4,'no');

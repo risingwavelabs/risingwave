@@ -71,7 +71,7 @@ use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
 use crate::utils::WithOptions;
-use crate::{FrontendConfig, FrontendOpts, PgResponseStream, TableCatalog};
+use crate::{FrontendOpts, PgResponseStream, TableCatalog};
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
@@ -258,13 +258,12 @@ impl FrontendEnv {
     pub async fn init(
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let frontend_config: FrontendConfig = load_config(&opts.config_path).unwrap();
-        let batch_config: BatchConfig = load_config(&opts.config_path).unwrap();
+        let config = load_config(&opts.config_path);
         tracing::info!(
-            "Starting frontend node with\nfrontend config {:?}\nbatch config {:?}",
-            frontend_config,
-            batch_config
+            "Starting frontend node with\nfrontend config {:?}",
+            config.server
         );
+        let batch_config = config.batch;
 
         let frontend_address: HostAddr = opts
             .client_address
@@ -288,8 +287,8 @@ impl FrontendEnv {
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(frontend_config.server.heartbeat_interval_ms as u64),
-            Duration::from_secs(frontend_config.server.max_heartbeat_interval_secs as u64),
+            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
             vec![],
         );
 
@@ -306,9 +305,8 @@ impl FrontendEnv {
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
-        let compute_client_pool = Arc::new(ComputeClientPool::new(
-            frontend_config.server.connection_pool_size,
-        ));
+        let compute_client_pool =
+            Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
@@ -339,9 +337,7 @@ impl FrontendEnv {
 
         meta_client.activate(&frontend_address).await?;
 
-        let client_pool = Arc::new(ComputeClientPool::new(
-            frontend_config.server.connection_pool_size,
-        ));
+        let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
 
         let registry = prometheus::Registry::new();
         monitor_process(&registry).unwrap();
@@ -769,10 +765,8 @@ impl Session<PgResponseStream> for SessionImpl {
         format: bool,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
-            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
-            e
-        })?;
+        let mut stmts = Parser::parse_sql(sql)
+            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
         if stmts.is_empty() {
             return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
@@ -785,10 +779,25 @@ impl Session<PgResponseStream> for SessionImpl {
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql, format).await.map_err(|e| {
-            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
-            e
-        })?;
+        let rsp = {
+            let mut handle_fut = Box::pin(handle(self, stmt, sql, format));
+            if cfg!(debug_assertions) {
+                // Report the SQL in the log periodically if the query is slow.
+                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
+                loop {
+                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
+                        Ok(result) => break result,
+                        Err(_) => tracing::warn!(
+                            sql,
+                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
+                        ),
+                    }
+                }
+            } else {
+                handle_fut.await
+            }
+        }
+        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
         Ok(rsp)
     }
 
@@ -797,10 +806,8 @@ impl Session<PgResponseStream> for SessionImpl {
         sql: &str,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
-            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
-            e
-        })?;
+        let mut stmts = Parser::parse_sql(sql)
+            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
         if stmts.is_empty() {
             return Ok(vec![]);
         }
@@ -814,10 +821,8 @@ impl Session<PgResponseStream> for SessionImpl {
         // This part refers from src/frontend/handler/ so the Vec<PgFieldDescriptor> is same as
         // result of run_statement().
         let rsp = match stmt {
-            Statement::Query(_) => infer(self, stmt, sql).map_err(|e| {
-                tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
-                e
-            })?,
+            Statement::Query(_) => infer(self, stmt, sql)
+                .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?,
             Statement::ShowObjects(show_object) => match show_object {
                 ShowObject::Columns { table: _ } => {
                     vec![
