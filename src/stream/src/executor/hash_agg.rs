@@ -302,7 +302,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             lookup_miss_count.fetch_add(1, Ordering::Relaxed);
                             Box::new(
                                 AggGroup::create(
-                                    Some(key.clone().deserialize(group_key_types)?),
+                                    Some(key.deserialize(group_key_types)?),
                                     agg_calls,
                                     storages,
                                     result_table,
@@ -459,7 +459,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     }
 
                     for _ in 0..n_appended_ops {
-                        key.clone().deserialize_to_builders(
+                        key.deserialize_to_builders(
                             &mut builders[..group_key_indices.len()],
                             group_key_data_types,
                         )?;
