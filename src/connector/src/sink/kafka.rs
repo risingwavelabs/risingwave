@@ -17,8 +17,6 @@ use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use risingwave_common::types::to_text::ToText;
-
 use itertools::Itertools;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
@@ -27,6 +25,7 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::{ArrayResult, Op, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -397,7 +396,7 @@ fn record_to_json(row: RowRef<'_>, schema: Vec<Field>) -> Result<Map<String, Val
         let key = field.name.clone();
         let value = datum_to_json_object(field, datum_ref)
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
-            tracing::info!("value {:?}", value.to_string());
+        tracing::info!("value {:?}", value.to_string());
         mappings.insert(key, value);
     }
     Ok(mappings)
@@ -504,7 +503,7 @@ impl KafkaTransactionConductor {
 #[cfg(test)]
 mod test {
     use maplit::hashmap;
-    use risingwave_common::{test_prelude::StreamChunkTestExt, types::NaiveDateWrapper};
+    use risingwave_common::test_prelude::StreamChunkTestExt;
 
     use super::*;
 
