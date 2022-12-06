@@ -11,13 +11,12 @@ SET RW_IMPLICIT_FLUSH TO true;
 statement ok
 CREATE SCHEMA s;
 
-statement ok
-
+# (original DDL)
 # statement ok
 # CREATE TABLE s.a as select 'hello' as col1;
 
 statement ok
-CREATE TABLE s.a(t VARCHAR);
+CREATE TABLE s.a(col1 VARCHAR);
 
 statement ok
 INSERT INTO s.a VALUES ('hello');
@@ -30,3 +29,12 @@ select s.b.col1 from s.b;
 
 statement ok
 select b.col1 from s.b;
+
+statement ok
+drop view s.b;
+
+statement ok
+drop table s.a;
+
+statement ok
+drop schema s;
