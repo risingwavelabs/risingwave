@@ -104,7 +104,6 @@ NULL NULL 1 flow
 NULL NULL 1 gww
 NULL NULL 1 hello
 
-
 statement ok
 drop materialized view t3;
 

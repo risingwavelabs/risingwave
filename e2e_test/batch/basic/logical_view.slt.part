@@ -9,7 +9,7 @@ SELECT * FROM v1;
 ----
 1
 
-statement error
+statement error 
 CREATE VIEW v2(a, b) AS SELECT 1;
 
 statement ok
@@ -36,23 +36,26 @@ SELECT * FROM v3;
 514 0 NULL NULL
 
 # v3 depends on t. We can't drop t.
-statement error
+
+statement error 
 DROP TABLE t;
 
 # Currently it is allowed to drop a view even it is depended by another view.
+
 statement ok
 DROP VIEW v2;
 
-statement error
+statement error 
 SELECT * from v3;
 
 statement ok
 DROP VIEW v3;
 
-statement error
+statement error 
 SELECT * FROM v3;
 
 # We can drop t and v2 now
+
 statement ok
 DROP TABLE t;
 
