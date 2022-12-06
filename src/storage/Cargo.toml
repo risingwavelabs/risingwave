@@ -80,7 +80,7 @@ tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 twox-hash = "1"
-xxhash-rust = {version = "0.8.5",features = ["xxh32"]}
+xxhash-rust = { version = "0.8.5",features = ["xxh32"] }
 zstd = "0.11.2"
 
 [target.'cfg(not(madsim))'.dependencies]
