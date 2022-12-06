@@ -36,7 +36,7 @@ use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
-use risingwave_common::config::constant::hummock::CompactionFilterFlag;
+use risingwave_common::constants::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
@@ -93,8 +93,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
         let tracker = self
             .limiter
             .require_memory((self.options.capacity + self.options.block_capacity) as u64)
-            .await
-            .unwrap();
+            .await;
         let timer = Instant::now();
         let table_id = self.sstable_id_manager.get_new_sst_id().await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;

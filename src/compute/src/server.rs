@@ -61,7 +61,7 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::{AsyncStackTraceOption, ComputeNodeConfig, ComputeNodeOpts};
+use crate::{AsyncStackTraceOption, ComputeNodeOpts};
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
@@ -70,7 +70,7 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config: ComputeNodeConfig = load_config(&opts.config_path).unwrap();
+    let config = load_config(&opts.config_path);
     info!(
         "Starting compute node with config {:?} with debug assertions {}",
         config,

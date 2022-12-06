@@ -379,7 +379,13 @@ impl LocalStreamManagerCore {
         async_stack_trace_config: Option<TraceConfig>,
         enable_managed_cache: bool,
     ) -> Self {
-        let context = SharedContext::new(addr, state_store.clone(), &config, enable_managed_cache);
+        let context = SharedContext::new(
+            addr,
+            state_store.clone(),
+            streaming_metrics.clone(),
+            &config,
+            enable_managed_cache,
+        );
         Self::new_inner(
             state_store,
             context,

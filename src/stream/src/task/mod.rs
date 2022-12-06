@@ -25,6 +25,7 @@ use risingwave_rpc_client::ComputeClientPool;
 use crate::cache::{LruManager, LruManagerRef};
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::{self, Receiver, Sender};
+use crate::executor::monitor::StreamingMetrics;
 
 mod barrier_manager;
 mod env;
@@ -95,6 +96,7 @@ impl SharedContext {
     pub fn new(
         addr: HostAddr,
         state_store: StateStoreImpl,
+        streaming_metrics: Arc<StreamingMetrics>,
         config: &StreamingConfig,
         enable_managed_cache: bool,
     ) -> Self {
@@ -102,6 +104,7 @@ impl SharedContext {
             let mgr = LruManager::new(
                 config.total_memory_available_bytes,
                 config.barrier_interval_ms,
+                streaming_metrics,
             );
             // Run a background memory monitor
             tokio::spawn(mgr.clone().run());

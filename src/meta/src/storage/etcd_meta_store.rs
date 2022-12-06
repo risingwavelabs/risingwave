@@ -18,6 +18,7 @@ use anyhow;
 use async_trait::async_trait;
 use etcd_client::{Client, Compare, CompareOp, Error as EtcdError, GetOptions, Txn, TxnOp};
 use futures::Future;
+use itertools::Itertools;
 use tokio::sync::Mutex;
 
 use super::{Key, MetaStore, MetaStoreError, MetaStoreResult, Snapshot, Transaction, Value};
@@ -157,7 +158,12 @@ impl Snapshot for EtcdSnapshot {
         let view = ListViewer {
             key: encode_etcd_key(cf, &[]),
         };
-        self.view_inner(view).await
+        let cf_bytes = cf.as_bytes().len() + 1;
+        self.view_inner(view).await.map(|kvs| {
+            kvs.into_iter()
+                .map(|(mut k, v)| (k.drain(cf_bytes..).collect_vec(), v))
+                .collect()
+        })
     }
 
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>> {

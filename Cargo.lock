@@ -729,9 +729,9 @@ dependencies = [
 
 [[package]]
 name = "axum"
-version = "0.5.17"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acee9fd5073ab6b045a275b3e709c163dd36c90685219cb21804a147b58dba43"
+checksum = "08b108ad2665fa3f6e6a517c3d80ec3e77d224c47d605167aefaa5d7ef97fa48"
 dependencies = [
  "async-trait",
  "axum-core 0.2.9",
@@ -747,8 +747,10 @@ dependencies = [
  "mime",
  "percent-encoding",
  "pin-project-lite",
+ "rustversion",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
@@ -789,9 +791,9 @@ dependencies = [
 
 [[package]]
 name = "axum-core"
-version = "0.2.9"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37e5939e02c56fecd5c017c37df4238c0a839fa76b7f97acdd7efb804fd181cc"
+checksum = "79b8558f5a0581152dc94dcd289132a1d377494bdeafcd41869b3258e3e2ad92"
 dependencies = [
  "async-trait",
  "bytes",
@@ -799,6 +801,7 @@ dependencies = [
  "http",
  "http-body",
  "mime",
+ "rustversion",
  "tower-layer",
  "tower-service",
 ]
@@ -3351,9 +3354,9 @@ checksum = "a3e378b66a060d48947b590737b30a1be76706c8dd7b8ba0f2fe3989c68a853f"
 
 [[package]]
 name = "matchit"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73cbba799671b762df5a175adf59ce145165747bb891505c43d09aefbbf38beb"
+checksum = "b87248edafb776e59e6ee64a79086f65890d3510f2c656c000bf2a7e8a0aea40"
 
 [[package]]
 name = "matchit"
@@ -5096,6 +5099,7 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "tempfile",
+ "toml",
  "workspace-hack",
  "yaml-rust",
 ]
@@ -5270,6 +5274,7 @@ dependencies = [
  "hex",
  "humantime",
  "itertools",
+ "itoa",
  "libc",
  "lru 0.7.6",
  "mach",
@@ -5291,6 +5296,7 @@ dependencies = [
  "regex",
  "risingwave_pb",
  "rust_decimal",
+ "ryu",
  "serde",
  "serde_derive",
  "serde_json",
@@ -5334,6 +5340,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "clap 3.2.23",
+ "futures",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
@@ -5654,8 +5661,10 @@ dependencies = [
 name = "risingwave_hummock_test"
 version = "0.2.0-alpha"
 dependencies = [
+ "async-stream",
  "async-trait",
  "bytes",
+ "criterion",
  "fail",
  "futures",
  "itertools",
@@ -5664,7 +5673,6 @@ dependencies = [
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_common_service",
- "risingwave_compute",
  "risingwave_hummock_sdk",
  "risingwave_meta",
  "risingwave_object_store",
@@ -5720,6 +5728,7 @@ dependencies = [
  "risingwave_common_service",
  "risingwave_connector",
  "risingwave_hummock_sdk",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_test_runner",
@@ -5738,6 +5747,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "twox-hash",
  "url",
  "uuid",
  "workspace-hack",
@@ -6410,6 +6420,15 @@ checksum = "6ce777b7b150d76b9cf60d28b55f5847135a003f7d7350c6be7a773508ce7d45"
 dependencies = [
  "itoa",
  "ryu",
+ "serde",
+]
+
+[[package]]
+name = "serde_path_to_error"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "184c643044780f7ceb59104cef98a5a6f12cb2288a7bc701ab93a362b49fd47d"
+dependencies = [
  "serde",
 ]
 
