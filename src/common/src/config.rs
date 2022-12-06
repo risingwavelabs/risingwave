@@ -540,11 +540,8 @@ mod default {
         }
 
         pub fn total_memory_available_bytes() -> usize {
-            use sysinfo::{System, SystemExt};
-
-            let mut sys = System::new();
-            sys.refresh_memory();
-            sys.total_memory() as usize
+            use util::resource_util;
+            resource_util::memory::total_memory_available_bytes()
         }
     }
 

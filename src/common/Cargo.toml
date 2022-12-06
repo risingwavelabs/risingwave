@@ -15,6 +15,8 @@ auto_enums = "0.7"
 bitflags = "1.3.2"
 byteorder = "1"
 bytes = "1"
+sysinfo = "0.26"
+num_cpus = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 comfy-table = "6"
 crc32fast = "1"
