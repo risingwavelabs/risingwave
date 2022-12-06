@@ -382,6 +382,7 @@ impl LocalStreamManagerCore {
         let context = SharedContext::new(
             addr,
             state_store.clone(),
+            streaming_metrics.clone(),
             &config,
             total_memory_available_bytes,
         );
