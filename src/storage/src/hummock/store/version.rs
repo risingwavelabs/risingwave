@@ -45,8 +45,7 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::store::state_store::HummockStorageIterator;
 use crate::hummock::utils::{
-    check_subset_preserve_order, filter_single_sst, prune_ssts, range_overlap,
-    search_sst_idx_in_level,
+    check_subset_preserve_order, filter_single_sst, prune_ssts, range_overlap, search_sst_idx,
 };
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, DeleteRangeAggregator,
@@ -600,15 +599,11 @@ impl HummockVersionReader {
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&level.table_infos));
                 let start_table_idx = match encoded_user_key_range.start_bound() {
-                    Included(key) | Excluded(key) => {
-                        search_sst_idx_in_level(&level.table_infos, key)
-                    }
+                    Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
                     _ => 0,
                 };
                 let end_table_idx = match encoded_user_key_range.end_bound() {
-                    Included(key) | Excluded(key) => {
-                        search_sst_idx_in_level(&level.table_infos, key)
-                    }
+                    Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
                     _ => level.table_infos.len().saturating_sub(1),
                 };
                 assert!(

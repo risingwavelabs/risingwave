@@ -123,7 +123,7 @@ where
 }
 
 /// Search the SST containing the specified key within a level, using binary search.
-pub(crate) fn search_sst_idx_in_level<B>(ssts: &[SstableInfo], key: &B) -> usize
+pub(crate) fn search_sst_idx<B>(ssts: &[SstableInfo], key: &B) -> usize
 where
     B: AsRef<[u8]> + Send + ?Sized,
 {

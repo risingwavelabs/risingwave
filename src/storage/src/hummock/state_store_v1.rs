@@ -51,7 +51,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::ReadVersion;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::utils::{prune_ssts, search_sst_idx_in_level};
+use crate::hummock::utils::{prune_ssts, search_sst_idx};
 use crate::hummock::{
     DeleteRangeAggregator, ForwardIter, HummockEpoch, HummockError, HummockIteratorType,
     HummockResult,
@@ -308,15 +308,11 @@ impl HummockStorageV1 {
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&level.table_infos));
                 let start_table_idx = match encoded_user_key_range.start_bound() {
-                    Included(key) | Excluded(key) => {
-                        search_sst_idx_in_level(&level.table_infos, key)
-                    }
+                    Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
                     _ => 0,
                 };
                 let end_table_idx = match encoded_user_key_range.end_bound() {
-                    Included(key) | Excluded(key) => {
-                        search_sst_idx_in_level(&level.table_infos, key)
-                    }
+                    Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
                     _ => level.table_infos.len().saturating_sub(1),
                 };
                 assert!(
