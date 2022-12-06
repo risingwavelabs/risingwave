@@ -85,7 +85,7 @@ pub async fn compute_node_serve(
         &opts.meta_address,
         WorkerType::ComputeNode,
         &client_addr,
-        config.streaming.worker_node_parallelism,
+        opts.worker_node_parallelism,
     )
     .await
     .unwrap();
@@ -213,6 +213,7 @@ pub async fn compute_node_serve(
         config.streaming.clone(),
         async_stack_trace_config,
         config.streaming.developer.stream_enable_managed_cache,
+        opts.total_memory_available_bytes,
     ));
     let source_mgr = Arc::new(TableSourceManager::new(
         source_metrics,

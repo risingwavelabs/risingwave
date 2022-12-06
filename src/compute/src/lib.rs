@@ -86,6 +86,12 @@ pub struct ComputeNodeOpts {
     /// [`risingwave_common::config`] instead of command line arguments.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    #[clap(long, default_value_t = total_memory_available_bytes())]
+    pub total_memory_available_bytes: usize,
+
+    #[clap(long, default_value_t = worker_node_parallelism())]
+    pub worker_node_parallelism: usize,
 }
 
 use std::future::Future;
@@ -121,4 +127,16 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             join_handle.await.unwrap();
         }
     })
+}
+
+fn total_memory_available_bytes() -> usize {
+    use sysinfo::{System, SystemExt};
+
+    let mut sys = System::new();
+    sys.refresh_memory();
+    sys.total_memory() as usize
+}
+
+fn worker_node_parallelism() -> usize {
+    std::thread::available_parallelism().unwrap().get()
 }

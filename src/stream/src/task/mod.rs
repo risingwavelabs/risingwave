@@ -97,12 +97,10 @@ impl SharedContext {
         state_store: StateStoreImpl,
         config: &StreamingConfig,
         enable_managed_cache: bool,
+        total_memory_available_bytes: usize,
     ) -> Self {
         let create_lru_manager = || {
-            let mgr = LruManager::new(
-                config.total_memory_available_bytes,
-                config.barrier_interval_ms,
-            );
+            let mgr = LruManager::new(total_memory_available_bytes, config.barrier_interval_ms);
             // Run a background memory monitor
             tokio::spawn(mgr.clone().run());
             mgr
