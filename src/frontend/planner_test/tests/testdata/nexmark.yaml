@@ -1121,22 +1121,50 @@
     ) b ON a.id = b.auction;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32), SplitPart(bid.url, '/':Varchar, 5:Int32), SplitPart(bid.url, '/':Varchar, 6:Int32)] }
-      └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url], distribution: SomeShard }
+    └─BatchHashJoin { type: LeftOuter, predicate: auction.id = bid.auction, output: [auction.id, auction.item_name, max(bid.price)] }
+      ├─BatchExchange { order: [], dist: HashShard(auction.id) }
+      | └─BatchScan { table: auction, columns: [auction.id, auction.item_name], distribution: UpstreamHashShard(auction.id) }
+      └─BatchHashAgg { group_key: [bid.auction], aggs: [max(bid.price)] }
+        └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+          └─BatchScan { table: bid, columns: [bid.auction, bid.price], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id(hidden)], pk_columns: [bid._row_id] }
-    └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32), SplitPart(bid.url, '/':Varchar, 5:Int32), SplitPart(bid.url, '/':Varchar, 6:Int32), bid._row_id] }
-      └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    StreamMaterialize { columns: [auction_id, auction_item_name, current_highest_bid, bid.auction(hidden)], pk_columns: [auction_id, bid.auction] }
+    └─StreamHashJoin { type: LeftOuter, predicate: auction.id = bid.auction, output: [auction.id, auction.item_name, max(bid.price), bid.auction] }
+      ├─StreamExchange { dist: HashShard(auction.id) }
+      | └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+      └─StreamProject { exprs: [bid.auction, max(bid.price)] }
+        └─StreamHashAgg { group_key: [bid.auction], aggs: [count, max(bid.price)] }
+          └─StreamExchange { dist: HashShard(bid.auction) }
+            └─StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |
     Fragment 0
-      StreamMaterialize { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id(hidden)], pk_columns: [bid._row_id] }
+      StreamMaterialize { columns: [auction_id, auction_item_name, current_highest_bid, bid.auction(hidden)], pk_columns: [auction_id, bid.auction] }
           materialized table: 4294967294
-        StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32), SplitPart(bid.url, '/':Varchar, 5:Int32), SplitPart(bid.url, '/':Varchar, 6:Int32), bid._row_id] }
-          Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-            Upstream
-            BatchPlanNode
+        StreamHashJoin { type: LeftOuter, predicate: auction.id = bid.auction, output: [auction.id, auction.item_name, max(bid.price), bid.auction] }
+            left table: 0, right table 2, left degree table: 1, right degree table: 3,
+          StreamExchange Hash([0]) from 1
+          StreamProject { exprs: [bid.auction, max(bid.price)] }
+            StreamHashAgg { group_key: [bid.auction], aggs: [count, max(bid.price)] }
+                result table: 5, state tables: [4]
+              StreamExchange Hash([0]) from 2
 
-     Table 4294967294 { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7] }
+    Fragment 1
+      Chain { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+        Upstream
+        BatchPlanNode
+
+    Fragment 2
+      Chain { table: bid, columns: [bid.auction, bid.price, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+        Upstream
+        BatchPlanNode
+
+     Table 0 { columns: [auction.id, auction.item_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 1 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 2 { columns: [bid.auction, max(bid.price)], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 3 { columns: [bid.auction, bid.auction_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4 { columns: [bid.auction, bid.price, bid._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 5 { columns: [bid.auction, count, max(bid.price)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 4294967294 { columns: [auction_id, auction_item_name, current_highest_bid, bid.auction], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
 - id: nexmark_q102
   before:
   - create_tables
@@ -1145,8 +1173,6 @@
     --
     -- Show the auctions whose count of bids is greater than the overall average count of bids
     -- per auction.
-    CREATE MATERIALIZED VIEW nexmark_q102
-    AS
     SELECT
         a.id AS auction_id,
         a.item_name AS auction_item_name,
@@ -1158,20 +1184,89 @@
         SELECT COUNT(*) / COUNT(DISTINCT auction) FROM bid
     )
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32), SplitPart(bid.url, '/':Varchar, 5:Int32), SplitPart(bid.url, '/':Varchar, 6:Int32)] }
-      └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url], distribution: SomeShard }
+    BatchNestedLoopJoin { type: Inner, predicate: (count(bid.auction) >= (sum0(count) / count(bid.auction))), output: [auction.id, auction.item_name, count(bid.auction)] }
+    ├─BatchExchange { order: [], dist: Single }
+    | └─BatchHashAgg { group_key: [auction.id, auction.item_name], aggs: [count(bid.auction), count(bid.auction)] }
+    |   └─BatchHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+    |     ├─BatchExchange { order: [], dist: HashShard(auction.id) }
+    |     | └─BatchScan { table: auction, columns: [auction.id, auction.item_name], distribution: UpstreamHashShard(auction.id) }
+    |     └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+    |       └─BatchScan { table: bid, columns: [bid.auction], distribution: SomeShard }
+    └─BatchProject { exprs: [(sum0(count) / count(bid.auction))] }
+      └─BatchSimpleAgg { aggs: [sum0(count), count(bid.auction)] }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchHashAgg { group_key: [bid.auction], aggs: [count] }
+            └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+              └─BatchScan { table: bid, columns: [bid.auction], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id(hidden)], pk_columns: [bid._row_id] }
-    └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32), SplitPart(bid.url, '/':Varchar, 5:Int32), SplitPart(bid.url, '/':Varchar, 6:Int32), bid._row_id] }
-      └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], pk_columns: [auction_id, auction_item_name] }
+    └─StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
+      └─StreamDynamicFilter { predicate: (count(bid.auction) >= (sum0(count) / count(bid.auction))), output: [auction.id, auction.item_name, count(bid.auction), count(bid.auction)] }
+        ├─StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction), count(bid.auction)] }
+        | └─StreamHashAgg { group_key: [auction.id, auction.item_name], aggs: [count, count(bid.auction), count(bid.auction)] }
+        |   └─StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+        |     ├─StreamExchange { dist: HashShard(auction.id) }
+        |     | └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+        |     └─StreamExchange { dist: HashShard(bid.auction) }
+        |       └─StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+        └─StreamExchange { dist: Broadcast }
+          └─StreamProject { exprs: [(sum0(count) / count(bid.auction))] }
+            └─StreamGlobalSimpleAgg { aggs: [count, sum0(count), count(bid.auction)] }
+              └─StreamExchange { dist: Single }
+                └─StreamProject { exprs: [bid.auction, count] }
+                  └─StreamHashAgg { group_key: [bid.auction], aggs: [count, count] }
+                    └─StreamExchange { dist: HashShard(bid.auction) }
+                      └─StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |
     Fragment 0
-      StreamMaterialize { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id(hidden)], pk_columns: [bid._row_id] }
+      StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], pk_columns: [auction_id, auction_item_name] }
           materialized table: 4294967294
-        StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32), SplitPart(bid.url, '/':Varchar, 5:Int32), SplitPart(bid.url, '/':Varchar, 6:Int32), bid._row_id] }
-          Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-            Upstream
-            BatchPlanNode
+        StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
+          StreamDynamicFilter { predicate: (count(bid.auction) >= (sum0(count) / count(bid.auction))), output: [auction.id, auction.item_name, count(bid.auction), count(bid.auction)] }
+              left table: 0, right table 1
+            StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction), count(bid.auction)] }
+              StreamHashAgg { group_key: [auction.id, auction.item_name], aggs: [count, count(bid.auction), count(bid.auction)] }
+                  result table: 2, state tables: []
+                StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+                    left table: 3, right table 5, left degree table: 4, right degree table: 6,
+                  StreamExchange Hash([0]) from 1
+                  StreamExchange Hash([0]) from 2
+            StreamExchange Broadcast from 3
 
-     Table 4294967294 { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7] }
+    Fragment 1
+      Chain { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+        Upstream
+        BatchPlanNode
+
+    Fragment 2
+      Chain { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+        Upstream
+        BatchPlanNode
+
+    Fragment 3
+      StreamProject { exprs: [(sum0(count) / count(bid.auction))] }
+        StreamGlobalSimpleAgg { aggs: [count, sum0(count), count(bid.auction)] }
+            result table: 7, state tables: []
+          StreamExchange Single from 4
+
+    Fragment 4
+      StreamProject { exprs: [bid.auction, count] }
+        StreamHashAgg { group_key: [bid.auction], aggs: [count, count] }
+            result table: 8, state tables: []
+          StreamExchange Hash([0]) from 5
+
+    Fragment 5
+      Chain { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+        Upstream
+        BatchPlanNode
+
+     Table 0 { columns: [auction.id, auction.item_name, count(bid.auction), count(bid.auction)_0], primary key: [$3 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 1 { columns: [(sum0(count) / count(bid.auction))], primary key: [], value indices: [0], distribution key: [] }
+     Table 2 { columns: [auction.id, auction.item_name, count, count(bid.auction), count(bid.auction)_0], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4], distribution key: [0] }
+     Table 3 { columns: [auction.id, auction.item_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 4 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 5 { columns: [bid.auction, bid._row_id], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 6 { columns: [bid.auction, bid._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 7 { columns: [count, sum0(count), count(bid.auction)], primary key: [], value indices: [0, 1, 2], distribution key: [] }
+     Table 8 { columns: [bid.auction, count, count_0], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
