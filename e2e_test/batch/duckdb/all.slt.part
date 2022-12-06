@@ -5,3 +5,4 @@ include ./join/*/*.slt.part
 include ./conjunction/*.slt.part
 include ./conjunction/*/*.slt.part
 include ./limit/*.slt.part
+include ./select/*.slt.part
