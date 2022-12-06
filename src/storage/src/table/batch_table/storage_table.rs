@@ -440,7 +440,6 @@ impl<S: StateStore> StorageTable<S> {
             range_bounds.end_bound(),
             false,
         );
-
         let prefix_serializer = self.pk_serializer.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
         assert!(pk_prefix.len() <= self.pk_indices.len());
@@ -449,7 +448,10 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
         let dist_key_hint = if self.dist_key_indices.is_empty()
-            || !is_continuous_subset(self.dist_key_indices.iter(), pk_prefix_indices.iter())
+            || !is_continuous_subset(
+                self.dist_key_indices.iter().sorted(),
+                pk_prefix_indices.iter().sorted(),
+            )
             || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk.unwrap()
                 > pk_prefix.len()
         {
@@ -462,13 +464,16 @@ impl<S: StateStore> StorageTable<S> {
             );
             None
         } else {
+            let distribution_key_end_index_in_pk = self.dist_key_in_pk_indices.len()
+                + self.distribution_key_start_index_in_pk.unwrap();
             let (dist_key_start_position, dist_key_len) = self
                 .pk_serializer
                 .deserialize_dist_key_position_with_column_indices(
                     &encoded_prefix,
-                    0..self.dist_key_in_pk_indices.len()
-                        + self.distribution_key_start_index_in_pk.unwrap(),
-                    self.distribution_key_start_index_in_pk.unwrap(),
+                    (
+                        self.distribution_key_start_index_in_pk.unwrap(),
+                        distribution_key_end_index_in_pk,
+                    ),
                 )
                 .unwrap();
 

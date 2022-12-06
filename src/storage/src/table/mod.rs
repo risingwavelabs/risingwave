@@ -156,13 +156,12 @@ fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
         vnode
     );
 }
-
 pub fn is_continuous_subset<T: Eq>(
     mut sub_iter: impl Iterator<Item = T>,
     mut iter: impl Iterator<Item = T>,
 ) -> bool {
     if let Some(first) = sub_iter.next() {
-        if iter.any(|item| item == first) {
+        if !iter.any(|item| item == first) {
             return false;
         }
 

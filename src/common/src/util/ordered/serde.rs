@@ -110,13 +110,13 @@ impl OrderedRowSerde {
     pub fn deserialize_dist_key_position_with_column_indices(
         &self,
         key: &[u8],
-        column_indices: impl Iterator<Item = usize>,
-        dist_key_start_index: usize,
+        dist_key_indices_pair: (usize, usize),
     ) -> memcomparable::Result<(usize, usize)> {
+        let (dist_key_start_index, dist_key_end_index) = dist_key_indices_pair;
         use crate::types::ScalarImpl;
         let mut dist_key_start_position: usize = 0;
         let mut len: usize = 0;
-        for index in column_indices {
+        for index in 0..dist_key_end_index {
             let data_type = &self.schema[index];
             let order_type = &self.order_types[index];
             let data = &key[len..];
@@ -301,8 +301,10 @@ mod tests {
             let (dist_key_start_position, dist_key_len) = serde
                 .deserialize_dist_key_position_with_column_indices(
                     &array[0],
-                    0..dist_key_start_index + dist_key_indices.len(),
-                    dist_key_start_index,
+                    (
+                        dist_key_start_index,
+                        dist_key_start_index + dist_key_indices.len(),
+                    ),
                 )
                 .unwrap();
 

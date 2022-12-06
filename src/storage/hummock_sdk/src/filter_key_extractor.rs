@@ -166,8 +166,10 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
                     .deserializer
                     .deserialize_dist_key_position_with_column_indices(
                         pk,
-                        0..self.distribution_key_indices_pair_in_pk.unwrap().1,
-                        self.distribution_key_indices_pair_in_pk.unwrap().0,
+                        (
+                            self.distribution_key_indices_pair_in_pk.unwrap().0,
+                            self.distribution_key_indices_pair_in_pk.unwrap().1,
+                        ),
                     )
                     .unwrap();
 
@@ -220,8 +222,6 @@ impl SchemaFilterKeyExtractor {
                     dist_key_in_pk_indices.len() + distribution_key_start_index_in_pk,
                 )
             });
-
-        // column_index in pk
 
         let data_types = pk_indices
             .iter()
@@ -592,7 +592,7 @@ mod tests {
             let deserializer = OrderedRowSerde::new(schema, order_types);
 
             let (_, dist_key_len) = deserializer
-                .deserialize_dist_key_position_with_column_indices(&row_bytes, 0..2, 1)
+                .deserialize_dist_key_position_with_column_indices(&row_bytes, (1, 2))
                 .unwrap();
             assert_eq!(dist_key_len, output_key.len());
         }
@@ -633,7 +633,7 @@ mod tests {
             let deserializer = OrderedRowSerde::new(data_types, order_types);
 
             let (_dist_key_start_position, dist_key_len) = deserializer
-                .deserialize_dist_key_position_with_column_indices(&row_bytes, 0..2, 1)
+                .deserialize_dist_key_position_with_column_indices(&row_bytes, (1, 2))
                 .unwrap();
 
             assert_eq!(dist_key_len, output_key.len());
