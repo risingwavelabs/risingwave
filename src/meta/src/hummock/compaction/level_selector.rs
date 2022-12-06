@@ -208,8 +208,8 @@ impl LevelSelectorCore {
                 / self.config.level0_tier_compact_file_number,
         );
 
-        let total_size =
-            levels.l0.as_ref().unwrap().total_file_size - handlers[0].get_pending_file_size();
+        let total_size = levels.l0.as_ref().unwrap().total_file_size
+            - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
         if idle_file_count > 0 {
             // trigger intra-l0 compaction at first when the number of files is too large.
             let l0_score =
