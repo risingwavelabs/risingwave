@@ -344,33 +344,54 @@ impl Cluster {
     pub async fn kill_node(&self, opts: &KillOpts) {
         let mut nodes = vec![];
         if opts.kill_meta {
-            nodes.push(format!("meta"));
+            if rand::thread_rng().gen_bool(0.5) {
+                nodes.push(format!("meta"));
+            }
         }
         if opts.kill_frontend {
-            let i = rand::thread_rng().gen_range(1..=self.config.frontend_nodes);
-            nodes.push(format!("frontend-{}", i));
+            let rand = rand::thread_rng().gen_range(0..3);
+            for i in 1..=self.config.frontend_nodes {
+                match rand {
+                    0 => break,                                         // no killed
+                    1 => {}                                             // all killed
+                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    _ => {}
+                }
+                nodes.push(format!("frontend-{}", i));
+            }
         }
         if opts.kill_compute {
-            let i = rand::thread_rng().gen_range(1..=self.config.compute_nodes);
-            nodes.push(format!("compute-{}", i));
+            let rand = rand::thread_rng().gen_range(0..3);
+            for i in 1..=self.config.compute_nodes {
+                match rand {
+                    0 => break,                                         // no killed
+                    1 => {}                                             // all killed
+                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    _ => {}
+                }
+                nodes.push(format!("compute-{}", i));
+            }
         }
         if opts.kill_compactor {
-            let i = rand::thread_rng().gen_range(1..=self.config.compactor_nodes);
-            nodes.push(format!("compactor-{}", i));
-        }
-        if nodes.is_empty() {
-            return;
+            let rand = rand::thread_rng().gen_range(0..3);
+            for i in 1..=self.config.compactor_nodes {
+                match rand {
+                    0 => break,                                         // no killed
+                    1 => {}                                             // all killed
+                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    _ => {}
+                }
+                nodes.push(format!("compactor-{}", i));
+            }
         }
         join_all(nodes.iter().map(|name| async move {
-            // FIXME: sleep random time lead to panic
-            // let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
-            // tokio::time::sleep(t).await;
+            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            tokio::time::sleep(t).await;
             tracing::info!("kill {name}");
             madsim::runtime::Handle::current().kill(&name);
 
-            // let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
-            // tokio::time::sleep(t).await;
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            tokio::time::sleep(t).await;
             tracing::info!("restart {name}");
             madsim::runtime::Handle::current().restart(&name);
         }))

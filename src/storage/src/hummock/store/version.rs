@@ -588,30 +588,34 @@ impl HummockVersionReader {
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
         for level in committed.levels(read_options.table_id) {
-            let table_infos = prune_ssts(
-                level.table_infos.iter(),
-                read_options.table_id,
-                &table_key_range,
-            );
-            if table_infos.is_empty() {
+            if level.table_infos.is_empty() {
                 continue;
             }
 
             if level.level_type == LevelType::Nonoverlapping as i32 {
-                debug_assert!(can_concat(&table_infos));
+                debug_assert!(can_concat(&level.table_infos));
                 let start_table_idx = match encoded_user_key_range.start_bound() {
-                    Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
+                    Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
                     _ => 0,
                 };
                 let end_table_idx = match encoded_user_key_range.end_bound() {
-                    Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
-                    _ => table_infos.len().saturating_sub(1),
+                    Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
+                    _ => level.table_infos.len().saturating_sub(1),
                 };
-                assert!(start_table_idx < table_infos.len() && end_table_idx < table_infos.len());
-                let matched_table_infos = &table_infos[start_table_idx..=end_table_idx];
+                assert!(
+                    start_table_idx < level.table_infos.len()
+                        && end_table_idx < level.table_infos.len()
+                );
 
                 let mut sstables = vec![];
-                for sstable_info in matched_table_infos {
+                for sstable_info in &level.table_infos[start_table_idx..=end_table_idx] {
+                    if sstable_info
+                        .table_ids
+                        .binary_search(&read_options.table_id.table_id)
+                        .is_err()
+                    {
+                        continue;
+                    }
                     let sstable = self
                         .sstable_store
                         .sstable(sstable_info, &mut local_stats)
@@ -641,6 +645,14 @@ impl HummockVersionReader {
                     Arc::new(SstableIteratorReadOptions::default()),
                 ));
             } else {
+                let table_infos = prune_ssts(
+                    level.table_infos.iter(),
+                    read_options.table_id,
+                    &table_key_range,
+                );
+                if table_infos.is_empty() {
+                    continue;
+                }
                 // Overlapping
                 let mut iters = Vec::new();
                 for table_info in table_infos.into_iter().rev() {

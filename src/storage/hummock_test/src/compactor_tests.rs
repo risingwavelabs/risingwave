@@ -23,8 +23,8 @@ pub(crate) mod tests {
     use itertools::Itertools;
     use rand::Rng;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::config::constant::hummock::CompactionFilterFlag;
     use risingwave_common::config::StorageConfig;
+    use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::util::epoch::Epoch;
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;

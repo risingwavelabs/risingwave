@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::BytesMut;
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
@@ -163,8 +164,16 @@ impl<W: SstableWriter> SstableBuilder<W> {
     }
 
     /// Add kv pair to sstable.
-    pub fn add_delete_range(&mut self, tombstone: DeleteRangeTombstone) {
-        self.range_tombstones.push(tombstone);
+    pub fn add_delete_range(&mut self, range_tombstones: Vec<DeleteRangeTombstone>) {
+        let mut last_table_id = TableId::default();
+        for tombstone in &range_tombstones {
+            if last_table_id != tombstone.start_user_key.table_id {
+                last_table_id = tombstone.start_user_key.table_id;
+                self.table_ids
+                    .insert(tombstone.start_user_key.table_id.table_id);
+            }
+        }
+        self.range_tombstones.extend(range_tombstones);
     }
 
     /// Add kv pair to sstable.
@@ -436,12 +445,12 @@ pub(super) mod tests {
         };
         let table_id = TableId::default();
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
-        b.add_delete_range(DeleteRangeTombstone::new(
+        b.add_delete_range(vec![DeleteRangeTombstone::new(
             table_id,
             b"abcd".to_vec(),
             b"eeee".to_vec(),
             0,
-        ));
+        )]);
         let s = b.finish().await.unwrap().sst_info;
         let key_range = s.sst_info.key_range.unwrap();
         assert_eq!(

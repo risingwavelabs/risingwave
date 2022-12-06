@@ -78,10 +78,15 @@ impl JoinEntryState {
 
     /// Note: To make the estimated size accurate, the caller should ensure that it does not mutate
     /// the size (or capacity) of the [`StateValueType`].
-    pub fn values_mut<'a, 'b: 'a>(
+    ///
+    /// Note: the first item in the tuple is the mutable reference to the value in this entry, while
+    /// the second item is the decoded value. To mutate the degree, one **must not** forget to apply
+    /// the changes to the first item.
+    pub fn values_mut<'a>(
         &'a mut self,
-        data_types: &'b [DataType],
-    ) -> impl Iterator<Item = (&'a mut StateValueType, StreamExecutorResult<JoinRow>)> + 'a {
+        data_types: &'a [DataType],
+    ) -> impl Iterator<Item = (&'a mut StateValueType, StreamExecutorResult<JoinRow<Row>>)> + 'a
+    {
         self.cached.values_mut().map(|encoded| {
             let decoded = encoded.decode(data_types);
             (encoded, decoded)

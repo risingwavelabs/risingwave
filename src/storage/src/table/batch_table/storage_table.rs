@@ -317,12 +317,7 @@ impl<S: StateStore> StorageTable<S> {
             // If `vnode_hint` is set, we can only access this single vnode.
             Some(vnode) => std::iter::once(vnode),
             // Otherwise, we need to access all vnodes of this table.
-            None => self
-                .vnodes
-                .iter()
-                .enumerate()
-                .filter(|&(_, set)| set)
-                .map(|(i, _)| VirtualNode::from_index(i)),
+            None => self.vnodes.ones().map(VirtualNode::from_index),
         };
 
         // For each vnode, construct an iterator.

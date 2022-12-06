@@ -14,6 +14,7 @@
 
 use std::borrow::Cow;
 
+use bytes::BufMut;
 use itertools::Itertools;
 
 use crate::error::Result;
@@ -49,20 +50,19 @@ impl OrderedRowSerde {
         }
     }
 
-    pub fn serialize(&self, row: impl Row2, append_to: &mut Vec<u8>) {
+    pub fn serialize(&self, row: impl Row2, append_to: impl BufMut) {
         self.serialize_datums(row.iter(), append_to)
     }
 
     pub fn serialize_datums(
         &self,
         datum_refs: impl Iterator<Item = impl ToDatumRef>,
-        append_to: &mut Vec<u8>,
+        mut append_to: impl BufMut,
     ) {
         for (datum, order_type) in datum_refs.zip_eq(self.order_types.iter()) {
-            let mut serializer = memcomparable::Serializer::new(vec![]);
+            let mut serializer = memcomparable::Serializer::new(&mut append_to);
             serializer.set_reverse(*order_type == OrderType::Descending);
             serialize_datum_into(datum, &mut serializer).unwrap();
-            append_to.extend(serializer.into_inner());
         }
     }
 
