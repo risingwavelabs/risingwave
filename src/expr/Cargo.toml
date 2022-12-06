@@ -20,9 +20,9 @@ chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 crc32fast = "1"
 dyn-clone = "1"
 either = "1"
+hex = "0.4.3"
 itertools = "0.10"
 md5 = "0.7.0"
-memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 parse-display = "0.6"
 paste = "1"

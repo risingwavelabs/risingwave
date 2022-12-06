@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn test_struct_expr_literal_from() {
         let value = StructValue::new(vec![
-            Some(ScalarImpl::Utf8("12222".to_string())),
+            Some(ScalarImpl::Utf8("12222".into())),
             Some(2.into()),
             None,
         ]);
@@ -222,7 +222,7 @@ mod tests {
         let expr = LiteralExpression::try_from(&make_expression(None, t)).unwrap();
         assert_eq!(v, expr.literal());
 
-        let v = String::from("varchar");
+        let v: Box<str> = "varchar".into();
         let t = TypeName::Varchar;
         let bytes = serialize_datum_to_bytes(Some(v.clone().to_scalar_value()).as_ref());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();

@@ -16,10 +16,10 @@ mod iter_utils;
 mod join_entry_state;
 
 use std::alloc::Global;
-use std::ops::{Deref, DerefMut, Index};
+use std::borrow::Cow;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use anyhow::Context;
 use fixedbitset::FixedBitSet;
 use futures::future::try_join;
 use futures_async_stream::for_await;
@@ -28,12 +28,12 @@ use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
-use risingwave_common::row::{CompactedRow, Row, Row2, RowDeserializer, RowExt};
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::row;
+use risingwave_common::row::{CompactedRow, Row, Row2, RowExt};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::{bail, row};
 use risingwave_storage::StateStore;
 
 use self::iter_utils::zip_by_order_key;
@@ -45,30 +45,19 @@ use crate::task::ActorId;
 
 type DegreeType = u64;
 
-// TODO(row trait): no need to `into_owned_row` here
-pub fn build_degree_row(order_key: impl Row2, degree: DegreeType) -> Row {
-    order_key
-        .chain(row::once(Some(ScalarImpl::Int64(degree as i64))))
-        .into_owned_row()
+fn build_degree_row(order_key: impl Row2, degree: DegreeType) -> impl Row2 {
+    order_key.chain(row::once(Some(ScalarImpl::Int64(degree as i64))))
 }
 
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
-pub struct JoinRow {
-    pub row: Row,
+pub struct JoinRow<R: Row2> {
+    pub row: R,
     degree: DegreeType,
 }
 
-impl Index<usize> for JoinRow {
-    type Output = Datum;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.row[index]
-    }
-}
-
-impl JoinRow {
-    pub fn new(row: Row, degree: DegreeType) -> Self {
+impl<R: Row2> JoinRow<R> {
+    pub fn new(row: R, degree: DegreeType) -> Self {
         Self { row, degree }
     }
 
@@ -76,27 +65,17 @@ impl JoinRow {
         self.degree == 0
     }
 
-    pub fn inc_degree(&mut self) -> DegreeType {
-        self.degree += 1;
-        self.degree
-    }
-
-    pub fn dec_degree(&mut self) -> StreamExecutorResult<DegreeType> {
-        if self.degree == 0 {
-            bail!("Tried to decrement zero join row degree");
-        }
-        self.degree -= 1;
-        Ok(self.degree)
-    }
-
     /// Return row and degree in `Row` format. The degree part will be inserted in degree table
     /// later, so a pk prefix will be added.
     ///
     /// * `state_order_key_indices` - the order key of `row`
-    pub fn into_table_rows(self, state_order_key_indices: &[usize]) -> (Row, Row) {
+    pub fn to_table_rows<'a>(
+        &'a self,
+        state_order_key_indices: &'a [usize],
+    ) -> (&'a R, impl Row2 + 'a) {
         let order_key = (&self.row).project(state_order_key_indices);
         let degree = build_degree_row(order_key, self.degree);
-        (self.row, degree)
+        (&self.row, degree)
     }
 
     pub fn encode(&self) -> EncodedJoinRow {
@@ -114,49 +93,16 @@ pub struct EncodedJoinRow {
 }
 
 impl EncodedJoinRow {
-    fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow> {
-        let deserializer = RowDeserializer::new(data_types.to_vec());
-        let row = deserializer.deserialize(self.compacted_row.row.as_ref())?;
+    fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<Row>> {
         Ok(JoinRow {
-            row,
+            row: self.decode_row(data_types)?,
             degree: self.degree,
         })
     }
 
     fn decode_row(&self, data_types: &[DataType]) -> StreamExecutorResult<Row> {
-        let deserializer = RowDeserializer::new(data_types.to_vec());
-        let row = deserializer.deserialize(self.compacted_row.row.as_ref())?;
+        let row = self.compacted_row.deserialize(data_types)?;
         Ok(row)
-    }
-
-    pub fn inc_degree(&mut self) -> DegreeType {
-        self.degree += 1;
-        self.degree
-    }
-
-    pub fn dec_degree(&mut self) -> StreamExecutorResult<DegreeType> {
-        if self.degree == 0 {
-            bail!("Tried to decrement zero join row degree");
-        }
-        self.degree -= 1;
-        Ok(self.degree)
-    }
-
-    // TODO(yuhao): only need to decode part of the encoded row.
-    // TODO(yuhao): add kv api in state table to avoid manually append pk prefix.
-    /// Get a row with the schema in degree state table
-    ///
-    /// * `state_order_key_indices` - the order key of `row`
-    pub fn get_schemaed_degree(
-        &self,
-        row_data_types: &[DataType],
-        state_order_key_indices: &[usize],
-    ) -> StreamExecutorResult<Row> {
-        let order_key = self
-            .decode_row(row_data_types)?
-            .project(state_order_key_indices);
-        let schemaed_degree = build_degree_row(order_key, self.degree);
-        Ok(schemaed_degree)
     }
 }
 
@@ -276,6 +222,7 @@ struct TableInner<S: StateStore> {
     // This should be identical to the pk in state table.
     order_key_indices: Vec<usize>,
     // This should be identical to the data types in table schema.
+    #[expect(dead_code)]
     all_data_types: Vec<DataType>,
     pub(crate) table: StateTable<S>,
 }
@@ -396,13 +343,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
     /// Will return a empty `JoinEntryState` even when state does not exist in remote.
     async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
-        let key = key.clone().deserialize(&self.join_key_data_types)?;
-
-        let table_iter_fut = self.state.table.iter_key_and_val(&key);
+        let key = key.deserialize(&self.join_key_data_types)?;
 
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
+            let table_iter_fut = self.state.table.iter_key_and_val(&key);
             let degree_table_iter_fut = self.degree_state.table.iter_key_and_val(&key);
 
             let (table_iter, degree_table_iter) =
@@ -435,29 +381,30 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             #[for_await]
             for row_and_degree in zipped_iter {
-                let (row, degree) = row_and_degree?;
+                let (row, degree): (Cow<'_, Row>, Cow<'_, Row>) = row_and_degree?;
                 let pk = row
-                    .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
-                let degree_i64: ScalarImpl = degree
-                    .iter()
-                    .last()
-                    .context("Empty row")?
-                    .context("Fail to fetch a degree")?
-                    .into_scalar_impl();
+                    .as_ref()
+                    .project(&self.state.pk_indices)
+                    .memcmp_serialize(&self.pk_serializer);
+                let degree_i64 = degree
+                    .datum_at(degree.len() - 1)
+                    .expect("degree should not be NULL");
                 entry_state.insert(
                     pk,
-                    JoinRow::new(row.into_owned(), *degree_i64.as_int64() as u64).encode(),
+                    JoinRow::new(row, degree_i64.into_int64() as u64).encode(),
                 );
             }
         } else {
-            let table_iter = table_iter_fut.await?;
+            let table_iter = self.state.table.iter_with_pk_prefix(&key).await?;
 
             #[for_await]
             for row in table_iter {
-                let row = row?.1;
+                let row: Cow<'_, Row> = row?;
                 let pk = row
-                    .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
-                entry_state.insert(pk, JoinRow::new(row.into_owned(), 0).encode());
+                    .as_ref()
+                    .project(&self.state.pk_indices)
+                    .memcmp_serialize(&self.pk_serializer);
+                entry_state.insert(pk, JoinRow::new(row, 0).encode());
             }
         };
 
@@ -472,27 +419,27 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a join row
-    pub fn insert(&mut self, key: &K, value: JoinRow) {
+    pub fn insert(&mut self, key: &K, value: JoinRow<impl Row2>) {
         if let Some(entry) = self.inner.get_mut(key) {
-            let pk = value
-                .row
-                .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
+            let pk = (&value.row)
+                .project(&self.state.pk_indices)
+                .memcmp_serialize(&self.pk_serializer);
             entry.insert(pk, value.encode());
         }
         // If no cache maintained, only update the flush buffer.
-        let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
+        let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
         self.state.table.insert(row);
         self.degree_state.table.insert(degree);
     }
 
     /// Insert a row.
     /// Used when the side does not need to update degree.
-    pub fn insert_row(&mut self, key: &K, value: Row) {
-        let join_row = JoinRow::new(value.clone(), 0);
-
+    pub fn insert_row(&mut self, key: &K, value: impl Row2) {
         if let Some(entry) = self.inner.get_mut(key) {
-            let pk =
-                value.extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
+            let join_row = JoinRow::new(&value, 0);
+            let pk = (&value)
+                .project(&self.state.pk_indices)
+                .memcmp_serialize(&self.pk_serializer);
             entry.insert(pk, join_row.encode());
         }
         // If no cache maintained, only update the state table.
@@ -500,26 +447,27 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Delete a join row
-    pub fn delete(&mut self, key: &K, value: JoinRow) {
+    pub fn delete(&mut self, key: &K, value: JoinRow<impl Row2>) {
         if let Some(entry) = self.inner.get_mut(key) {
-            let pk = value
-                .row
-                .extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
+            let pk = (&value.row)
+                .project(&self.state.pk_indices)
+                .memcmp_serialize(&self.pk_serializer);
             entry.remove(pk);
         }
 
         // If no cache maintained, only update the state table.
-        let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
+        let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
         self.state.table.delete(row);
         self.degree_state.table.delete(degree);
     }
 
     /// Delete a row
     /// Used when the side does not need to update degree.
-    pub fn delete_row(&mut self, key: &K, value: Row) {
+    pub fn delete_row(&mut self, key: &K, value: impl Row2) {
         if let Some(entry) = self.inner.get_mut(key) {
-            let pk =
-                value.extract_memcomparable_by_indices(&self.pk_serializer, &self.state.pk_indices);
+            let pk = (&value)
+                .project(&self.state.pk_indices)
+                .memcmp_serialize(&self.pk_serializer);
             entry.remove(pk);
         }
 
@@ -532,26 +480,42 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.put(key.clone(), HashValueWrapper(Some(state)));
     }
 
-    pub fn inc_degree(&mut self, join_row: &mut StateValueType) -> StreamExecutorResult<()> {
+    /// Manipulate the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
+    /// memory and in the degree table.
+    fn manipulate_degree(
+        &mut self,
+        join_row_ref: &mut StateValueType,
+        join_row: &mut JoinRow<Row>,
+        action: impl Fn(&mut DegreeType),
+    ) {
+        // TODO: no need to `into_owned_row` here due to partial borrow.
         let old_degree = join_row
-            .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
-        join_row.inc_degree();
-        let new_degree = join_row
-            .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
+            .to_table_rows(&self.state.order_key_indices)
+            .1
+            .into_owned_row();
+
+        action(&mut join_row_ref.degree);
+        action(&mut join_row.degree);
+
+        let new_degree = join_row.to_table_rows(&self.state.order_key_indices).1;
 
         self.degree_state.table.update(old_degree, new_degree);
-        Ok(())
     }
 
-    pub fn dec_degree(&mut self, join_row: &mut StateValueType) -> StreamExecutorResult<()> {
-        let old_degree = join_row
-            .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
-        join_row.dec_degree()?;
-        let new_degree = join_row
-            .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
+    /// Increment the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
+    /// memory and in the degree table.
+    pub fn inc_degree(&mut self, join_row_ref: &mut StateValueType, join_row: &mut JoinRow<Row>) {
+        self.manipulate_degree(join_row_ref, join_row, |d| *d += 1)
+    }
 
-        self.degree_state.table.update(old_degree, new_degree);
-        Ok(())
+    /// Decrement the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
+    /// memory and in the degree table.
+    pub fn dec_degree(&mut self, join_row_ref: &mut StateValueType, join_row: &mut JoinRow<Row>) {
+        self.manipulate_degree(join_row_ref, join_row, |d| {
+            *d = d
+                .checked_sub(1)
+                .expect("Tried to decrement zero join row degree")
+        })
     }
 
     /// Evict the cache.

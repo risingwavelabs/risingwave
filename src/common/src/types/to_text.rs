@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Write;
+use std::num::FpCategory;
+
+use num_traits::ToPrimitive;
+
 use super::{DatumRef, ScalarRefImpl};
 
 // Used to convert ScalarRef to text format
@@ -31,14 +36,78 @@ macro_rules! implement_using_to_string {
     };
 }
 
+macro_rules! implement_using_itoa {
+    ($({ $scalar_type:ty } ),*) => {
+        $(
+            impl ToText for $scalar_type {
+                fn to_text(&self) -> String {
+                    itoa::Buffer::new().format(*self).to_owned()
+                }
+            }
+        )*
+    };
+}
+
 implement_using_to_string! {
+    { String },
+    { &str }
+}
+
+implement_using_itoa! {
     { i16 },
     { i32 },
-    { i64 },
-    { String },
-    { &str },
-    { crate::types::OrderedF32 },
-    { crate::types::OrderedF64 }
+    { i64 }
+}
+
+macro_rules! implement_using_ryu {
+    ($({ $scalar_type:ty, $to_std_type:ident } ),*) => {
+            $(
+            impl ToText for $scalar_type {
+                fn to_text(&self) -> String {
+                    match self.classify() {
+                        FpCategory::Infinite if self.is_sign_negative() => "-Infinity".to_owned(),
+                        FpCategory::Infinite => "Infinity".to_owned(),
+                        FpCategory::Zero if self.is_sign_negative() => "-0".to_owned(),
+                        FpCategory::Nan => "NaN".to_owned(),
+                        _ => match self.$to_std_type() {
+                            Some(v) => {
+                                let mut buf = ryu::Buffer::new();
+                                let mut s = buf.format_finite(v);
+                                if let Some(trimmed) = s.strip_suffix(".0") {
+                                    s = trimmed;
+                                }
+                                let mut s_chars = s.chars().peekable();
+                                let mut s_owned = s.to_owned();
+                                let mut index = 0;
+                                while let Some(c) = s_chars.next() {
+                                    index += 1;
+                                    if c == 'e' {
+                                        if s_chars.peek() != Some(&'-') {
+                                            s_owned.insert(index, '+');
+                                        } else {
+                                            index += 1;
+                                        }
+
+                                        if index + 1 == s.len() {
+                                            s_owned.insert(index,'0');
+                                        }
+                                        break;
+                                    }
+                                }
+                                s_owned
+                            }
+                            None => "NaN".to_owned(),
+                        },
+                    }
+                }
+            }
+        )*
+    };
+}
+
+implement_using_ryu! {
+    { crate::types::OrderedF32, to_f32 },
+    { crate::types::OrderedF64, to_f64 }
 }
 
 impl ToText for bool {
@@ -49,6 +118,13 @@ impl ToText for bool {
             "f".to_string()
         }
     }
+}
+
+/// Convert bytes in `Bytea` type to String.
+pub fn format_bytes(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(2 * bytes.len());
+    write!(s, "\\x{}", hex::encode(bytes)).unwrap();
+    s
 }
 
 impl ToText for ScalarRefImpl<'_> {
@@ -68,6 +144,7 @@ impl ToText for ScalarRefImpl<'_> {
             ScalarRefImpl::List(l) => l.to_text(),
             ScalarRefImpl::Struct(s) => s.to_text(),
             ScalarRefImpl::Utf8(v) => v.to_text(),
+            ScalarRefImpl::Bytea(v) => format_bytes(v),
         }
     }
 }
@@ -78,5 +155,23 @@ impl ToText for DatumRef<'_> {
             Some(data) => data.to_text(),
             None => "NULL".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::types::ordered_float::OrderedFloat;
+    use crate::types::to_text::ToText;
+
+    #[test]
+    fn test_float_to_text() {
+        // f64 -> text.
+        let ret: OrderedFloat<f64> = OrderedFloat::<f64>::from(1.234567890123456);
+        tracing::info!("ret: {}", ret.to_text());
+        assert_eq!("1.234567890123456".to_string(), ret.to_text());
+
+        // f32 -> text.
+        let ret: OrderedFloat<f32> = OrderedFloat::<f32>::from(1.234567);
+        assert_eq!("1.234567".to_string(), ret.to_text());
     }
 }

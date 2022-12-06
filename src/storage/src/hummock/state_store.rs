@@ -109,7 +109,13 @@ impl HummockStorage {
                         .collect_vec()
                 };
 
-                read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
+                // When the system has just started and no state has been created, the memory state
+                // may be empty
+                if read_version_vec.is_empty() {
+                    (Vec::default(), Vec::default(), (**pinned_version).clone())
+                } else {
+                    read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
+                }
             };
 
         Ok(read_version_tuple)
