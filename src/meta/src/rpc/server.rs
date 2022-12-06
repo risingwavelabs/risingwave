@@ -189,14 +189,20 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();
     monitor_process(registry).unwrap();
-    let compactor_manager = Arc::new(
-        hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
-            .await
-            .unwrap(),
-    );
 
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
+            .await
+            .unwrap(),
+    );
+    let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
+
+    // above is needed for both follower and leader
+
+    // below is needed only for follower
+
+    let compactor_manager = Arc::new(
+        hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
             .await
             .unwrap(),
     );
@@ -310,7 +316,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         compactor_manager.clone(),
     ));
 
-    let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
         catalog_manager.clone(),
@@ -404,6 +409,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     };
 
     let mut services_leader_rx = leader_rx.clone();
+    let mut note_status_leader_rx = leader_rx.clone();
     let intercept_leader_rx = leader_rx.clone();
 
     // print current leader/follower status of this node + fencing mechanism
@@ -412,12 +418,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let _enter = span.enter();
         let mut was_leader = false;
         loop {
-            if leader_rx.changed().await.is_err() {
+            // TODO: panic if sender dropped?
+            if note_status_leader_rx.changed().await.is_err() {
                 tracing::error!("Issue receiving leader value from channel");
                 continue;
             }
 
-            let (leader_addr, is_leader) = leader_rx.borrow().clone();
+            let (leader_addr, is_leader) = note_status_leader_rx.borrow().clone();
 
             // Implementation of naive fencing mechanism:
             // leader nodes should panic if they loose their leader position
@@ -569,7 +576,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         });
     });
 
-    // TODO: Do I still need below code?
+    // TODO: Do I still need below code? Not needed if I use serve_with_shutdown
+    // Do in different PR
     // TODO: Use tonic's serve_with_shutdown for a graceful shutdown. Now it does not work,
     // as the graceful shutdown waits all connections to disconnect in order to finish the stop.
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
