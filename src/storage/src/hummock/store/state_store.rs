@@ -21,6 +21,7 @@ use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use tokio::sync::mpsc;
+use tracing::warn;
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
@@ -181,14 +182,38 @@ impl StateStoreWrite for LocalHummockStorage {
             let epoch = write_options.epoch;
             let table_id = write_options.table_id;
 
+            let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
+            let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+            let limiter = self.core.memory_limiter.as_ref();
+            let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
+                tracker
+            } else {
+                warn!(
+                    "blocked at requiring memory: {}, current {}",
+                    size,
+                    limiter.get_memory_usage()
+                );
+                self.core
+                    .event_sender
+                    .send(HummockEvent::BufferMayFlush)
+                    .expect("should be able to send");
+                let tracker = limiter.require_memory(size as u64).await;
+                warn!(
+                    "successfully requiring memory: {}, current {}",
+                    size,
+                    limiter.get_memory_usage()
+                );
+                tracker
+            };
+
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
-                kv_pairs,
+                sorted_items,
+                size,
                 delete_ranges,
                 table_id,
-                Some(self.core.memory_limiter.as_ref()),
-            )
-            .await;
+                Some(tracker),
+            );
             let imm_size = imm.size();
             self.core
                 .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
