@@ -662,7 +662,6 @@ mod tests {
         let mock_meta_store = Arc::new(MemStore::new());
         let lease_timeout = 10;
 
-        // TODO: Is this expected behavior?
         // Leader: If nobody was elected leader renewing lease fails and leader is marked as failed
         let leader_info = MetaLeaderInfo {
             node_address: "localhost:1234".into(),
