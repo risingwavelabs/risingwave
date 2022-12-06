@@ -195,16 +195,30 @@ impl FeBindMessage {
                 buf.copy_to_bytes(val_len as usize)
             })
             .collect();
-        // Read ResultFormatCode
-        let len = buf.get_i16();
 
-        assert!(len==0||len==1,"Only support default result format(len==0) or uniform result format(len==1), can't support mix format now.");
+        // Read ResultFormatCode
+        // result format code depend on following rule:
+        // - If the length is 0, format is false(text).
+        // - If the length is 1, format is decide by format_codes[0].
+        // - If the length > 1, each column can have their own format and it depend on according
+        //   format code. But RisingWave can't support return col with different format now, when
+        //   length>1, we guarantee all format code is the same (0,0,0..) or (1,1,1,...).
+        let len = buf.get_i16();
+        let format_codes = (0..len).map(|_| buf.get_i16()).collect::<Vec<_>>();
+        let all_elements_are_equal = format_codes.iter().all(|&x| x == format_codes[0]);
+
+        if !all_elements_are_equal {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Only support uniform result format (TEXT or BINARY), can't support mix format now.",
+            ));
+        }
 
         let result_format_code = if len == 0 {
             // default format:text
             false
         } else {
-            buf.get_i16() == 1
+            format_codes[0] == 1
         };
 
         Ok(FeMessage::Bind(FeBindMessage {
