@@ -1,0 +1,38 @@
+# name: test/sql/join/full_outer/test_full_outer_join_parallel.test_slow
+# description: Test full outer join with parallelism
+# group: [full_outer]
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE VIEW integers AS SELECT * FROM range(0, 75000, 1) tbl(i);
+
+statement ok
+CREATE VIEW integers2 AS SELECT * FROM range(0, 100000, 1) tbl(i) WHERE i%2 != 0;
+
+query I
+SELECT COUNT(*) FROM integers JOIN integers2 ON integers.i=integers2.i
+----
+37500
+
+query I
+SELECT COUNT(*) FROM integers LEFT OUTER JOIN integers2 ON integers.i=integers2.i
+----
+75000
+
+query I
+SELECT COUNT(*) FROM integers RIGHT OUTER JOIN integers2 ON integers.i=integers2.i
+----
+50000
+
+query I
+SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.i=integers2.i
+----
+87500
+
+statement ok
+DROP VIEW integers
+
+statement ok
+DROP VIEW integers2
