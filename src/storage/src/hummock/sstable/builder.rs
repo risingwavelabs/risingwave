@@ -107,8 +107,6 @@ pub struct SstableBuilder<W: SstableWriter> {
     last_table_id: u32,
     sstable_id: u64,
 
-    last_bloom_filter_key_length: usize,
-
     /// `stale_key_count` counts range_tombstones as well.
     stale_key_count: u64,
     /// `total_key_count` counts range_tombstones as well.
@@ -157,7 +155,6 @@ impl<W: SstableWriter> SstableBuilder<W> {
             range_tombstones: vec![],
             sstable_id,
             filter_key_extractor,
-            last_bloom_filter_key_length: 0,
             stale_key_count: 0,
             total_key_count: 0,
             table_stats: Default::default(),
@@ -207,7 +204,6 @@ impl<W: SstableWriter> SstableBuilder<W> {
                 // avoid duplicate add to bloom filter
                 self.user_key_hashes
                     .push(farmhash::fingerprint32(extract_key));
-                self.last_bloom_filter_key_length = extract_key.len();
                 self.last_extract_key.clear();
                 self.last_extract_key.extend_from_slice(extract_key);
             }

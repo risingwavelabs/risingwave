@@ -39,7 +39,7 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
-use crate::table::{compute_vnode, is_continuous_subset, Distribution, TableIter};
+use crate::table::{compute_vnode, Distribution, TableIter};
 use crate::{StateStore, StateStoreIter};
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
@@ -448,10 +448,7 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
         let dist_key_hint = if self.dist_key_indices.is_empty()
-            || !is_continuous_subset(
-                self.dist_key_indices.iter().sorted(),
-                pk_prefix_indices.iter().sorted(),
-            )
+            || self.distribution_key_start_index_in_pk.is_none()
             || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk.unwrap()
                 > pk_prefix.len()
         {
