@@ -57,8 +57,24 @@ impl FilterKeyExtractorImpl {
             .map(|col_order| col_order.index as usize)
             .collect();
 
-        let match_read_pattern =
-            !dist_key_indices.is_empty() && pk_indices.starts_with(&dist_key_indices);
+        let dist_key_in_pk_indices = dist_key_indices
+            .iter()
+            .map(|&di| {
+                pk_indices
+                    .iter()
+                    .position(|&pi| di == pi)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "distribution key {:?} must be a subset of primary key {:?}",
+                            dist_key_indices, pk_indices
+                        )
+                    })
+            })
+            .collect_vec();
+
+        let match_read_pattern = !dist_key_in_pk_indices.is_empty()
+            && *dist_key_in_pk_indices.iter().min().unwrap() + dist_key_in_pk_indices.len() - 1
+                == *dist_key_in_pk_indices.iter().max().unwrap();
         if !match_read_pattern {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
@@ -159,6 +175,7 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
         // detection.
         match self.distribution_key_indices_pair_in_pk.is_some()
             && self.distribution_key_indices_pair_in_pk.unwrap().1 != 0
+            && self.distribution_key_indices_pair_in_pk.unwrap().1 <= pk.len()
         {
             false => &[],
             true => {
