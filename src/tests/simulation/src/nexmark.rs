@@ -141,6 +141,7 @@ impl DerefMut for NexmarkCluster {
 }
 
 /// Nexmark queries.
+// TODO: import the query from external files and avoid duplicating the queries in the code.
 pub mod queries {
     use std::time::Duration;
 
