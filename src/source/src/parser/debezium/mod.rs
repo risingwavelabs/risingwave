@@ -124,8 +124,8 @@ mod test {
         let [(_op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
 
         assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
-        assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".to_string()))));
-        assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".to_string()))));
+        assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
+        assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".into()))));
         assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
     }
 
@@ -145,8 +145,8 @@ mod test {
         assert_eq!(op, Op::Insert);
 
         assert!(row[0].eq(&Some(ScalarImpl::Int32(102))));
-        assert!(row[1].eq(&Some(ScalarImpl::Utf8("car battery".to_string()))));
-        assert!(row[2].eq(&Some(ScalarImpl::Utf8("12V car battery".to_string()))));
+        assert!(row[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
+        assert!(row[2].eq(&Some(ScalarImpl::Utf8("12V car battery".into()))));
         assert!(row[3].eq(&Some(ScalarImpl::Float64(8.1.into()))));
     }
 
@@ -167,8 +167,8 @@ mod test {
         assert_eq!(op, Op::Delete);
 
         assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
-        assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".to_string()))));
-        assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".to_string()))));
+        assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
+        assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".into()))));
         assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
     }
 
@@ -197,13 +197,13 @@ mod test {
         assert_eq!(op2, Op::UpdateInsert);
 
         assert!(row1[0].eq(&Some(ScalarImpl::Int32(102))));
-        assert!(row1[1].eq(&Some(ScalarImpl::Utf8("car battery".to_string()))));
-        assert!(row1[2].eq(&Some(ScalarImpl::Utf8("12V car battery".to_string()))));
+        assert!(row1[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
+        assert!(row1[2].eq(&Some(ScalarImpl::Utf8("12V car battery".into()))));
         assert!(row1[3].eq(&Some(ScalarImpl::Float64(8.1.into()))));
 
         assert!(row2[0].eq(&Some(ScalarImpl::Int32(102))));
-        assert!(row2[1].eq(&Some(ScalarImpl::Utf8("car battery".to_string()))));
-        assert!(row2[2].eq(&Some(ScalarImpl::Utf8("24V car battery".to_string()))));
+        assert!(row2[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
+        assert!(row2[2].eq(&Some(ScalarImpl::Utf8("24V car battery".into()))));
         assert!(row2[3].eq(&Some(ScalarImpl::Float64(9.1.into()))));
     }
 

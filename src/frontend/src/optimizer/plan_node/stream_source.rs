@@ -59,10 +59,7 @@ impl fmt::Display for StreamSource {
         let mut builder = f.debug_struct("StreamSource");
         builder
             .field("source", &self.logical.source_catalog().name)
-            .field(
-                "columns",
-                &format_args!("[{}]", &self.column_names().join(", ")),
-            )
+            .field("columns", &self.column_names())
             .finish()
     }
 }

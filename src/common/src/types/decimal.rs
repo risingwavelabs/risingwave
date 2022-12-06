@@ -25,6 +25,7 @@ use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use crate::array::ArrayResult;
+use crate::error::Result as RwResult;
 use crate::types::Decimal::Normalized;
 
 #[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
@@ -67,12 +68,12 @@ impl Decimal {
 }
 
 impl ToBinary for Decimal {
-    fn to_binary(&self) -> Option<Bytes> {
+    fn to_binary(&self) -> RwResult<Option<Bytes>> {
         let mut output = BytesMut::new();
         match self {
             Decimal::Normalized(d) => {
                 d.to_sql(&Type::ANY, &mut output).unwrap();
-                return Some(output.freeze());
+                return Ok(Some(output.freeze()));
             }
             Decimal::NaN => {
                 output.reserve(8);
@@ -96,7 +97,7 @@ impl ToBinary for Decimal {
                 output.put_i16(0);
             }
         };
-        Some(output.freeze())
+        Ok(Some(output.freeze()))
     }
 }
 

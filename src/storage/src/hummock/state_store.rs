@@ -75,7 +75,7 @@ impl HummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<HummockStorageIterator> {
+    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
         let read_version_tuple =
             self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?;
 
@@ -109,7 +109,13 @@ impl HummockStorage {
                         .collect_vec()
                 };
 
-                read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
+                // When the system has just started and no state has been created, the memory state
+                // may be empty
+                if read_version_vec.is_empty() {
+                    (Vec::default(), Vec::default(), (**pinned_version).clone())
+                } else {
+                    read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
+                }
             };
 
         Ok(read_version_tuple)
@@ -117,7 +123,7 @@ impl HummockStorage {
 }
 
 impl StateStoreRead for HummockStorage {
-    type Iter = HummockStorageIterator;
+    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
 
     define_state_store_read_associated_type!();
 

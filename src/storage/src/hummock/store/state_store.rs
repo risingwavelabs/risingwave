@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -20,7 +19,7 @@ use bytes::Bytes;
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{map_table_key_range, FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use tokio::sync::mpsc;
 use tracing::warn;
 
@@ -38,10 +37,7 @@ use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader
 use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
-use crate::store::{
-    GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, LocalStateStore, ReadOptions,
-    StateStoreRead, StateStoreWrite, WriteOptions,
-};
+use crate::store::*;
 use crate::{
     define_state_store_read_associated_type, define_state_store_write_associated_type,
     StateStoreIter,
@@ -129,7 +125,7 @@ impl HummockStorageCore {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<HummockStorageIterator> {
+    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
         let read_snapshot = read_filter_for_local(
             epoch,
             read_options.table_id,
@@ -144,7 +140,7 @@ impl HummockStorageCore {
 }
 
 impl StateStoreRead for LocalHummockStorage {
-    type Iter = HummockStorageIterator;
+    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
 
     define_state_store_read_associated_type!();
 
@@ -163,10 +159,9 @@ impl StateStoreRead for LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        let iter = self
-            .core
-            .iter_inner(map_table_key_range(key_range), epoch, read_options);
-        iter.in_span(self.tracing.new_tracer("hummock_iter"))
+        self.core
+            .iter_inner(map_table_key_range(key_range), epoch, read_options)
+            .in_span(self.tracing.new_tracer("hummock_iter"))
     }
 }
 
@@ -295,9 +290,9 @@ pub struct HummockStorageIterator {
 }
 
 impl StateStoreIter for HummockStorageIterator {
-    type Item = (FullKey<Vec<u8>>, Bytes);
+    type Item = StateStoreIterItem;
 
-    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
+    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {

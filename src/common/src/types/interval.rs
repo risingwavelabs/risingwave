@@ -728,10 +728,10 @@ impl<'a> FromSql<'a> for IntervalUnit {
 }
 
 impl ToBinary for IntervalUnit {
-    fn to_binary(&self) -> Option<Bytes> {
+    fn to_binary(&self) -> Result<Option<Bytes>> {
         let mut output = BytesMut::new();
         self.to_sql(&Type::ANY, &mut output).unwrap();
-        Some(output.freeze())
+        Ok(Some(output.freeze()))
     }
 }
 

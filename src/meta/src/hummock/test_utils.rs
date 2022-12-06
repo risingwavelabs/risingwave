@@ -283,17 +283,15 @@ pub async fn setup_compute_env_with_config(
 
     let compactor_manager = Arc::new(CompactorManager::for_test());
 
-    let hummock_manager = Arc::new(
-        HummockManager::with_config(
-            env.clone(),
-            cluster_manager.clone(),
-            Arc::new(MetaMetrics::new()),
-            compactor_manager,
-            config,
-        )
-        .await
-        .unwrap(),
-    );
+    let hummock_manager = HummockManager::with_config(
+        env.clone(),
+        cluster_manager.clone(),
+        Arc::new(MetaMetrics::new()),
+        compactor_manager,
+        config,
+    )
+    .await
+    .unwrap();
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
         port,

@@ -39,11 +39,13 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .map(|i| ColumnId::from(*i))
             .collect::<Vec<ColumnId>>();
 
+        let properties = node.get_properties();
+
         Ok(Box::new(SinkExecutor::new(
             materialize_executor,
             store,
             stream.streaming_metrics.clone(),
-            node.properties.clone(),
+            properties.clone(),
             params.executor_id,
             params.env.connector_params(),
         )))

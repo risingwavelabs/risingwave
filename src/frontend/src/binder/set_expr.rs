@@ -55,13 +55,13 @@ impl BoundSetExpr {
         }
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn is_correlated(&self, depth: Depth) -> bool {
         match self {
-            BoundSetExpr::Select(s) => s.is_correlated(),
-            BoundSetExpr::Values(v) => v.is_correlated(),
-            BoundSetExpr::Query(q) => q.is_correlated(),
+            BoundSetExpr::Select(s) => s.is_correlated(depth),
+            BoundSetExpr::Values(v) => v.is_correlated(depth),
+            BoundSetExpr::Query(q) => q.is_correlated(depth),
             BoundSetExpr::SetOperation { left, right, .. } => {
-                left.is_correlated() || right.is_correlated()
+                left.is_correlated(depth) || right.is_correlated(depth)
             }
         }
     }

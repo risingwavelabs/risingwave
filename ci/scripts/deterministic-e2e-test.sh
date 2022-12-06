@@ -24,7 +24,7 @@ echo "--- deterministic simulation e2e, ci-3cn-1fe, batch"
 seq 16 | parallel MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/batch/\*\*/\*.slt > $LOGDIR/batch-{}.log && rm $LOGDIR/batch-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, kafka source"
-seq 16 | parallel MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/source/kafka.slt > $LOGDIR/source-{}.log && rm $LOGDIR/source-{}.log'
+seq 16 | parallel MADSIM_TEST_SEED={} './risingwave_simulation --kafka-datadir=./scripts/source/test_data ./e2e_test/source/kafka.slt > $LOGDIR/source-{}.log && rm $LOGDIR/source-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, streaming"
 seq 16 | parallel MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2e_test/streaming/\*\*/\*.slt > $LOGDIR/parallel-streaming-{}.log && rm $LOGDIR/parallel-streaming-{}.log'

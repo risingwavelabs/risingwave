@@ -29,6 +29,7 @@ impl DataType {
             | DataType::Time => 8,
             DataType::Decimal
             | DataType::Varchar
+            | DataType::Bytea
             | DataType::Interval
             | DataType::Struct(_)
             | DataType::List { .. } => -1,
@@ -92,6 +93,9 @@ impl DataType {
             1185 => Ok(DataType::List {
                 datatype: Box::new(DataType::Timestampz),
             }),
+            1001 => Ok(DataType::List {
+                datatype: Box::new(DataType::Bytea),
+            }),
             1187 => Ok(DataType::List {
                 datatype: Box::new(DataType::Interval),
             }),
@@ -114,9 +118,10 @@ impl DataType {
             DataType::Timestamp => 1114,
             DataType::Timestampz => 1184,
             DataType::Interval => 1186,
-            // NOTE: Sturct type don't have oid in postgres, here we use varchar oid so that struct
+            // NOTE: Struct type don't have oid in postgres, here we use varchar oid so that struct
             // will be considered as a varchar.
             DataType::Struct(_) => 1043,
+            DataType::Bytea => 17,
             DataType::List { datatype } => match unnested_list_type(datatype.as_ref().clone()) {
                 DataType::Boolean => 1000,
                 DataType::Int16 => 1005,
@@ -127,6 +132,7 @@ impl DataType {
                 DataType::Decimal => 1231,
                 DataType::Date => 1182,
                 DataType::Varchar => 1015,
+                DataType::Bytea => 1001,
                 DataType::Time => 1183,
                 DataType::Timestamp => 1115,
                 DataType::Timestampz => 1185,

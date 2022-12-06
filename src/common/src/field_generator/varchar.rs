@@ -51,6 +51,6 @@ impl VarcharField {
             .take(self.length)
             .map(char::from)
             .collect();
-        Some(s.to_scalar_value())
+        Some(s.into_boxed_str().to_scalar_value())
     }
 }
