@@ -387,12 +387,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let mut services_leader_rx = leader_rx.clone();
     let intercept_leader_rx = leader_rx.clone();
 
-    // TODO: Do one update loop that handles if this is leader or follower and calls
-    // different functions:
-    // Print status
-    // fencing mechanism
-    // starting services
-
     // print current leader/follower status of this node + fencing mechanism
     tokio::spawn(async move {
         let mut was_leader = false;
@@ -428,25 +422,15 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     });
 
     // TODO:
-    // if leader start below services
-    // else start follower service (See design doc)
-    // If leader also start a thread that checks if status changed.
-    //      If leader lost lease it should panic
     // Remove the interceptor pattern again
 
-    // health service should start on follower
-
-    // TODO: remove notes
-    // first try: Start health on follower and everything else on leader
-    // If follower becomes leader, start other services
+    // TODO:
+    // we only can define leader services when they are needed? Otherwise they already do things
 
     tokio::spawn(async move {
         let intercept = InterceptorWrapper {
             leader_rx: intercept_leader_rx,
         };
-
-        // services present in both leader and follower
-        let heartbeat_srv_clone = heartbeat_srv.clone();
 
         // failover logic
         let (svc_shutdown_tx, svc_shutdown_rx) = tokio::sync::oneshot::channel();
@@ -559,7 +543,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     });
 
     // TODO: Do I still need below code?
-
     // TODO: Use tonic's serve_with_shutdown for a graceful shutdown. Now it does not work,
     // as the graceful shutdown waits all connections to disconnect in order to finish the stop.
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
