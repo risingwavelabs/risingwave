@@ -269,6 +269,7 @@ pub(crate) async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHumm
         meta_client.clone(),
         get_test_notification_client(env, hummock_manager_ref, worker_node),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(risingwave_tracing::RwTracingService::disabled()),
     )
     .await
     .unwrap();

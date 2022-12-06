@@ -329,6 +329,7 @@ export interface SourceNode {
   pkColumnIds: number[];
   properties: { [key: string]: string };
   info: SourceInfo | undefined;
+  sourceName: string;
 }
 
 export interface SourceNode_PropertiesEntry {
@@ -701,6 +702,11 @@ export interface RowIdGenNode {
   rowIdIndex: number;
 }
 
+export interface NowNode {
+  /** Persists emitted 'now'. */
+  stateTable: Table | undefined;
+}
+
 export interface StreamNode {
   nodeBody?:
     | { $case: "source"; source: SourceNode }
@@ -731,7 +737,8 @@ export interface StreamNode {
     | { $case: "sort"; sort: SortNode }
     | { $case: "watermarkFilter"; watermarkFilter: WatermarkFilterNode }
     | { $case: "dml"; dml: DmlNode }
-    | { $case: "rowIdGen"; rowIdGen: RowIdGenNode };
+    | { $case: "rowIdGen"; rowIdGen: RowIdGenNode }
+    | { $case: "now"; now: NowNode };
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
@@ -1627,6 +1634,7 @@ function createBaseSourceNode(): SourceNode {
     pkColumnIds: [],
     properties: {},
     info: undefined,
+    sourceName: "",
   };
 }
 
@@ -1645,6 +1653,7 @@ export const SourceNode = {
         }, {})
         : {},
       info: isSet(object.info) ? SourceInfo.fromJSON(object.info) : undefined,
+      sourceName: isSet(object.sourceName) ? String(object.sourceName) : "",
     };
   },
 
@@ -1672,6 +1681,7 @@ export const SourceNode = {
       });
     }
     message.info !== undefined && (obj.info = message.info ? SourceInfo.toJSON(message.info) : undefined);
+    message.sourceName !== undefined && (obj.sourceName = message.sourceName);
     return obj;
   },
 
@@ -1698,6 +1708,7 @@ export const SourceNode = {
     message.info = (object.info !== undefined && object.info !== null)
       ? SourceInfo.fromPartial(object.info)
       : undefined;
+    message.sourceName = object.sourceName ?? "";
     return message;
   },
 };
@@ -3085,6 +3096,31 @@ export const RowIdGenNode = {
   },
 };
 
+function createBaseNowNode(): NowNode {
+  return { stateTable: undefined };
+}
+
+export const NowNode = {
+  fromJSON(object: any): NowNode {
+    return { stateTable: isSet(object.stateTable) ? Table.fromJSON(object.stateTable) : undefined };
+  },
+
+  toJSON(message: NowNode): unknown {
+    const obj: any = {};
+    message.stateTable !== undefined &&
+      (obj.stateTable = message.stateTable ? Table.toJSON(message.stateTable) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<NowNode>, I>>(object: I): NowNode {
+    const message = createBaseNowNode();
+    message.stateTable = (object.stateTable !== undefined && object.stateTable !== null)
+      ? Table.fromPartial(object.stateTable)
+      : undefined;
+    return message;
+  },
+};
+
 function createBaseStreamNode(): StreamNode {
   return { nodeBody: undefined, operatorId: 0, input: [], streamKey: [], appendOnly: false, identity: "", fields: [] };
 }
@@ -3150,6 +3186,8 @@ export const StreamNode = {
         ? { $case: "dml", dml: DmlNode.fromJSON(object.dml) }
         : isSet(object.rowIdGen)
         ? { $case: "rowIdGen", rowIdGen: RowIdGenNode.fromJSON(object.rowIdGen) }
+        : isSet(object.now)
+        ? { $case: "now", now: NowNode.fromJSON(object.now) }
         : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
       input: Array.isArray(object?.input)
@@ -3230,6 +3268,8 @@ export const StreamNode = {
       (obj.dml = message.nodeBody?.dml ? DmlNode.toJSON(message.nodeBody?.dml) : undefined);
     message.nodeBody?.$case === "rowIdGen" &&
       (obj.rowIdGen = message.nodeBody?.rowIdGen ? RowIdGenNode.toJSON(message.nodeBody?.rowIdGen) : undefined);
+    message.nodeBody?.$case === "now" &&
+      (obj.now = message.nodeBody?.now ? NowNode.toJSON(message.nodeBody?.now) : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
       obj.input = message.input.map((e) =>
@@ -3447,6 +3487,9 @@ export const StreamNode = {
       object.nodeBody?.rowIdGen !== null
     ) {
       message.nodeBody = { $case: "rowIdGen", rowIdGen: RowIdGenNode.fromPartial(object.nodeBody.rowIdGen) };
+    }
+    if (object.nodeBody?.$case === "now" && object.nodeBody?.now !== undefined && object.nodeBody?.now !== null) {
+      message.nodeBody = { $case: "now", now: NowNode.fromPartial(object.nodeBody.now) };
     }
     message.operatorId = object.operatorId ?? 0;
     message.input = object.input?.map((e) => StreamNode.fromPartial(e)) || [];

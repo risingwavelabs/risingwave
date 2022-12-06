@@ -22,7 +22,7 @@ pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
 #[async_trait]
 pub trait Snapshot: Sync + Send + 'static {
-    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<Vec<u8>>>;
+    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>>;
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>>;
 }
 
@@ -38,7 +38,8 @@ pub trait MetaStore: Clone + Sync + Send + 'static {
     async fn txn(&self, trx: Transaction) -> MetaStoreResult<()>;
 
     async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<Vec<u8>>> {
-        self.snapshot().await.list_cf(cf).await
+        let kvs = self.snapshot().await.list_cf(cf).await?;
+        Ok(kvs.into_iter().map(|(_k, v)| v).collect())
     }
 
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>> {

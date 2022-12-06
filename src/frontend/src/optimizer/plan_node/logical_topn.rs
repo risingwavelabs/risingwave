@@ -133,10 +133,10 @@ impl LogicalTopN {
             ),
         );
         builder
-            .field("limit", &format_args!("{}", self.limit()))
-            .field("offset", &format_args!("{}", self.offset()));
+            .field("limit", &self.limit())
+            .field("offset", &self.offset());
         if self.with_ties() {
-            builder.field("with_ties", &format_args!("{}", true));
+            builder.field("with_ties", &true);
         }
         if !self.group_key().is_empty() {
             builder.field("group_key", &self.group_key());
@@ -352,6 +352,7 @@ impl ColPrunable for LogicalTopN {
 
 impl PredicatePushdown for LogicalTopN {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        // filter can not transpose topN
         gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }

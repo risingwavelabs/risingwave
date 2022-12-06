@@ -42,7 +42,7 @@ use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
 
-use crate::{CompactionTestOpts, TestToolConfig};
+use crate::CompactionTestOpts;
 
 struct CompactionTestMetrics {
     num_expect_check: u64,
@@ -128,7 +128,6 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         &listen_addr,
         "--backend",
         "mem",
-        "--enable-compaction-deterministic",
         "--config-path",
         &config_path,
     ]);
@@ -293,7 +292,7 @@ async fn start_replay(
     );
 
     let mut metric = CompactionTestMetrics::new();
-    let config: TestToolConfig = load_config(&opts.config_path).unwrap();
+    let config = load_config(&opts.config_path);
     tracing::info!(
         "Starting replay with config {:?} and opts {:?}",
         config,
@@ -659,6 +658,7 @@ pub async fn create_hummock_store_with_metrics(
         metrics.state_store_metrics.clone(),
         metrics.object_store_metrics.clone(),
         TieredCacheMetricsBuilder::unused(),
+        Arc::new(risingwave_tracing::RwTracingService::disabled()),
     )
     .await?;
 

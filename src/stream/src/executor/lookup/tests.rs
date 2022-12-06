@@ -335,20 +335,13 @@ async fn test_lookup_last_epoch() {
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
-    next_msg(&mut msgs, &mut lookup_executor).await;
 
-    println!("{:#?}", msgs);
-
-    assert_eq!(msgs.len(), 5);
+    assert_eq!(msgs.len(), 4);
     assert_matches!(msgs[0], Message::Barrier(_));
-    assert_matches!(msgs[2], Message::Barrier(_));
-    assert_matches!(msgs[4], Message::Barrier(_));
+    assert_matches!(msgs[1], Message::Barrier(_));
+    assert_matches!(msgs[3], Message::Barrier(_));
 
-    let chunk1 = msgs[1].as_chunk().unwrap();
-    // the arrangement of epoch 0 is not ready yet, should be empty.
-    assert_eq!(chunk1.cardinality(), 0);
-
-    let chunk2 = msgs[3].as_chunk().unwrap();
+    let chunk2 = msgs[2].as_chunk().unwrap();
     let expected_chunk2 = StreamChunk::from_pretty(
         " I I    I I
         - 6 1 2333 6

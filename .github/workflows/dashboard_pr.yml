@@ -12,8 +12,14 @@ jobs:
   dashboard-ui-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - run: git fetch origin $GITHUB_BASE_REF $GITHUB_HEAD_REF
+      - name: Checkout forked repo
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+      - run: |
+          git remote add upstream https://github.com/risingwavelabs/risingwave.git
+          git fetch upstream $GITHUB_BASE_REF
       - uses: actions/setup-node@v2
         with:
           node-version: "18"
@@ -26,10 +32,12 @@ jobs:
           npm install
           npm run gen-proto
 
-          if ! git diff --quiet; then
+          git add -A
+          if ! git diff --quiet --staged; then
+            git reset
             echo "::error::Generated proto files are not up to date."
-            FORK_POINT=$(git merge-base origin/$GITHUB_HEAD_REF origin/$GITHUB_BASE_REF)
-            if ! git diff --quiet $FORK_POINT..origin/$GITHUB_BASE_REF -- ../proto; then
+            FORK_POINT=$(git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF)
+            if ! git diff --quiet $FORK_POINT..upstream/$GITHUB_BASE_REF -- ../proto; then
               echo "::error::Your branch is out-of-date. Please update your branch first and then run 'npm run gen-proto' at dashboard/ and commit the changes."
             else
               echo "::error::Please run 'npm run gen-proto' at dashboard/ and commit the changes."

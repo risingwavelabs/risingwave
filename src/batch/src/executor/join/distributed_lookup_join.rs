@@ -15,9 +15,10 @@
 use std::marker::PhantomData;
 use std::mem::swap;
 
+use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
-use risingwave_common::error::{internal_error, Result};
+use risingwave_common::error::Result;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
@@ -31,7 +32,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::Distribution;
+use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use crate::executor::join::JoinType;
@@ -152,15 +153,12 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .map(|&i| outer_side_data_types[i].clone())
             .collect_vec();
 
+        let lookup_prefix_len: usize =
+            distributed_lookup_join_node.get_lookup_prefix_len() as usize;
+
         let mut inner_side_key_idxs = vec![];
-        for pk in &table_desc.pk {
-            let key_idx = inner_side_column_ids
-                .iter()
-                .position(|&i| table_desc.columns[pk.index as usize].column_id == i)
-                .ok_or_else(|| {
-                    internal_error("Inner side key is not part of its output columns")
-                })?;
-            inner_side_key_idxs.push(key_idx);
+        for inner_side_key in distributed_lookup_join_node.get_inner_side_key() {
+            inner_side_key_idxs.push(*inner_side_key as usize)
         }
 
         let inner_side_key_types = inner_side_key_idxs
@@ -232,6 +230,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             let inner_side_builder = InnerSideExecutorBuilder::new(
                 outer_side_key_types,
                 inner_side_key_types.clone(),
+                lookup_prefix_len,
                 source.epoch(),
                 vec![],
                 table,
@@ -248,6 +247,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 inner_side_key_types,
                 inner_side_key_idxs,
                 null_safe,
+                lookup_prefix_len,
                 chunk_builder: DataChunkBuilder::new(original_schema.data_types(), chunk_size),
                 schema: actual_schema,
                 output_indices,
@@ -269,6 +269,7 @@ struct DistributedLookupJoinExecutorArgs {
     inner_side_key_types: Vec<DataType>,
     inner_side_key_idxs: Vec<usize>,
     null_safe: Vec<bool>,
+    lookup_prefix_len: usize,
     chunk_builder: DataChunkBuilder,
     schema: Schema,
     output_indices: Vec<usize>,
@@ -291,6 +292,7 @@ impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
                 inner_side_key_types: self.inner_side_key_types,
                 inner_side_key_idxs: self.inner_side_key_idxs,
                 null_safe: self.null_safe,
+                lookup_prefix_len: self.lookup_prefix_len,
                 chunk_builder: self.chunk_builder,
                 schema: self.schema,
                 output_indices: self.output_indices,
@@ -310,6 +312,7 @@ impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
 struct InnerSideExecutorBuilder<S: StateStore> {
     outer_side_key_types: Vec<DataType>,
     inner_side_key_types: Vec<DataType>,
+    lookup_prefix_len: usize,
     epoch: u64,
     row_list: Vec<Row>,
     table: StorageTable<S>,
@@ -320,6 +323,7 @@ impl<S: StateStore> InnerSideExecutorBuilder<S> {
     fn new(
         outer_side_key_types: Vec<DataType>,
         inner_side_key_types: Vec<DataType>,
+        lookup_prefix_len: usize,
         epoch: u64,
         row_list: Vec<Row>,
         table: StorageTable<S>,
@@ -328,6 +332,7 @@ impl<S: StateStore> InnerSideExecutorBuilder<S> {
         Self {
             outer_side_key_types,
             inner_side_key_types,
+            lookup_prefix_len,
             epoch,
             row_list,
             table,
@@ -348,8 +353,16 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
 
         for ((datum, outer_type), inner_type) in key_datums
             .into_iter()
-            .zip_eq(self.outer_side_key_types.iter())
-            .zip_eq(self.inner_side_key_types.iter())
+            .zip_eq(
+                self.outer_side_key_types
+                    .iter()
+                    .take(self.lookup_prefix_len),
+            )
+            .zip_eq(
+                self.inner_side_key_types
+                    .iter()
+                    .take(self.lookup_prefix_len),
+            )
         {
             let datum = if inner_type == outer_type {
                 datum
@@ -367,13 +380,26 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         }
 
         let pk_prefix = Row::new(scan_range.eq_conds);
-        let row = self
-            .table
-            .get_row(&pk_prefix, HummockReadEpoch::Committed(self.epoch))
-            .await?;
 
-        if let Some(row) = row {
-            self.row_list.push(row);
+        if self.lookup_prefix_len == self.table.pk_indices().len() {
+            let row = self
+                .table
+                .get_row(&pk_prefix, HummockReadEpoch::Committed(self.epoch))
+                .await?;
+
+            if let Some(row) = row {
+                self.row_list.push(row);
+            }
+        } else {
+            let iter = self
+                .table
+                .batch_iter_with_pk_bounds(HummockReadEpoch::Committed(self.epoch), &pk_prefix, ..)
+                .await?;
+
+            pin_mut!(iter);
+            while let Some(row) = iter.next_row().await? {
+                self.row_list.push(row);
+            }
         }
 
         Ok(())

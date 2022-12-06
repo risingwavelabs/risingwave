@@ -51,10 +51,6 @@ pub struct CompactionTestOpts {
     #[clap(long, default_value = "http://127.0.0.1:5790")]
     pub meta_address: String,
 
-    /// No given `config_path` means to use default config.
-    #[clap(long, default_value = "")]
-    pub config_path: String,
-
     /// The data of this table will be checked after compaction
     #[clap(short, long, default_value = "0")]
     pub table_id: u32,
@@ -70,17 +66,15 @@ pub struct CompactionTestOpts {
     /// The number of rounds to trigger compactions
     #[clap(long, default_value = "5")]
     pub num_trigger_rounds: u32,
-}
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct TestToolConfig {
-    // For connection
-    #[serde(default)]
-    pub server: ServerConfig,
-
-    // Below for Hummock.
-    #[serde(default)]
-    pub storage: StorageConfig,
+    /// Te path of `risingwave.toml` configuration file.
+    ///
+    /// If empty, default configuration values will be used.
+    ///
+    /// Note that internal system parameters should be defined in the configuration file at
+    /// [`risingwave_common::config`] instead of command line arguments.
+    #[clap(long, default_value = "")]
+    pub config_path: String,
 }
 
 use std::future::Future;

@@ -97,10 +97,21 @@ pub(crate) fn gen_create_index_plan(
         .map(to_column_indices)
         .try_collect::<_, Vec<_>, RwError>()?;
 
-    let mut include_columns = include
-        .iter()
-        .map(to_column_indices)
-        .try_collect::<_, Vec<_>, RwError>()?;
+    let mut include_columns = if include.is_empty() {
+        // Create index to include all (non-hidden) columns by default.
+        table
+            .columns()
+            .iter()
+            .enumerate()
+            .filter(|(_, column)| !column.is_hidden)
+            .map(|(x, _)| x)
+            .collect_vec()
+    } else {
+        include
+            .iter()
+            .map(to_column_indices)
+            .try_collect::<_, Vec<_>, RwError>()?
+    };
 
     let distributed_by_columns = distributed_by
         .iter()
@@ -165,6 +176,11 @@ pub(crate) fn gen_create_index_plan(
         index_item: build_index_item(index_table.table_desc().into(), table.name(), table_desc)
             .iter()
             .map(InputRef::to_expr_proto)
+            .collect_vec(),
+        original_columns: index_columns
+            .iter()
+            .chain(include_columns.iter())
+            .map(|index| *index as i32)
             .collect_vec(),
     };
 

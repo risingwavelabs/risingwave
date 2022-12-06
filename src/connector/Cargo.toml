@@ -37,9 +37,8 @@ humantime = "2.1"
 hyper = "0.14"
 itertools = "0.10"
 maplit = "1.0.2"
-memcomparable = { path = "../utils/memcomparable" }
 mysql_async = "0.31"
-nexmark = { path = "../utils/nexmark", features = ["serde"] }
+nexmark = { version = "0.1", features = ["serde"] }
 num-traits = "0.2"
 paste = "1"
 prost = "0.11"

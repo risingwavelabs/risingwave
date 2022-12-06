@@ -13,11 +13,12 @@
 // limitations under the License.
 
 pub mod pg_am;
+pub mod pg_attribute;
 pub mod pg_cast;
 pub mod pg_class;
 pub mod pg_collation;
 pub mod pg_index;
-pub mod pg_matviews_info;
+pub mod pg_matviews;
 pub mod pg_namespace;
 pub mod pg_opclass;
 pub mod pg_operator;
@@ -29,17 +30,19 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 pub use pg_am::*;
+pub use pg_attribute::*;
 pub use pg_cast::*;
 pub use pg_class::*;
 pub use pg_collation::*;
 pub use pg_index::*;
-pub use pg_matviews_info::*;
+pub use pg_matviews::*;
 pub use pg_namespace::*;
 pub use pg_opclass::*;
 pub use pg_operator::*;
 pub use pg_type::*;
 pub use pg_user::*;
 pub use pg_views::*;
+use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
 use risingwave_common::row::Row;
 use risingwave_common::types::ScalarImpl;
@@ -140,13 +143,11 @@ impl SysCatalogReaderImpl {
             .map(|schema| {
                 Row::new(vec![
                     Some(ScalarImpl::Int32(schema.id as i32)),
-                    Some(ScalarImpl::Utf8(schema.name.clone())),
+                    Some(ScalarImpl::Utf8(schema.name.clone().into())),
                     Some(ScalarImpl::Int32(schema.owner as i32)),
-                    Some(ScalarImpl::Utf8(get_acl_items(
-                        &Object::SchemaId(schema.id),
-                        &users,
-                        username_map,
-                    ))),
+                    Some(ScalarImpl::Utf8(
+                        get_acl_items(&Object::SchemaId(schema.id), &users, username_map).into(),
+                    )),
                 ])
             })
             .collect_vec())
@@ -160,11 +161,11 @@ impl SysCatalogReaderImpl {
             .map(|user| {
                 Row::new(vec![
                     Some(ScalarImpl::Int32(user.id as i32)),
-                    Some(ScalarImpl::Utf8(user.name.clone())),
+                    Some(ScalarImpl::Utf8(user.name.clone().into())),
                     Some(ScalarImpl::Bool(user.can_create_db)),
                     Some(ScalarImpl::Bool(user.is_super)),
                     // compatible with PG.
-                    Some(ScalarImpl::Utf8("********".to_string())),
+                    Some(ScalarImpl::Utf8("********".into())),
                 ])
             })
             .collect_vec())
@@ -203,10 +204,10 @@ impl SysCatalogReaderImpl {
                     .map(|table| {
                         Row::new(vec![
                             Some(ScalarImpl::Int32(table.id.table_id() as i32)),
-                            Some(ScalarImpl::Utf8(table.name.clone())),
+                            Some(ScalarImpl::Utf8(table.name.clone().into())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(table.owner as i32)),
-                            Some(ScalarImpl::Utf8("r".to_string())),
+                            Some(ScalarImpl::Utf8("r".into())),
                         ])
                     })
                     .collect_vec();
@@ -216,10 +217,10 @@ impl SysCatalogReaderImpl {
                     .map(|mv| {
                         Row::new(vec![
                             Some(ScalarImpl::Int32(mv.id.table_id() as i32)),
-                            Some(ScalarImpl::Utf8(mv.name.clone())),
+                            Some(ScalarImpl::Utf8(mv.name.clone().into())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(mv.owner as i32)),
-                            Some(ScalarImpl::Utf8("m".to_string())),
+                            Some(ScalarImpl::Utf8("m".into())),
                         ])
                     })
                     .collect_vec();
@@ -229,10 +230,10 @@ impl SysCatalogReaderImpl {
                     .map(|index| {
                         Row::new(vec![
                             Some(ScalarImpl::Int32(index.index_table.id.table_id as i32)),
-                            Some(ScalarImpl::Utf8(index.name.clone())),
+                            Some(ScalarImpl::Utf8(index.name.clone().into())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(index.index_table.owner as i32)),
-                            Some(ScalarImpl::Utf8("i".to_string())),
+                            Some(ScalarImpl::Utf8("i".into())),
                         ])
                     })
                     .collect_vec();
@@ -242,10 +243,10 @@ impl SysCatalogReaderImpl {
                     .map(|source| {
                         Row::new(vec![
                             Some(ScalarImpl::Int32(source.id as i32)),
-                            Some(ScalarImpl::Utf8(source.name.clone())),
+                            Some(ScalarImpl::Utf8(source.name.clone().into())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(source.owner as i32)),
-                            Some(ScalarImpl::Utf8("x".to_string())),
+                            Some(ScalarImpl::Utf8("x".into())),
                         ])
                     })
                     .collect_vec();
@@ -255,10 +256,10 @@ impl SysCatalogReaderImpl {
                     .map(|table| {
                         Row::new(vec![
                             Some(ScalarImpl::Int32(table.id.table_id() as i32)),
-                            Some(ScalarImpl::Utf8(table.name.clone())),
+                            Some(ScalarImpl::Utf8(table.name.clone().into())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(table.owner as i32)),
-                            Some(ScalarImpl::Utf8("r".to_string())),
+                            Some(ScalarImpl::Utf8("r".into())),
                         ])
                     })
                     .collect_vec();
@@ -268,10 +269,10 @@ impl SysCatalogReaderImpl {
                     .map(|view| {
                         Row::new(vec![
                             Some(ScalarImpl::Int32(view.id as i32)),
-                            Some(ScalarImpl::Utf8(view.name().to_string())),
+                            Some(ScalarImpl::Utf8(view.name().into())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(view.owner as i32)),
-                            Some(ScalarImpl::Utf8("v".to_string())),
+                            Some(ScalarImpl::Utf8("v".into())),
                         ])
                     })
                     .collect_vec();
@@ -297,7 +298,14 @@ impl SysCatalogReaderImpl {
                     Row::new(vec![
                         Some(ScalarImpl::Int32(index.id.index_id() as i32)),
                         Some(ScalarImpl::Int32(index.primary_table.id.table_id() as i32)),
-                        Some(ScalarImpl::Int16(index.index_item.len() as i16)),
+                        Some(ScalarImpl::Int16(index.original_columns.len() as i16)),
+                        Some(ScalarImpl::List(ListValue::new(
+                            index
+                                .original_columns
+                                .iter()
+                                .map(|index| Some(ScalarImpl::Int16(index.get_id() as i16 + 1)))
+                                .collect_vec(),
+                        ))),
                     ])
                 })
             })
@@ -330,12 +338,12 @@ impl SysCatalogReaderImpl {
                 .for_each(|t| {
                     if let Some(fragments) = table_fragments.get(&t.id.table_id) {
                         rows.push(Row::new(vec![
-                            Some(ScalarImpl::Int32(t.id.table_id as i32)),
-                            Some(ScalarImpl::Utf8(t.name.clone())),
-                            Some(ScalarImpl::Utf8(schema.clone())),
+                            Some(ScalarImpl::Utf8(schema.clone().into())),
+                            Some(ScalarImpl::Utf8(t.name.clone().into())),
                             Some(ScalarImpl::Int32(t.owner as i32)),
-                            Some(ScalarImpl::Utf8(json!(fragments).to_string())),
-                            Some(ScalarImpl::Utf8(t.definition.clone())),
+                            Some(ScalarImpl::Utf8(t.definition.clone().into())),
+                            Some(ScalarImpl::Int32(t.id.table_id as i32)),
+                            Some(ScalarImpl::Utf8(json!(fragments).to_string().into())),
                         ]));
                     }
                 });
@@ -356,15 +364,61 @@ impl SysCatalogReaderImpl {
             .flat_map(|schema| {
                 schema.iter_view().map(|view| {
                     Row::new(vec![
-                        Some(ScalarImpl::Utf8(schema.name())),
-                        Some(ScalarImpl::Utf8(view.name().to_string())),
+                        Some(ScalarImpl::Utf8(schema.name().into())),
+                        Some(ScalarImpl::Utf8(view.name().into())),
                         Some(ScalarImpl::Utf8(
-                            user_info_reader.get_user_name_by_id(view.owner).unwrap(),
+                            user_info_reader
+                                .get_user_name_by_id(view.owner)
+                                .unwrap()
+                                .into(),
                         )),
                         // TODO(zehua): may be not same as postgresql's "definition" column.
-                        Some(ScalarImpl::Utf8(view.sql.clone())),
+                        Some(ScalarImpl::Utf8(view.sql.clone().into())),
                     ])
                 })
+            })
+            .collect_vec())
+    }
+
+    pub(super) fn read_pg_attribute(&self) -> Result<Vec<Row>> {
+        let reader = self.catalog_reader.read_guard();
+        let schemas = reader.iter_schemas(&self.auth_context.database)?;
+
+        Ok(schemas
+            .flat_map(|schema| {
+                let view_rows = schema.iter_view().flat_map(|view| {
+                    view.columns.iter().enumerate().map(|(index, column)| {
+                        Row::new(vec![
+                            Some(ScalarImpl::Int32(view.id as i32)),
+                            Some(ScalarImpl::Utf8(column.name.clone().into())),
+                            Some(ScalarImpl::Int32(column.data_type().to_oid())),
+                            Some(ScalarImpl::Int16(column.data_type().type_len())),
+                            Some(ScalarImpl::Int16(index as i16 + 1)),
+                            Some(ScalarImpl::Bool(false)),
+                        ])
+                    })
+                });
+
+                schema
+                    .iter_valid_table()
+                    .flat_map(|table| {
+                        table
+                            .columns()
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, column)| !column.is_hidden())
+                            .map(|(index, column)| {
+                                Row::new(vec![
+                                    Some(ScalarImpl::Int32(table.id.table_id() as i32)),
+                                    Some(ScalarImpl::Utf8(column.name().into())),
+                                    Some(ScalarImpl::Int32(column.data_type().to_oid())),
+                                    Some(ScalarImpl::Int16(column.data_type().type_len())),
+                                    Some(ScalarImpl::Int16(index as i16 + 1)),
+                                    Some(ScalarImpl::Bool(false)),
+                                ])
+                            })
+                    })
+                    .chain(view_rows)
             })
             .collect_vec())
     }

@@ -14,6 +14,7 @@
 
 use std::time::Duration;
 
+use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::subscribe_response::Info;
@@ -90,11 +91,13 @@ where
         }
     }
 
-    async fn wait_init_notification(&mut self) {
+    async fn wait_init_notification(&mut self) -> Result<()> {
         let mut notification_vec = Vec::new();
         let init_notification = loop {
             // notification before init notification must be received successfully.
-            let notification = self.rx.message().await.unwrap().unwrap();
+            let Ok(Some(notification)) = self.rx.message().await else {
+                bail!("receives meta's notification err");
+            };
             if !matches!(notification.info.as_ref().unwrap(), &Info::Snapshot(_)) {
                 notification_vec.push(notification);
             } else {
@@ -136,12 +139,16 @@ where
         for notification in notification_vec {
             self.observer_states.handle_notification(notification);
         }
+
+        Ok(())
     }
 
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and
     /// call the `handle_initialization_notification` and `handle_notification` to update node data.
     pub async fn start(mut self) -> JoinHandle<()> {
-        self.wait_init_notification().await;
+        if matches!(self.wait_init_notification().await, Err(_)) {
+            self.re_subscribe().await;
+        }
 
         tokio::spawn(async move {
             loop {
@@ -174,8 +181,9 @@ where
                 Ok(rx) => {
                     tracing::debug!("re-subscribe success");
                     self.rx = rx;
-                    self.wait_init_notification().await;
-                    break;
+                    if !matches!(self.wait_init_notification().await, Err(_)) {
+                        break;
+                    }
                 }
                 Err(_) => {
                     tokio::time::sleep(RE_SUBSCRIBE_RETRY_INTERVAL).await;

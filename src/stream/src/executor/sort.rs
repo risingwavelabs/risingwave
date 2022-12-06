@@ -122,66 +122,59 @@ impl<S: StateStore> SortExecutor<S> {
         #[for_await]
         for msg in input {
             match msg? {
-                Message::Watermark(watermark) => {
-                    let Watermark {
-                        col_idx,
-                        val,
-                        data_type: _,
-                    } = &watermark;
-
-                    // Sort executor only sends a stream chunk to downstream when
-                    // `self.sort_column_index` matches the watermark's column index. Otherwise, it
-                    // just forwards the watermark message to downstream without sending a stream
-                    // chunk message.
-                    if *col_idx == self.sort_column_index {
-                        let watermark_value = val.clone();
-
-                        // Find out the records to send to downstream.
-                        while let Some(entry) = self.buffer.first_entry() {
-                            // Only when a record's timestamp is prior to the watermark should it be
-                            // sent to downstream.
-                            if entry.key().0 < watermark_value {
-                                // Remove the record from memory.
-                                let (row, persisted) = entry.remove();
-                                // Remove the record from state store. It is possible that a record
-                                // is not present in state store because this watermark arrives
-                                // before a barrier since last watermark.
-                                // TODO: Use range delete instead.
-                                if persisted {
-                                    self.state_table.delete(row.clone());
-                                }
-                                // Add the record to stream chunk data. Note that we retrieve the
-                                // record from a BTreeMap, so data in this chunk should be ordered
-                                // by timestamp and pk.
-                                if let Some(data_chunk) = data_chunk_builder.append_one_row(row) {
-                                    // When the chunk size reaches its maximum, we construct a
-                                    // stream chunk and send it to downstream.
-                                    let ops = vec![Op::Insert; data_chunk.capacity()];
-                                    let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-                                    yield Message::Chunk(stream_chunk);
-                                }
-                            } else {
-                                // We have collected all data below watermark.
-                                break;
+                // Sort executor only sends a stream chunk to downstream when
+                // `self.sort_column_index` matches the watermark's column index.
+                Message::Watermark(watermark @ Watermark { col_idx, .. })
+                    if col_idx == self.sort_column_index =>
+                {
+                    let watermark_value = watermark.val.clone();
+                    // Find out the records to send to downstream.
+                    while let Some(entry) = self.buffer.first_entry() {
+                        // Only when a record's timestamp is prior to the watermark should it be
+                        // sent to downstream.
+                        if entry.key().0 < watermark_value {
+                            // Remove the record from memory.
+                            let (row, persisted) = entry.remove();
+                            // Remove the record from state store. It is possible that a record
+                            // is not present in state store because this watermark arrives
+                            // before a barrier since last watermark.
+                            // TODO: Use range delete instead.
+                            if persisted {
+                                self.state_table.delete(&row);
                             }
+                            // Add the record to stream chunk data. Note that we retrieve the
+                            // record from a BTreeMap, so data in this chunk should be ordered
+                            // by timestamp and pk.
+                            if let Some(data_chunk) = data_chunk_builder.append_one_row(row) {
+                                // When the chunk size reaches its maximum, we construct a
+                                // stream chunk and send it to downstream.
+                                let ops = vec![Op::Insert; data_chunk.capacity()];
+                                let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+                                yield Message::Chunk(stream_chunk);
+                            }
+                        } else {
+                            // We have collected all data below watermark.
+                            break;
                         }
-
-                        // Construct and send a stream chunk message. Rows in this message are
-                        // always ordered by timestamp.
-                        if let Some(data_chunk) = data_chunk_builder.consume_all() {
-                            let ops = vec![Op::Insert; data_chunk.capacity()];
-                            let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-                            yield Message::Chunk(stream_chunk);
-                        }
-
-                        // Update previous watermark, which is used for range delete.
-                        self._prev_watermark = Some(val.clone());
                     }
+
+                    // Construct and send a stream chunk message. Rows in this message are
+                    // always ordered by timestamp.
+                    if let Some(data_chunk) = data_chunk_builder.consume_all() {
+                        let ops = vec![Op::Insert; data_chunk.capacity()];
+                        let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+                        yield Message::Chunk(stream_chunk);
+                    }
+
+                    // Update previous watermark, which is used for range delete.
+                    self._prev_watermark = Some(watermark_value);
 
                     // Forward the watermark message.
                     yield Message::Watermark(watermark);
                 }
-
+                // Otherwise, it just forwards the watermark message to downstream without sending a
+                // stream chunk message.
+                Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     for (op, row_ref) in chunk.rows() {
                         match op {
@@ -206,7 +199,7 @@ impl<S: StateStore> SortExecutor<S> {
                         // buffer that have not been persisted before to state store.
                         for (row, persisted) in self.buffer.values_mut() {
                             if !*persisted {
-                                self.state_table.insert(row.clone());
+                                self.state_table.insert(&*row);
                                 // Update `persisted` so if the next barrier arrives before the
                                 // next watermark, this record will not be persisted redundantly.
                                 *persisted = true;
@@ -265,11 +258,7 @@ impl<S: StateStore> SortExecutor<S> {
             curr_vnode_bitmap.to_owned()
         };
         let mut values_per_vnode = Vec::new();
-        for (owned_vnode, _) in newly_owned_vnodes
-            .iter()
-            .enumerate()
-            .filter(|(_, is_set)| *is_set)
-        {
+        for owned_vnode in newly_owned_vnodes.ones() {
             let value_iter = self
                 .state_table
                 .iter_with_pk_range(

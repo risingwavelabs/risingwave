@@ -508,6 +508,7 @@ async fn test_reload_storage() {
             worker_node.clone(),
         ),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(risingwave_tracing::RwTracingService::disabled()),
     )
     .await
     .unwrap();
