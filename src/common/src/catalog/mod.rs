@@ -28,7 +28,7 @@ use parse_display::Display;
 pub use physical_table::*;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
-pub use crate::config::constant::hummock;
+pub use crate::constants::hummock;
 use crate::error::Result;
 use crate::row::Row;
 
