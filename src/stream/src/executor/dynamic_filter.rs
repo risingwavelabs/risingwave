@@ -298,7 +298,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             &self.schema.data_types(),
             vec![],
             left_to_output,
-        )?;
+        );
 
         #[for_await]
         for msg in aligned_stream {
@@ -374,11 +374,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                                 // All rows have a single identity at this point
                                 if is_insert { Op::Insert } else { Op::Delete },
                                 &row_deserializer.deserialize(row.row.as_ref())?,
-                            )? {
+                            ) {
                                 yield Message::Chunk(chunk);
                             }
                         }
-                        if let Some(chunk) = stream_chunk_builder.take()? {
+                        if let Some(chunk) = stream_chunk_builder.take() {
                             yield Message::Chunk(chunk);
                         }
                     }
@@ -394,7 +394,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                                 self.right_table.delete(old_row);
                             }
                             if let Some(row) = &current_epoch_row {
-                                self.right_table.insert(row.clone());
+                                self.right_table.insert(row);
                             }
                             self.right_table.commit(barrier.epoch).await?;
                         } else {
