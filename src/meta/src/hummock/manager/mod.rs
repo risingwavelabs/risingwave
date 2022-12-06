@@ -2259,18 +2259,15 @@ fn gen_version_delta<'a>(
                     .iter()
                     .filter_map(|table_info| {
                         let id = table_info.get_id();
-                        if compacting_ssts.contains(&id) {
-                            None
-                        } else {
-                            if table_info
+                        if compacting_ssts.contains(&id)
+                            || table_info
                                 .get_table_ids()
                                 .iter()
                                 .any(|table_id| all_state_tables.contains(table_id))
-                            {
-                                None
-                            } else {
-                                Some(id)
-                            }
+                        {
+                            None
+                        } else {
+                            Some(id)
                         }
                     })
                     .collect_vec();
