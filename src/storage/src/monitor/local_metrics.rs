@@ -36,9 +36,9 @@ pub struct StoreLocalStatistic {
     pub bloom_filter_check_counts: u64,
     pub get_shared_buffer_hit_counts: u64,
 
-    #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
+    #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
     reported: AtomicBool,
-    #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
+    #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
     added: AtomicBool,
 }
 
@@ -62,7 +62,7 @@ impl StoreLocalStatistic {
         self.total_key_count += other.total_key_count;
         self.get_shared_buffer_hit_counts += other.get_shared_buffer_hit_counts;
 
-        #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
+        #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
         if other.added.fetch_or(true, Ordering::Relaxed) || other.reported.load(Ordering::Relaxed) {
             tracing::error!("double added\n{:#?}", other);
         }
