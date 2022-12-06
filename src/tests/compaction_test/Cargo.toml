@@ -14,6 +14,7 @@ async-trait = "0.1"
 bytes = "1"
 clap = { version = "3", features = ["derive"] }
 itertools = "0.10"
+lazy_static = "1.4"
 parking_lot = "0.12"
 rand = "0.8"
 risingwave_common = { path = "../../common" }

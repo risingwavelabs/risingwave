@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
     SstIdRange,
 };
+use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
@@ -40,7 +41,7 @@ use crate::storage::MemStore;
 pub struct MockHummockMetaClient {
     hummock_manager: Arc<HummockManager<MemStore>>,
     context_id: HummockContextId,
-    epoch: AtomicU64,
+    compact_context_id: AtomicU32,
 }
 
 impl MockHummockMetaClient {
@@ -51,7 +52,7 @@ impl MockHummockMetaClient {
         MockHummockMetaClient {
             hummock_manager,
             context_id,
-            epoch: AtomicU64::new(0),
+            compact_context_id: AtomicU32::new(context_id),
         }
     }
 
@@ -129,7 +130,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     ) -> Result<()> {
         self.hummock_manager
             .report_compact_task(
-                self.context_id,
+                self.compact_context_id.load(Ordering::Acquire),
                 &mut compact_task,
                 Some(to_prost_table_stats_map(table_stats_change)),
             )
@@ -150,9 +151,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         self.hummock_manager
             .commit_epoch(epoch, sstables, sst_to_worker)
             .await
-            .map_err(mock_err)?;
-        self.epoch.fetch_max(epoch, Ordering::Relaxed);
-        Ok(())
+            .map_err(mock_err)
     }
 
     async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
@@ -170,6 +169,26 @@ impl HummockMetaClient for MockHummockMetaClient {
         self.hummock_manager
             .init_compaction_scheduler(sched_channel.clone(), None);
 
+        let worker_node = self
+            .hummock_manager
+            .cluster_manager()
+            .add_worker_node(
+                WorkerType::Compactor,
+                HostAddress {
+                    host: "compactor".to_string(),
+                    port: 0,
+                },
+                1,
+            )
+            .await
+            .unwrap();
+        let context_id = worker_node.id;
+        let _ = self
+            .hummock_manager
+            .compactor_manager_ref_for_test()
+            .add_compactor(context_id, 8);
+        self.compact_context_id.store(context_id, Ordering::Release);
+
         let hummock_manager_compact = self.hummock_manager.clone();
         let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel();
         let _ = tokio::spawn(async move {
@@ -180,6 +199,10 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .await
                     .unwrap()
                 {
+                    hummock_manager_compact
+                        .assign_compaction_task(&task, context_id)
+                        .await
+                        .unwrap();
                     let resp = SubscribeCompactTasksResponse {
                         task: Some(Task::CompactTask(task)),
                     };

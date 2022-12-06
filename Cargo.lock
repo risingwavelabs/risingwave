@@ -5203,6 +5203,7 @@ dependencies = [
  "bytes",
  "clap 3.2.23",
  "itertools",
+ "lazy_static",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
