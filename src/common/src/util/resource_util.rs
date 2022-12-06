@@ -48,7 +48,7 @@ pub mod resource_util {
     }
 
     // returns a cgroup version if it exists, else returns None.
-    // Checks for the existance of the root hierarchy directory.
+    // Checks for the existence of the root hierarchy directory.
     pub fn get_cgroup_version() -> Option<CgroupVersion>{
         // check if cgroup exists.
         if  !Path::new(DEFAULT_CGROUP_ROOT_HIERARCYHY).is_dir(){
@@ -67,7 +67,7 @@ pub mod resource_util {
         Path::new(DEFAULT_DOCKER_ENV_PATH).exists()
     }
 
-    // parses the filepath and checks for existance of controller_name in file.
+    // parses the filepath and checks for existence of controller_name in file.
     fn parse_controller_enable_file_for_cgroup_v2(file_path: &str, controller_name: &str) -> bool{
         match fs::read_to_string(file_path){
             Ok(controller_string) => {
@@ -85,7 +85,7 @@ pub mod resource_util {
     }
 
     // Given a certain controller, check if it is enabled
-    // For cgroup_v1, existance of directory with controller name is checked in cgroup default root hierarchy. e.g if directory "/sys/fs/cgroup"/cpu" exists then CPU controller is enabled.
+    // For cgroup_v1, existence of directory with controller name is checked in cgroup default root hierarchy. e.g if directory "/sys/fs/cgroup"/cpu" exists then CPU controller is enabled.
     // For cgroup_v2, check the controller list path for the controller name.
     fn is_controller_activated(controller_type: Controller) -> bool {
         match get_cgroup_version(){
@@ -265,7 +265,7 @@ pub mod resource_util {
 
         // Helper function to parse a cpu limit file path for cgroup_v2.
         // returns the CPU limit when cgroup_V2 is utilised.
-        // inteface file should have the format as such -> "{cpu_quota} {cpu_period}". e.g "max 1000000".
+        // interface file should have the format as such -> "{cpu_quota} {cpu_period}". e.g "max 1000000".
         pub fn read_cgroup_v2_cpu_limit_from_file_path(file_path: &str) -> f32{
             let cpu_quota: usize;
             let cpu_period: usize;
