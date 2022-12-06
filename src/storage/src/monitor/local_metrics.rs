@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
+#[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -147,18 +147,18 @@ impl StoreLocalStatistic {
                 .inc_by(self.total_key_count);
         }
 
-        #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
+        #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
         if self.reported.fetch_or(true, Ordering::Relaxed) || self.added.load(Ordering::Relaxed) {
             tracing::error!("double reported\n{:#?}", self);
         }
     }
 
     pub fn ignore(&self) {
-        #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
+        #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
         self.reported.store(true, Ordering::Relaxed);
     }
 
-    #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
+    #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
     fn need_report(&self) -> bool {
         self.cache_data_block_miss != 0
             || self.cache_data_block_total != 0
@@ -173,7 +173,7 @@ impl StoreLocalStatistic {
     }
 }
 
-#[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
+#[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
 impl Drop for StoreLocalStatistic {
     fn drop(&mut self) {
         if !self.reported.load(Ordering::Relaxed)

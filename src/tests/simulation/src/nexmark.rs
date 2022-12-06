@@ -354,4 +354,68 @@ DROP MATERIALIZED VIEW nexmark_q9;
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
+
+    pub mod q101 {
+        //! A self-made query that covers outer join.
+        //!
+        //! Monitor ongoing auctions and track the current highest bid for each one in real-time. If
+        //! the auction has no bids, the highest bid will be NULL.
+
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q101
+AS
+SELECT
+    a.id AS auction_id,
+    a.item_name AS auction_item_name,
+    b.max_price AS current_highest_bid
+FROM auction a
+LEFT OUTER JOIN (
+    SELECT
+        b1.auction,
+        MAX(b1.price) max_price
+    FROM bid b1
+    GROUP BY b1.auction
+) b ON a.id = b.auction;
+"#;
+        pub const SELECT: &str = r#"
+SELECT * FROM nexmark_q101 ORDER BY auction_id;
+"#;
+        pub const DROP: &str = r#"
+DROP MATERIALIZED VIEW nexmark_q101;
+"#;
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q102 {
+        //! A self-made query that covers dynamic filter.
+        //!
+        //! Show the auctions whose count of bids is greater than the overall average count of bids
+        //! per auction.
+
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q102
+AS
+SELECT
+    a.id AS auction_id,
+    a.item_name AS auction_item_name,
+    COUNT(b.auction) AS bid_count
+FROM auction a
+JOIN bid b ON a.id = b.auction
+GROUP BY a.id, a.item_name
+HAVING COUNT(b.auction) >= (
+    SELECT COUNT(*) / COUNT(DISTINCT auction) FROM bid
+)
+"#;
+        pub const SELECT: &str = r#"
+SELECT * FROM nexmark_q102 ORDER BY auction_id;
+"#;
+        pub const DROP: &str = r#"
+DROP MATERIALIZED VIEW nexmark_q102;
+"#;
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
 }

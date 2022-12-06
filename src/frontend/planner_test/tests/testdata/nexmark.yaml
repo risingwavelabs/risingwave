@@ -1099,3 +1099,79 @@
             BatchPlanNode
 
      Table 4294967294 { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7] }
+- id: nexmark_q101
+  before:
+  - create_tables
+  sql: |
+    -- A self-made query that covers outer join.
+    --
+    -- Monitor ongoing auctions and track the current highest bid for each one in real-time. If
+    -- the auction has no bids, the highest bid will be NULL.
+    SELECT
+        a.id AS auction_id,
+        a.item_name AS auction_item_name,
+        b.max_price AS current_highest_bid
+    FROM auction a
+    LEFT OUTER JOIN (
+        SELECT
+            b1.auction,
+            MAX(b1.price) max_price
+        FROM bid b1
+        GROUP BY b1.auction
+    ) b ON a.id = b.auction;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32), SplitPart(bid.url, '/':Varchar, 5:Int32), SplitPart(bid.url, '/':Varchar, 6:Int32)] }
+      └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id(hidden)], pk_columns: [bid._row_id] }
+    └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32), SplitPart(bid.url, '/':Varchar, 5:Int32), SplitPart(bid.url, '/':Varchar, 6:Int32), bid._row_id] }
+      └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+  stream_dist_plan: |
+    Fragment 0
+      StreamMaterialize { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id(hidden)], pk_columns: [bid._row_id] }
+          materialized table: 4294967294
+        StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32), SplitPart(bid.url, '/':Varchar, 5:Int32), SplitPart(bid.url, '/':Varchar, 6:Int32), bid._row_id] }
+          Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+            Upstream
+            BatchPlanNode
+
+     Table 4294967294 { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7] }
+- id: nexmark_q102
+  before:
+  - create_tables
+  sql: |
+    -- A self-made query that covers dynamic filter.
+    --
+    -- Show the auctions whose count of bids is greater than the overall average count of bids
+    -- per auction.
+    CREATE MATERIALIZED VIEW nexmark_q102
+    AS
+    SELECT
+        a.id AS auction_id,
+        a.item_name AS auction_item_name,
+        COUNT(b.auction) AS bid_count
+    FROM auction a
+    JOIN bid b ON a.id = b.auction
+    GROUP BY a.id, a.item_name
+    HAVING COUNT(b.auction) >= (
+        SELECT COUNT(*) / COUNT(DISTINCT auction) FROM bid
+    )
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32), SplitPart(bid.url, '/':Varchar, 5:Int32), SplitPart(bid.url, '/':Varchar, 6:Int32)] }
+      └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id(hidden)], pk_columns: [bid._row_id] }
+    └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32), SplitPart(bid.url, '/':Varchar, 5:Int32), SplitPart(bid.url, '/':Varchar, 6:Int32), bid._row_id] }
+      └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+  stream_dist_plan: |
+    Fragment 0
+      StreamMaterialize { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id(hidden)], pk_columns: [bid._row_id] }
+          materialized table: 4294967294
+        StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32), SplitPart(bid.url, '/':Varchar, 5:Int32), SplitPart(bid.url, '/':Varchar, 6:Int32), bid._row_id] }
+          Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+            Upstream
+            BatchPlanNode
+
+     Table 4294967294 { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7] }

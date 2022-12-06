@@ -159,3 +159,7 @@ test!(q7);
 test!(q8);
 test!(q9);
 // TODO: extended queries from q10
+
+// Self made queries.
+test!(q101);
+test!(q102);
