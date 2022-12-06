@@ -173,7 +173,7 @@ impl StreamChunkBuilder {
     #[must_use]
     pub fn take(&mut self) -> Option<StreamChunk> {
         if self.size == 0 {
-            // FIXME: do not output empty chunk.
+            return None;
         }
 
         self.size = 0;
