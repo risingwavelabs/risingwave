@@ -9,7 +9,7 @@ source ci/scripts/common.env.sh
 STABLE_VERSION=e31eb0bf6e4f708ceadce846538fc6bd55978c59
 
 echo "--- Build Java connector node"
-git clone --depth 1 https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
+git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
 cd risingwave-connector-node
 # checkout a stable version
 git checkout $STABLE_VERSION
