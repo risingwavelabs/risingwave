@@ -5,7 +5,7 @@
 # description: Test multi column reference
 # group: [select]
 
-# **(NOTE): the description might be wrong**
+# **(NOTE): the description might be wrong.** it is copied from duckdb.
 # Duckdb has different syntax and grammer with postgresql, so some adaption has been applied on the cases. 
 
 # column names can have an arbitrary amount of dots
