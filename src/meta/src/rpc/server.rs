@@ -94,7 +94,7 @@ pub async fn rpc_serve(
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
-) -> MetaResult<(JoinHandle<()>, Sender<()>)> {
+) -> MetaResult<Sender<()>> {
     match meta_store_backend {
         MetaStoreBackend::Etcd {
             endpoints,
@@ -302,7 +302,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
-) -> MetaResult<(JoinHandle<()>, Sender<()>)> {
+) -> MetaResult<Sender<()>> {
     // Initialize managers.
     let (info, lease_handle, lease_shutdown) = register_leader_for_meta(
         address_info.addr.clone(),
@@ -511,23 +511,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
 
-    let (idle_send, mut idle_recv) = tokio::sync::oneshot::channel();
+    // TODO: Do we still need this?
+    let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
     sub_tasks.push(
         IdleManager::start_idle_checker(env.idle_manager_ref(), Duration::from_secs(30), idle_send)
             .await,
     );
 
-    let shutdown_all = async move {
-        for (join_handle, shutdown_sender) in sub_tasks {
-            if let Err(_err) = shutdown_sender.send(()) {
-                // Maybe it is already shut down
-                continue;
-            }
-            if let Err(err) = join_handle.await {
-                tracing::warn!("Failed to join shutdown: {:?}", err);
-            }
-        }
-    };
+    let (svc_shutdown_tx, svc_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     // Start services.
     tokio::spawn(async move {
@@ -542,27 +533,18 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(UserServiceServer::new(user_srv))
             .add_service(ScaleServiceServer::new(scale_srv))
             .add_service(HealthServer::new(health_srv))
-            .serve(address_info.listen_addr)
+            .serve_with_shutdown(address_info.listen_addr, async move {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {},
+                    _ = svc_shutdown_rx => {},
+                    _ = idle_recv => {},
+                }
+            })
             .await
             .unwrap();
     });
 
-    // TODO: Use tonic's serve_with_shutdown for a graceful shutdown. Now it does not work,
-    // as the graceful shutdown waits all connections to disconnect in order to finish the stop.
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
-    let join_handle = tokio::spawn(async move {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {},
-            _ = &mut shutdown_recv => {
-                shutdown_all.await;
-            },
-            _ = &mut idle_recv => {
-                shutdown_all.await;
-            },
-        }
-    });
-
-    Ok((join_handle, shutdown_send))
+    Ok(svc_shutdown_tx)
 }
 
 #[cfg(test)]
@@ -578,7 +560,7 @@ mod tests {
             ..Default::default()
         };
         let meta_store = Arc::new(MemStore::default());
-        let (handle, closer) = rpc_serve_with_store(
+        let closer = rpc_serve_with_store(
             meta_store.clone(),
             info,
             Duration::from_secs(10),
@@ -602,7 +584,6 @@ mod tests {
         .await;
         assert!(ret.is_err());
         closer.send(()).unwrap();
-        handle.await.unwrap();
         sleep(Duration::from_secs(3)).await;
         rpc_serve_with_store(
             meta_store.clone(),
