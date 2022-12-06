@@ -22,7 +22,10 @@ In the second mode, it will test the entire query handling end-to-end. We provid
 ```sh
 cargo build # Ensure CLI tool is up to date
 ./risedev d # Start cluster
+# Run sqlsmith
 ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
+# Or run sqlsmith with logs
+RUST_LOG=info ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
 ```
 
 Additionally, in some cases where you may want to debug whether we have defined some function/operator incorrectly,
