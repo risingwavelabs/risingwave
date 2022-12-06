@@ -12,16 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
-use std::io::sink;
 use std::net::SocketAddr;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::sync::Arc;
 use std::time::Duration;
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
-use futures::TryFutureExt;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
@@ -413,7 +408,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     // print current leader/follower status of this node + fencing mechanism
     tokio::spawn(async move {
-        let span = tracing::span!(tracing::Level::INFO, "node status");
+        let span = tracing::span!(tracing::Level::INFO, "node_status");
         let _enter = span.enter();
         let mut was_leader = false;
         loop {
@@ -455,7 +450,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     // Remove the interceptor pattern again
 
     // TODO:
-    // we only can define leader services when they are needed? Otherwise they already do things
+    // we only can define leader services when they are needed. Otherwise they already do things
 
     tokio::spawn(async move {
         let span = tracing::span!(tracing::Level::INFO, "services");
@@ -528,7 +523,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // TODO: leader services should only be DEFINED if this is a leader node
         // https://risingwave-labs.slack.com/archives/C046M5Y0WH2/p1670327569092569
 
-        // start leader services
         tracing::info!("Starting leader services");
         tokio::spawn(async move {
             tonic::transport::Server::builder()
@@ -592,17 +586,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     });
 
     Ok((join_handle, shutdown_send))
-}
-
-async fn oneshot_rx_to_future(mut shutdown_rx: tokio::sync::oneshot::Receiver<()>) {
-    let x = tokio::spawn(async move {
-        tokio::select! {
-            _ = &mut shutdown_rx => {
-                let _ = shutdown_rx.await;
-                tracing::info!("end of oneshot_rx_to_future"); // TODO: remove
-            },
-        }
-    });
 }
 
 #[derive(Clone)]
