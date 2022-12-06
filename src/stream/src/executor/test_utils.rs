@@ -162,27 +162,24 @@ macro_rules! row_nonnull {
 }
 
 /// Trait for testing `StreamExecutor` more easily.
-pub trait StreamExecutorTestExt: MessageStream {
+///
+/// With `next_unwrap_ready`, we can retrieve the next message from the executor without `await`ing,
+/// so that we can immediately panic if the executor is not ready instead of getting stuck. This is
+/// useful for testing.
+pub trait StreamExecutorTestExt: MessageStream + Unpin {
     /// Asserts that the executor is pending (not ready) now.
     ///
     /// Panics if it is ready.
-    fn next_unwrap_pending(&mut self)
-    where
-        Self: Unpin,
-    {
-        match self.try_next().now_or_never() {
-            Some(r) => panic!("expect pending stream, but got `{:?}`", r),
-            None => {}
+    fn next_unwrap_pending(&mut self) {
+        if let Some(r) = self.try_next().now_or_never() {
+            panic!("expect pending stream, but got `{:?}`", r);
         }
     }
 
     /// Asserts that the executor is ready now, returning the next message.
     ///
     /// Panics if it is pending.
-    fn next_unwrap_ready(&mut self) -> StreamExecutorResult<Message>
-    where
-        Self: Unpin,
-    {
+    fn next_unwrap_ready(&mut self) -> StreamExecutorResult<Message> {
         match self.next().now_or_never() {
             Some(Some(r)) => r,
             Some(None) => panic!("expect ready stream, but got terminated"),
@@ -193,10 +190,7 @@ pub trait StreamExecutorTestExt: MessageStream {
     /// Asserts that the executor is ready on a [`StreamChunk`] now, returning the next chunk.
     ///
     /// Panics if it is pending or the next message is not a [`StreamChunk`].
-    fn next_unwrap_ready_chunk(&mut self) -> StreamExecutorResult<StreamChunk>
-    where
-        Self: Unpin,
-    {
+    fn next_unwrap_ready_chunk(&mut self) -> StreamExecutorResult<StreamChunk> {
         self.next_unwrap_ready()
             .map(|msg| msg.into_chunk().expect("expect chunk"))
     }
@@ -204,10 +198,7 @@ pub trait StreamExecutorTestExt: MessageStream {
     /// Asserts that the executor is ready on a [`Barrier`] now, returning the next barrier.
     ///
     /// Panics if it is pending or the next message is not a [`Barrier`].
-    fn next_unwrap_ready_barrier(&mut self) -> StreamExecutorResult<Barrier>
-    where
-        Self: Unpin,
-    {
+    fn next_unwrap_ready_barrier(&mut self) -> StreamExecutorResult<Barrier> {
         self.next_unwrap_ready()
             .map(|msg| msg.into_barrier().expect("expect barrier"))
     }
