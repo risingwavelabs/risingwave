@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{
-    AtomicF64, AtomicI64, AtomicU64, GenericCounter, GenericCounterVec, GenericGaugeVec,
-};
+use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
-    HistogramVec, IntGauge, Registry,
+    HistogramVec, IntCounter, IntGauge, Registry,
 };
 
 pub struct StreamingMetrics {
@@ -73,8 +71,9 @@ pub struct StreamingMetrics {
     // FIXME(yuhao): use u64 here
     pub lru_current_watermark_time_ms: IntGauge,
     pub lru_physical_now_ms: IntGauge,
-    pub lru_runtime_loop_count: GenericCounter<AtomicU64>,
+    pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
+    pub jemalloc_allocated_bytes: IntGauge,
 }
 
 impl StreamingMetrics {
@@ -357,7 +356,7 @@ impl StreamingMetrics {
 
         let lru_runtime_loop_count = register_int_counter_with_registry!(
             "lru_runtime_loop_count",
-            "The counts of the eviction loop in LRU manager",
+            "The counts of the eviction loop in LRU manager per second",
             registry
         )
         .unwrap();
@@ -365,6 +364,13 @@ impl StreamingMetrics {
         let lru_watermark_step = register_int_gauge_with_registry!(
             "lru_watermark_step",
             "The steps increase in 1 loop",
+            registry
+        )
+        .unwrap();
+
+        let jemalloc_allocated_bytes = register_int_gauge_with_registry!(
+            "jemalloc_allocated_bytes",
+            "The memory jemalloc allocated, got from jemalloc_ctl",
             registry
         )
         .unwrap();
@@ -408,6 +414,7 @@ impl StreamingMetrics {
             lru_physical_now_ms,
             lru_runtime_loop_count,
             lru_watermark_step,
+            jemalloc_allocated_bytes,
         }
     }
 

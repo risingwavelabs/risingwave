@@ -179,6 +179,9 @@ impl LruManager {
             self.metrics.lru_physical_now_ms.set(physical_now as i64);
             self.metrics.lru_watermark_step.set(step as i64);
             self.metrics.lru_runtime_loop_count.inc();
+            self.metrics
+                .jemalloc_allocated_bytes
+                .set(cur_total_bytes_used as i64);
 
             self.set_watermark_time_ms(watermark_time_ms);
         }

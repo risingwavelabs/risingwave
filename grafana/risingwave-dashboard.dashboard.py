@@ -2189,11 +2189,11 @@ def section_memory_manager(outer_panels):
             "Memory manager",
             [
                 panels.timeseries_count(
-                    "LRU manager loop count",
+                    "LRU manager loop count per sec",
                     "",
                     [
                         panels.target(
-                            f"{metric('lru_runtime_loop_count')}",
+                            f"rate({metric('lru_runtime_loop_count')}[$__rate_interval])",
                             "",
                         ),
                     ],
@@ -2218,6 +2218,16 @@ def section_memory_manager(outer_panels):
                         ),
                         panels.target(
                             f"{metric('lru_physical_now_ms')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The memory allocated by jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_allocated_bytes')}",
                             "",
                         ),
                     ],
