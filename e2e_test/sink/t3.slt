@@ -7,8 +7,9 @@ CREATE MATERIALIZED VIEW mv3 AS SELECT * FROM t3;
 statement ok
 CREATE SINK s3 FROM mv3 WITH (
     connector = 'mysql',
-    endpoint = '127.0.0.1:3306',
+    endpoint = 'mysql:3306',
     user = 'root',
+    password = '123456',
     database = 'test',
     table = 't3'
 );
