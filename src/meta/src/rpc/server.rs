@@ -389,10 +389,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     // print current leader/follower status of this node + fencing mechanism
     tokio::spawn(async move {
+        let span = tracing::span!(tracing::Level::INFO, "node status");
+        let _enter = span.enter();
         let mut was_leader = false;
         loop {
             if leader_rx.changed().await.is_err() {
-                tracing::error!("Leader status: issue receiving leader value from channel");
+                tracing::error!("Issue receiving leader value from channel");
                 continue;
             }
 
@@ -402,6 +404,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             // leader nodes should panic if they loose their leader position
             if was_leader {
                 // && !is_leader {
+                // TODO: enable this again to give leader chance to claim lease again?
                 panic!(
                     "This node lost its leadership. New host address is {}:{}. Killing node",
                     leader_addr.host, leader_addr.port
@@ -422,12 +425,20 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     });
 
     // TODO:
+    // have a look at bug.txt
+
+    // TODO:
     // Remove the interceptor pattern again
 
     // TODO:
     // we only can define leader services when they are needed? Otherwise they already do things
 
     tokio::spawn(async move {
+        let span = tracing::span!(tracing::Level::INFO, "services");
+        let _enter = span.enter();
+
+        tracing::error!("this is a test");
+
         let intercept = InterceptorWrapper {
             leader_rx: intercept_leader_rx,
         };
@@ -437,14 +448,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         loop {
             if services_leader_rx.changed().await.is_err() {
-                tracing::error!("Services: Issue receiving leader value from channel");
+                tracing::error!("Issue receiving leader value from channel");
                 continue;
             }
             break;
         }
-
-        // TODO: Give name to traces?
-        // I do not want to write tracing:: Services: message
 
         let is_leader = services_leader_rx.borrow().clone().1;
         let was_follower = !is_leader;
@@ -453,7 +461,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         // run follower services until node becomes leader
         if !is_leader {
-            tracing::info!("Services: Starting follower services");
+            tracing::info!("Starting follower services");
             tokio::spawn(async move {
                 tonic::transport::Server::builder()
                     .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
@@ -474,7 +482,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                     // TODO: Do we really want to loop to get a value?
                     // Do we want to panic if sender drops?
                     if services_leader_rx.changed().await.is_err() {
-                        tracing::error!("Services: Issue receiving leader value from channel");
+                        tracing::error!("Issue receiving leader value from channel");
                         continue;
                     }
                     break;
@@ -484,19 +492,22 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 }
             }
         }
-        tracing::info!("Services: Node is leader");
+        tracing::info!("Node is leader");
 
         // shut down follower svc if node used to be follower
         if was_follower {
-            tracing::info!("Services: Shutting down follower services");
+            tracing::info!("Shutting down follower services");
             match svc_shutdown_tx.send(()) {
-                Ok(_) => tracing::info!("Services: Succeeded shutting down follower services"),
-                Err(_) => tracing::error!("Services: Error when shutdown follower services"),
+                Ok(_) => tracing::info!("Succeeded shutting down follower services"),
+                Err(_) => tracing::error!("Error when shutdown follower services"),
             }
         }
 
+        // TODO: leader services should only be DEFINED if this is a leader node
+        // https://risingwave-labs.slack.com/archives/C046M5Y0WH2/p1670327569092569
+
         // start leader services
-        tracing::info!("Services: Starting leader services");
+        tracing::info!("Starting leader services");
         tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
