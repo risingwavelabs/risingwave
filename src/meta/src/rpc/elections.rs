@@ -41,7 +41,7 @@ struct ElectionOutcome {
     pub meta_leader_info: MetaLeaderInfo,
     pub _meta_lease_info: MetaLeaseInfo,
 
-    // True if current node is leader, else false
+    // True if current node is leader. False if follower
     pub is_leader: bool,
 }
 
@@ -54,8 +54,8 @@ impl ElectionOutcome {
 /// Runs for election in an attempt to become leader
 ///
 /// ## Returns
-/// Returns `ElectionResult`, containing infos about the leader who won or
-/// None if the election needs to be repeated
+/// Returns `ElectionOutcome`, containing infos about the node who won the election or
+/// None if the election ran into an error
 ///
 /// ## Arguments
 /// `meta_store`: The meta store which holds the lease, deciding about the election outcome
@@ -142,7 +142,7 @@ async fn campaign<S: MetaStore>(
         });
     }
 
-    // TODO: This has to be done with a single transaction, not 2
+    // FIXME: This has to be done with a single transaction, not 2
     // if it is not leader, then get the current leaders HostAddress
     // Ask Pin how to implement txn.get here
     let (leader, lease) = get_infos_obj(meta_store).await?;
@@ -154,7 +154,8 @@ async fn campaign<S: MetaStore>(
     })
 }
 
-// converts a string into a HostAddress
+// converts a &str into a HostAddress
+// On error returns default HostAddress
 fn s_to_ha(s: &str) -> HostAddress {
     // adduming addr is e.g. 127.0.0.1:1234
     let parts = s.split(':').collect::<Vec<&str>>();
@@ -175,18 +176,18 @@ fn s_to_ha(s: &str) -> HostAddress {
 /// Try to renew/acquire the leader lease
 ///
 /// ## Returns
-/// True, if the current node could acquire/renew the lease
-/// False, if the current node could acquire/renew the lease
-/// None, if the operation failed
+/// True, if the current node could acquire/renew the lease.
+/// False, if the current node could acquire/renew the lease.
+/// None, if there was an error.
 ///
 /// ## Arguments
 /// `leader_info`: Info of the node that trie
-/// s to acquire/renew the lease
+/// `lease_time_sec`: Time in seconds that the lease is valid
 /// `meta_store`: Store which holds the lease
 ///
-/// Returns true if node was leader and was able to renew/acquire the lease
-/// Returns false if node was follower and thus could not renew/acquire lease
-/// Returns None if operation has to be repeated
+/// Returns true if node was leader and was able to renew/acquire the lease.
+/// Returns false if node was follower and thus could not renew/acquire lease.
+/// Returns None if operation ran into an error
 async fn renew_lease<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
     lease_time_sec: u64,
@@ -270,7 +271,7 @@ async fn get_infos<S: MetaStore>(
 /// Wrapper for `get_infos`
 ///
 /// ## Returns
-/// None on error, else infos about the leader
+/// None on error, else infos about the leader and lease
 async fn get_infos_obj<S: MetaStore>(
     meta_store: &Arc<S>,
 ) -> Option<(MetaLeaderInfo, MetaLeaseInfo)> {
@@ -290,7 +291,6 @@ fn gen_rand_lease_id() -> u64 {
     rand::thread_rng().gen_range(0..std::u64::MAX)
 }
 
-// TODO: rewrite all doc strings
 /// Used to manage single leader setup. `run_elections` will continuously run elections to determine
 /// which nodes are **leaders** and which are **followers**.
 ///
@@ -300,16 +300,16 @@ fn gen_rand_lease_id() -> u64 {
 /// A term lasts until the current leader crashes.   
 ///
 /// ## Arguments
-/// `addr`: Address of the current leader, e.g. "127.0.0.1"
-/// `meta_store`: Holds information about the leader
-/// `lease_time_sec`: Time that a lease will be valid for.
+/// `addr`: Address of the current leader, e.g. "127.0.0.1".
+/// `meta_store`: Holds information about the leader.
+/// `lease_time_sec`: Time in seconds that a lease will be valid for.
 /// A large value reduces the meta store traffic. A small value reduces the downtime during failover
 ///
 /// ## Returns:
-/// `MetaLeaderInfo` containing the leader who got initially elected
-/// `JoinHandle` running all future elections concurrently
-/// `Sender` for signaling a shutdown
-/// `Receiver` receiving true if this node got elected as leader and false if it is a follower
+/// `MetaLeaderInfo` containing the leader who got elected initially.
+/// `JoinHandle` running all future elections concurrently.
+/// `Sender` for signaling a shutdown.
+/// `Receiver` receiving true if this node got elected as leader and false if it is a follower.
 pub async fn run_elections<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,
@@ -446,9 +446,15 @@ pub async fn run_elections<S: MetaStore>(
 /// Leaders will try to extend the term
 /// Followers will check if the leader is still alive
 ///
+/// ## Arguments:
+/// `is_leader`: True if this node currently is a leader
+/// `leader_info`: Info about the last observed leader
+/// `lease_time_sec`: Time in seconds that a lease is valid
+/// `meta_store`: Holds lease and leader data
+///
 /// ## Returns
-/// True if the leader defined in `leader_ifo` is still in power.
-/// False if the leader failed.
+/// True if the leader defined in `leader_info` is still in power.
+/// False if the old leader failed, there is no leader, or there a new leader got elected
 /// None if there was an error.
 async fn manage_term<S: MetaStore>(
     is_leader: bool,
@@ -489,9 +495,7 @@ async fn manage_term<S: MetaStore>(
     if lease_info.get_lease_expire_time() + some_time < since_epoch().as_secs() {
         tracing::warn!("Detected that leader is down");
         let mut txn = Transaction::default();
-        // TODO: No deletion here
-        // just do election straight away.
-        // Overwrite current leader info
+        // FIXME: No deletion here, directly write new key
         txn.delete(
             META_CF_NAME.to_string(),
             META_LEADER_KEY.as_bytes().to_vec(),
@@ -508,9 +512,9 @@ async fn manage_term<S: MetaStore>(
     Some(true)
 }
 
-// True if leader changed
-// False if leader is still the leader defined in leader_info
-// None on error
+/// True if leader changed
+/// False if leader is still the leader defined in `leader_info`
+/// None on error
 async fn leader_changed<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
     meta_store: &Arc<S>,
@@ -655,7 +659,6 @@ mod tests {
         put_leader_lease(&leader_info, &lease_info, &mock_meta_store).await;
         (lease_timeout, mock_meta_store, leader_info, lease_info, now)
     }
-    // TODO: more test cases?
 
     #[tokio::test]
     async fn test_manage_term() {
@@ -760,7 +763,6 @@ mod tests {
     #[tokio::test]
     async fn lease_outdated() {
         // Follower: If lease is outdated, follower should delete leader and lease
-        // TODO: in the future, the follower should directly write new lease
         let lease_timeout = 10;
         let mock_meta_store = Arc::new(MemStore::new());
         let leader_info = MetaLeaderInfo {
