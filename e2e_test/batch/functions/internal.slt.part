@@ -4,14 +4,14 @@ SET RW_IMPLICIT_FLUSH TO true;
 statement ok
 create table t(v1 varchar, v2 int, v3 int)
 
-query 
+query II
 select rw_vnode(_row_id) as vnode, _row_id from t;
 ----
 
 statement ok
 insert into t values ('aaa', 1, 1), ('bbb', 0, 2), ('ccc', 0, 5), ('ddd', 1, 4)
 
-query ??
+query II
 select rw_vnode(_row_id) as vnode, _row_id from t;
 ----
 61	222848002044723201
