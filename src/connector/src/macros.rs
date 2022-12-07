@@ -77,11 +77,13 @@ macro_rules! impl_split {
             }
 
             fn encode_to_bytes(&self) -> Bytes {
-                Bytes::from(ConnectorSplit::from(self).encode_to_vec())
+                let hex_string = hex::encode(ConnectorSplit::from(self).encode_to_vec());
+                Bytes::from(hex_string.into_bytes())
             }
 
             fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
-                SplitImpl::try_from(&ConnectorSplit::decode(bytes)?)
+                let raw_bytes = hex::decode(bytes)?;
+                SplitImpl::try_from(&ConnectorSplit::decode(raw_bytes.as_slice())?)
             }
         }
 
