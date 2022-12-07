@@ -19,9 +19,11 @@ use itertools::Itertools;
 use libtest_mimic::{Arguments, Failed, Trial};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
-use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::LocalFrontend;
-use risingwave_frontend::{handler, Binder, FrontendOpts, Planner, WithOptions};
+use risingwave_frontend::{
+    handler, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef, Planner, WithOptions,
+};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
     create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
