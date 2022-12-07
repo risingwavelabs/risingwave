@@ -531,6 +531,13 @@ impl ToText for ListRef<'_> {
             )
         })
     }
+
+    fn to_text_with_type(&self, ty: &DataType) -> String {
+        match ty {
+            DataType::List { .. } => self.to_text(),
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Eq for ListRef<'_> {}
