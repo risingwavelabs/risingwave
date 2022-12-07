@@ -57,6 +57,9 @@ statement error
 SELECT s.tbl.col FROM s.tbl t;
 
 statement ok
+DROP TABLE s.tbl
+
+statement ok
 DROP SCHEMA s
 
 # check how ties are resolved
