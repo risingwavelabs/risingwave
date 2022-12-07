@@ -7,7 +7,6 @@ create table t2 (x int, y int);
 statement ok
 create table t3(x int, y int);
 
-
 statement ok
 create materialized view v as select * from t1 where exists(select t2.x from t2 left join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y where t1.x = t2.x);
 
