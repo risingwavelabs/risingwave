@@ -40,7 +40,7 @@ use crate::row_serde::row_serde_util::{
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
 use crate::table::{compute_vnode, Distribution, TableIter};
-use crate::{StateStore, StateStoreIter};
+use crate::StateStore;
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format, and is used in batch mode.
@@ -493,7 +493,7 @@ impl<S: StateStore> StorageTable<S> {
 /// [`StorageTableIterInner`] iterates on the storage table.
 struct StorageTableIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
-    iter: S::Iter,
+    iter: S::IterStream,
 
     mapping: Arc<ColumnMapping>,
 
@@ -532,12 +532,13 @@ impl<S: StateStore> StorageTableIterInner<S> {
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
     async fn into_stream(self) {
-        use crate::store::StateStoreIterExt;
+        use futures::TryStreamExt;
 
         // No need for table id and epoch.
-        let mut iter = self.iter.map(|(k, v)| (k.user_key.table_key.0, v));
+        let iter = self.iter.map_ok(|(k, v)| (k.user_key.table_key.0, v));
+        futures::pin_mut!(iter);
         while let Some((raw_key, value)) = iter
-            .next()
+            .try_next()
             .verbose_stack_trace("storage_table_iter_next")
             .await?
         {

@@ -39,6 +39,9 @@ pub struct ComputeNodeConfig {
     pub user_managed: bool,
     pub enable_in_memory_kv_state_backend: bool,
     pub connector_rpc_endpoint: String,
+
+    pub total_memory_bytes: usize,
+    pub parallelism: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

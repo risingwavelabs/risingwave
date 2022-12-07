@@ -195,6 +195,8 @@ impl Cluster {
                 "192.168.1.1:5690",
                 "--state-store",
                 "hummock+memory-shared",
+                "--parallelism",
+                &conf.compute_node_cores.to_string(),
             ]);
             handle
                 .create_node()
