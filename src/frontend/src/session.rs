@@ -13,10 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
-use std::marker::Sync;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 // use tokio::sync::Mutex;
 use std::time::Duration;
@@ -54,7 +52,6 @@ use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::{Catalog, SchemaPath};
 use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
-use crate::expr::CorrelatedId;
 use crate::handler::handle;
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
@@ -62,7 +59,7 @@ use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
 use crate::observer::FrontendObserverNode;
-use crate::optimizer::plan_node::PlanNodeId;
+use crate::optimizer::OptimizerContext;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
@@ -72,121 +69,6 @@ use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterIm
 use crate::user::UserId;
 use crate::utils::WithOptions;
 use crate::{FrontendOpts, PgResponseStream, TableCatalog};
-
-pub struct OptimizerContext {
-    pub session_ctx: Arc<SessionImpl>,
-    // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
-    pub next_id: AtomicI32,
-    /// For debugging purposes, store the SQL string in Context
-    pub sql: Arc<str>,
-
-    /// it indicates whether the explain mode is verbose for explain statement
-    pub explain_verbose: AtomicBool,
-
-    /// it indicates whether the explain mode is trace for explain statement
-    pub explain_trace: AtomicBool,
-    /// Store the trace of optimizer
-    pub optimizer_trace: Arc<Mutex<Vec<String>>>,
-    /// Store correlated id
-    pub next_correlated_id: AtomicU32,
-    /// Store options or properties from the `with` clause
-    pub with_options: WithOptions,
-}
-
-#[derive(Clone, Debug)]
-pub struct OptimizerContextRef {
-    inner: Arc<OptimizerContext>,
-}
-
-impl !Sync for OptimizerContextRef {}
-
-impl From<OptimizerContext> for OptimizerContextRef {
-    fn from(inner: OptimizerContext) -> Self {
-        Self {
-            inner: Arc::new(inner),
-        }
-    }
-}
-
-impl OptimizerContextRef {
-    pub fn inner(&self) -> &OptimizerContext {
-        &self.inner
-    }
-
-    pub fn next_plan_node_id(&self) -> PlanNodeId {
-        // It's safe to use `fetch_add` and `Relaxed` ordering since we have marked
-        // `QueryContextRef` not `Sync`.
-        let next_id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
-        PlanNodeId(next_id)
-    }
-
-    pub fn next_correlated_id(&self) -> CorrelatedId {
-        self.inner
-            .next_correlated_id
-            .fetch_add(1, Ordering::Relaxed)
-    }
-
-    pub fn is_explain_verbose(&self) -> bool {
-        self.inner.explain_verbose.load(Ordering::Acquire)
-    }
-
-    pub fn is_explain_trace(&self) -> bool {
-        self.inner.explain_trace.load(Ordering::Acquire)
-    }
-
-    pub fn trace(&self, str: impl Into<String>) {
-        let mut guard = self.inner.optimizer_trace.lock().unwrap();
-        guard.push(str.into());
-        guard.push("\n".to_string());
-    }
-
-    pub fn take_trace(&self) -> Vec<String> {
-        let mut guard = self.inner.optimizer_trace.lock().unwrap();
-        guard.drain(..).collect()
-    }
-}
-
-impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>, with_options: WithOptions) -> Self {
-        Self {
-            session_ctx,
-            next_id: AtomicI32::new(0),
-            sql,
-            explain_verbose: AtomicBool::new(false),
-            explain_trace: AtomicBool::new(false),
-            optimizer_trace: Arc::new(Mutex::new(vec![])),
-            next_correlated_id: AtomicU32::new(1),
-            with_options,
-        }
-    }
-
-    // TODO(TaoWu): Remove the async.
-    #[cfg(test)]
-    #[expect(clippy::unused_async)]
-    pub async fn mock() -> OptimizerContextRef {
-        Self {
-            session_ctx: Arc::new(SessionImpl::mock()),
-            next_id: AtomicI32::new(0),
-            sql: Arc::from(""),
-            explain_verbose: AtomicBool::new(false),
-            explain_trace: AtomicBool::new(false),
-            optimizer_trace: Arc::new(Mutex::new(vec![])),
-            next_correlated_id: AtomicU32::new(1),
-            with_options: Default::default(),
-        }
-        .into()
-    }
-}
-
-impl std::fmt::Debug for OptimizerContext {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "QueryContext {{ current id = {} }}",
-            self.next_id.load(Ordering::Relaxed)
-        )
-    }
-}
 
 /// The global environment for the frontend server.
 #[derive(Clone)]
@@ -931,17 +813,4 @@ fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<Pg
         .collect::<Vec<PgFieldDescriptor>>();
 
     Ok(pg_descs)
-}
-
-#[cfg(test)]
-mod tests {
-    use assert_impl::assert_impl;
-
-    use crate::session::OptimizerContextRef;
-
-    #[test]
-    fn check_query_context_ref() {
-        assert_impl!(Send: OptimizerContextRef);
-        assert_impl!(!Sync: OptimizerContextRef);
-    }
 }

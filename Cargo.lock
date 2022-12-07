@@ -3152,9 +3152,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.10"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85b32d93334a4030dad86dde50018e57ccd9e4c0f64a23e2a7be240e9d7d958c"
+checksum = "a5b15031e1ca7bb25f51c6ddb36f9ec8e10aa184e21987c49118e18a1141f7a8"
 dependencies = [
  "ahash",
  "async-channel",
@@ -3179,15 +3179,19 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.8"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d6c5383c2297a0a3306fbcc0475a6ab1decb5b49c3cd20adae6fd8d149dbde0"
+checksum = "f83388bf9b75da759e6ebc7470e8ab4911314504eb75e16946de66f56a5608ea"
 dependencies = [
  "etcd-client",
  "futures-util",
  "http",
  "madsim",
+ "serde",
+ "serde_with",
  "spin 0.9.4",
+ "thiserror",
+ "toml",
  "tonic",
  "tracing",
 ]
@@ -5172,7 +5176,6 @@ dependencies = [
  "static_assertions",
  "strum",
  "strum_macros",
- "sysinfo",
  "thiserror",
  "tokio-stream",
  "toml",
@@ -5300,6 +5303,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "static_assertions",
+ "sysinfo",
  "tempfile",
  "thiserror",
  "tokio-stream",

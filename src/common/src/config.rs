@@ -180,17 +180,10 @@ pub struct StreamingConfig {
     #[serde(default)]
     pub minimal_scheduling: bool,
 
-    /// The parallelism that the compute node will register to the scheduler of the meta service.
-    #[serde(default = "default::streaming::worker_node_parallelism")]
-    pub worker_node_parallelism: usize,
-
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
-
-    #[serde(default = "default::streaming::total_memory_available_bytes")]
-    pub total_memory_available_bytes: usize,
 
     #[serde(default)]
     pub developer: DeveloperConfig,
@@ -533,18 +526,6 @@ mod default {
 
         pub fn checkpoint_frequency() -> usize {
             10
-        }
-
-        pub fn worker_node_parallelism() -> usize {
-            std::thread::available_parallelism().unwrap().get()
-        }
-
-        pub fn total_memory_available_bytes() -> usize {
-            use sysinfo::{System, SystemExt};
-
-            let mut sys = System::new();
-            sys.refresh_memory();
-            sys.total_memory() as usize
         }
     }
 
