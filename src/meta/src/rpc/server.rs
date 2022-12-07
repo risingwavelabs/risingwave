@@ -170,10 +170,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, Sender<()>)> {
-    // Contains address info with port
-    //   address_info.listen_addr;
-
-    // Initialize managers.
     let (current_leader_info, election_handle, election_shutdown, mut leader_rx) =
         register_leader_for_meta(
             address_info.listen_addr.clone().to_string(),
@@ -184,6 +180,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
 
+    // wait until initial election is done
     if leader_rx.changed().await.is_err() {
         panic!("Issue receiving leader value from channel");
     }
@@ -207,22 +204,21 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 leader_addr.port
             );
 
-            if let Err(e) = note_status_leader_rx.changed().await {
+            if note_status_leader_rx.changed().await.is_err() {
                 panic!("Issue receiving leader value from channel");
             }
         }
     });
 
+    // FIXME: Start leader services if follower becomes leader
+    // failover logic
+
     // Start follower services
-    // FIXME: Implement failover
     if !leader_rx.borrow().1 {
         tracing::info!("Node initially elected as follower");
         tokio::spawn(async move {
             let span = tracing::span!(tracing::Level::INFO, "services");
             let _enter = span.enter();
-
-            // FIXME: Start leader services if follower becomes leader
-            // failover logic
 
             let health_srv = HealthServiceImpl::new();
             // run follower services until node becomes leader
@@ -237,27 +233,21 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             });
         });
 
-        let sub_tasks = vec![(election_handle, election_shutdown)];
-        let shutdown_all = async move {
-            for (join_handle, shutdown_sender) in sub_tasks {
-                if let Err(_err) = shutdown_sender.send(()) {
-                    // Maybe it is already shut down
-                    continue;
-                }
-                if let Err(err) = join_handle.await {
-                    tracing::warn!("Failed to join shutdown: {:?}", err);
-                }
+        let shutdown_election = async move {
+            if election_shutdown.send(()).is_err() {
+                tracing::warn!("election service already shut down");
+            } else if let Err(err) = election_handle.await {
+                tracing::warn!("Failed to join shutdown: {:?}", err);
             }
         };
 
         let (svc_shutdown_tx, mut svc_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-        // stop service on ctrl + c
         let join_handle = tokio::spawn(async move {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {}
                 _ = &mut svc_shutdown_rx => {
-                    shutdown_all.await;
+                    shutdown_election.await;
                 }
             }
         });
@@ -488,9 +478,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             }
         }
     };
-
-    let mut services_leader_rx = leader_rx.clone();
-    let mut note_status_leader_rx = leader_rx.clone();
 
     tracing::info!("Starting leader services");
     tokio::spawn(async move {

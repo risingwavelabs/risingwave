@@ -447,7 +447,7 @@ pub async fn run_elections<S: MetaStore>(
 /// Followers will check if the leader is still alive
 ///
 /// ## Returns
-/// True if the leader defined in leader_ifo is still in power.
+/// True if the leader defined in `leader_ifo` is still in power.
 /// False if the leader failed.
 /// None if there was an error.
 async fn manage_term<S: MetaStore>(
@@ -562,7 +562,7 @@ mod tests {
         // get_info should retrieve old leader info
         let test_leader = MetaLeaderInfo {
             node_address: "some_address".into(),
-            lease_id: 123 as u64,
+            lease_id: 123,
         };
         let res = mock_meta_store
             .put_cf(
@@ -592,13 +592,13 @@ mod tests {
         // valid input
         let addr = HostAddress {
             host: "localhost".to_owned(),
-            port: 123 as i32,
+            port: 123,
         };
         assert!(addr.eq(&s_to_ha("localhost:123")));
 
         let addr = HostAddress {
             host: "127.0.0.1".to_owned(),
-            port: 123 as i32,
+            port: 123,
         };
         assert!(addr.eq(&s_to_ha("127.0.0.1:123")));
     }
@@ -644,7 +644,7 @@ mod tests {
         let mock_meta_store = Arc::new(MemStore::new());
         let leader_info = MetaLeaderInfo {
             node_address: "localhost:1234".into(),
-            lease_id: 123 as u64,
+            lease_id: 123,
         };
         let now = since_epoch();
         let lease_info = MetaLeaseInfo {
@@ -665,7 +665,7 @@ mod tests {
         // Leader: If nobody was elected leader renewing lease fails and leader is marked as failed
         let leader_info = MetaLeaderInfo {
             node_address: "localhost:1234".into(),
-            lease_id: 123 as u64,
+            lease_id: 123,
         };
         assert!(
             !manage_term(true, &leader_info, lease_timeout, &mock_meta_store)
@@ -740,7 +740,7 @@ mod tests {
         // Leader: If new leader was elected old leader should NOT renew lease
         let other_leader_info = MetaLeaderInfo {
             node_address: "other:1234".into(),
-            lease_id: 456 as u64,
+            lease_id: 456,
         };
         assert!(
             !manage_term(true, &other_leader_info, lease_timeout, &mock_meta_store)
@@ -765,7 +765,7 @@ mod tests {
         let mock_meta_store = Arc::new(MemStore::new());
         let leader_info = MetaLeaderInfo {
             node_address: "localhost:1234".into(),
-            lease_id: 123 as u64,
+            lease_id: 123,
         };
         let now = since_epoch();
         // lease is expired
