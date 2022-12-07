@@ -53,7 +53,7 @@ impl From<MetaStoreError> for Error {
             MetaStoreError::ItemNotFound(err) => anyhow::anyhow!(err).into(),
             MetaStoreError::TransactionAbort() => {
                 // TODO: need more concrete error from meta store.
-                Error::InvalidContext(0)
+                Error::Internal(anyhow::anyhow!("meta store transaction failed"))
             }
             // TODO: Currently MetaStoreError::Internal is equivalent to EtcdError, which
             // includes both retryable and non-retryable. Need to expand MetaStoreError::Internal

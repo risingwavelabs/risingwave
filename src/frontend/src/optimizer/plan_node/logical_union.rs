@@ -295,8 +295,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_prune_union() {

@@ -107,6 +107,7 @@ pub fn data_type_name_to_ast_data_type(type_name: DataTypeName) -> Option<DataTy
         DataTypeName::Float32 => Some(DataType::Real),
         DataTypeName::Float64 => Some(DataType::Double),
         DataTypeName::Varchar => Some(DataType::Varchar),
+        DataTypeName::Bytea => Some(DataType::Bytea),
         DataTypeName::Date => Some(DataType::Date),
         DataTypeName::Timestamp => Some(DataType::Timestamp(false)),
         DataTypeName::Timestampz => Some(DataType::Timestamp(true)),

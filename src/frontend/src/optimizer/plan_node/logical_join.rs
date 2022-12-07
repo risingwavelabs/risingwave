@@ -505,32 +505,21 @@ impl LogicalJoin {
             max_pos + 1
         };
 
-        if predicate.right_eq_indexes().len() < at_least_prefix_len {
-            // In Lookup Join, the right columns of the equality join predicates must contains the
-            // prefix of order key.
-            return None;
-        }
-
-        // Lookup prefix len is the prefix length of the order key.
-        let mut lookup_prefix_len = 0;
-        #[expect(clippy::disallowed_methods)]
-        for (i, (order_col_id, eq_idx)) in order_col_ids
-            .into_iter()
-            .zip(predicate.right_eq_indexes())
-            .enumerate()
-        {
-            if order_col_id != output_column_ids[eq_idx] {
-                if i < at_least_prefix_len {
-                    // In Lookup Join, the right columns of the equality join predicates must
-                    // contains the prefix of order key.
-                    return None;
-                } else {
+        // Reorder the join equal predicate to match the order key.
+        let mut reorder_idx = vec![];
+        for order_col_id in order_col_ids {
+            for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
+                if order_col_id == output_column_ids[eq_idx] {
+                    reorder_idx.push(i);
                     break;
                 }
-            } else {
-                lookup_prefix_len = i + 1;
             }
         }
+        if reorder_idx.len() < at_least_prefix_len {
+            return None;
+        }
+        let lookup_prefix_len = reorder_idx.len();
+        let predicate = predicate.reorder(&reorder_idx);
 
         // Extract the predicate from logical scan. Only pure scan is supported.
         let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
@@ -1223,9 +1212,9 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
 
     /// Pruning
     /// ```text

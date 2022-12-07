@@ -131,7 +131,7 @@ pub mod IdCategory {
     pub const Worker: IdCategoryType = 4;
     pub const Fragment: IdCategoryType = 5;
     pub const Actor: IdCategoryType = 6;
-    pub const HummockSnapshot: IdCategoryType = 7;
+    pub const Backup: IdCategoryType = 7;
     pub const HummockSstableId: IdCategoryType = 8;
     pub const ParallelUnit: IdCategoryType = 9;
     pub const Source: IdCategoryType = 10;
@@ -156,7 +156,7 @@ pub struct IdGeneratorManager<S> {
     fragment: Arc<StoredIdGenerator<S>>,
     actor: Arc<StoredIdGenerator<S>>,
     user: Arc<StoredIdGenerator<S>>,
-    hummock_snapshot: Arc<StoredIdGenerator<S>>,
+    backup: Arc<StoredIdGenerator<S>>,
     hummock_ss_table_id: Arc<StoredIdGenerator<S>>,
     hummock_compaction_task: Arc<StoredIdGenerator<S>>,
     parallel_unit: Arc<StoredIdGenerator<S>>,
@@ -197,9 +197,7 @@ where
                 )
                 .await,
             ),
-            hummock_snapshot: Arc::new(
-                StoredIdGenerator::new(meta_store.clone(), "hummock_snapshot", Some(1)).await,
-            ),
+            backup: Arc::new(StoredIdGenerator::new(meta_store.clone(), "backup", Some(1)).await),
             hummock_ss_table_id: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "hummock_ss_table_id", Some(1)).await,
             ),
@@ -231,7 +229,7 @@ where
             IdCategory::Fragment => &self.fragment,
             IdCategory::Actor => &self.actor,
             IdCategory::User => &self.user,
-            IdCategory::HummockSnapshot => &self.hummock_snapshot,
+            IdCategory::Backup => &self.backup,
             IdCategory::Worker => &self.worker,
             IdCategory::HummockSstableId => &self.hummock_ss_table_id,
             IdCategory::ParallelUnit => &self.parallel_unit,
