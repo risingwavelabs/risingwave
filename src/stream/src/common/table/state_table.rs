@@ -452,10 +452,10 @@ impl<S: StateStore> StateTable<S> {
                     .into_iter()
                     .map(|index| self.pk_indices[index])
                     .collect_vec();
-
                 let read_options = ReadOptions {
                     dist_key_hint: None,
-                    check_bloom_filter: self.dist_key_indices == key_indices,
+                    check_bloom_filter: self.dist_key_indices == key_indices
+                        && !key_indices.is_empty(),
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,
