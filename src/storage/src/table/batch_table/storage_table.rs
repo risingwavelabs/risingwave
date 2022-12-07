@@ -23,7 +23,10 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
+use risingwave_common::catalog::{
+    get_dist_key_in_pk_indices, get_dist_key_start_index_in_pk, ColumnDesc, ColumnId, Schema,
+    TableId, TableOption,
+};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, Row, Row2, RowDeserializer, RowExt};
 use risingwave_common::util::ordered::*;
@@ -39,7 +42,7 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
-use crate::table::{compute_vnode, get_dist_key_in_pk_indices, Distribution, TableIter};
+use crate::table::{compute_vnode, Distribution, TableIter};
 use crate::{StateStore, StateStoreIter};
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
@@ -185,13 +188,8 @@ impl<S: StateStore> StorageTable<S> {
         let row_deserializer = RowDeserializer::new(all_data_types);
 
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
-        let distribution_key_start_index_in_pk = match !dist_key_in_pk_indices.is_empty()
-            && *dist_key_in_pk_indices.iter().min().unwrap() + dist_key_in_pk_indices.len() - 1
-                == *dist_key_in_pk_indices.iter().max().unwrap()
-        {
-            false => None,
-            true => Some(*dist_key_in_pk_indices.iter().min().unwrap()),
-        };
+        let distribution_key_start_index_in_pk =
+            get_dist_key_start_index_in_pk(&dist_key_in_pk_indices);
         Self {
             table_id,
             store,
@@ -422,8 +420,7 @@ impl<S: StateStore> StorageTable<S> {
             range_bounds.end_bound(),
             false,
         );
-        let prefix_serializer = self.pk_serializer.prefix(pk_prefix.len());
-        let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
+
         assert!(pk_prefix.len() <= self.pk_indices.len());
         let pk_prefix_indices = (0..pk_prefix.len())
             .into_iter()
@@ -443,12 +440,17 @@ impl<S: StateStore> StorageTable<S> {
             );
             None
         } else {
+            let encoded_prefix = if let Bound::Included(start_key) = start_key.as_ref() {
+                start_key
+            } else {
+                unreachable!()
+            };
             let distribution_key_end_index_in_pk = self.dist_key_in_pk_indices.len()
                 + self.distribution_key_start_index_in_pk.unwrap();
             let (dist_key_start_position, dist_key_len) = self
                 .pk_serializer
                 .deserialize_dist_key_position_with_column_indices(
-                    &encoded_prefix,
+                    encoded_prefix,
                     (
                         self.distribution_key_start_index_in_pk.unwrap(),
                         distribution_key_end_index_in_pk,

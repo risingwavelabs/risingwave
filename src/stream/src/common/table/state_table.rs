@@ -26,7 +26,9 @@ use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
+use risingwave_common::catalog::{
+    get_dist_key_in_pk_indices, get_dist_key_start_index_in_pk, ColumnDesc, TableId, TableOption,
+};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, CompactedRow, Row, Row2, RowDeserializer, RowExt};
 use risingwave_common::types::ScalarImpl;
@@ -47,9 +49,7 @@ use risingwave_storage::store::{
 use risingwave_storage::table::streaming_table::mem_table::{
     MemTable, MemTableError, MemTableIter, RowOp,
 };
-use risingwave_storage::table::{
-    compute_chunk_vnode, compute_vnode, get_dist_key_in_pk_indices, Distribution,
-};
+use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
 use risingwave_storage::{StateStore, StateStoreIter};
 use tracing::trace;
 
@@ -179,13 +179,8 @@ impl<S: StateStore> StateTable<S> {
             },
             None => Distribution::fallback(),
         };
-        let distribution_key_start_index_in_pk = match !dist_key_in_pk_indices.is_empty()
-            && *dist_key_in_pk_indices.iter().min().unwrap() + dist_key_in_pk_indices.len() - 1
-                == *dist_key_in_pk_indices.iter().max().unwrap()
-        {
-            false => None,
-            true => Some(*dist_key_in_pk_indices.iter().min().unwrap()),
-        };
+        let distribution_key_start_index_in_pk =
+            get_dist_key_start_index_in_pk(&dist_key_in_pk_indices);
 
         let vnode_col_idx_in_pk = table_catalog
             .vnode_col_idx

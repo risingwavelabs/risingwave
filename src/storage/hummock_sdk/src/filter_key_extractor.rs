@@ -19,7 +19,9 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{
+    get_dist_key_in_pk_indices, get_dist_key_start_index_in_pk, ColumnDesc,
+};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -210,28 +212,10 @@ impl SchemaFilterKeyExtractor {
             .map(|col_order| col_order.index as usize)
             .collect();
 
-        let dist_key_in_pk_indices = dist_key_indices
-            .iter()
-            .map(|&di| {
-                pk_indices
-                    .iter()
-                    .position(|&pi| di == pi)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "distribution key {:?} must be a subset of primary key {:?}",
-                            dist_key_indices, pk_indices
-                        )
-                    })
-            })
-            .collect_vec();
+        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
 
-        let distribution_key_start_index_in_pk = match !dist_key_in_pk_indices.is_empty()
-            && *dist_key_in_pk_indices.iter().min().unwrap() + dist_key_in_pk_indices.len() - 1
-                == *dist_key_in_pk_indices.iter().max().unwrap()
-        {
-            false => None,
-            true => Some(*dist_key_in_pk_indices.iter().min().unwrap()),
-        };
+        let distribution_key_start_index_in_pk =
+            get_dist_key_start_index_in_pk(&dist_key_in_pk_indices);
         let distribution_key_indices_pair_in_pk =
             distribution_key_start_index_in_pk.map(|distribution_key_start_index_in_pk| {
                 (

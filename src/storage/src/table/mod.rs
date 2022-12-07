@@ -156,20 +156,3 @@ fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
         vnode
     );
 }
-pub fn get_dist_key_in_pk_indices(dist_key_indices: &[usize], pk_indices: &[usize]) -> Vec<usize> {
-    let dist_key_in_pk_indices = dist_key_indices
-        .iter()
-        .map(|&di| {
-            pk_indices
-                .iter()
-                .position(|&pi| di == pi)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "distribution key {:?} must be a subset of primary key {:?}",
-                        dist_key_indices, pk_indices
-                    )
-                })
-        })
-        .collect_vec();
-    dist_key_in_pk_indices
-}
