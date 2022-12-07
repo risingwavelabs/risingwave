@@ -1,5 +1,5 @@
 # Copied from https://github.com/duckdb/duckdb (MIT licensed).
-# Copyright 2018-2022 Stichting DuckDB Foundation 
+# Copyright 2018-2022 Stichting DuckDB Foundation
 
 # description: Test ORDER BY keyword
 
@@ -13,6 +13,7 @@ statement ok
 INSERT INTO test VALUES (11, 22), (12, 21), (13, 22);
 
 # simple ORDER BY
+
 query I
 SELECT b FROM test ORDER BY a DESC;
 ----
@@ -35,6 +36,7 @@ SELECT a, b FROM test ORDER BY a DESC;
 11	22
 
 # ORDER BY on multiple columns
+
 query II
 SELECT a, b FROM test ORDER BY b, a;
 ----
@@ -43,6 +45,7 @@ SELECT a, b FROM test ORDER BY b, a;
 13	22
 
 # ORDER BY using select indices
+
 query II
 SELECT a, b FROM test ORDER BY 2, 1;
 ----
@@ -65,18 +68,21 @@ SELECT a, b FROM test ORDER BY b, a DESC;
 11	22
 
 # TOP N queries
+
 query II
 SELECT a, b FROM test ORDER BY b, a DESC LIMIT 1;
 ----
 12	21
 
 # Offset
+
 query II
 SELECT a, b FROM test ORDER BY b, a DESC LIMIT 1 OFFSET 1;
 ----
 13	22
 
 # Offset without limit
+
 query II
 SELECT a, b FROM test ORDER BY b, a DESC OFFSET 1;
 ----
@@ -111,6 +117,7 @@ SELECT b, a FROM test WHERE a < 13 ORDER BY b DESC;
 # https://github.com/risingwavelabs/risingwave/issues/4681
 # query IR
 # SELECT b % 2 AS f, SUM(a) FROM test GROUP BY f ORDER BY b % 2;
+
 query II
 SELECT b % 2, SUM(a) FROM test GROUP BY b % 2 ORDER BY b % 2;
 ----
@@ -118,6 +125,7 @@ SELECT b % 2, SUM(a) FROM test GROUP BY b % 2 ORDER BY b % 2;
 1	12
 
 # order by expression that is not in SELECT
+
 query II
 SELECT b % 2 AS f, a FROM test ORDER BY b % 2, a;
 ----
@@ -128,6 +136,7 @@ SELECT b % 2 AS f, a FROM test ORDER BY b % 2, a;
 # ORDER BY alias
 # query IR
 # SELECT b % 2 AS f, SUM(a) FROM test GROUP BY f ORDER BY f;
+
 query II
 SELECT b % 2 AS f, SUM(a) FROM test GROUP BY b % 2 ORDER BY f;
 ----
@@ -136,6 +145,7 @@ SELECT b % 2 AS f, SUM(a) FROM test GROUP BY b % 2 ORDER BY f;
 
 # query IR
 # SELECT b % 2 AS f, SUM(a) FROM test GROUP BY f ORDER BY 1;
+
 query II
 SELECT b % 2 AS f, SUM(a) FROM test GROUP BY b % 2 ORDER BY 1;
 ----
