@@ -33,16 +33,16 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-CREATE SCHEMA test
+CREATE SCHEMA s
 
 statement ok
-CREATE TABLE test.tbl(col INTEGER);
+CREATE TABLE s.tbl(col INTEGER);
 
 statement ok
-INSERT INTO test.tbl VALUES (1), (2), (3);
+INSERT INTO s.tbl VALUES (1), (2), (3);
 
 query I rowsort
-SELECT test.tbl.col FROM test.tbl;
+SELECT s.tbl.col FROM s.tbl;
 ----
 1
 2
@@ -51,13 +51,13 @@ SELECT test.tbl.col FROM test.tbl;
 # (TODO)schema name with alias does not work
 # https://github.com/risingwavelabs/risingwave/issues/6744
 # statement error
-# SELECT test.t.col FROM test.tbl t;
+# SELECT s.t.col FROM s.tbl t;
 
 statement error
-SELECT test.tbl.col FROM test.tbl t;
+SELECT s.tbl.col FROM s.tbl t;
 
 statement ok
-DROP SCHEMA test
+DROP SCHEMA s
 
 # check how ties are resolved
 # we create a table called "t" in a schema called "t" with a column called "t" that has a field called "t"
