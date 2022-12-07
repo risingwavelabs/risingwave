@@ -270,7 +270,7 @@ where
             .try_with(|stats| {
                 let task_id = task::id();
                 stats.borrow_mut().add(layout.size());
-                let ptr = self.0.alloc(wrapped_layout);
+                let ptr = self.0.alloc_zerod(wrapped_layout);
                 // Warn: We assume `task::Id` is u64 here, but it's not public documented.
                 *ptr.cast() = std::mem::transmute::<_, u64>(task_id);
                 ptr.wrapping_add(offset)
