@@ -115,7 +115,7 @@ pub struct StateTable<S: StateStore> {
     /// The epoch flush to the state store last time.
     epoch: Option<EpochPair>,
 
-    /// last watermark that is used to construct delete ranges in `ingest`
+    /// last watermark that is used to construct delete ranges in `ingest`.
     last_watermark: Option<ScalarImpl>,
 
     /// latest watermark
