@@ -22,9 +22,29 @@ use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalFilter, Logic
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// Push `LogicalApply` down `LogicalAgg`.
-pub struct ApplyAggRule {}
-impl Rule for ApplyAggRule {
+/// Transpose `LogicalApply` and `LogicalAgg`.
+///
+/// Before:
+///
+/// ```text
+///     LogicalApply
+///    /            \
+///  Domain      LogicalAgg
+///                  |
+///                Input
+/// ```
+///
+/// After:
+///
+/// ```text
+///      LogicalAgg
+///          |
+///     LogicalApply
+///    /            \
+///  Domain        Input
+/// ```
+pub struct ApplyAggTransposeRule {}
+impl Rule for ApplyAggTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
@@ -133,8 +153,8 @@ impl Rule for ApplyAggRule {
     }
 }
 
-impl ApplyAggRule {
+impl ApplyAggTransposeRule {
     pub fn create() -> BoxedRule {
-        Box::new(ApplyAggRule {})
+        Box::new(ApplyAggTransposeRule {})
     }
 }
