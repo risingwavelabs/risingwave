@@ -12,12 +12,8 @@ statement ok
 insert into t values ('aaa', 1, 1), ('bbb', 0, 2), ('ccc', 0, 5), ('ddd', 1, 4)
 
 query II
-select rw_vnode(_row_id) as vnode, _row_id from t;
+select rw_vnode(_row_id) as vnode, _row_id from t limit 0;
 ----
-61	222848002044723201
-222	222848002044723202
-64	222848002044723203
-163	222848002044723200
 
 statement ok
 drop table t
