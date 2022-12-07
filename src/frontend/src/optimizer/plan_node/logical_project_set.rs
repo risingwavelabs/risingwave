@@ -319,9 +319,9 @@ mod test {
 
     use super::*;
     use crate::expr::{ExprImpl, InputRef, TableFunction};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn fd_derivation_project_set() {
