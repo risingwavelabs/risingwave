@@ -486,12 +486,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         )
     }
 
-    // Initialize sub-tasks.
     let compaction_scheduler = Arc::new(CompactionScheduler::new(
         env.clone(),
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
+
+    // sub_tasks executed concurrently. Can be shutdown via shutdown_all
     let mut sub_tasks =
         hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
     sub_tasks.push(
@@ -510,12 +511,22 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         );
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
-
     let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
     sub_tasks.push(
         IdleManager::start_idle_checker(env.idle_manager_ref(), Duration::from_secs(30), idle_send)
             .await,
     );
+    let shutdown_all = async move {
+        for (join_handle, shutdown_sender) in sub_tasks {
+            if let Err(_err) = shutdown_sender.send(()) {
+                // Maybe it is already shut down
+                continue;
+            }
+            if let Err(err) = join_handle.await {
+                tracing::warn!("Failed to join shutdown: {:?}", err);
+            }
+        }
+    };
 
     let (svc_shutdown_tx, svc_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -535,8 +546,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .serve_with_shutdown(address_info.listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
-                    _ = svc_shutdown_rx => {},
-                    _ = idle_recv => {},
+                    _ = svc_shutdown_rx => {
+                        shutdown_all.await;
+                    },
+                    _ = idle_recv => {
+                        shutdown_all.await;
+                    },
                 }
             })
             .await
