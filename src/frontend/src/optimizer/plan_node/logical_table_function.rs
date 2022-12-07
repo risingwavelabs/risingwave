@@ -19,9 +19,9 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::expr::{Expr, TableFunction};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::BatchTableFunction;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
 
 /// `LogicalGenerateSeries` implements Hop Table Function.

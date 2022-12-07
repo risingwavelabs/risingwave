@@ -23,10 +23,11 @@ mod plan_correlated_id_finder;
 mod plan_rewriter;
 mod plan_visitor;
 pub use plan_visitor::PlanVisitor;
+mod optimizer_context;
 mod rule;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
+pub use optimizer_context::*;
 use property::Order;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -583,8 +584,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_as_subplan() {
