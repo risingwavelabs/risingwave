@@ -107,11 +107,11 @@ pub struct Args {
     #[clap(long)]
     sqlsmith: Option<usize>,
 
-    /// Load etcd data from json file.
+    /// Load etcd data from toml file.
     #[clap(long)]
     etcd_data: Option<PathBuf>,
 
-    /// Dump etcd data into json file before exit.
+    /// Dump etcd data into toml file before exit.
     #[clap(long)]
     etcd_dump: Option<PathBuf>,
 }
