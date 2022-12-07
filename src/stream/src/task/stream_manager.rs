@@ -34,6 +34,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use task_stats_alloc::MemoryMonitor;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -80,6 +81,8 @@ pub struct LocalStreamManagerCore {
 
     /// Manages the stack traces of all actors.
     stack_trace_manager: Option<StackTraceManager<ActorId>>,
+
+    memory_monitor: Arc<MemoryMonitor>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -419,6 +422,7 @@ impl LocalStreamManagerCore {
             streaming_metrics,
             config,
             stack_trace_manager: async_stack_trace_config.map(StackTraceManager::new),
+            memory_monitor: Arc::new(MemoryMonitor::default()),
         }
     }
 
@@ -649,15 +653,10 @@ impl LocalStreamManagerCore {
                     None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
-                let allocation_stated = task_stats_alloc::allocation_stat(
+                let allocation_stated = task_stats_alloc::allocation_stat2(
                     instrumented,
                     Duration::from_millis(1000),
-                    move |bytes| {
-                        metrics
-                            .actor_memory_usage
-                            .with_label_values(&[&actor_id_str])
-                            .set(bytes as i64)
-                    },
+                    self.memory_monitor.clone(),
                 );
                 self.runtime.spawn(allocation_stated)
             };

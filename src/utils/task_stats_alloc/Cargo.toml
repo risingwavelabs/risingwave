@@ -6,6 +6,7 @@ description = "Allocator with statistics"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+hashbrown = { version = "0.13", features = ["nightly"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",

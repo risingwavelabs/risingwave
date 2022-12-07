@@ -17,11 +17,15 @@
 #![feature(atomic_mut_ptr)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::RefCell;
+use std::collections::hash_map::RandomState;
 use std::future::Future;
 use std::sync::atomic::{fence, AtomicUsize, Ordering};
+use std::sync::{Mutex, Arc};
 use std::time::Duration;
 
-use tokio::task_local;
+use hashbrown::HashMap;
+use tokio::{task, task_local};
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
@@ -89,8 +93,90 @@ impl TaskLocalBytesAllocated {
     }
 }
 
+#[derive(Default, Debug)]
+pub struct LocalStats {
+    /// Bytes allocated in the task and also deallocated in current task.
+    cur_task_allocated: usize,
+    /// Bytes deallocated in current task and also allocated it.
+    cur_task_deallocated: usize,
+    /// Bytes deallocated in current task but allocated in other tasks.
+    other_task_deallocated: HashMap<task::Id, usize, RandomState, System>,
+    // TODO: Bytes deallocated in current task but allocated out of the runtime.
+}
+
+impl LocalStats {
+    #[inline(always)]
+    fn add(&mut self, bytes: usize) {
+        self.cur_task_allocated += bytes;
+    }
+
+    #[inline(always)]
+    fn sub(&mut self, task_id: Option<task::Id>, bytes: usize) {
+        let cur_task_id = task::id();
+        match task_id {
+            Some(allocated_task_id) if cur_task_id == allocated_task_id => {
+                self.cur_task_deallocated += bytes;
+            }
+            Some(allocated_task_id) => {
+                *self
+                    .other_task_deallocated
+                    .entry(allocated_task_id)
+                    .or_default() += bytes;
+            }
+            None => {
+                // TODO: Bytes deallocated in current task but allocated out of the runtime.
+            }
+        }
+    }
+}
+
 task_local! {
     pub static BYTES_ALLOCATED: TaskLocalBytesAllocated;
+    pub static LOCAL_STATS: RefCell<LocalStats>;
+}
+
+#[derive(Default, Debug)]
+pub struct MemoryMonitor {
+    /// Memory usages per task.
+    memory_usage_by_task: Mutex<HashMap<task::Id, usize>>,
+}
+
+pub async fn allocation_stat2<Fut, T>(
+    future: Fut,
+    interval: Duration,
+    monitor: Arc<MemoryMonitor>,
+) -> T
+where
+    Fut: Future<Output = T>,
+{
+    LOCAL_STATS
+        .scope(RefCell::new(LocalStats::default()), async move {
+            let monitor_fut = async move {
+                let mut interval = tokio::time::interval(interval);
+                loop {
+                    interval.tick().await;
+                    LOCAL_STATS.with(|stats| {
+                        let mut stats = stats.borrow_mut();
+                        let stats = &mut *stats;
+                        let stats = std::mem::take(stats);
+                        let mut memory_usage_by_task = monitor.memory_usage_by_task.lock().unwrap();
+                        let cur_task_usage = memory_usage_by_task.entry(task::id()).or_default();
+                        *cur_task_usage += stats.cur_task_allocated;
+                        *cur_task_usage -= stats.cur_task_deallocated;
+                        for (task_id, deallocated) in stats.other_task_deallocated {
+                            *memory_usage_by_task.entry(task_id).or_default() -= deallocated;
+                        }
+                    });
+                }
+            };
+            let output = tokio::select! {
+                biased;
+                _ = monitor_fut => unreachable!(),
+                output = future => output,
+            };
+            output
+        })
+        .await
 }
 
 pub async fn allocation_stat<Fut, T, F>(future: Fut, interval: Duration, mut report: F) -> T
@@ -142,16 +228,19 @@ where
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let (wrapped_layout, offset) = wrap_layout(layout);
 
-        BYTES_ALLOCATED
-            .try_with(|&bytes| {
-                bytes.add_unchecked(layout.size());
+        LOCAL_STATS
+            .try_with(|stats| {
+                let task_id = task::id();
+                stats.borrow_mut().add(layout.size());
                 let ptr = self.0.alloc(wrapped_layout);
-                *ptr.cast() = bytes;
+                // Warn: We assume `task::Id` is u64 here, but it's not public documented.
+                *ptr.cast() = std::mem::transmute::<_, u64>(task_id);
                 ptr.wrapping_add(offset)
             })
             .unwrap_or_else(|_| {
                 let ptr = self.0.alloc(wrapped_layout);
-                *ptr.cast() = TaskLocalBytesAllocated::invalid();
+                // Warn: We assume 0xffffffff is an invalid `task::Id`, but it's not public documented.
+                *ptr.cast() = 0xffffffffu64;
                 ptr.wrapping_add(offset)
             })
     }
@@ -160,8 +249,16 @@ where
         let (wrapped_layout, offset) = wrap_layout(layout);
         let ptr = ptr.wrapping_sub(offset);
 
-        let bytes: TaskLocalBytesAllocated = *ptr.cast();
-        bytes.sub(layout.size());
+        let task_id: u64 = *ptr.cast();
+        // Warn: We assume 0xffffffff is an invalid `task::Id`, but it's not public documented.
+        let task_id: Option<task::Id> = if task_id == 0xffffffffu64 {
+            None
+        } else {
+            Some(std::mem::transmute(task_id))
+        };
+        let _ = LOCAL_STATS.try_with(|stats| {
+            stats.borrow_mut().sub(task_id, layout.size());
+        });
 
         self.0.dealloc(ptr, wrapped_layout);
     }
@@ -169,16 +266,19 @@ where
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         let (wrapped_layout, offset) = wrap_layout(layout);
 
-        BYTES_ALLOCATED
-            .try_with(|&bytes| {
-                bytes.add_unchecked(layout.size());
-                let ptr = self.0.alloc_zeroed(wrapped_layout);
-                *ptr.cast() = bytes;
+        LOCAL_STATS
+            .try_with(|stats| {
+                let task_id = task::id();
+                stats.borrow_mut().add(layout.size());
+                let ptr = self.0.alloc(wrapped_layout);
+                // Warn: We assume `task::Id` is u64 here, but it's not public documented.
+                *ptr.cast() = std::mem::transmute::<_, u64>(task_id);
                 ptr.wrapping_add(offset)
             })
             .unwrap_or_else(|_| {
                 let ptr = self.0.alloc_zeroed(wrapped_layout);
-                *ptr.cast() = TaskLocalBytesAllocated::invalid();
+                // Warn: We assume 0xffffffff is an invalid `task::Id`, but it's not public documented.
+                *ptr.cast() = 0xffffffffu64;
                 ptr.wrapping_add(offset)
             })
     }
@@ -186,6 +286,19 @@ where
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let (wrapped_layout, offset) = wrap_layout(layout);
         let ptr = ptr.wrapping_sub(offset);
+
+        let task_id: u64 = *ptr.cast();
+        // Warn: We assume 0xffffffff is an invalid `task::Id`, but it's not public documented.
+        let task_id: Option<task::Id> = if task_id == 0xffffffffu64 {
+            None
+        } else {
+            Some(std::mem::transmute(task_id))
+        };
+        let _ = LOCAL_STATS.try_with(|stats| {
+            let mut stats = stats.borrow_mut();
+            stats.add(new_size);
+            stats.sub(task_id, layout.size());
+        });
 
         let bytes: TaskLocalBytesAllocated = *ptr.cast();
         bytes.add(new_size);
@@ -195,7 +308,7 @@ where
         if ptr.is_null() {
             ptr
         } else {
-            *ptr.cast() = bytes;
+            *ptr.cast() = task_id;
             ptr.wrapping_add(offset)
         }
     }
