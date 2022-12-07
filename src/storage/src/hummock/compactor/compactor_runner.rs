@@ -18,6 +18,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
@@ -25,6 +26,7 @@ use super::task_progress::TaskProgress;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
+    MultiCompactionFilter,
 };
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
@@ -120,6 +122,7 @@ impl CompactorRunner {
     pub async fn build_delete_range_iter(
         compact_task: &CompactTask,
         sstable_store: &CompactorSstableStoreRef,
+        multi_filter: &mut MultiCompactionFilter,
     ) -> HummockResult<Arc<RangeTombstonesCollector>> {
         let mut builder = DeleteRangeAggregatorBuilder::default();
         let mut local_stats = StoreLocalStatistic::default();
@@ -130,7 +133,20 @@ impl CompactorRunner {
 
             for table_info in &level.table_infos {
                 let table = sstable_store.sstable(table_info, &mut local_stats).await?;
-                builder.add_tombstone(table.value().meta.range_tombstone_list.clone());
+                let tombstones = table
+                    .value()
+                    .meta
+                    .range_tombstone_list
+                    .iter()
+                    .filter(|tombstone| {
+                        !multi_filter.should_delete(FullKey::from_user_key(
+                            tombstone.start_user_key.as_ref(),
+                            tombstone.sequence,
+                        ))
+                    })
+                    .cloned()
+                    .collect_vec();
+                builder.add_tombstone(tombstones);
             }
         }
         let aggregator = builder.build(compact_task.watermark, compact_task.gc_delete_keys);

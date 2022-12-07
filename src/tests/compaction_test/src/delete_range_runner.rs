@@ -3,7 +3,6 @@ use std::future::Future;
 use std::ops::Bound;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -37,7 +36,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
 use risingwave_storage::{StateStore, StateStoreIter};
 
-use crate::{CompactionTestOpts, TestToolConfig};
+use crate::CompactionTestOpts;
 
 pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
@@ -70,7 +69,7 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
 }
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
     tracing::info!("Started embedded Meta");
-    let config: TestToolConfig = load_config(&opts.config_path).unwrap();
+    let config = load_config(&opts.config_path);
     let mut storage_config = config.storage;
     storage_config.enable_state_store_v1 = false;
     let compaction_config = CompactionConfigBuilder::new().build();
@@ -79,7 +78,7 @@ pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()
         storage_config,
         &opts.state_store,
         1000000,
-        1000000,
+        100000,
     )
     .await
 }
@@ -179,9 +178,11 @@ async fn compaction_test(
         meta_client.clone(),
         get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
         state_store_metrics.clone(),
+        Arc::new(risingwave_tracing::RwTracingService::disabled()),
     )
     .await
     .unwrap();
+    let sstable_id_manager = store.sstable_id_manager().clone();
     let filter_key_extractor_manager = store.filter_key_extractor_manager().clone();
     filter_key_extractor_manager.update(
         1,
@@ -201,6 +202,7 @@ async fn compaction_test(
         sstable_store,
         meta_client.clone(),
         filter_key_extractor_manager,
+        sstable_id_manager,
         state_store_metrics,
     );
     run_compare_result(&store, meta_client.clone(), test_range, test_count)
@@ -241,10 +243,6 @@ async fn compaction_test(
     Ok(())
 }
 
-lazy_static::lazy_static! {
-    pub static ref ENABLE_DEBUG: AtomicBool = AtomicBool::new(false);
-}
-
 async fn run_compare_result(
     hummock: &HummockStorage,
     meta_client: Arc<MockHummockMetaClient>,
@@ -253,20 +251,20 @@ async fn run_compare_result(
 ) -> Result<(), String> {
     let mut normal = NormalState::new(hummock, 1, 0).await;
     let mut delete_range = DeleteRangeState::new(hummock, 2, 0).await;
-    const RANGE_BASE: u64 = 100;
-    let range_mod = test_range / 2 / RANGE_BASE;
+    const RANGE_BASE: u64 = 400;
+    let range_mod = test_range / RANGE_BASE;
 
     let mut rng = StdRng::seed_from_u64(10097);
     let mut overlap_ranges = vec![];
     for epoch in 1..test_count {
-        for idx in 0..100 {
-            let op = rng.next_u32() % 20;
+        for idx in 0..1000 {
+            let op = rng.next_u32() % 50;
             let key_number = rng.next_u64() % test_range;
             if op == 0 {
-                let end_key = key_number + (rng.next_u64() % range_mod);
+                let end_key = key_number + (rng.next_u64() % range_mod) + 1;
                 overlap_ranges.push((key_number, end_key, epoch, idx));
-                let start_key = format!("{:06}", key_number);
-                let end_key = format!("{:06}", end_key);
+                let start_key = format!("{:010}", key_number);
+                let end_key = format!("{:010}", end_key);
                 normal
                     .delete_range(start_key.as_bytes(), end_key.as_bytes())
                     .await;
@@ -274,13 +272,15 @@ async fn run_compare_result(
                     .delete_range(start_key.as_bytes(), end_key.as_bytes())
                     .await;
             } else if op < 5 {
-                let key = format!("{:06}", key_number);
+                let key = format!("{:010}", key_number);
                 let a = normal.get(key.as_bytes()).await;
                 let b = delete_range.get(key.as_bytes()).await;
                 if a.is_some() && b.is_none() {
                     let d = overlap_ranges
                         .iter()
-                        .filter(|(left, right, _, _)| *left <= key_number && key_number < *right).cloned().collect_vec();
+                        .filter(|(left, right, _, _)| *left <= key_number && key_number < *right)
+                        .cloned()
+                        .collect_vec();
                     println!("delete ranges: \n{:?}", d);
                     delete_range.enable_debug();
                     let _ = delete_range.get(key.as_bytes()).await;
@@ -300,8 +300,8 @@ async fn run_compare_result(
                 if overlap {
                     continue;
                 }
-                let key = format!("{:06}", key_number);
-                let val = format!("val-{:016}", epoch);
+                let key = format!("{:010}", key_number);
+                let val = format!("val-{:010}-{:016}-{:016}", idx, key_number, epoch);
                 normal.insert(key.as_bytes(), val.as_bytes());
                 delete_range.insert(key.as_bytes(), val.as_bytes());
             }
@@ -314,14 +314,9 @@ async fn run_compare_result(
             .commit_epoch(epoch, ret.uncommitted_ssts)
             .await
             .unwrap();
-        if epoch % 100 == 0 {
+        if epoch % 200 == 0 {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-        // meta_client.update_current_epoch(epoch).await.unwrap();
-        // hummock
-        //     .try_wait_epoch(HummockReadEpoch::Committed(epoch))
-        //     .await
-        //     .unwrap();
     }
     Ok(())
 }
@@ -346,6 +341,7 @@ impl DeleteRangeState {
             delete_ranges: vec![],
         }
     }
+
     fn enable_debug(&mut self) {
         self.inner.enable_debug();
     }
@@ -372,7 +368,6 @@ impl NormalState {
             debug: false,
         }
     }
-
 
     fn enable_debug(&mut self) {
         self.debug = true;
@@ -564,6 +559,7 @@ fn run_compactor_thread(
     sstable_store: SstableStoreRef,
     meta_client: Arc<MockHummockMetaClient>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
+    sstable_id_manager: Arc<SstableIdManager>,
     state_store_metrics: Arc<StateStoreMetrics>,
 ) -> (
     tokio::task::JoinHandle<()>,
@@ -574,7 +570,6 @@ fn run_compactor_thread(
         MemoryLimiter::unlimit(),
     ));
 
-    let sstable_id_manager = Arc::new(SstableIdManager::new(meta_client.clone(), 10));
     let context = Arc::new(Context {
         options: config,
         hummock_meta_client: meta_client.clone(),
@@ -611,19 +606,21 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
     async fn test_small_data() {
-        let mut storage_config = StorageConfig::default();
-        storage_config.enable_state_store_v1 = false;
+        let storage_config = StorageConfig {
+            enable_state_store_v1: false,
+            ..Default::default()
+        };
         let mut compaction_config = CompactionConfigBuilder::new().build();
-        compaction_config.max_sub_compaction = 2;
-        compaction_config.level0_tier_compact_file_number = 4;
-        compaction_config.max_bytes_for_level_base = 4 * 1024 * 1024;
-        compaction_config.sub_level_max_compaction_bytes = 1024 * 1024;
+        compaction_config.max_sub_compaction = 1;
+        compaction_config.level0_tier_compact_file_number = 2;
+        compaction_config.max_bytes_for_level_base = 512 * 1024;
+        compaction_config.sub_level_max_compaction_bytes = 256 * 1024;
         compaction_test(
             compaction_config,
             storage_config,
             "hummock+memory",
             10000,
-            10000,
+            800,
         )
         .await
         .unwrap();

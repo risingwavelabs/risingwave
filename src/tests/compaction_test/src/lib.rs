@@ -29,8 +29,6 @@ mod runner;
 
 use clap::Parser;
 pub use delete_range_runner::start_delete_range;
-use risingwave_common::config::{ServerConfig, StorageConfig};
-use serde::{Deserialize, Serialize};
 
 use crate::runner::compaction_test_main;
 
