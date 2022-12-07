@@ -86,6 +86,14 @@ pub struct ComputeNodeOpts {
     /// [`risingwave_common::config`] instead of command line arguments.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    /// Total available memory in bytes, used by LRU Manager
+    #[clap(long, default_value_t = default_total_memory_bytes())]
+    pub total_memory_bytes: usize,
+
+    /// The parallelism that the compute node will register to the scheduler of the meta service.
+    #[clap(long, default_value_t = default_parallelism())]
+    pub parallelism: usize,
 }
 
 use std::future::Future;
@@ -121,4 +129,16 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             join_handle.await.unwrap();
         }
     })
+}
+
+fn default_total_memory_bytes() -> usize {
+    use sysinfo::{System, SystemExt};
+
+    let mut sys = System::new();
+    sys.refresh_memory();
+    sys.total_memory() as usize
+}
+
+fn default_parallelism() -> usize {
+    std::thread::available_parallelism().unwrap().get()
 }

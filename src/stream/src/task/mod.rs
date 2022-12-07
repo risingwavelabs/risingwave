@@ -98,11 +98,11 @@ impl SharedContext {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
         config: &StreamingConfig,
-        enable_managed_cache: bool,
+        total_memory_available_bytes: usize,
     ) -> Self {
         let create_lru_manager = || {
             let mgr = LruManager::new(
-                config.total_memory_available_bytes,
+                total_memory_available_bytes,
                 config.barrier_interval_ms,
                 streaming_metrics,
             );
@@ -110,6 +110,7 @@ impl SharedContext {
             tokio::spawn(mgr.clone().run());
             mgr
         };
+        let enable_managed_cache = config.developer.stream_enable_managed_cache;
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
