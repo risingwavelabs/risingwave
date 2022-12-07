@@ -94,7 +94,7 @@ pub async fn rpc_serve(
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
-) -> MetaResult<Sender<()>> {
+) -> MetaResult<(JoinHandle<()>, Sender<()>)> {
     match meta_store_backend {
         MetaStoreBackend::Etcd {
             endpoints,
@@ -302,7 +302,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
-) -> MetaResult<Sender<()>> {
+) -> MetaResult<(JoinHandle<()>, Sender<()>)> {
     // Initialize managers.
     let (info, lease_handle, lease_shutdown) = register_leader_for_meta(
         address_info.addr.clone(),
@@ -531,7 +531,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let (svc_shutdown_tx, svc_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     // Start services.
-    tokio::spawn(async move {
+    let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
             .add_service(HeartbeatServiceServer::new(heartbeat_srv))
@@ -558,7 +558,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .unwrap();
     });
 
-    Ok(svc_shutdown_tx)
+    Ok((join_handle, svc_shutdown_tx))
 }
 
 #[cfg(test)]
@@ -574,7 +574,7 @@ mod tests {
             ..Default::default()
         };
         let meta_store = Arc::new(MemStore::default());
-        let closer = rpc_serve_with_store(
+        let (handle, closer) = rpc_serve_with_store(
             meta_store.clone(),
             info,
             Duration::from_secs(10),
@@ -598,6 +598,7 @@ mod tests {
         .await;
         assert!(ret.is_err());
         closer.send(()).unwrap();
+        handle.await.unwrap();
         sleep(Duration::from_secs(3)).await;
         rpc_serve_with_store(
             meta_store.clone(),
