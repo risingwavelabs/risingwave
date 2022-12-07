@@ -15,7 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::ErrorCode::PermissionDenied;
-use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
 use super::RwPgResponse;

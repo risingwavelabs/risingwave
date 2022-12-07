@@ -56,6 +56,9 @@ SELECT test.tbl.col FROM test.tbl;
 statement error
 SELECT test.tbl.col FROM test.tbl t;
 
+statement ok
+DROP SCHEMA test
+
 # check how ties are resolved
 # we create a table called "t" in a schema called "t" with a column called "t" that has a field called "t"
 statement ok
