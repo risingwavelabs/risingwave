@@ -17,7 +17,7 @@ use risingwave_common::types::DataType;
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprDisplay, ExprImpl};
-use crate::session::OptimizerContextRef;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 
 /// [`ProjectSet`] projects one row multiple times according to `select_list`.
