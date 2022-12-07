@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, get_dist_key_start_index_in_pk, ColumnDesc,
@@ -59,20 +58,7 @@ impl FilterKeyExtractorImpl {
             .map(|col_order| col_order.index as usize)
             .collect();
 
-        let dist_key_in_pk_indices = dist_key_indices
-            .iter()
-            .map(|&di| {
-                pk_indices
-                    .iter()
-                    .position(|&pi| di == pi)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "distribution key {:?} must be a subset of primary key {:?}",
-                            dist_key_indices, pk_indices
-                        )
-                    })
-            })
-            .collect_vec();
+        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
 
         let match_read_pattern = !dist_key_in_pk_indices.is_empty()
             && *dist_key_in_pk_indices.iter().min().unwrap() + dist_key_in_pk_indices.len() - 1
@@ -175,26 +161,24 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
-        match self.distribution_key_indices_pair_in_pk.is_some()
-            && self.distribution_key_indices_pair_in_pk.unwrap().1 != 0
-            && self.distribution_key_indices_pair_in_pk.unwrap().1 <= pk.len()
+        if let Some((distribution_key_start_index_in_pk, distribution_key_end_index_in_pk)) =
+            self.distribution_key_indices_pair_in_pk
         {
-            false => &[],
-            true => {
-                let (dist_key_start_position, dist_key_len) = self
-                    .deserializer
-                    .deserialize_dist_key_position_with_column_indices(
-                        pk,
-                        (
-                            self.distribution_key_indices_pair_in_pk.unwrap().0,
-                            self.distribution_key_indices_pair_in_pk.unwrap().1,
-                        ),
-                    )
-                    .unwrap();
+            let (dist_key_start_position, dist_key_len) = self
+                .deserializer
+                .deserialize_dist_key_position_with_column_indices(
+                    pk,
+                    (
+                        distribution_key_start_index_in_pk,
+                        distribution_key_end_index_in_pk,
+                    ),
+                )
+                .unwrap();
 
-                let start_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + dist_key_start_position;
-                &full_key[start_position..start_position + dist_key_len]
-            }
+            let start_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + dist_key_start_position;
+            &full_key[start_position..start_position + dist_key_len]
+        } else {
+            &[]
         }
     }
 }

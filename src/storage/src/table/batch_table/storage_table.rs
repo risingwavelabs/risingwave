@@ -426,42 +426,42 @@ impl<S: StateStore> StorageTable<S> {
             .into_iter()
             .map(|index| self.pk_indices[index])
             .collect_vec();
-        let dist_key_hint = if self.dist_key_indices.is_empty()
-            || self.distribution_key_start_index_in_pk.is_none()
-            || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk.unwrap()
-                > pk_prefix.len()
+
+        let dist_key_hint = if let Some(distribution_key_start_index_in_pk) =
+            self.distribution_key_start_index_in_pk &&
+            self.dist_key_indices.len() + distribution_key_start_index_in_pk
+                <= pk_prefix.len()
         {
-            trace!(
-                "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
-                self.table_id,
-                pk_prefix,
-                self.dist_key_indices,
-                pk_prefix_indices
-            );
-            None
-        } else {
             let encoded_prefix = if let Bound::Included(start_key) = start_key.as_ref() {
                 start_key
             } else {
                 unreachable!()
             };
-            let distribution_key_end_index_in_pk = self.dist_key_in_pk_indices.len()
-                + self.distribution_key_start_index_in_pk.unwrap();
+            let distribution_key_end_index_in_pk =
+                self.dist_key_in_pk_indices.len() + distribution_key_start_index_in_pk;
             let (dist_key_start_position, dist_key_len) = self
                 .pk_serializer
                 .deserialize_dist_key_position_with_column_indices(
                     encoded_prefix,
                     (
-                        self.distribution_key_start_index_in_pk.unwrap(),
+                        distribution_key_start_index_in_pk,
                         distribution_key_end_index_in_pk,
                     ),
                 )
                 .unwrap();
-
             Some(
                 encoded_prefix[dist_key_start_position..dist_key_len + dist_key_start_position]
                     .to_vec(),
             )
+        } else {
+            trace!(
+                    "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
+                    self.table_id,
+                    pk_prefix,
+                    self.dist_key_indices,
+                    pk_prefix_indices
+                );
+            None
         };
 
         trace!(

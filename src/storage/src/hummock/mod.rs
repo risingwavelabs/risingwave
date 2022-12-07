@@ -329,6 +329,15 @@ pub async fn get_from_sstable_info(
         get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
     };
 
+    // let dist_key = &full_key.user_key.table_key[VirtualNode::SIZE..];
+    // if read_options.check_bloom_filter
+    //     && !hit_sstable_bloom_filter(sstable.value(), dist_key, local_stats)
+    // {
+    //     if delete_epoch.is_some() {
+    //         return Ok(Some(HummockValue::Delete));
+    //     }
+    //     return Ok(None);
+    // }
     // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
     // use default before refinement.
     let mut iter = SstableIterator::create(

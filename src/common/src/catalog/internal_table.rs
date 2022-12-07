@@ -63,11 +63,19 @@ pub fn get_dist_key_in_pk_indices(dist_key_indices: &[usize], pk_indices: &[usiz
 /// Note that `dist_key_in_pk_indices` may be shuffled, the start index should be the
 /// minimum value.
 pub fn get_dist_key_start_index_in_pk(dist_key_in_pk_indices: &[usize]) -> Option<usize> {
-    match !dist_key_in_pk_indices.is_empty()
-        && *dist_key_in_pk_indices.iter().min().unwrap() + dist_key_in_pk_indices.len() - 1
-            == *dist_key_in_pk_indices.iter().max().unwrap()
+    let sorted_dist_key = dist_key_in_pk_indices
+        .iter()
+        .copied()
+        .sorted()
+        .collect_vec();
+    if !dist_key_in_pk_indices.is_empty()
+        && sorted_dist_key
+            == (*dist_key_in_pk_indices.iter().min().unwrap()
+                ..*dist_key_in_pk_indices.iter().max().unwrap() + 1)
+                .collect_vec()
     {
-        true => Some(*dist_key_in_pk_indices.iter().min().unwrap()),
-        false => None,
+        Some(*dist_key_in_pk_indices.iter().min().unwrap())
+    } else {
+        None
     }
 }
