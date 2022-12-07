@@ -21,15 +21,15 @@ use risingwave_sqlparser::ast::{DropMode, ObjectName};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_schema(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     schema_name: ObjectName,
     if_exist: bool,
     mode: Option<DropMode>,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let catalog_reader = session.env().catalog_reader();
     let schema_name = Binder::resolve_schema_name(schema_name)?;
 

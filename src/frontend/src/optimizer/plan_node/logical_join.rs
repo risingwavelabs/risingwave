@@ -1212,9 +1212,9 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
 
     /// Pruning
     /// ```text

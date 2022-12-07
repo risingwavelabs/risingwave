@@ -398,7 +398,7 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 
-use crate::session::OptimizerContextRef;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node

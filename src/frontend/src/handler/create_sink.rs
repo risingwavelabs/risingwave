@@ -23,8 +23,9 @@ use risingwave_sqlparser::ast::{
 use super::create_mv::{check_column_names, get_column_names};
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::optimizer::PlanRef;
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::handler::HandlerArgs;
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::Planner;
 
@@ -138,14 +139,15 @@ pub fn gen_sink_plan(
 }
 
 pub async fn handle_create_sink(
-    context: OptimizerContext,
+    handle_args: HandlerArgs,
     stmt: CreateSinkStatement,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx.clone();
+    let session = handle_args.session.clone();
 
     session.check_relation_name_duplicated(stmt.sink_name.clone())?;
 
     let (sink, graph) = {
+        let context = OptimizerContext::new_with_handler_args(handle_args);
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
 
         (sink, build_graph(plan))

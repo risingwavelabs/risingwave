@@ -29,11 +29,11 @@ use super::{
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object

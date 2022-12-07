@@ -25,9 +25,9 @@ use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2;
 use crate::optimizer::property::{Distribution, FieldOrder};
-use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
