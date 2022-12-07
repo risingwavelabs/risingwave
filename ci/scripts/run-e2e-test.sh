@@ -100,7 +100,9 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     buildkite-agent artifact download compaction-test-"$profile" target/debug/
     mv target/debug/compaction-test-"$profile" target/debug/compaction-test
     chmod +x ./target/debug/compaction-test
-    ./target/debug/compaction-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
+    # Use the config of ci-compaction-test for replay.
+    config_path=".risingwave/config/risingwave.toml"
+    ./target/debug/compaction-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
     cargo make ci-kill
