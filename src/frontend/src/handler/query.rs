@@ -29,13 +29,15 @@ use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
 use crate::handler::privilege::{check_privileges, resolve_privileges};
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
+use crate::handler::HandlerArgs;
+use crate::optimizer::{OptimizerContext, OptimizerContextRef};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
     HummockSnapshotGuard, LocalQueryExecution, LocalQueryStream,
 };
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::session::SessionImpl;
 use crate::PlanRef;
 
 pub fn gen_batch_query_plan(
@@ -88,16 +90,17 @@ pub fn gen_batch_query_plan(
 }
 
 pub async fn handle_query(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     stmt: Statement,
     format: bool,
 ) -> Result<RwPgResponse> {
     let stmt_type = to_statement_type(&stmt)?;
-    let session = context.session_ctx.clone();
+    let session = handler_args.session.clone();
     let query_start_time = Instant::now();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, output_schema) = {
+        let context = OptimizerContext::new_with_handler_args(handler_args);
         let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
         tracing::trace!(

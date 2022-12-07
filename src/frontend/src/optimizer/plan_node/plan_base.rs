@@ -17,8 +17,8 @@ use risingwave_common::catalog::Schema;
 
 use super::*;
 use crate::for_all_plan_nodes;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
-use crate::session::OptimizerContextRef;
 
 /// the common fields of all nodes, please make a field named `base` in
 /// every planNode and correctly valued it when construct the planNode.

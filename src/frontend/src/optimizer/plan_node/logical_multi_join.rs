@@ -536,9 +536,9 @@ mod test {
 
     use super::*;
     use crate::expr::{FunctionCall, InputRef};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
     #[tokio::test]
     async fn fd_derivation_multi_join() {
         // t1: [v0, v1], t2: [v2, v3, v4], t3: [v5, v6]

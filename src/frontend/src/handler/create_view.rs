@@ -24,27 +24,28 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::optimizer::PlanVisitor;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
+use crate::optimizer::{OptimizerContext, PlanVisitor};
 
 pub async fn handle_create_view(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     name: ObjectName,
     columns: Vec<Ident>,
     query: Query,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx.clone();
+    let session = handler_args.session.clone();
     let db_name = session.database();
     let (schema_name, view_name) = Binder::resolve_schema_qualified_name(db_name, name.clone())?;
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
-    let properties = context.with_options.clone();
+    let properties = handler_args.with_options.clone();
 
     session.check_relation_name_duplicated(name.clone())?;
 
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
+        let context = OptimizerContext::new_with_handler_args(handler_args);
         let (plan, _mode, schema) = super::query::gen_batch_query_plan(
             &session,
             context.into(),
