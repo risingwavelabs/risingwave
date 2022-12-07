@@ -345,20 +345,15 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             // fixme
             json!(v.to_text())
         }
-        (DataType::Date, ScalarRefImpl::NaiveDate(v)) => {
-            json!(v.to_text_with_type(&DataType::Date))
-        }
-        (DataType::Time, ScalarRefImpl::NaiveTime(v)) => {
-            json!(v.to_text_with_type(&DataType::Time))
-        }
-        (DataType::TIMESTAMP, ScalarRefImpl::NaiveDateTime(v)) => {
-            json!(v.to_text_with_type(&DataType::TIMESTAMP))
-        }
-        (DataType::TIMESTAMPZ, ScalarRefImpl::Int64(v)) => {
-            json!(v.to_text_with_type(&DataType::TIMESTAMPZ))
-        }
-        (DataType::Interval, ScalarRefImpl::Interval(v)) => {
-            json!(v.to_text_with_type(&DataType::Interval))
+        (
+            dt @ DataType::Date
+            | dt @ DataType::Time
+            | dt @ DataType::Timestamp
+            | dt @ DataType::Timestampz
+            | dt @ DataType::Interval,
+            scalar,
+        ) => {
+            json!(scalar.to_text_with_type(&dt))
         }
         (DataType::List { .. }, ScalarRefImpl::List(list_ref)) => {
             let mut vec = Vec::with_capacity(field.sub_fields.len());
@@ -396,7 +391,6 @@ fn record_to_json(row: RowRef<'_>, schema: Vec<Field>) -> Result<Map<String, Val
         let key = field.name.clone();
         let value = datum_to_json_object(field, datum_ref)
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
-        tracing::info!("value {:?}", value.to_string());
         mappings.insert(key, value);
     }
     Ok(mappings)
