@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::{Sink as ProstSink, Table};
@@ -81,25 +80,9 @@ pub fn gen_sink_plan(
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
 
-    let (query, sink_col_names) = match stmt.sink_from {
-        CreateSink::From(from_name) => {
-            let (from_schema_name, from_table_name) =
-                Binder::resolve_schema_qualified_name(db_name, from_name.clone())?;
-            let (_, _, from_catalog) =
-                session.get_table_catalog_for_create(from_schema_name, &from_table_name)?;
-            let from_col_names = from_catalog
-                .columns()
-                .iter()
-                .filter_map(|catalog| {
-                    (!catalog.is_hidden()).then_some(catalog.column_desc.name.clone())
-                })
-                .collect_vec();
-            (
-                Box::new(gen_sink_query_from_name(from_name)?),
-                Some(from_col_names),
-            )
-        }
-        CreateSink::AsQuery(query) => (query, None),
+    let query = match stmt.sink_from {
+        CreateSink::From(from_name) => Box::new(gen_sink_query_from_name(from_name)?),
+        CreateSink::AsQuery(query) => query,
     };
 
     let (sink_database_id, sink_schema_id) =
@@ -113,7 +96,7 @@ pub fn gen_sink_plan(
     };
 
     // If colume names not specified, use the name in materialized view.
-    let col_names = get_column_names(&bound, session, stmt.columns)?.or(sink_col_names);
+    let col_names = get_column_names(&bound, session, stmt.columns)?;
 
     let properties = context.inner().with_options.clone();
 
