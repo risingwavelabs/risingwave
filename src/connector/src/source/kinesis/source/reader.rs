@@ -138,6 +138,7 @@ impl KinesisSplitReader {
                         self.stream_name,
                         self.shard_id
                     );
+                    self.new_shard_iter().await?;
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
                 }
@@ -148,6 +149,7 @@ impl KinesisSplitReader {
                         self.shard_id,
                         e
                     );
+                    self.new_shard_iter().await?;
                     continue;
                 }
                 Err(e) => return Err(anyhow!(e)),
@@ -170,6 +172,12 @@ impl KinesisSplitReader {
                 _ => unreachable!(),
             }
         };
+        tracing::info!(
+            "resetting kinesis to: stream {:?} shard {:?} starting from {:?}",
+            self.stream_name,
+            self.shard_id,
+            starting_seq_num
+        );
 
         let resp = self
             .client
@@ -191,7 +199,15 @@ impl KinesisSplitReader {
     ) -> core::result::Result<GetRecordsOutput, SdkError<GetRecordsError>> {
         self.client
             .get_records()
-            .set_shard_iterator(self.shard_iter.take())
+            .set_shard_iterator({
+               if self.shard_iter.is_some() {
+                   self.shard_iter.take()
+               } else {
+                   tracing::warn!("shard iterator is None unexpectedly, renew it");
+                   self.new_shard_iter().await?;
+                   self.shard_iter.take()
+               }
+            })
             .send()
             .await
     }
