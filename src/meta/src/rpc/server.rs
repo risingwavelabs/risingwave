@@ -467,6 +467,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             leader_rx: intercept_leader_rx,
         };
 
+        // FIXME: Start leader services if follower becomes leader
+
         // failover logic
         let (svc_shutdown_tx, svc_shutdown_rx) = tokio::sync::oneshot::channel();
 
@@ -490,7 +492,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 tonic::transport::Server::builder()
                     .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
                     .add_service(HeartbeatServiceServer::with_interceptor(
-                        heartbeat_srv_clone,
+                        heartbeat_srv_clone, // TODO: Change this to health service!
                         intercept_clone,
                     ))
                     .serve_with_shutdown(address_info.listen_addr, async move {
@@ -499,6 +501,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                     .await
                     .unwrap();
             });
+
+            // Follower to leader in next PR
 
             // loop until this node becomes a leader
             loop {
