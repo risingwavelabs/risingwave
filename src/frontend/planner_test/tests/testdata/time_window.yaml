@@ -132,18 +132,16 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3)::Float64)] }
       └─BatchHashAgg { group_key: [t.v1, window_end], aggs: [sum(t.v3), count(t.v3)] }
-        └─BatchExchange { order: [], dist: HashShard(t.v1, window_end) }
-          └─BatchProject { exprs: [t.v1, window_end, t.v3] }
-            └─BatchHopWindow { time_col: t.v2, slide: 00:01:00, size: 00:10:00, output: [t.v1, t.v3, window_end] }
-              └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+        └─BatchHopWindow { time_col: t.v2, slide: 00:01:00, size: 00:10:00, output: [t.v1, t.v3, window_end] }
+          └─BatchExchange { order: [], dist: HashShard(t.v1) }
+            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, window_end, avg], pk_columns: [v1, window_end] }
     └─StreamProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3)::Float64)] }
       └─StreamHashAgg { group_key: [t.v1, window_end], aggs: [count, sum(t.v3), count(t.v3)] }
         └─StreamExchange { dist: HashShard(t.v1, window_end) }
-          └─StreamProject { exprs: [t.v1, window_end, t.v3, t._row_id] }
-            └─StreamHopWindow { time_col: t.v2, slide: 00:01:00, size: 00:10:00, output: [t.v1, t.v3, window_end, t._row_id] }
-              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamHopWindow { time_col: t.v2, slide: 00:01:00, size: 00:10:00, output: [t.v1, t.v3, window_end, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t1 (id int, v1 int, created_at date);
     with t2 as (select * from t1 where v1 >= 10)

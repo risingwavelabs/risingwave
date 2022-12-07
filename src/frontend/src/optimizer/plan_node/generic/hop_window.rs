@@ -103,13 +103,10 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
             f,
             "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
             name,
-            format_args!(
-                "{}",
-                InputRefDisplay {
-                    input_ref: &self.time_col,
-                    input_schema: self.input.schema()
-                }
-            ),
+            InputRefDisplay {
+                input_ref: &self.time_col,
+                input_schema: self.input.schema()
+            },
             self.window_slide,
             self.window_size,
             if self

@@ -141,6 +141,21 @@ steps:
     timeout_in_minutes: 5
     retry: *auto-retry
 
+  - label: "end-to-end sink test"
+    command: "ci/scripts/e2e-sink-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
+    retry: *auto-retry
+
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"
     depends_on: "build"
@@ -170,14 +185,14 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "pre unit test"
-    command: "ci/scripts/pre-unit-test.sh"
+  - label: "check"
+    command: "ci/scripts/check.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"

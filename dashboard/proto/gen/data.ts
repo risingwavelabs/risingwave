@@ -19,6 +19,7 @@ export const RwArrayType = {
   INTERVAL: "INTERVAL",
   STRUCT: "STRUCT",
   LIST: "LIST",
+  BYTEA: "BYTEA",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -71,6 +72,9 @@ export function rwArrayTypeFromJSON(object: any): RwArrayType {
     case 14:
     case "LIST":
       return RwArrayType.LIST;
+    case 15:
+    case "BYTEA":
+      return RwArrayType.BYTEA;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -110,6 +114,8 @@ export function rwArrayTypeToJSON(object: RwArrayType): string {
       return "STRUCT";
     case RwArrayType.LIST:
       return "LIST";
+    case RwArrayType.BYTEA:
+      return "BYTEA";
     case RwArrayType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -322,6 +328,7 @@ export const DataType_TypeName = {
   TIMESTAMPZ: "TIMESTAMPZ",
   STRUCT: "STRUCT",
   LIST: "LIST",
+  BYTEA: "BYTEA",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -377,6 +384,9 @@ export function dataType_TypeNameFromJSON(object: any): DataType_TypeName {
     case 16:
     case "LIST":
       return DataType_TypeName.LIST;
+    case 17:
+    case "BYTEA":
+      return DataType_TypeName.BYTEA;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -418,6 +428,8 @@ export function dataType_TypeNameToJSON(object: DataType_TypeName): string {
       return "STRUCT";
     case DataType_TypeName.LIST:
       return "LIST";
+    case DataType_TypeName.BYTEA:
+      return "BYTEA";
     case DataType_TypeName.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";

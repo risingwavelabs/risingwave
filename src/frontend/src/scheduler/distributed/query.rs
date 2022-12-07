@@ -380,7 +380,7 @@ pub(crate) mod tests {
     use std::sync::{Arc, RwLock};
 
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
-    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+    use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;

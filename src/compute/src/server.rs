@@ -16,6 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_stack_trace::StackTraceManager;
 use risingwave_batch::executor::BatchTaskMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
@@ -59,7 +60,7 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::{AsyncStackTraceOption, ComputeNodeConfig, ComputeNodeOpts};
+use crate::{AsyncStackTraceOption, ComputeNodeOpts};
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
@@ -68,7 +69,7 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config: ComputeNodeConfig = load_config(&opts.config_path).unwrap();
+    let config = load_config(&opts.config_path);
     info!(
         "Starting compute node with config {:?} with debug assertions {}",
         config,
@@ -84,7 +85,7 @@ pub async fn compute_node_serve(
         &opts.meta_address,
         WorkerType::ComputeNode,
         &client_addr,
-        config.streaming.worker_node_parallelism,
+        opts.parallelism,
     )
     .await
     .unwrap();
@@ -210,14 +211,15 @@ pub async fn compute_node_serve(
         state_store.clone(),
         streaming_metrics.clone(),
         config.streaming.clone(),
-        async_stack_trace_config.clone(),
-        config.streaming.developer.stream_enable_managed_cache,
+        async_stack_trace_config,
+        opts.total_memory_bytes,
     ));
     let source_mgr = Arc::new(TableSourceManager::new(
         source_metrics,
         stream_config.developer.stream_connector_message_buffer_size,
     ));
-    let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
+    let grpc_stack_trace_mgr = async_stack_trace_config
+        .map(|config| GrpcStackTraceManagerRef::new(StackTraceManager::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::default());
 
     // Initialize batch environment.
@@ -235,8 +237,7 @@ pub async fn compute_node_serve(
     );
 
     let connector_params = risingwave_connector::ConnectorParams {
-        connector_source_endpoint: opts.connector_source_endpoint,
-        connector_sink_endpoint: opts.connector_sink_endpoint,
+        connector_rpc_endpoint: opts.connector_rpc_endpoint,
     };
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
@@ -274,7 +275,7 @@ pub async fn compute_node_serve(
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .tcp_nodelay(true)
             .layer(StackTraceMiddlewareLayer::new_optional(
-                async_stack_trace_config.map(|c| (grpc_stack_trace_mgr, c)),
+                grpc_stack_trace_mgr,
             ))
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))

@@ -24,7 +24,6 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"
 maplit = "1"
-memcomparable = { path = "../utils/memcomparable" }
 moka = { version = "0.9", features = ["future"] }
 num-traits = "0.2"
 parking_lot = "0.12"

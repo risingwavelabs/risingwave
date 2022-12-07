@@ -98,6 +98,11 @@ pub struct MetaOpts {
 
     /// The prometheus endpoint for dashboard service.
     pub prometheus_endpoint: Option<String>,
+
+    /// The storage url for storing backups.
+    pub backup_storage_url: String,
+    /// The storage directory for storing backups.
+    pub backup_storage_directory: String,
 }
 
 impl MetaOpts {
@@ -118,6 +123,8 @@ impl MetaOpts {
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
             prometheus_endpoint: None,
+            backup_storage_url: "memory".to_string(),
+            backup_storage_directory: "backup".to_string(),
         }
     }
 }
