@@ -23,7 +23,7 @@ use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalProject};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
-/// Transpose `LogicalApply` and `LogicalFilter`.
+/// Remove `LogicalApply` at leaf.
 ///
 /// Before:
 ///
