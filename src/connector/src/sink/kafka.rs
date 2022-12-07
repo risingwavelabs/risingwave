@@ -346,19 +346,19 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             json!(v.to_string())
         }
         (DataType::Date, ScalarRefImpl::NaiveDate(v)) => {
-            json!(v.to_text())
+            json!(v.to_text_with_type(&DataType::Date))
         }
         (DataType::Time, ScalarRefImpl::NaiveTime(v)) => {
-            json!(v.to_text())
+            json!(v.to_text_with_type(&DataType::Time))
         }
         (DataType::TIMESTAMP, ScalarRefImpl::NaiveDateTime(v)) => {
-            json!(v.to_text())
+            json!(v.to_text_with_type(&DataType::TIMESTAMP))
         }
         (DataType::TIMESTAMPZ, ScalarRefImpl::Int64(v)) => {
-            json!(v)
+            json!(v.to_text_with_type(&DataType::TIMESTAMPZ))
         }
         (DataType::Interval, ScalarRefImpl::Interval(v)) => {
-            json!(v.to_string())
+            json!(v.to_text_with_type(&DataType::Interval))
         }
         (DataType::List { .. }, ScalarRefImpl::List(list_ref)) => {
             let mut vec = Vec::with_capacity(field.sub_fields.len());
