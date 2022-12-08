@@ -277,6 +277,7 @@ impl ToStream for LogicalFilter {
                             now_delta_expr.inputs_mut()[0] = ExprImpl::from(InputRef::new(0, DataType::Timestamp));
                             StreamProject::new(LogicalProject::new(StreamNow::new(self.ctx()).into(), vec![ExprImpl::from(now_delta_expr)])).into()
                         },
+                        // We can panic here because we have checked above
                         _ => panic!(),
                     }
                 });
