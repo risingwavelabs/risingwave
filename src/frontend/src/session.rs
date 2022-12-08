@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
-// use tokio::sync::Mutex;
+use std::thread;
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
@@ -56,7 +56,7 @@ use crate::handler::handle;
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
 use crate::health_service::HealthServiceImpl;
-use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
+use crate::meta_client::{self, FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
 use crate::observer::FrontendObserverNode;
 use crate::optimizer::OptimizerContext;
@@ -147,25 +147,67 @@ impl FrontendEnv {
         );
         let batch_config = config.batch;
 
-        let frontend_address: HostAddr = opts
-            .client_address
-            .as_ref()
-            .unwrap_or_else(|| {
-                tracing::warn!("Client address is not specified, defaulting to host address");
-                &opts.host
-            })
-            .parse()
-            .unwrap();
+        let client_address = opts.client_address.as_ref().unwrap_or_else(|| {
+            tracing::warn!("Client address is not specified, defaulting to host address");
+            &opts.host
+        });
+
+        let frontend_address: HostAddr = client_address.parse().unwrap();
         tracing::info!("Client address is {}", frontend_address);
 
         // Register in meta by calling `AddWorkerNode` RPC.
-        let meta_client = MetaClient::register_new(
+        let mut client_res = MetaClient::register_new(
             opts.meta_addr.clone().as_str(),
-            WorkerType::Frontend,
+            WorkerType::ComputeNode,
             &frontend_address,
             0,
         )
-        .await?;
+        .await;
+
+        // FIXME: even after initializing the meta_client we have to be careful when talking to meta
+        // every call to meta may fail if the current meta is not a leader
+        // Below code does not handle meta failover
+
+        tracing::info!(
+            "Trying to connect against meta node {}. May be a follower",
+            opts.meta_addr.clone().as_str(),
+        );
+        let mut used_leader_addr = client_address.clone();
+        loop {
+            if client_res.as_ref().is_ok() {
+                break;
+            }
+            let e = client_res.as_ref().err().unwrap();
+            let e_str = e.to_string();
+            // FIXME Can we do this better? Error is:
+            // gRPC error (The operation was aborted): http://127.0.0.1:25690
+            let tmp = e_str
+                .split("gRPC error (The operation was aborted): ")
+                .collect::<Vec<&str>>();
+
+            // FIXME: meta needs a service that responds with leader addr
+            if tmp.len() != 2 {
+                panic!(
+                    "Follower did not reply with leader address. Error was {}",
+                    e_str
+                );
+            }
+            let leader_addr = tmp[1];
+
+            thread::sleep(Duration::from_millis(5000));
+            client_res = MetaClient::register_new(
+                leader_addr,
+                WorkerType::ComputeNode,
+                &frontend_address,
+                0,
+            )
+            .await;
+        }
+        tracing::info!(
+            "Succeeded to connect against leader meta node {}",
+            used_leader_addr,
+        );
+        let meta_client = client_res.unwrap();
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
