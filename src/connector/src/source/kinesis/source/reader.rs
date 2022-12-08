@@ -102,6 +102,10 @@ impl KinesisSplitReader {
     pub async fn into_stream(mut self) {
         self.new_shard_iter().await?;
         loop {
+            if self.shard_iter.is_none() {
+                tracing::warn!("shard iterator is none unexpectedly, renew it");
+                self.new_shard_iter().await?;
+            }
             match self.get_records().await {
                 Ok(resp) => {
                     self.shard_iter = resp.next_shard_iterator().map(String::from);
@@ -199,15 +203,7 @@ impl KinesisSplitReader {
     ) -> core::result::Result<GetRecordsOutput, SdkError<GetRecordsError>> {
         self.client
             .get_records()
-            .set_shard_iterator({
-               if self.shard_iter.is_some() {
-                   self.shard_iter.take()
-               } else {
-                   tracing::warn!("shard iterator is None unexpectedly, renew it");
-                   self.new_shard_iter().await?;
-                   self.shard_iter.take()
-               }
-            })
+            .set_shard_iterator(self.shard_iter.take())
             .send()
             .await
     }
