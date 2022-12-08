@@ -110,9 +110,18 @@ pub async fn compute_node_serve(
         let e_str = e.to_string();
         // FIXME Can we do this better? Error is:
         // gRPC error (The operation was aborted): http://127.0.0.1:25690
-        let leader_addr = e_str
+        let tmp = e_str
             .split("gRPC error (The operation was aborted): ")
-            .collect::<Vec<&str>>()[1];
+            .collect::<Vec<&str>>();
+
+        // FIXME: meta needs a service that responds with leader addr
+        if tmp.len() != 2 {
+            panic!(
+                "Follower did not reply with leader address. Error was {}",
+                e_str
+            );
+        }
+        let leader_addr = tmp[1];
         used_leader_addr = leader_addr.to_string();
 
         thread::sleep(Duration::from_millis(5000));
