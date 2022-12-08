@@ -118,7 +118,7 @@ pub enum TableType {
     Table,
     /// Tables created by `CREATE MATERIALIZED VIEW`.
     MaterializedView,
-    /// Tables serving as index for `TableType::Table` or `TableType::MView`.
+    /// Tables serving as index for `TableType::Table` or `TableType::MaterializedView`.
     Index,
     /// Internal tables for executors.
     Internal,

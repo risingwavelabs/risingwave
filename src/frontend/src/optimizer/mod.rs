@@ -584,7 +584,9 @@ impl PlanRoot {
             definition,
             false,
             None,
-            TableType::Table, // FIXME(Yuanxin): comment
+            // NOTE(Yuanxin): We set the table type as default here because this is irrelevant to
+            // sink's plan generating.
+            TableType::default(),
         )
         .map(|plan| plan.rewrite_into_sink(properties))
     }
