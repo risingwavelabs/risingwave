@@ -81,7 +81,7 @@ export interface Sink {
   distributionKey: number[];
   /** pk_indices of the corresponding materialize operator's output. */
   streamKey: number[];
-  appendonly: boolean;
+  appendOnly: boolean;
   owner: number;
   properties: { [key: string]: string };
   definition: string;
@@ -119,10 +119,11 @@ export interface Table {
   dependentRelations: number[];
   optionalAssociatedSourceId?: { $case: "associatedSourceId"; associatedSourceId: number };
   isIndex: boolean;
+  isMview: boolean;
   distributionKey: number[];
   /** pk_indices of the corresponding materialize operator's output. */
   streamKey: number[];
-  appendonly: boolean;
+  appendOnly: boolean;
   owner: number;
   properties: { [key: string]: string };
   fragmentId: number;
@@ -130,7 +131,14 @@ export interface Table {
    * an optional column index which is the vnode of each row computed by the
    * table's consistent hash distribution
    */
-  vnodeColIdx:
+  vnodeColIndex:
+    | ColumnIndex
+    | undefined;
+  /**
+   * An optional column index of row id. If the primary key is specified by users,
+   * this will be `None`.
+   */
+  rowIdIndex:
     | ColumnIndex
     | undefined;
   /**
@@ -457,7 +465,7 @@ function createBaseSink(): Sink {
     dependentRelations: [],
     distributionKey: [],
     streamKey: [],
-    appendonly: false,
+    appendOnly: false,
     owner: 0,
     properties: {},
     definition: "",
@@ -480,7 +488,7 @@ export const Sink = {
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
       streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
-      appendonly: isSet(object.appendonly) ? Boolean(object.appendonly) : false,
+      appendOnly: isSet(object.appendOnly) ? Boolean(object.appendOnly) : false,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
@@ -523,7 +531,7 @@ export const Sink = {
     } else {
       obj.streamKey = [];
     }
-    message.appendonly !== undefined && (obj.appendonly = message.appendonly);
+    message.appendOnly !== undefined && (obj.appendOnly = message.appendOnly);
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     obj.properties = {};
     if (message.properties) {
@@ -546,7 +554,7 @@ export const Sink = {
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
-    message.appendonly = object.appendonly ?? false;
+    message.appendOnly = object.appendOnly ?? false;
     message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
@@ -665,13 +673,15 @@ function createBaseTable(): Table {
     dependentRelations: [],
     optionalAssociatedSourceId: undefined,
     isIndex: false,
+    isMview: false,
     distributionKey: [],
     streamKey: [],
-    appendonly: false,
+    appendOnly: false,
     owner: 0,
     properties: {},
     fragmentId: 0,
-    vnodeColIdx: undefined,
+    vnodeColIndex: undefined,
+    rowIdIndex: undefined,
     valueIndices: [],
     definition: "",
     handlePkConflict: false,
@@ -694,13 +704,14 @@ export const Table = {
         ? { $case: "associatedSourceId", associatedSourceId: Number(object.associatedSourceId) }
         : undefined,
       isIndex: isSet(object.isIndex) ? Boolean(object.isIndex) : false,
+      isMview: isSet(object.isMview) ? Boolean(object.isMview) : false,
       distributionKey: Array.isArray(object?.distributionKey)
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
       streamKey: Array.isArray(object?.streamKey)
         ? object.streamKey.map((e: any) => Number(e))
         : [],
-      appendonly: isSet(object.appendonly) ? Boolean(object.appendonly) : false,
+      appendOnly: isSet(object.appendOnly) ? Boolean(object.appendOnly) : false,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
@@ -709,7 +720,8 @@ export const Table = {
         }, {})
         : {},
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
-      vnodeColIdx: isSet(object.vnodeColIdx) ? ColumnIndex.fromJSON(object.vnodeColIdx) : undefined,
+      vnodeColIndex: isSet(object.vnodeColIndex) ? ColumnIndex.fromJSON(object.vnodeColIndex) : undefined,
+      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
       valueIndices: Array.isArray(object?.valueIndices)
         ? object.valueIndices.map((e: any) => Number(e))
         : [],
@@ -742,6 +754,7 @@ export const Table = {
     message.optionalAssociatedSourceId?.$case === "associatedSourceId" &&
       (obj.associatedSourceId = Math.round(message.optionalAssociatedSourceId?.associatedSourceId));
     message.isIndex !== undefined && (obj.isIndex = message.isIndex);
+    message.isMview !== undefined && (obj.isMview = message.isMview);
     if (message.distributionKey) {
       obj.distributionKey = message.distributionKey.map((e) => Math.round(e));
     } else {
@@ -752,7 +765,7 @@ export const Table = {
     } else {
       obj.streamKey = [];
     }
-    message.appendonly !== undefined && (obj.appendonly = message.appendonly);
+    message.appendOnly !== undefined && (obj.appendOnly = message.appendOnly);
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     obj.properties = {};
     if (message.properties) {
@@ -761,8 +774,10 @@ export const Table = {
       });
     }
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
-    message.vnodeColIdx !== undefined &&
-      (obj.vnodeColIdx = message.vnodeColIdx ? ColumnIndex.toJSON(message.vnodeColIdx) : undefined);
+    message.vnodeColIndex !== undefined &&
+      (obj.vnodeColIndex = message.vnodeColIndex ? ColumnIndex.toJSON(message.vnodeColIndex) : undefined);
+    message.rowIdIndex !== undefined &&
+      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
     if (message.valueIndices) {
       obj.valueIndices = message.valueIndices.map((e) => Math.round(e));
     } else {
@@ -793,9 +808,10 @@ export const Table = {
       };
     }
     message.isIndex = object.isIndex ?? false;
+    message.isMview = object.isMview ?? false;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
-    message.appendonly = object.appendonly ?? false;
+    message.appendOnly = object.appendOnly ?? false;
     message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
@@ -807,8 +823,11 @@ export const Table = {
       {},
     );
     message.fragmentId = object.fragmentId ?? 0;
-    message.vnodeColIdx = (object.vnodeColIdx !== undefined && object.vnodeColIdx !== null)
-      ? ColumnIndex.fromPartial(object.vnodeColIdx)
+    message.vnodeColIndex = (object.vnodeColIndex !== undefined && object.vnodeColIndex !== null)
+      ? ColumnIndex.fromPartial(object.vnodeColIndex)
+      : undefined;
+    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
+      ? ColumnIndex.fromPartial(object.rowIdIndex)
       : undefined;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
