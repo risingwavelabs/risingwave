@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::Ordering;
-
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
@@ -40,7 +38,13 @@ pub(super) fn handle_explain(
     options: ExplainOptions,
     analyze: bool,
 ) -> Result<RwPgResponse> {
-    let context = OptimizerContext::new_with_handler_args(handler_args);
+    let context = OptimizerContext::new(
+        handler_args.session,
+        handler_args.sql,
+        handler_args.with_options,
+        options.verbose,
+        options.trace,
+    );
 
     if analyze {
         return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
@@ -49,13 +53,7 @@ pub(super) fn handle_explain(
         return Err(ErrorCode::NotImplemented("explain logical".to_string(), 4856.into()).into());
     }
 
-    let session = context.session_ctx.clone();
-    context
-        .explain_verbose
-        .store(options.verbose, Ordering::Release);
-    context
-        .explain_trace
-        .store(options.trace, Ordering::Release);
+    let session = context.session_ctx().clone();
 
     let plan = match stmt {
         Statement::CreateView {

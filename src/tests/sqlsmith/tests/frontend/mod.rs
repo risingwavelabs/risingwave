@@ -159,6 +159,8 @@ fn test_batch_query(
         session.clone(),
         Arc::from(sql),
         WithOptions::try_from(&stmt)?,
+        false,
+        false,
     )
     .into();
 

@@ -795,8 +795,14 @@ impl Session<PgResponseStream> for SessionImpl {
 
 /// Returns row description of the statement
 fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(session, Arc::from(sql), WithOptions::try_from(&stmt)?);
-    let session = context.session_ctx.clone();
+    let context = OptimizerContext::new(
+        session,
+        Arc::from(sql),
+        WithOptions::try_from(&stmt)?,
+        false,
+        false,
+    );
+    let session = context.session_ctx().clone();
 
     let bound = {
         let mut binder = Binder::new(&session);

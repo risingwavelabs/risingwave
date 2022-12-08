@@ -67,8 +67,7 @@ impl Source {
     pub fn infer_internal_table_catalog(me: &impl GenericPlanRef) -> TableCatalog {
         // note that source's internal table is to store partition_id -> offset mapping and its
         // schema is irrelevant to input schema
-        let mut builder =
-            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
+        let mut builder = TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
         let key = Field {
             data_type: DataType::Varchar,
