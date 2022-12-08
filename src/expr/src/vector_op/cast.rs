@@ -37,7 +37,10 @@ const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
 const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
-const PARSE_ERROR_STR_TO_TIMESTAMPZ: &str = "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)";
+const PARSE_ERROR_STR_TO_TIMESTAMPZ: &str = concat!(
+    "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
+    , "\nFor example: '2021-04-01 00:00:00+00:00'"
+);
 const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
 const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
