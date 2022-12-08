@@ -1090,7 +1090,7 @@ impl ToBatch for LogicalJoin {
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
 
-        let config = self.base.ctx.inner().session_ctx.config();
+        let config = self.base.ctx.session_ctx().config();
 
         if predicate.has_eq() {
             if config.get_batch_enable_lookup_join() {

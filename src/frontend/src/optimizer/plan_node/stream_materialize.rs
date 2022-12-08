@@ -150,9 +150,8 @@ impl StreamMaterialize {
         }
 
         let ctx = input.ctx();
-        let properties = ctx.inner().with_options.internal_table_subset();
         let distribution_key = base.dist.dist_column_indices().to_vec();
-
+        let properties = ctx.with_options().internal_table_subset();
         let table = TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
