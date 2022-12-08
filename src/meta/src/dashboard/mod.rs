@@ -200,7 +200,7 @@ where
             .layer(cors_layer);
 
         let app = if let Some(ui_path) = ui_path {
-            let static_file_router = Router::new().nest(
+            let static_file_router = Router::new().nest_service(
                 "/",
                 get_service(ServeDir::new(ui_path)).handle_error(
                     |error: std::io::Error| async move {
@@ -212,7 +212,7 @@ where
                 ),
             );
             Router::new()
-                .fallback(static_file_router)
+                .fallback_service(static_file_router)
                 .nest("/api", api_router)
         } else {
             let cache = Arc::new(Mutex::new(HashMap::new()));
@@ -228,7 +228,9 @@ where
                     })
                 }
             });
-            Router::new().fallback(service).nest("/api", api_router)
+            Router::new()
+                .fallback_service(service)
+                .nest("/api", api_router)
         };
 
         axum::Server::bind(&srv.dashboard_addr)

@@ -21,14 +21,14 @@ use super::privilege::check_super_user;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_sink(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     sink_name: ObjectName,
     if_exists: bool,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, sink_name) = Binder::resolve_schema_qualified_name(db_name, sink_name)?;
     let search_path = session.config().get_search_path();

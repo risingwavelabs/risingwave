@@ -213,7 +213,7 @@ where
             let new_nodes = current_nodes
                 .into_iter()
                 .filter(|node| {
-                    !info.node_map.contains_key(&node.id) && !node_map.contains_key(&node.id)
+                    !info.actor_map.contains_key(&node.id) && !node_map.contains_key(&node.id)
                 })
                 .collect_vec();
             for new_node in new_nodes {

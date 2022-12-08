@@ -193,8 +193,8 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{LogicalExpand, LogicalValues};
-    use crate::session::OptimizerContext;
 
     // TODO(Wenzhuo): change this test according to expand's new definition.
     #[tokio::test]

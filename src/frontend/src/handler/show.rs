@@ -25,7 +25,8 @@ use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
 use crate::catalog::CatalogError;
 use crate::handler::util::col_descs_to_rows;
-use crate::session::{OptimizerContext, SessionImpl};
+use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
 
 pub fn get_columns_from_table(
     session: &SessionImpl,
@@ -55,8 +56,8 @@ fn schema_or_default(schema: &Option<Ident>) -> String {
         .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
 }
 
-pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Result<RwPgResponse> {
+    let session = handler_args.session;
     let catalog_reader = session.env().catalog_reader().read_guard();
 
     let names = match command {

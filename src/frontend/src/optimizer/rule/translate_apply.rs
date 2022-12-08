@@ -16,21 +16,41 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::types::DataType;
+use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalJoin, LogicalProject, LogicalScan, PlanTreeNodeBinary, PlanTreeNodeUnary,
+    LogicalAgg, LogicalApply, LogicalJoin, LogicalProject, LogicalScan, PlanTreeNodeBinary,
+    PlanTreeNodeUnary,
 };
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// Translate `LogicalApply` into `LogicalJoin` and `LogicalApply`, and rewrite
-/// `LogicalApply`'s left.
+/// General Unnesting based on the paper Unnesting Arbitrary Queries:
+/// Translate the apply into a canonical form.
+///
+/// Before:
+///
+/// ```text
+///     LogicalApply
+///    /            \
+///  LHS           RHS
+/// ```
+///
+/// After:
+///
+/// ```text
+///      LogicalJoin
+///    /            \
+///  LHS        LogicalApply
+///             /           \
+///          Domain         RHS
+/// ```
 pub struct TranslateApplyRule {}
 impl Rule for TranslateApplyRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let apply = plan.as_logical_apply()?;
+        let apply: &LogicalApply = plan.as_logical_apply()?;
         let left = apply.left();
         let apply_left_len = left.schema().len();
         let correlated_indices = apply.correlated_indices();
@@ -40,8 +60,9 @@ impl Rule for TranslateApplyRule {
         let mut data_types = HashMap::new();
         let mut index = 0;
 
-        // First try to rewrite the left side of the apply if it is SPJ.
-        // TODO: remove the rewrite and always use the general way to calculate the domain.
+        // First try to rewrite the left side of the apply.
+        // TODO: remove the rewrite and always use the general way to calculate the domain
+        //      after we support DAG.
         let domain: PlanRef = if let Some(rewritten_left) = Self::rewrite(
             &left,
             correlated_indices.clone(),
@@ -146,15 +167,6 @@ impl TranslateApplyRule {
                 data_types,
                 index,
             )
-        } else if let Some(project) = plan.as_logical_project() {
-            Self::rewrite(
-                &project.input(),
-                correlated_indices,
-                offset,
-                index_mapping,
-                data_types,
-                index,
-            )
         } else {
             // TODO: better to return an error.
             None
@@ -169,6 +181,18 @@ impl TranslateApplyRule {
         data_types: &mut HashMap<usize, DataType>,
         index: &mut usize,
     ) -> Option<PlanRef> {
+        // Only accept join which doesn't generate null columns.
+        if !matches!(
+            join.join_type(),
+            JoinType::Inner
+                | JoinType::LeftSemi
+                | JoinType::RightSemi
+                | JoinType::LeftAnti
+                | JoinType::RightAnti
+        ) {
+            return None;
+        }
+
         // TODO: Do we need to take the `on` into account?
         let left_len = join.left().schema().len();
         let (left_idxs, right_idxs): (Vec<_>, Vec<_>) = required_col_idx
