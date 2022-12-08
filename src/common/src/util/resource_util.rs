@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Container aware resource utility functions
+// Container aware resource utility functions.
 pub mod resource_util {
     use std::path::Path;
     use std::fs;
@@ -52,7 +52,7 @@ pub mod resource_util {
     // Checks for the existence of the root hierarchy directory.
     fn get_cgroup_version() -> Option<CgroupVersion> {
         // check if cgroup exists.
-        if  !Path::new(DEFAULT_CGROUP_ROOT_HIERARCYHY).is_dir(){
+        if !Path::new(DEFAULT_CGROUP_ROOT_HIERARCYHY).is_dir(){
             return None
         }
         // if cgroup.controllers exist, v2 is used.
@@ -170,7 +170,7 @@ pub mod resource_util {
             }
             match super::get_cgroup_version() {
                 Some(cgroup_version) => { 
-                    match   get_memory_used_in_container(cgroup_version){
+                    match get_memory_used_in_container(cgroup_version){
                         Some(mem_usage) => return mem_usage,
                         None => return get_system_memory_used(),
                     };
@@ -222,7 +222,7 @@ pub mod resource_util {
 
     pub mod cpu{
         use std::fs;
-        use num_cpus;
+        use std::thread;
 
          // Default constant Cgroup paths and hierarchy.
         const V1_CPU_QUOTA_HIERARCHY: &str = "/cpu/cpu.cfs_quota_us";
@@ -259,8 +259,11 @@ pub mod resource_util {
         }
 
         // Returns the total system cpu.
-        fn get_system_cpu() -> f32 {
-            return num_cpus::get() as f32;
+        pub fn get_system_cpu() -> f32 {
+            match thread::available_parallelism() {
+                Ok(available_parallelism) => return available_parallelism.get() as f32,
+                Err(e) => panic!("Platform is not supported, error: {}", e),
+            }
         }
 
         // Returns the CPU limit when cgroup_V1 is utilised.
