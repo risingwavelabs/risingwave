@@ -539,6 +539,11 @@ mod default {
             std::thread::available_parallelism().unwrap().get()
         }
 
+        #[cfg(madsim)]
+        pub fn total_memory_available_bytes() -> usize {
+            16 * 1024 * 1024 * 1024
+        }
+        #[cfg(not(madsim))]
         pub fn total_memory_available_bytes() -> usize {
             use util::resource_util;
             resource_util::memory::total_memory_available_bytes()
