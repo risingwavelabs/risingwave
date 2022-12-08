@@ -204,6 +204,24 @@ pub(crate) fn gen_create_table_plan(
     constraints: Vec<TableConstraint>,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
+    gen_create_table_plan_without_bind(
+        session,
+        context,
+        table_name,
+        column_descs,
+        pk_column_id_from_columns,
+        constraints,
+    )
+}
+
+pub(crate) fn gen_create_table_plan_without_bind(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
+    table_name: ObjectName,
+    column_descs: Vec<ColumnDesc>,
+    pk_column_id_from_columns: Option<ColumnId>,
+    constraints: Vec<TableConstraint>,
+) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
