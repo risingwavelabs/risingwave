@@ -1,4 +1,5 @@
 # scan MV with ORDER BY isn't guaranteed to be ordered
+
 query TTRR rowsort
 select * from tpch_q7;
 ----
@@ -8,4 +9,3 @@ IRAN  ROMANIA  1995  84411.4801
 IRAN  ROMANIA  1996  142296.4245
 IRAN  ROMANIA  1997  59846.7019
 IRAN  ROMANIA  1998  154730.1173
-

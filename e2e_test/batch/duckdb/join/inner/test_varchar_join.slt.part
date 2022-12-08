@@ -1,5 +1,5 @@
 # Copied from https://github.com/duckdb/duckdb (MIT licensed).
-# Copyright 2018-2022 Stichting DuckDB Foundation 
+# Copyright 2018-2022 Stichting DuckDB Foundation
 
 # description: Test joins on VARCHAR columns with NULL values
 
@@ -25,4 +25,3 @@ select * from (select 42 as a, 'asdf' as b) sq2, (select 42 as a, NULL::varchar 
 query ITIT
 select * from (select 42 as a, 'asdf' as b) sq2, (select 42 as a, NULL::varchar as b) sq1 where sq1.a=sq2.a and sq1.b <> sq2.b;
 ----
-

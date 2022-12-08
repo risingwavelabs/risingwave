@@ -204,6 +204,14 @@ impl PlanRoot {
             .into());
         }
 
+        // Predicate push down before translate apply, because we need to calculate the domain
+        // and predicate push down can reduce the size of domain.
+        plan = plan.predicate_pushdown(Condition::true_cond());
+        if explain_trace {
+            ctx.trace("Predicate Push Down:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
         // join.
@@ -217,10 +225,10 @@ impl PlanRoot {
             plan,
             "General Unnesting(Push Down Apply)".to_string(),
             vec![
-                ApplyAggRule::create(),
-                ApplyFilterRule::create(),
-                ApplyProjRule::create(),
-                ApplyJoinRule::create(),
+                ApplyAggTransposeRule::create(),
+                ApplyFilterTransposeRule::create(),
+                ApplyProjectTransposeRule::create(),
+                ApplyJoinTransposeRule::create(),
                 ApplyScanRule::create(),
             ],
             ApplyOrder::TopDown,
