@@ -61,7 +61,7 @@ pub mod resource_util {
     }
 
     // checks if is running in a docker container by checking for docker env file, or if it is running in a kubernetes pod.
-    pub fn is_running_in_container() -> bool {
+    fn is_running_in_container() -> bool {
         env_var_check_if_running_in_container() || docker_env_exists() || is_running_in_kubernetes_pod()
     }
 
