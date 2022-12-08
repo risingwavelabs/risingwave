@@ -25,8 +25,8 @@ use super::stream::StreamPlanRef;
 use super::utils::{IndicesDisplay, TableCatalogBuilder};
 use super::{PlanBase, StreamNode};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
-use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::OptimizerContextRef;
 
 #[derive(Clone, Debug)]
 pub struct StreamNow {
