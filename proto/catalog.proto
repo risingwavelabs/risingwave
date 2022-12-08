@@ -86,6 +86,13 @@ message Index {
 
 // See `TableCatalog` struct in frontend crate for more information.
 message Table {
+  enum TableType {
+    UNSPECIFIED = 0;
+    TABLE = 1;
+    MATERIALIZED_VIEW = 2;
+    INDEX = 3;
+    INTERNAL = 4;
+  }
   uint32 id = 1;
   uint32 schema_id = 2;
   uint32 database_id = 3;
@@ -96,8 +103,7 @@ message Table {
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;
   }
-  bool is_index = 10;
-  bool is_mview = 11;
+  TableType table_type = 10;
   repeated int32 distribution_key = 12;
   // pk_indices of the corresponding materialize operator's output.
   repeated int32 stream_key = 13;

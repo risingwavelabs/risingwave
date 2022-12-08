@@ -29,7 +29,7 @@ use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
-use crate::catalog::table_catalog::{TableCatalog, TableKind};
+use crate::catalog::table_catalog::{TableCatalog, TableType};
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{CatalogError, IndexCatalog, TableId};
 use crate::user::UserId;
@@ -310,17 +310,23 @@ impl Binder {
         let (associate_table, schema_name) =
             self.catalog
                 .get_table_by_name(db_name, schema_path, source_name)?;
-        match associate_table.kind() {
-            TableKind::TableOrSource => {}
-            TableKind::Index => {
+        match associate_table.table_type() {
+            TableType::Table => {}
+            TableType::Index => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot change index \"{source_name}\""
                 ))
                 .into())
             }
-            TableKind::MView => {
+            TableType::MaterializedView => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot change materialized view \"{source_name}\""
+                ))
+                .into())
+            }
+            TableType::Internal => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "cannot change internal table \"{source_name}\""
                 ))
                 .into())
             }

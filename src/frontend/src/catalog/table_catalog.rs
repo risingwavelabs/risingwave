@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType as ProstTableType};
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
 use super::column_catalog::ColumnCatalog;
@@ -75,10 +75,8 @@ pub struct TableCatalog {
     /// pk_indices of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
 
-    pub is_index: bool,
-
-    /// Whether the table is created by `CREATE MATERIALIZED VIEW`.
-    pub is_mview: bool,
+    /// Type of the table. Sink will
+    pub table_type: TableType,
 
     /// Distribution key column indices.
     pub distribution_key: Vec<usize>,
@@ -114,12 +112,43 @@ pub struct TableCatalog {
     pub handle_pk_conflict: bool,
 }
 
-pub enum TableKind {
-    /// Refer to [`crate::handler::drop_table::check_source`] for how to distinguish between a
-    /// table and a source.
-    TableOrSource,
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum TableType {
+    /// Tables created by `CREATE TABLE`.
+    Table,
+    /// Tables created by `CREATE MATERIALIZED VIEW`.
+    MaterializedView,
+    /// Tables serving as index for `TableType::Table` or `TableType::MView`.
     Index,
-    MView,
+    /// Internal tables for executors.
+    Internal,
+}
+
+impl Default for TableType {
+    fn default() -> Self {
+        Self::Table
+    }
+}
+
+impl TableType {
+    fn from_prost(prost: ProstTableType) -> Self {
+        match prost {
+            ProstTableType::Table => Self::Table,
+            ProstTableType::MaterializedView => Self::MaterializedView,
+            ProstTableType::Index => Self::Index,
+            ProstTableType::Internal => Self::Internal,
+            ProstTableType::Unspecified => unreachable!(),
+        }
+    }
+
+    fn to_prost(self) -> ProstTableType {
+        match self {
+            Self::Table => ProstTableType::Table,
+            Self::MaterializedView => ProstTableType::MaterializedView,
+            Self::Index => ProstTableType::Index,
+            Self::Internal => ProstTableType::Internal,
+        }
+    }
 }
 
 impl TableCatalog {
@@ -137,14 +166,20 @@ impl TableCatalog {
         self.handle_pk_conflict
     }
 
-    pub fn kind(&self) -> TableKind {
-        if self.is_index {
-            TableKind::Index
-        } else if self.is_mview {
-            TableKind::MView
-        } else {
-            TableKind::TableOrSource
-        }
+    pub fn table_type(&self) -> TableType {
+        self.table_type
+    }
+
+    pub fn is_table(&self) -> bool {
+        self.table_type == TableType::Table
+    }
+
+    pub fn is_mview(&self) -> bool {
+        self.table_type == TableType::MaterializedView
+    }
+
+    pub fn is_index(&self) -> bool {
+        self.table_type == TableType::Index
     }
 
     /// Get the table catalog's associated source id.
@@ -213,8 +248,7 @@ impl TableCatalog {
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
-            is_index: self.is_index,
-            is_mview: self.is_mview,
+            table_type: self.table_type.to_prost() as i32,
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -240,6 +274,7 @@ impl TableCatalog {
 impl From<ProstTable> for TableCatalog {
     fn from(tb: ProstTable) -> Self {
         let id = tb.id;
+        let table_type = tb.get_table_type().unwrap();
         let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
         });
@@ -265,8 +300,7 @@ impl From<ProstTable> for TableCatalog {
             name,
             pk,
             columns,
-            is_index: tb.is_index,
-            is_mview: tb.is_mview,
+            table_type: TableType::from_prost(table_type),
             distribution_key: tb
                 .distribution_key
                 .iter()
@@ -300,7 +334,7 @@ mod tests {
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
-    use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+    use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType as ProstTableType};
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan_common::{
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
@@ -308,19 +342,18 @@ mod tests {
 
     use crate::catalog::column_catalog::ColumnCatalog;
     use crate::catalog::row_id_column_desc;
-    use crate::catalog::table_catalog::TableCatalog;
+    use crate::catalog::table_catalog::{TableCatalog, TableType};
     use crate::optimizer::property::{Direction, FieldOrder};
     use crate::WithOptions;
 
     #[test]
     fn test_into_table_catalog() {
         let table: TableCatalog = ProstTable {
-            is_index: false,
-            is_mview: false,
             id: 0,
             schema_id: 0,
             database_id: 0,
             name: "test".to_string(),
+            table_type: ProstTableType::Table as i32,
             columns: vec![
                 ProstColumnCatalog {
                     column_desc: Some((&row_id_column_desc(ColumnId::new(0))).into()),
@@ -375,11 +408,10 @@ mod tests {
         assert_eq!(
             table,
             TableCatalog {
-                is_index: false,
-                is_mview: false,
                 id: TableId::new(0),
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),
+                table_type: TableType::Table,
                 columns: vec![
                     ColumnCatalog::row_id_column(ColumnId::new(0)),
                     ColumnCatalog {

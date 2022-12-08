@@ -185,7 +185,7 @@ impl SchemaCatalog {
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| !v.is_mview && !v.is_index)
+            .filter(|(_, v)| v.is_table())
             .map(|(_, v)| v)
     }
 
@@ -199,7 +199,7 @@ impl SchemaCatalog {
     pub fn iter_mv(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.is_mview && valid_table_name(&v.name))
+            .filter(|(_, v)| v.is_mview() && valid_table_name(&v.name))
             .map(|(_, v)| v)
     }
 

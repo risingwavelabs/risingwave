@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 use super::privilege::{check_privileges, resolve_relation_privileges};
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::catalog::table_catalog::TableType;
 use crate::handler::HandlerArgs;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::planner::Planner;
@@ -109,8 +110,15 @@ pub fn gen_create_mv_plan(
     if let Some(col_names) = &col_names {
         check_column_names(col_names, &plan_root)?
     }
-    let materialize = plan_root
-        .gen_materialize_plan(table_name, definition, col_names, false, false, None, true)?;
+    let materialize = plan_root.gen_materialize_plan(
+        table_name,
+        definition,
+        col_names,
+        false,
+        false,
+        None,
+        TableType::MaterializedView,
+    )?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
