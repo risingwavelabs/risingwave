@@ -17,14 +17,10 @@ use async_trait::async_trait;
 use crate::source::cdc::{CdcProperties, CdcSplit};
 use crate::source::SplitEnumerator;
 
-pub const MYSQL_CDC_PREFIX: &str = "RW_CDC_";
-
 #[derive(Debug)]
 pub struct DebeziumSplitEnumerator {
     /// The source_id in the catalog
     source_id: u32,
-    /// Debezium will assign a partition identifier for each table
-    partition: String,
 }
 
 #[async_trait]
@@ -33,13 +29,8 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
     type Split = CdcSplit;
 
     async fn new(props: CdcProperties) -> anyhow::Result<DebeziumSplitEnumerator> {
-        let partition = format!(
-            "{}{}.{}",
-            MYSQL_CDC_PREFIX, props.database_name, props.table_name
-        );
         Ok(Self {
             source_id: props.source_id,
-            partition,
         })
     }
 
@@ -47,7 +38,6 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
         // CDC source only supports single split
         let splits = vec![CdcSplit {
             source_id: self.source_id,
-            partition: self.partition.clone(),
             start_offset: None,
         }];
         Ok(splits)
