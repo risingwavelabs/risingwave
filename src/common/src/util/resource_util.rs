@@ -37,18 +37,15 @@ pub mod resource_util {
     const DEFAULT_LINUX_IDENTIFIER: &str = "linux";
     const DEFAULT_IN_CONTAINER_ENV_VARIABLE: &str = "IN_CONTAINER";
 
-    pub fn get_default_root_hierarchy() -> String {
+    fn get_default_root_hierarchy() -> String {
         String::from(DEFAULT_CGROUP_ROOT_HIERARCYHY)
     }
 
     fn is_linux_machine() -> bool {
-        if env::consts::OS.eq(DEFAULT_LINUX_IDENTIFIER){
-            return true;
-        }
-        false
+        env::consts::OS.eq(DEFAULT_LINUX_IDENTIFIER)
     }
 
-    // returns a cgroup version if it exists, else returns None.
+    // Returns a cgroup version if it exists, else returns None.
     // Checks for the existence of the root hierarchy directory.
     fn get_cgroup_version() -> Option<CgroupVersion> {
         // check if cgroup exists.
@@ -64,7 +61,7 @@ pub mod resource_util {
     }
 
     // checks if is running in a docker container by checking for docker env file, or if it is running in a kubernetes pod.
-    pub fn is_running_in_container() -> bool {
+    fn is_running_in_container() -> bool {
         env_var_check_if_running_in_container() || docker_env_exists() || is_running_in_kubernetes_pod()
     }
 
