@@ -100,7 +100,7 @@ async fn campaign<S: MetaStore>(
         false
     };
 
-    // Initial leader election
+    // Leader is down
     if current_leader_info.is_empty() || lease_expired {
         tracing::info!("We have no leader");
 
