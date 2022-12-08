@@ -104,20 +104,28 @@ impl RescheduleContext {
 
 /// This function provides an simple balancing method
 /// The specific process is as follows
+///
 /// 1. Calculate the number of target actors, and calculate the average value and the remainder, and
 /// use the average value as expected.
-/// 2. Filter out the actor to be removed and the actor to be retained,
-/// and sort them from largest to smallest (according to the number of virtual nodes held).
-/// 3. Calculate their balance
-///     3.1 For the actors to be removed, the number of virtual nodes per actor is the balance.
-///     3.2 For retained actors, the number of virtual nodes - expected is the balance.
-///     3.3 For newly created actors, -expected is the balance (always negative).
+///
+/// 2. Filter out the actor to be removed and the actor to be retained, and sort them from largest
+/// to smallest (according to the number of virtual nodes held).
+///
+/// 3. Calculate their balance, 1) For the actors to be removed, the number of virtual nodes per
+/// actor is the balance. 2) For retained actors, the number of virtual nodes - expected is the
+/// balance. 3) For newly created actors, -expected is the balance (always negative).
+///
 /// 4. Allocate the remainder, high priority to newly created nodes.
+///
 /// 5. After that, merge removed, retained and created into a queue, with the head of the queue
-/// being the source, and move the vnode to the dest at the end of the queue.
+/// being the source, and move the virtual nodes to the destination at the end of the queue.
 ///
 /// This can handle scale in, scale out, migration, and simultaneous scaling with as much affinity
-/// as possible (still needs to be tested)
+/// as possible.
+///
+/// Note that this function can only rebalance actors whose `vnode_bitmap` is not `None`, in other
+/// words, for `Fragment` of `FragmentDistributionType::Single`, using this function will cause
+/// assert to fail and should be skipped from the upper level.
 ///
 /// The return value is the bitmap distribution after scaling, which covers all virtual node indexes
 pub(crate) fn rebalance_actor_vnode(
@@ -237,7 +245,6 @@ pub(crate) fn rebalance_actor_vnode(
 
     // We will return the full bitmap here after rebalancing,
     // if we want to return only the changed actors, filter balance = 0 here
-
     let mut result = HashMap::with_capacity(target_actor_count);
 
     for balance in &v {
@@ -360,8 +367,6 @@ where
         let mut fragment_dispatcher_map = HashMap::new();
 
         for actor in actor_map.values() {
-            // Question(peng): will a fragment use multiple different dispatchers to connect to the
-            // same downstream fragment?
             for dispatcher in &actor.dispatcher {
                 for downstream_actor_id in &dispatcher.downstream_actor_id {
                     if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
@@ -380,7 +385,7 @@ where
             }
         }
 
-        // Then, we collect all available upstream
+        // Then, we collect all available upstreams
         let mut upstream_dispatchers: HashMap<
             ActorId,
             Vec<(FragmentId, DispatcherId, DispatcherType)>,
@@ -660,7 +665,6 @@ where
             ctx: &RescheduleContext,
             fragment_id: &FragmentId,
             upstream_fragment_id: &FragmentId,
-            fragment_map: &HashMap<FragmentId, Fragment>,
             fragment_actors_after_reschedule: &HashMap<
                 FragmentId,
                 BTreeMap<ActorId, ParallelUnitId>,
@@ -678,7 +682,7 @@ where
                 return;
             }
 
-            let fragment = fragment_map.get(fragment_id).unwrap();
+            let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
             // If the upstream is a Singleton Fragment, there will be no Bitmap changes
             let mut upstream_fragment_bitmap = fragment_updated_bitmap
@@ -733,7 +737,6 @@ where
                         ctx,
                         downstream_fragment_id,
                         fragment_id,
-                        fragment_map,
                         fragment_actors_after_reschedule,
                         fragment_updated_bitmap,
                         no_shuffle_upstream_actor_map,
@@ -757,7 +760,6 @@ where
                             &ctx,
                             downstream_fragment_id,
                             fragment_id,
-                            &ctx.fragment_map,
                             &fragment_actors_after_reschedule,
                             &mut fragment_actor_bitmap,
                             &mut no_shuffle_upstream_actor_map,
@@ -823,9 +825,7 @@ where
                 new_actor.actor_id = *new_actor_id;
 
                 Self::modify_actor_upstream_and_downstream(
-                    &ctx.fragment_map,
-                    &ctx.actor_map,
-                    &ctx.fragment_dispatcher_map,
+                    &ctx,
                     &fragment_actors_to_remove,
                     &fragment_actors_to_create,
                     &fragment_actor_bitmap,
@@ -1305,11 +1305,8 @@ where
 
     /// Modifies the upstream and downstream actors of the new created actor according to the
     /// overall changes, and is used to handle cascading updates
-    #[allow(clippy::too_many_arguments)]
     fn modify_actor_upstream_and_downstream(
-        fragment_map: &HashMap<FragmentId, Fragment>,
-        actor_map: &HashMap<ActorId, StreamActor>,
-        fragment_relation_map: &HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
+        ctx: &RescheduleContext,
         fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
@@ -1317,11 +1314,12 @@ where
         no_shuffle_downstream_actors_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         new_actor: &mut StreamActor,
     ) -> MetaResult<()> {
-        let fragment = fragment_map.get(&new_actor.fragment_id).unwrap();
+        let fragment = &ctx.fragment_map.get(&new_actor.fragment_id).unwrap();
         let mut applied_upstream_fragment_actor_ids = HashMap::new();
 
         for upstream_fragment_id in &fragment.upstream_fragment_ids {
-            let upstream_dispatch_type = fragment_relation_map
+            let upstream_dispatch_type = &ctx
+                .fragment_dispatcher_map
                 .get(upstream_fragment_id)
                 .and_then(|map| map.get(&fragment.fragment_id))
                 .unwrap();
@@ -1329,7 +1327,7 @@ where
             match upstream_dispatch_type {
                 DispatcherType::Unspecified => unreachable!(),
                 DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
-                    let upstream_fragment = fragment_map.get(upstream_fragment_id).unwrap();
+                    let upstream_fragment = &ctx.fragment_map.get(upstream_fragment_id).unwrap();
                     let mut upstream_actor_ids = upstream_fragment
                         .actors
                         .iter()
@@ -1400,7 +1398,7 @@ where
             let downstream_fragment_id = dispatcher
                 .downstream_actor_id
                 .iter()
-                .filter_map(|actor_id| actor_map.get(actor_id).map(|actor| actor.fragment_id))
+                .filter_map(|actor_id| ctx.actor_map.get(actor_id).map(|actor| actor.fragment_id))
                 .dedup()
                 .exactly_one()
                 .unwrap() as FragmentId;
