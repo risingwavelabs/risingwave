@@ -45,7 +45,7 @@ mod tests {
 
     use super::*;
     use crate::expr::{ExprImpl, FunctionCall, InputRef};
-    use crate::session::OptimizerContext;
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::utils::Condition;
 
     #[tokio::test]

@@ -407,9 +407,9 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::LogicalTopN;
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{ColPrunable, LogicalValues};
     use crate::optimizer::property::Order;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_prune_col() {

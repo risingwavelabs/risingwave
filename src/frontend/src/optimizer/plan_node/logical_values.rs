@@ -23,8 +23,8 @@ use super::{
     ToStream,
 };
 use crate::expr::{Expr, ExprImpl};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
 
 /// `LogicalValues` builds rows according to a list of expressions
@@ -124,7 +124,7 @@ mod tests {
 
     use super::*;
     use crate::expr::Literal;
-    use crate::session::OptimizerContext;
+    use crate::optimizer::optimizer_context::OptimizerContext;
 
     fn literal(val: i32) -> ExprImpl {
         Literal::new(Datum::Some(val.into()), DataType::Int32).into()

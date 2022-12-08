@@ -15,7 +15,7 @@
 use risingwave_common::catalog::Schema;
 
 use super::{stream, EqJoinPredicate};
-use crate::session::OptimizerContextRef;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 
 pub mod dynamic_filter;
 pub use dynamic_filter::*;
