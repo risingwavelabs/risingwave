@@ -153,7 +153,7 @@ pub fn new_unary_expr(
                             ),
                         )*
                         _ => {
-                            return Err(ExprError::Cast2(child_expr.return_type(), return_type));
+                            return Err(ExprError::UnsupportedCast(child_expr.return_type(), return_type));
                         }
                     }
                 };

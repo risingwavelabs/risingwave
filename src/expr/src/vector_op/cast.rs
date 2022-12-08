@@ -622,7 +622,7 @@ fn scalar_cast(
                             }
                         )*
                         _ => {
-                            return Err(ExprError::Cast2(source_type.clone(), target_type.clone()));
+                            return Err(ExprError::UnsupportedCast(source_type.clone(), target_type.clone()));
                         }
                     }
                 };
