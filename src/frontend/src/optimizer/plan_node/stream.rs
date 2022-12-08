@@ -25,11 +25,12 @@ use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2;
 use crate::optimizer::property::{Distribution, FieldOrder};
-use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{TableCatalog, WithOptions};
+use crate::TableCatalog;
+
 macro_rules! impl_node {
 ($base:ident, $($t:ident),*) => {
     #[derive(Debug, Clone)]
@@ -244,7 +245,7 @@ impl HashJoin {
 
         // Build internal table
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
         let internal_columns_fields = schema.fields().to_vec();
 
         internal_columns_fields.iter().for_each(|field| {
@@ -257,7 +258,7 @@ impl HashJoin {
 
         // Build degree table.
         let mut degree_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
 
         let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
@@ -330,7 +331,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core
 #[derive(Debug, Clone)]
 pub struct Sink {
     pub input: PlanRef,
-    pub properties: WithOptions,
+    pub table: TableCatalog,
 }
 impl_plan_tree_node_v2_for_stream_unary_node!(Sink, input);
 /// [`Source`] represents a table/connector source at the very beginning of the graph.
@@ -677,16 +678,10 @@ pub fn to_stream_prost_body(
             })
         }
         Node::Sink(me) => {
-            let (_, input_node) = &*me.input;
-            let table_desc = match input_node {
-                Node::TableScan(table_scan) => &*table_scan.core.table_desc,
-                _ => unreachable!(),
-            };
-
             ProstNode::Sink(SinkNode {
-                table_id: table_desc.table_id.table_id(),
+                table_id: me.table.id().into(),
                 column_ids: vec![], // TODO(nanderstabel): fix empty Vector
-                properties: me.properties.inner().clone(),
+                properties: me.table.properties.inner().clone(),
             })
         }
         Node::Source(me) => {

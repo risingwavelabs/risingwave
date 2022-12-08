@@ -531,6 +531,13 @@ impl ToText for ListRef<'_> {
             )
         })
     }
+
+    fn to_text_with_type(&self, ty: &DataType) -> String {
+        match ty {
+            DataType::List { .. } => self.to_text(),
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Eq for ListRef<'_> {}
@@ -841,10 +848,10 @@ mod tests {
     #[test]
     fn test_serialize_deserialize() {
         let value = ListValue::new(vec![
-            Some("abcd".to_string().to_scalar_value()),
-            Some("".to_string().to_scalar_value()),
+            Some("abcd".into()),
+            Some("".into()),
             None,
-            Some("a".to_string().to_scalar_value()),
+            Some("a".into()),
         ]);
         let list_ref = ListRef::ValueRef { val: &value };
         let mut serializer = memcomparable::Serializer::new(vec![]);
@@ -902,7 +909,7 @@ mod tests {
                 Ordering::Greater,
             ),
             (
-                ListValue::new(vec![None, Some("".to_string().to_scalar_value())]),
+                ListValue::new(vec![None, Some("".into())]),
                 ListValue::new(vec![None, None]),
                 DataType::Varchar,
                 Ordering::Less,

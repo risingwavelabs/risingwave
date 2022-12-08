@@ -21,7 +21,7 @@ use risingwave_common::types::{DataType, IntervalUnit};
 use super::super::utils::IndicesDisplay;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{InputRef, InputRefDisplay};
-use crate::session::OptimizerContextRef;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 
 /// [`HopWindow`] implements Hop Table Function.
 #[derive(Debug, Clone)]
@@ -103,13 +103,10 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
             f,
             "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
             name,
-            format_args!(
-                "{}",
-                InputRefDisplay {
-                    input_ref: &self.time_col,
-                    input_schema: self.input.schema()
-                }
-            ),
+            InputRefDisplay {
+                input_ref: &self.time_col,
+                input_schema: self.input.schema()
+            },
             self.window_slide,
             self.window_size,
             if self

@@ -26,11 +26,11 @@ use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePro
 
 use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
-use crate::expr::{Expr, InputRef, InputRefDisplay};
+use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::Direction;
-use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, IndexRewriter};
 use crate::TableCatalog;
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
@@ -148,7 +148,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                             include_keys: Vec<usize>|
          -> MaterializedInputState {
             let mut internal_table_catalog_builder =
-                TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
+                TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
             let mut included_upstream_indices = vec![]; // all upstream indices that are included in the state table
             let mut column_mapping = BTreeMap::new(); // key: upstream col idx, value: table col idx
@@ -202,7 +202,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 
         let gen_table_state = |agg_kind: AggKind| -> TableState {
             let mut internal_table_catalog_builder =
-                TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
+                TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
             let mut included_upstream_indices = vec![];
             for &idx in &self.group_key {
@@ -325,7 +325,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         let out_fields = me.schema().fields();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
         for field in out_fields.iter() {
             let tb_column_idx = internal_table_catalog_builder.add_column(field);
             if tb_column_idx < self.group_key.len() {
@@ -412,17 +412,14 @@ pub struct PlanAggOrderByFieldDisplay<'a> {
     pub input_schema: &'a Schema,
 }
 
-impl fmt::Debug for PlanAggOrderByFieldDisplay<'_> {
+impl fmt::Display for PlanAggOrderByFieldDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let that = self.plan_agg_order_by_field;
-        write!(
-            f,
-            "{:?}",
-            InputRefDisplay {
-                input_ref: &that.input,
-                input_schema: self.input_schema
-            }
-        )?;
+        InputRefDisplay {
+            input_ref: &that.input,
+            input_schema: self.input_schema,
+        }
+        .fmt(f)?;
         match that.direction {
             Direction::Asc => write!(f, " ASC")?,
             Direction::Desc => write!(f, " DESC")?,
@@ -511,6 +508,24 @@ impl fmt::Debug for PlanAggCall {
 }
 
 impl PlanAggCall {
+    pub fn rewrite_input_index(&mut self, mapping: ColIndexMapping) {
+        // modify input
+        self.inputs.iter_mut().for_each(|x| {
+            x.index = mapping.map(x.index);
+        });
+
+        // modify order_by_fields
+        self.order_by_fields.iter_mut().for_each(|x| {
+            x.input.index = mapping.map(x.input.index);
+        });
+
+        // modify filter
+        let mut rewriter = IndexRewriter { mapping };
+        self.filter.conjunctions.iter_mut().for_each(|x| {
+            *x = rewriter.rewrite_expr(x.clone());
+        });
+    }
+
     pub fn to_protobuf(&self) -> ProstAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
@@ -603,13 +618,10 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                     f,
                     " order_by({})",
                     that.order_by_fields.iter().format_with(", ", |e, f| {
-                        f(&format_args!(
-                            "{:?}",
-                            PlanAggOrderByFieldDisplay {
-                                plan_agg_order_by_field: e,
-                                input_schema: self.input_schema,
-                            }
-                        ))
+                        f(&PlanAggOrderByFieldDisplay {
+                            plan_agg_order_by_field: e,
+                            input_schema: self.input_schema,
+                        })
                     })
                 )?;
             }

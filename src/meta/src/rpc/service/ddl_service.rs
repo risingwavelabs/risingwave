@@ -525,11 +525,23 @@ where
         .await?;
 
         // fill correct table id in fragment graph and fill fragment id in table.
-        if let StreamingJob::MaterializedView(table)
-        | StreamingJob::Index(_, table)
-        | StreamingJob::MaterializedSource(_, table) = stream_job
-        {
-            actor_graph_builder.fill_mview_id(table);
+        match stream_job {
+            StreamingJob::MaterializedView(table)
+            | StreamingJob::Index(_, table)
+            | StreamingJob::MaterializedSource(_, table) => {
+                table.fragment_id = actor_graph_builder.fill_mview_or_sink_id(
+                    table.database_id,
+                    table.schema_id,
+                    table.id.into(),
+                );
+            }
+            StreamingJob::Sink(sink) => {
+                actor_graph_builder.fill_mview_or_sink_id(
+                    sink.database_id,
+                    sink.schema_id,
+                    sink.id.into(),
+                );
+            }
         }
 
         let graph = actor_graph_builder
@@ -544,7 +556,10 @@ where
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
             | StreamingJob::MaterializedSource(_, table) => creating_tables.push(table.clone()),
-            _ => {}
+
+            StreamingJob::Sink(_) => {
+                // No need to mark it as creating. Do nothing.
+            }
         }
 
         self.catalog_manager
@@ -641,6 +656,7 @@ where
         Ok(version)
     }
 
+    // TODO(Yuanxin): Use this function for both `CREATE TABLE` and `CREATE TABLE WITH CONNECTOR`.
     async fn create_materialized_source_inner(
         &self,
         mut source: Source,

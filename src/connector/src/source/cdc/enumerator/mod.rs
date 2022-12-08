@@ -17,17 +17,18 @@ use async_trait::async_trait;
 use crate::source::cdc::{CdcProperties, CdcSplit};
 use crate::source::SplitEnumerator;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct CdcSplitEnumerator {
+#[derive(Debug)]
+pub struct DebeziumSplitEnumerator {
+    /// The source_id in the catalog
     source_id: u32,
 }
 
 #[async_trait]
-impl SplitEnumerator for CdcSplitEnumerator {
+impl SplitEnumerator for DebeziumSplitEnumerator {
     type Properties = CdcProperties;
     type Split = CdcSplit;
 
-    async fn new(props: CdcProperties) -> anyhow::Result<CdcSplitEnumerator> {
+    async fn new(props: CdcProperties) -> anyhow::Result<DebeziumSplitEnumerator> {
         Ok(Self {
             source_id: props.source_id,
         })

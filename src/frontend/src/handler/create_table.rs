@@ -34,10 +34,11 @@ use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::{check_valid_column_name, ColumnId};
+use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::{PlanRef, PlanRoot};
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
@@ -207,7 +208,10 @@ pub(crate) fn gen_create_table_plan(
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
-    let properties = context.inner().with_options.inner().clone();
+    let properties = context.with_options().inner().clone();
+
+    // TODO(Yuanxin): Detect if there is an external source based on `properties` (WITH CONNECTOR)
+    // and make prost source accordingly.
     let source = make_prost_source(
         session,
         table_name,
@@ -217,13 +221,11 @@ pub(crate) fn gen_create_table_plan(
         properties,
         Info::TableSource(TableSourceInfo {}),
     )?;
-    let (plan, table) = gen_materialized_source_plan(context, source.clone(), session.user_id())?;
+    let (plan, table) = gen_materialize_plan(context, source.clone(), session.user_id())?;
     Ok((plan, source, table))
 }
 
-/// Generate a stream plan with `StreamSource` + `StreamMaterialize`, it resembles a
-/// `CREATE MATERIALIZED VIEW AS SELECT * FROM <source>`.
-pub(crate) fn gen_materialized_source_plan(
+pub(crate) fn gen_materialize_plan(
     context: OptimizerContextRef,
     source: ProstSource,
     owner: u32,
@@ -243,14 +245,22 @@ pub(crate) fn gen_materialized_source_plan(
             out_names.remove(row_id_index);
         }
 
-        PlanRoot::new(
+        let mut plan_root = PlanRoot::new(
             source_node,
             RequiredDist::Any,
             Order::any(),
             required_cols,
             out_names,
-        )
-        .gen_create_mv_plan(source.name.clone(), "".into(), None, handle_pk_conflict)?
+        );
+
+        plan_root.gen_materialize_plan(
+            source.name.clone(),
+            "".into(),
+            None,
+            handle_pk_conflict,
+            false, // TODO(Yuanxin): true
+            None,  // TODO(Yuanxin): row_id_index
+        )?
     };
     let mut table = materialize
         .table()
@@ -260,13 +270,13 @@ pub(crate) fn gen_materialized_source_plan(
 }
 
 pub async fn handle_create_table(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     if_not_exists: bool,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx.clone();
+    let session = handler_args.session.clone();
 
     if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
         if if_not_exists {
@@ -280,6 +290,7 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, table) = {
+        let context = OptimizerContext::new_with_handler_args(handler_args);
         let (plan, source, table) = gen_create_table_plan(
             &session,
             context.into(),
@@ -299,9 +310,10 @@ pub async fn handle_create_table(
     );
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer
-        .create_materialized_source(source, table, graph)
-        .await?;
+
+    // TODO(Yuanxin): `source` will contain either an external source or nothing. Rewrite
+    // `create_table` accordingly.
+    catalog_writer.create_table(source, table, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }

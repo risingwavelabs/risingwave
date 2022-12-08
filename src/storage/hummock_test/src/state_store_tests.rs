@@ -16,6 +16,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::TryStreamExt;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, HummockSstableId, LocalSstableInfo};
@@ -23,14 +24,13 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::{count_iter, default_config_for_test};
+use risingwave_storage::hummock::test_utils::{count_stream, default_config_for_test};
 use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     ReadOptions, StateStore, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
 };
-use risingwave_storage::StateStoreIter;
 
 use crate::test_utils::{
     get_test_notification_client, with_hummock_storage_v1, with_hummock_storage_v2,
@@ -246,7 +246,7 @@ async fn test_basic_inner(
     assert_eq!(value, None);
 
     // Write aa bb
-    let mut iter = hummock_storage
+    let iter = hummock_storage
         .iter(
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch1,
@@ -260,7 +260,7 @@ async fn test_basic_inner(
         )
         .await
         .unwrap();
-    let len = count_iter(&mut iter).await;
+    let len = count_stream(iter).await;
     assert_eq!(len, 2);
 
     // Get the anchor value at the first snapshot
@@ -299,7 +299,7 @@ async fn test_basic_inner(
         .unwrap();
     assert_eq!(value, Bytes::from("111111"));
     // Update aa, write cc
-    let mut iter = hummock_storage
+    let iter = hummock_storage
         .iter(
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch2,
@@ -313,11 +313,11 @@ async fn test_basic_inner(
         )
         .await
         .unwrap();
-    let len = count_iter(&mut iter).await;
+    let len = count_stream(iter).await;
     assert_eq!(len, 3);
 
     // Delete aa, write dd,ee
-    let mut iter = hummock_storage
+    let iter = hummock_storage
         .iter(
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch3,
@@ -331,7 +331,7 @@ async fn test_basic_inner(
         )
         .await
         .unwrap();
-    let len = count_iter(&mut iter).await;
+    let len = count_stream(iter).await;
     assert_eq!(len, 4);
     let ssts = hummock_storage
         .seal_and_sync_epoch(epoch1)
@@ -628,7 +628,7 @@ async fn test_reload_storage() {
     assert_eq!(value, Bytes::from("111111"));
 
     // Write aa bb
-    let mut iter = hummock_storage
+    let iter = hummock_storage
         .iter(
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch1,
@@ -642,7 +642,7 @@ async fn test_reload_storage() {
         )
         .await
         .unwrap();
-    let len = count_iter(&mut iter).await;
+    let len = count_stream(iter).await;
     assert_eq!(len, 2);
 
     // Get the anchor value at the first snapshot
@@ -681,7 +681,7 @@ async fn test_reload_storage() {
         .unwrap();
     assert_eq!(value, Bytes::from("111111"));
     // Update aa, write cc
-    let mut iter = hummock_storage
+    let iter = hummock_storage
         .iter(
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             epoch2,
@@ -695,7 +695,7 @@ async fn test_reload_storage() {
         )
         .await
         .unwrap();
-    let len = count_iter(&mut iter).await;
+    let len = count_stream(iter).await;
     assert_eq!(len, 3);
 }
 
@@ -778,7 +778,7 @@ async fn test_write_anytime_inner(
                     .unwrap()
             );
             // check iter
-            let mut iter = hummock_storage
+            let iter = hummock_storage
                 .iter(
                     (
                         Bound::Included(b"aa".to_vec()),
@@ -795,28 +795,29 @@ async fn test_write_anytime_inner(
                 )
                 .await
                 .unwrap();
+            futures::pin_mut!(iter);
             assert_eq!(
                 (
                     FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch),
                     Bytes::from("111")
                 ),
-                iter.next().await.unwrap().unwrap()
+                iter.try_next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
                     FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch),
                     Bytes::from("222")
                 ),
-                iter.next().await.unwrap().unwrap()
+                iter.try_next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
                     FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch),
                     Bytes::from("333")
                 ),
-                iter.next().await.unwrap().unwrap()
+                iter.try_next().await.unwrap().unwrap()
             );
-            assert!(iter.next().await.unwrap().is_none());
+            assert!(iter.try_next().await.unwrap().is_none());
         }
     };
 
@@ -894,7 +895,7 @@ async fn test_write_anytime_inner(
                     .unwrap()
                     .unwrap()
             );
-            let mut iter = hummock_storage
+            let iter = hummock_storage
                 .iter(
                     (
                         Bound::Included(b"aa".to_vec()),
@@ -911,21 +912,22 @@ async fn test_write_anytime_inner(
                 )
                 .await
                 .unwrap();
+            futures::pin_mut!(iter);
             assert_eq!(
                 (
                     FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch),
                     Bytes::from("111_new")
                 ),
-                iter.next().await.unwrap().unwrap()
+                iter.try_next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
                     FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch),
                     Bytes::from("333")
                 ),
-                iter.next().await.unwrap().unwrap()
+                iter.try_next().await.unwrap().unwrap()
             );
-            assert!(iter.next().await.unwrap().is_none());
+            assert!(iter.try_next().await.unwrap().is_none());
         }
     };
 

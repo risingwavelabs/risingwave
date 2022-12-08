@@ -648,6 +648,13 @@ impl ToText for crate::types::IntervalUnit {
     fn to_text(&self) -> String {
         self.to_string()
     }
+
+    fn to_text_with_type(&self, ty: &DataType) -> String {
+        match ty {
+            DataType::Interval => self.to_string(),
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Display for IntervalUnit {
@@ -728,10 +735,15 @@ impl<'a> FromSql<'a> for IntervalUnit {
 }
 
 impl ToBinary for IntervalUnit {
-    fn to_binary(&self) -> Option<Bytes> {
-        let mut output = BytesMut::new();
-        self.to_sql(&Type::ANY, &mut output).unwrap();
-        Some(output.freeze())
+    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
+        match ty {
+            DataType::Interval => {
+                let mut output = BytesMut::new();
+                self.to_sql(&Type::ANY, &mut output).unwrap();
+                Ok(Some(output.freeze()))
+            }
+            _ => unreachable!(),
+        }
     }
 }
 

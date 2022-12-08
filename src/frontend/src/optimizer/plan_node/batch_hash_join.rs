@@ -101,20 +101,17 @@ impl fmt::Display for BatchHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("BatchHashJoin");
-        builder.field("type", &format_args!("{:?}", self.logical.join_type()));
+        builder.field("type", &self.logical.join_type());
 
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
         builder.field(
             "predicate",
-            &format_args!(
-                "{}",
-                EqJoinPredicateDisplay {
-                    eq_join_predicate: self.eq_join_predicate(),
-                    input_schema: &concat_schema
-                }
-            ),
+            &EqJoinPredicateDisplay {
+                eq_join_predicate: self.eq_join_predicate(),
+                input_schema: &concat_schema,
+            },
         );
 
         if verbose {
@@ -129,13 +126,10 @@ impl fmt::Display for BatchHashJoin {
             } else {
                 builder.field(
                     "output",
-                    &format_args!(
-                        "{:?}",
-                        &IndicesDisplay {
-                            indices: self.logical.output_indices(),
-                            input_schema: &concat_schema,
-                        }
-                    ),
+                    &IndicesDisplay {
+                        indices: self.logical.output_indices(),
+                        input_schema: &concat_schema,
+                    },
                 );
             }
         }

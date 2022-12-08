@@ -133,10 +133,10 @@ impl LogicalTopN {
             ),
         );
         builder
-            .field("limit", &format_args!("{}", self.limit()))
-            .field("offset", &format_args!("{}", self.offset()));
+            .field("limit", &self.limit())
+            .field("offset", &self.offset());
         if self.with_ties() {
-            builder.field("with_ties", &format_args!("{}", true));
+            builder.field("with_ties", &true);
         }
         if !self.group_key().is_empty() {
             builder.field("group_key", &self.group_key());
@@ -407,9 +407,9 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::LogicalTopN;
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{ColPrunable, LogicalValues};
     use crate::optimizer::property::Order;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_prune_col() {
