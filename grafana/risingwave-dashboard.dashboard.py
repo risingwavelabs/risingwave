@@ -1631,9 +1631,9 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_merge_sstable_counts_bucket')}[$__rate_interval])) by (le, job, instance))",
+                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_merge_sstable_counts_bucket')}[$__rate_interval])) by (le, job, type))",
                         f"# merged ssts p{legend}" +
-                        " - {{job}} @ {{instance}}",
+                        " - {{job}} @ {{type}}",
                     ),
                     [90, 99, "max"],
                 ),
