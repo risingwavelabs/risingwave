@@ -13,61 +13,26 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
 use super::privilege::{check_privileges, resolve_relation_privileges};
 use super::RwPgResponse;
-use crate::binder::{Binder, BoundSetExpr};
-use crate::catalog::check_schema_writable;
-use crate::handler::privilege::ObjectCheckItem;
-use crate::optimizer::PlanRef;
+use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::handler::HandlerArgs;
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::planner::Planner;
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
-/// Generate create MV plan, return plan and mv table info.
-pub fn gen_create_mv_plan(
+pub(super) fn get_column_names(
+    bound: &BoundQuery,
     session: &SessionImpl,
-    context: OptimizerContextRef,
-    query: Query,
-    name: ObjectName,
     columns: Vec<Ident>,
-) -> Result<(PlanRef, ProstTable)> {
-    let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, name)?;
-    let search_path = session.config().get_search_path();
-    let user_name = &session.auth_context().user_name;
-
-    let (database_id, schema_id) = {
-        let catalog_reader = session.env().catalog_reader().read_guard();
-        let schema = match schema_name {
-            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
-            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
-        };
-
-        check_schema_writable(&schema.name())?;
-        if schema.name() != DEFAULT_SCHEMA_NAME {
-            check_privileges(
-                session,
-                &vec![ObjectCheckItem::new(
-                    schema.owner(),
-                    Action::Create,
-                    Object::SchemaId(schema.id()),
-                )],
-            )?;
-        }
-
-        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
-        (db_id, schema.id())
-    };
-
-    let definition = query.to_string();
-
+) -> Result<Option<Vec<String>>> {
     // If columns is empty, it means that the user did not specify the column names.
     // In this case, we extract the column names from the query.
     // If columns is not empty, it means that user specify the column names and the user
@@ -75,12 +40,7 @@ pub fn gen_create_mv_plan(
     let col_names: Option<Vec<String>> = if columns.is_empty() {
         None
     } else {
-        Some(columns.iter().map(|v| v.value.clone()).collect())
-    };
-
-    let bound = {
-        let mut binder = Binder::new(session);
-        binder.bind_query(query)?
+        Some(columns.iter().map(|v| v.real_value()).collect())
     };
 
     if let BoundSetExpr::Select(select) = &bound.body {
@@ -101,25 +61,56 @@ pub fn gen_create_mv_plan(
         }
     }
 
+    Ok(col_names)
+}
+
+pub(super) fn check_column_names(col_names: &[String], plan_root: &PlanRoot) -> Result<()> {
+    // calculate the number of unhidden columns
+    let unhidden_len = plan_root
+        .schema()
+        .fields()
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| plan_root.out_fields().contains(*i))
+        .count();
+    if col_names.len() != unhidden_len {
+        return Err(InternalError(
+            "number of column names does not match number of columns".to_string(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// Generate create MV plan, return plan and mv table info.
+pub fn gen_create_mv_plan(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
+    query: Query,
+    name: ObjectName,
+    columns: Vec<Ident>,
+) -> Result<(PlanRef, ProstTable)> {
+    let db_name = session.database();
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+
+    let definition = query.to_string();
+
+    let bound = {
+        let mut binder = Binder::new(session);
+        binder.bind_query(query)?
+    };
+
+    let col_names = get_column_names(&bound, session, columns)?;
+
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     // Check the col_names match number of columns in the query.
     if let Some(col_names) = &col_names {
-        // calculate the number of unhidden columns
-        let unhidden_len = plan_root
-            .schema()
-            .fields()
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| plan_root.out_fields().contains(*i))
-            .count();
-        if col_names.len() != unhidden_len {
-            return Err(InternalError(
-                "number of column names does not match number of columns".to_string(),
-            )
-            .into());
-        }
+        check_column_names(col_names, &plan_root)?
     }
-    let materialize = plan_root.gen_create_mv_plan(table_name, definition, col_names)?;
+    let materialize =
+        plan_root.gen_materialize_plan(table_name, definition, col_names, false, false, None)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
@@ -141,35 +132,17 @@ pub fn gen_create_mv_plan(
 }
 
 pub async fn handle_create_mv(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     name: ObjectName,
     query: Query,
     columns: Vec<Ident>,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx.clone();
+    let session = handler_args.session.clone();
+
+    session.check_relation_name_duplicated(name.clone())?;
 
     let (table, graph) = {
-        {
-            // Here is some duplicate code because we need to check name duplicated outside of
-            // `gen_xxx_plan` to avoid `explain` reporting the error.
-            let db_name = session.database();
-            let catalog_reader = session.env().catalog_reader().read_guard();
-            let (schema_name, table_name) = {
-                let (schema_name, table_name) =
-                    Binder::resolve_table_or_source_name(db_name, name.clone())?;
-                let search_path = session.config().get_search_path();
-                let user_name = &session.auth_context().user_name;
-                let schema_name = match schema_name {
-                    Some(schema_name) => schema_name,
-                    None => catalog_reader
-                        .first_valid_schema(db_name, &search_path, user_name)?
-                        .name(),
-                };
-                (schema_name, table_name)
-            };
-            catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &table_name)?;
-        }
-
+        let context = OptimizerContext::new_with_handler_args(handler_args);
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
         let graph = build_graph(plan);
 

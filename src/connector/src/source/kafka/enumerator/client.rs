@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext};
 use rdkafka::error::KafkaResult;
@@ -89,11 +89,11 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<KafkaSplit>> {
-        let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
-            format!(
-                "failed to fetch metadata from kafka ({})",
-                self.broker_address
-            )
+        let topic_partitions = self.fetch_topic_partition().await.map_err(|e| {
+            anyhow!(format!(
+                "failed to fetch metadata from kafka ({}), error: {}",
+                self.broker_address, e
+            ))
         })?;
 
         let mut start_offsets = self.fetch_start_offset(topic_partitions.as_ref()).await?;
@@ -156,7 +156,7 @@ impl KafkaSplitEnumerator {
                         .await?;
                     let offset = match self.start_offset {
                         KafkaEnumeratorOffset::Earliest => low_watermark - 1,
-                        KafkaEnumeratorOffset::Latest => high_watermark,
+                        KafkaEnumeratorOffset::Latest => high_watermark - 1,
                         _ => unreachable!(),
                     };
                     map.insert(*partition, Some(offset));

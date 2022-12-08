@@ -17,7 +17,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk, Row};
+use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -120,9 +121,10 @@ impl<'a> TryFrom<&'a ExprNode> for InExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{DataChunk, Row};
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{DataType, Scalar, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
@@ -151,9 +153,7 @@ mod tests {
                     ..Default::default()
                 }),
                 rex_node: Some(RexNode::Constant(ProstDatum {
-                    body: serialize_datum_to_bytes(
-                        Some("ABC".to_string().to_scalar_value()).as_ref(),
-                    ),
+                    body: serialize_datum_to_bytes(Some("ABC".into()).as_ref()),
                 })),
             },
             ExprNode {
@@ -163,9 +163,7 @@ mod tests {
                     ..Default::default()
                 }),
                 rex_node: Some(RexNode::Constant(ProstDatum {
-                    body: serialize_datum_to_bytes(
-                        Some("def".to_string().to_scalar_value()).as_ref(),
-                    ),
+                    body: serialize_datum_to_bytes(Some("def".into()).as_ref()),
                 })),
             },
         ];
@@ -193,10 +191,10 @@ mod tests {
         ];
         let data = [
             vec![
-                Some(ScalarImpl::Utf8("abc".to_string())),
-                Some(ScalarImpl::Utf8("def".to_string())),
+                Some(ScalarImpl::Utf8("abc".into())),
+                Some(ScalarImpl::Utf8("def".into())),
             ],
-            vec![None, Some(ScalarImpl::Utf8("abc".to_string()))],
+            vec![None, Some(ScalarImpl::Utf8("abc".into()))],
         ];
 
         let data_chunks = [
@@ -247,10 +245,10 @@ mod tests {
 
         let data = [
             vec![
-                Some(ScalarImpl::Utf8("abc".to_string())),
-                Some(ScalarImpl::Utf8("def".to_string())),
+                Some(ScalarImpl::Utf8("abc".into())),
+                Some(ScalarImpl::Utf8("def".into())),
             ],
-            vec![None, Some(ScalarImpl::Utf8("abc".to_string()))],
+            vec![None, Some(ScalarImpl::Utf8("abc".into()))],
         ];
 
         let row_inputs = vec![
@@ -268,7 +266,7 @@ mod tests {
                 InExpression::new(input_ref, data[i].clone().into_iter(), DataType::Boolean);
 
             for (j, row_input) in row_inputs[i].iter().enumerate() {
-                let row_input = vec![row_input.map(|s| s.to_string().to_scalar_value())];
+                let row_input = vec![row_input.map(|s| s.into())];
                 let row = Row::new(row_input);
                 let result = search_expr.eval_row(&row).unwrap();
                 assert_eq!(result, expected[i][j].map(ScalarImpl::Bool));

@@ -15,8 +15,7 @@
 use risingwave_common::error::Result;
 
 use crate::binder::BoundStatement;
-use crate::optimizer::PlanRoot;
-use crate::session::OptimizerContextRef;
+use crate::optimizer::{OptimizerContextRef, PlanRoot};
 
 mod delete;
 mod insert;
@@ -24,6 +23,7 @@ mod query;
 mod relation;
 mod select;
 mod set_expr;
+mod set_operation;
 mod statement;
 mod update;
 mod values;

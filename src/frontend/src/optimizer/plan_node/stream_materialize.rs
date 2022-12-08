@@ -23,13 +23,14 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::WithOptions;
 
 /// The first column id to allocate for a new materialized view.
 ///
@@ -46,27 +47,9 @@ pub struct StreamMaterialize {
 }
 
 impl StreamMaterialize {
-    fn derive_plan_base(input: &PlanRef) -> Result<PlanBase> {
-        let ctx = input.ctx();
-
-        let schema = input.schema().clone();
-        let pk_indices = input.logical_pk();
-
-        // Materialize executor won't change the append-only behavior of the stream, so it depends
-        // on input's `append_only`.
-        Ok(PlanBase::new_stream(
-            ctx,
-            schema,
-            pk_indices.to_vec(),
-            input.functional_dependency().clone(),
-            input.distribution().clone(),
-            input.append_only(),
-        ))
-    }
-
     #[must_use]
     pub fn new(input: PlanRef, table: TableCatalog) -> Self {
-        let base = Self::derive_plan_base(&input).unwrap();
+        let base = PlanBase::derive_stream_plan_base(&input);
         Self { base, input, table }
     }
 
@@ -84,6 +67,7 @@ impl StreamMaterialize {
         out_names: Vec<String>,
         is_index: bool,
         definition: String,
+        handle_pk_conflict: bool,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
@@ -103,7 +87,7 @@ impl StreamMaterialize {
         };
 
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
-        let base = Self::derive_plan_base(&input)?;
+        let base = PlanBase::derive_stream_plan_base(&input);
         let schema = &base.schema;
         let pk_indices = &base.logical_pk;
 
@@ -167,7 +151,6 @@ impl StreamMaterialize {
 
         let ctx = input.ctx();
         let properties = ctx.inner().with_options.internal_table_subset();
-
         let table = TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -185,6 +168,7 @@ impl StreamMaterialize {
             vnode_col_idx: None,
             value_indices,
             definition,
+            handle_pk_conflict,
         };
 
         Ok(Self { base, input, table })
@@ -198,6 +182,16 @@ impl StreamMaterialize {
 
     pub fn name(&self) -> &str {
         self.table.name()
+    }
+
+    pub fn rewrite_into_sink(self, properties: WithOptions) -> StreamSink {
+        let Self {
+            base,
+            input,
+            mut table,
+        } = self;
+        table.properties = properties;
+        StreamSink::with_base(input, table, base)
     }
 }
 
@@ -265,7 +259,7 @@ impl StreamNode for StreamMaterialize {
                 .map(FieldOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
-            ignore_on_conflict: true,
+            handle_pk_conflict: self.table.handle_pk_conflict(),
         })
     }
 }

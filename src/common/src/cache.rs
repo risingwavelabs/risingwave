@@ -28,7 +28,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 
 const IN_CACHE: u8 = 1;
@@ -320,7 +319,7 @@ impl<K: LruKey, T: LruValue> LruHandleTable<K, T> {
     }
 }
 
-type RequestQueue<K, T> = Vec<Sender<CacheableEntry<K, T>>>;
+type RequestQueue = Vec<Sender<()>>;
 pub struct LruCacheShard<K: LruKey, T: LruValue> {
     /// The dummy header node of a ring linked list. The linked list is a LRU list, holding the
     /// cache handles that are not used externally.
@@ -328,7 +327,7 @@ pub struct LruCacheShard<K: LruKey, T: LruValue> {
     table: LruHandleTable<K, T>,
     // TODO: may want to use an atomic object linked list shared by all shards.
     object_pool: Vec<Box<LruHandle<K, T>>>,
-    write_request: HashMap<K, RequestQueue<K, T>>,
+    write_request: HashMap<K, RequestQueue>,
     lru_usage: Arc<AtomicUsize>,
     usage: Arc<AtomicUsize>,
     capacity: usize,
@@ -667,6 +666,11 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         }
     }
 
+    unsafe fn inc_reference(&self, handle: *mut LruHandle<K, T>) {
+        let _shard = self.shards[self.shard((*handle).hash)].lock();
+        (*handle).refs += 1;
+    }
+
     pub fn insert(
         self: &Arc<Self>,
         key: K,
@@ -675,6 +679,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         value: T,
     ) -> CacheableEntry<K, T> {
         let mut to_delete = vec![];
+        // Drop the entries outside lock to avoid deadlock.
         let handle = unsafe {
             let mut shard = self.shards[self.shard(hash)].lock();
             let pending_request = shard.write_request.remove(&key);
@@ -682,11 +687,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             debug_assert!(!ptr.is_null());
             if let Some(que) = pending_request {
                 for sender in que {
-                    (*ptr).add_ref();
-                    let _ = sender.send(CacheableEntry {
-                        cache: self.clone(),
-                        handle: ptr,
-                    });
+                    let _ = sender.send(());
                 }
             }
             CacheableEntry {
@@ -790,43 +791,41 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
         hash: u64,
         key: K,
         fetch_value: F,
-    ) -> Result<Result<CacheableEntry<K, T>, E>, RecvError>
+    ) -> Result<CacheableEntry<K, T>, E>
     where
         F: FnOnce() -> VC,
         E: Error + Send + 'static,
         VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
     {
-        match self.lookup_for_request(hash, key.clone()) {
-            LookupResult::Cached(entry) => Ok(Ok(entry)),
-            LookupResult::WaitPendingRequest(recv) => {
-                let entry = recv.await?;
-                Ok(Ok(entry))
-            }
-            LookupResult::Miss => {
-                let this = self.clone();
-                let fetch_value = fetch_value();
-                let key2 = key.clone();
-                let mut guard = CleanCacheGuard {
-                    cache: self,
-                    key,
-                    hash,
-                    success: false,
-                };
-                let ret = tokio::spawn(async move {
-                    match fetch_value.await {
-                        Ok((value, charge)) => {
-                            let entry = this.insert(key2, hash, charge, value);
-                            Ok(Ok(entry))
-                        }
-                        Err(e) => Ok(Err(e)),
-                    }
-                })
-                .await
-                .unwrap();
-                if let Ok(Ok(_)) = ret.as_ref() {
-                    guard.success = true;
+        loop {
+            match self.lookup_for_request(hash, key.clone()) {
+                LookupResult::Cached(entry) => return Ok(entry),
+                LookupResult::WaitPendingRequest(recv) => {
+                    let _ = recv.await;
+                    continue;
                 }
-                ret
+                LookupResult::Miss => {
+                    let this = self.clone();
+                    let fetch_value = fetch_value();
+                    let key2 = key.clone();
+                    let mut guard = CleanCacheGuard {
+                        cache: self,
+                        key,
+                        hash,
+                        success: false,
+                    };
+                    let ret = tokio::spawn(async move {
+                        let (value, charge) = fetch_value.await?;
+                        let entry = this.insert(key2, hash, charge, value);
+                        Ok(entry)
+                    })
+                    .await
+                    .unwrap();
+                    if ret.is_ok() {
+                        guard.success = true;
+                    }
+                    return ret;
+                }
             }
         }
     }
@@ -840,7 +839,7 @@ pub struct CacheableEntry<K: LruKey, T: LruValue> {
 pub enum LookupResult<K: LruKey, T: LruValue> {
     Cached(CacheableEntry<K, T>),
     Miss,
-    WaitPendingRequest(Receiver<CacheableEntry<K, T>>),
+    WaitPendingRequest(Receiver<()>),
 }
 
 unsafe impl<K: LruKey, T: LruValue> Send for CacheableEntry<K, T> {}
@@ -856,6 +855,18 @@ impl<K: LruKey, T: LruValue> Drop for CacheableEntry<K, T> {
     fn drop(&mut self) {
         unsafe {
             self.cache.release(self.handle);
+        }
+    }
+}
+
+impl<K: LruKey, T: LruValue> Clone for CacheableEntry<K, T> {
+    fn clone(&self) -> Self {
+        unsafe {
+            self.cache.inc_reference(self.handle);
+            CacheableEntry {
+                cache: self.cache.clone(),
+                handle: self.handle,
+            }
         }
     }
 }
@@ -1165,23 +1176,23 @@ mod tests {
             insert(&mut shard, "a", "v1");
             assert!(lookup(&mut shard, "a"));
         }
-        let ret = cache.lookup_for_request(0, "a".to_string());
-        match ret {
-            LookupResult::Cached(_) => (),
-            _ => panic!(),
-        }
-        let ret1 = cache.lookup_for_request(0, "b".to_string());
-        match ret1 {
-            LookupResult::Miss => (),
-            _ => panic!(),
-        }
+        assert!(matches!(
+            cache.lookup_for_request(0, "a".to_string()),
+            LookupResult::Cached(_)
+        ));
+        assert!(matches!(
+            cache.lookup_for_request(0, "b".to_string()),
+            LookupResult::Miss
+        ));
         let ret2 = cache.lookup_for_request(0, "b".to_string());
         match ret2 {
             LookupResult::WaitPendingRequest(mut recv) => {
                 assert!(matches!(recv.try_recv(), Err(TryRecvError::Empty)));
                 cache.insert("b".to_string(), 0, 1, "v2".to_string());
-                let v = recv.try_recv().unwrap();
-                assert_eq!(v.value(), "v2");
+                recv.try_recv().unwrap();
+                assert!(
+                    matches!(cache.lookup_for_request(0, "b".to_string()), LookupResult::Cached(v) if v.value().eq("v2"))
+                );
             }
             _ => panic!(),
         }
@@ -1294,7 +1305,6 @@ mod tests {
                     recv.await.map(|_| (1, 1))
                 })
                 .await
-                .unwrap()
                 .unwrap();
         });
         let wrapper = SyncPointFuture {

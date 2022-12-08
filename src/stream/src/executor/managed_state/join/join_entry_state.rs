@@ -78,16 +78,22 @@ impl JoinEntryState {
 
     /// Note: To make the estimated size accurate, the caller should ensure that it does not mutate
     /// the size (or capacity) of the [`StateValueType`].
-    pub fn values_mut<'a, 'b: 'a>(
+    ///
+    /// Note: the first item in the tuple is the mutable reference to the value in this entry, while
+    /// the second item is the decoded value. To mutate the degree, one **must not** forget to apply
+    /// the changes to the first item.
+    pub fn values_mut<'a>(
         &'a mut self,
-        data_types: &'b [DataType],
-    ) -> impl Iterator<Item = (&'a mut StateValueType, StreamExecutorResult<JoinRow>)> + 'a {
+        data_types: &'a [DataType],
+    ) -> impl Iterator<Item = (&'a mut StateValueType, StreamExecutorResult<JoinRow<Row>>)> + 'a
+    {
         self.cached.values_mut().map(|encoded| {
             let decoded = encoded.decode(data_types);
             (encoded, decoded)
         })
     }
 
+    #[expect(dead_code)]
     pub fn len(&self) -> usize {
         self.cached.len()
     }
@@ -123,11 +129,11 @@ mod tests {
         );
 
         for row_ref in data_chunk.rows() {
-            let row: Row = row_ref.into();
-            let value_indices = (0..row.0.len() - 1).collect_vec();
+            let row: Row = row_ref.into_owned_row();
+            let value_indices = (0..row.len() - 1).collect_vec();
             let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
             // Pk is only a `i64` here, so encoding method does not matter.
-            let pk = Row(pk).serialize(&Some(value_indices));
+            let pk = Row::new(pk).project(&value_indices).value_serialize();
             let join_row = JoinRow { row, degree: 0 };
             managed_state.insert(pk, join_row.encode());
         }

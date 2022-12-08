@@ -319,8 +319,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     })
                     .await
                 {
-                    // Prints the entire backtrace of error.
-                    error!("Execution failed [{:?}]: {:?}", &task_id, &e);
+                    error!("Execution failed [{:?}]: {}", &task_id, e);
                     let err_str = e.to_string();
                     *failure.lock() = Some(e);
                     if let Err(_e) = t_1

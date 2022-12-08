@@ -5,9 +5,12 @@ extend = [
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/jaeger.toml" },
   { path = "src/risedevtool/kafka.toml" },
+  { path = "src/risedevtool/gcloud-pubsub.toml"},
   { path = "src/risedevtool/redis.toml" },
+  { path = "src/risedevtool/connector.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
   { path = "src/frontend/planner_test/planner_test.toml" },
+  { path = "src/tests/compaction_test/Makefile.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -88,6 +91,82 @@ done
 echo ""
 echo ""
 echo ""
+'''
+
+
+[tasks.ls]
+category = "Misc"
+description = "List all nodes in the cluster"
+script = '''
+#!/bin/bash
+tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
+'''
+
+[tasks.lsw]
+category = "Misc"
+description = "List --watch all nodes in the cluster"
+script = '''
+#!/bin/bash
+watch -n 1 "tmux list-windows -t risedev | grep -v active | cut -d'(' -f1"
+'''
+
+[tasks.del]
+alias = "delete"
+
+[tasks.delete]
+category = "Misc"
+description = "Delete a node in the cluster"
+script = '''
+#!/bin/bash
+
+risedev_ls () {
+  tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
+}
+
+err () {
+  echo "Available nodes are"
+  risedev_ls
+  exit 1
+}
+
+if [[ -z "$1" ]]; then 
+  echo "Please pass a parameter to this script, defining which node you want to delete"
+  err
+fi
+
+if [[ -z $(risedev_ls | grep "$1" ) ]]; then 
+  echo "Please select a node that is currently running"
+  err
+fi
+
+tmux kill-window -t $1
+'''
+
+[tasks.f]
+alias = "follow"
+
+[tasks.follow]
+category = "misc"
+description = "Follows the end of the logs of a specific component"
+script = '''
+#!/bin/bash
+set -e
+
+if [[ -z "$1" ]]; then 
+  echo "Please pass a parameter to this script, defining which logs you want to follow"
+  echo "Available logs are..."
+  ls ${PREFIX_LOG}
+  exit 1
+fi
+
+if [[ ! -f ${PREFIX_LOG}/$1 ]]; then
+  echo "selected file does not exist"
+  echo "Available logs are..."
+  ls ${PREFIX_LOG}
+  exit 1
+fi 
+
+tail -f -n 5 ${PREFIX_LOG}/$1
 '''
 
 [tasks.check-logs]
@@ -285,7 +364,9 @@ dependencies = [
   "download-prometheus",
   "download-jaeger",
   "download-kafka",
+  "download-pubsub",
   "download-redis",
+  "download-connector",
   "build-risingwave",
   "post-build-risingwave",
   "extract-dashboard-artifact",
@@ -315,10 +396,6 @@ category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
 script = '''
 #!/bin/bash
-
-set -e
-
-echo "Use \`./risedev d\` instead if you want to start a full cluster."
 
 set -ex
 
@@ -389,7 +466,7 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make typos-cli
+for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-upgrades typos-cli
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo install $tool --locked
@@ -446,15 +523,6 @@ set -e
 cargo nextest run "$@"
 """
 description = "Run unit tests"
-
-[tasks.compaction-test]
-category = "RiseDev - Test"
-description = "Run hummock compaction e2e deterministic test"
-script = """
-#!/bin/bash
-set -e
-cargo run --bin compaction-test -- "$@"
-"""
 
 [tasks.sbuild]
 category = "RiseDev - Build in simulation mode"
@@ -514,7 +582,7 @@ script = """
 set -e
 
 cargo nextest run \
-  -p risingwave_simulation_scale \
+  -p risingwave_simulation \
   "$@"
 """
 
@@ -528,7 +596,7 @@ script = """
 set -e
 
 cargo nextest archive \
-  -p risingwave_simulation_scale \
+  -p risingwave_simulation \
   --archive-file scale-test.tar.zst \
   "$@"
 """

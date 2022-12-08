@@ -22,17 +22,20 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::OrderType;
 
+use super::generic::GenericPlanNode;
 use super::{
     generic, BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown,
     StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{
+    CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
@@ -56,35 +59,10 @@ impl LogicalScan {
         // here we have 3 concepts
         // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
         // 2. table_idx: usize, column index in the TableDesc or tableCatalog.
-        // 3. operator_idx: usize,  column index in the ScanOperator's schema.
-        // in a query we get the same version of catalog, so the mapping from column_id and
-        // table_idx will not changes. and the `required_col_idx is the `table_idx` of the
-        // required columns, in other word, is the mapping from operator_idx to table_idx.
-
-        let id_to_op_idx = Self::get_id_to_op_idx_mapping(&output_col_idx, &table_desc);
-
-        let fields = output_col_idx
-            .iter()
-            .map(|tb_idx| {
-                let col = &table_desc.columns[*tb_idx];
-                Field::from_with_table_name_prefix(col, &table_name)
-            })
-            .collect();
-
-        let pk_indices = table_desc
-            .stream_key
-            .iter()
-            .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
-            .collect::<Option<Vec<_>>>();
-        let schema = Schema { fields };
-        let (functional_dependency, pk_indices) = match pk_indices {
-            Some(pk_indices) => (
-                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
-                pk_indices,
-            ),
-            None => (FunctionalDependencySet::new(schema.len()), vec![]),
-        };
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
+        // 3. operator_idx: usize, column index in the ScanOperator's schema.
+        // In a query we get the same version of catalog, so the mapping from column_id and
+        // table_idx will not change. And the `required_col_idx` is the `table_idx` of the
+        // required columns, i.e., the mapping from operator_idx to table_idx.
 
         let mut required_col_idx = output_col_idx.clone();
         let mut visitor =
@@ -97,18 +75,31 @@ impl LogicalScan {
             }
         });
 
-        Self {
-            base,
-            core: generic::Scan {
-                table_name,
-                is_sys_table,
-                required_col_idx,
-                output_col_idx,
-                table_desc,
-                indexes,
-                predicate,
-            },
-        }
+        let core = generic::Scan {
+            table_name,
+            is_sys_table,
+            required_col_idx,
+            output_col_idx,
+            table_desc,
+            indexes,
+            predicate,
+        };
+
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+
+        let functional_dependency = match &pk_indices {
+            Some(pk_indices) => FunctionalDependencySet::with_key(schema.len(), pk_indices),
+            None => FunctionalDependencySet::new(schema.len()),
+        };
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
+
+        Self { base, core }
     }
 
     /// Create a [`LogicalScan`] node. Used by planner.
@@ -319,24 +310,8 @@ impl LogicalScan {
         output_idx
     }
 
-    /// Helper function to create a mapping from `column_id` to `operator_idx`
-    fn get_id_to_op_idx_mapping(
-        output_col_idx: &[usize],
-        table_desc: &Rc<TableDesc>,
-    ) -> HashMap<ColumnId, usize> {
-        let mut id_to_op_idx = HashMap::new();
-        output_col_idx
-            .iter()
-            .enumerate()
-            .for_each(|(op_idx, tb_idx)| {
-                let col = &table_desc.columns[*tb_idx];
-                id_to_op_idx.insert(col.column_id, op_idx);
-            });
-        id_to_op_idx
-    }
-
     /// Undo predicate push down when predicate in scan is not supported.
-    fn predicate_pull_up(&self) -> (LogicalScan, Condition, Option<Vec<ExprImpl>>) {
+    pub fn predicate_pull_up(&self) -> (LogicalScan, Condition, Option<Vec<ExprImpl>>) {
         let mut predicate = self.predicate().clone();
         if predicate.always_true() {
             return (self.clone(), Condition::true_cond(), None);
@@ -460,6 +435,26 @@ impl ColPrunable for LogicalScan {
 
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        // If the predicate contains `CorrelatedInputRef`. We don't push down.
+        // This case could come from the predicate push down before the subquery unnesting.
+        struct HasCorrelated {}
+        impl ExprVisitor<bool> for HasCorrelated {
+            fn merge(a: bool, b: bool) -> bool {
+                a | b
+            }
+
+            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> bool {
+                true
+            }
+        }
+        let mut has_correlated_visitor = HasCorrelated {};
+        if predicate.visit_expr(&mut has_correlated_visitor) {
+            return LogicalFilter::create(
+                self.clone_with_predicate(self.predicate().clone()).into(),
+                predicate,
+            );
+        }
+
         let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
         ));

@@ -22,7 +22,6 @@ use std::time::Duration;
 use futures::Future;
 use tracing::Level;
 use tracing_subscriber::filter;
-use tracing_subscriber::fmt::time;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 
@@ -54,8 +53,6 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
 }
 
 pub struct LoggerSettings {
-    /// Enable Jaeger tracing.
-    enable_jaeger_tracing: bool,
     /// Enable tokio console output.
     enable_tokio_console: bool,
     /// Enable colorful output in console.
@@ -64,12 +61,11 @@ pub struct LoggerSettings {
 
 impl LoggerSettings {
     pub fn new_default() -> Self {
-        Self::new(false, false)
+        Self::new(false)
     }
 
-    pub fn new(enable_jaeger_tracing: bool, enable_tokio_console: bool) -> Self {
+    pub fn new(enable_tokio_console: bool) -> Self {
         Self {
-            enable_jaeger_tracing,
             enable_tokio_console,
             colorful: console::colors_enabled_stderr(),
         }
@@ -96,8 +92,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Configure log output to stdout
         let fmt_layer = tracing_subscriber::fmt::layer()
             .compact()
-            .with_ansi(settings.colorful)
-            .with_timer(time::OffsetTime::local_rfc_3339().expect("could not get local offset!"));
+            .with_ansi(settings.colorful);
 
         let filter = filter::Targets::new()
             .with_target("aws_sdk_s3", Level::INFO)
@@ -110,7 +105,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("tonic", Level::WARN)
             .with_target("isahc", Level::WARN)
             .with_target("console_subscriber", Level::WARN)
-            .with_target("reqwest", Level::WARN);
+            .with_target("reqwest", Level::WARN)
+            .with_target("sled", Level::INFO);
 
         // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
         // needed.
@@ -123,10 +119,6 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
         fmt_layer.with_filter(filter)
     };
-
-    if settings.enable_jaeger_tracing {
-        todo!("jaeger tracing is not supported for now, and it will be replaced with minitrace jaeger tracing. Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4120");
-    }
 
     let tokio_console_layer = if settings.enable_tokio_console {
         let (console_layer, server) = console_subscriber::ConsoleLayer::builder()

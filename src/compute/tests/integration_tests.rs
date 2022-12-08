@@ -25,11 +25,12 @@ use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
+use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::row::Row;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
@@ -38,7 +39,7 @@ use risingwave_source::table_test_utils::create_table_source_desc_builder;
 use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::state_table_handler::SourceStateTableHandler;
@@ -46,6 +47,8 @@ use risingwave_stream::executor::{
     ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
+
+const MOCK_SOURCE_NAME: &str = "mock_source";
 
 struct SingleChunkExecutor {
     chunk: Option<DataChunk>,
@@ -131,11 +134,13 @@ async fn test_table_materialize() -> StreamResult<()> {
     let state_table = SourceStateTableHandler::from_table_catalog(
         &default_source_internal_table(0x2333),
         MemoryStateStore::new(),
-    );
+    )
+    .await;
     let stream_source = SourceExecutor::new(
         ActorContext::create(0x3f3f3f),
         source_builder,
         source_table_id,
+        MOCK_SOURCE_NAME.to_string(),
         vnodes,
         state_table,
         all_column_ids.clone(),
@@ -158,7 +163,11 @@ async fn test_table_materialize() -> StreamResult<()> {
         vec![OrderPair::new(0, OrderType::Ascending)],
         all_column_ids.clone(),
         2,
+        None,
+        0,
+        false,
     )
+    .await
     .boxed()
     .execute();
 
@@ -178,6 +187,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         source_manager.clone(),
         insert_inner,
         "InsertExecutor".to_string(),
+        vec![], // ignore insertion order
     ));
 
     tokio::spawn(async move {
@@ -383,7 +393,8 @@ async fn test_row_seq_scan() -> Result<()> {
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0_usize],
-    );
+    )
+    .await;
     let table = StorageTable::for_test(
         memory_state_store.clone(),
         TableId::from(0x42),
@@ -395,12 +406,12 @@ async fn test_row_seq_scan() -> Result<()> {
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
     epoch.inc();
-    state.insert(Row(vec![
+    state.insert(Row::new(vec![
         Some(1_i32.into()),
         Some(4_i32.into()),
         Some(7_i64.into()),
     ]));
-    state.insert(Row(vec![
+    state.insert(Row::new(vec![
         Some(2_i32.into()),
         Some(5_i32.into()),
         Some(8_i64.into()),

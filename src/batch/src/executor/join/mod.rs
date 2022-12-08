@@ -13,15 +13,19 @@
 // limitations under the License.
 
 mod chunked_data;
+mod distributed_lookup_join;
 pub mod hash_join;
-pub mod lookup_join;
+pub mod local_lookup_join;
+mod lookup_join_base;
 pub mod nested_loop_join;
 mod sort_merge_join;
 
 pub use chunked_data::*;
+pub use distributed_lookup_join::*;
 pub use hash_join::*;
 use itertools::Itertools;
-pub use lookup_join::*;
+pub use local_lookup_join::*;
+pub use lookup_join_base::*;
 pub use nested_loop_join::*;
 use risingwave_common::array::{DataChunk, RowRef, Vis};
 use risingwave_common::error::Result;
@@ -151,7 +155,7 @@ fn convert_datum_refs_to_chunk(
         .collect();
     for _i in 0..num_tuples {
         for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
-            builder.append_datum_ref(*datum_ref);
+            builder.append_datum(*datum_ref);
         }
     }
 

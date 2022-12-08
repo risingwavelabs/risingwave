@@ -22,6 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_files = vec![
         "catalog",
         "common",
+        "compute",
         "data",
         "ddl_service",
         "expr",
@@ -29,8 +30,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "meta",
         "batch_plan",
         "task_service",
+        "connector_service",
         "stream_plan",
         "stream_service",
+        "compactor",
         "hummock",
         "user",
         "source",

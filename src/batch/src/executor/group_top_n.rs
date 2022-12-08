@@ -44,6 +44,7 @@ pub struct GroupTopNExecutor<K: HashKey> {
     offset: usize,
     limit: usize,
     group_key: Vec<usize>,
+    with_ties: bool,
     schema: Schema,
     identity: String,
     chunk_size: usize,
@@ -57,6 +58,7 @@ pub struct GroupTopNExecutorBuilder {
     limit: usize,
     group_key: Vec<usize>,
     group_key_types: Vec<DataType>,
+    with_ties: bool,
     identity: String,
     chunk_size: usize,
 }
@@ -70,6 +72,7 @@ impl HashKeyDispatcher for GroupTopNExecutorBuilder {
             self.order_pairs,
             self.offset,
             self.limit,
+            self.with_ties,
             self.group_key,
             self.identity,
             self.chunk_size,
@@ -118,6 +121,7 @@ impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
             limit: top_n_node.get_limit() as usize,
             group_key,
             group_key_types,
+            with_ties: top_n_node.get_with_ties(),
             identity: source.plan_node().get_identity().clone(),
             chunk_size: source.context.get_config().developer.batch_chunk_size,
         };
@@ -127,11 +131,13 @@ impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
 }
 
 impl<K: HashKey> GroupTopNExecutor<K> {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         child: BoxedExecutor,
         order_pairs: Vec<OrderPair>,
         offset: usize,
         limit: usize,
+        with_ties: bool,
         group_key: Vec<usize>,
         identity: String,
         chunk_size: usize,
@@ -142,6 +148,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
             order_pairs,
             offset,
             limit,
+            with_ties,
             group_key,
             schema,
             identity,
@@ -185,7 +192,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
             {
                 let heap = groups
                     .entry(key)
-                    .or_insert_with(|| TopNHeap::new(self.limit, self.offset));
+                    .or_insert_with(|| TopNHeap::new(self.limit, self.offset, self.with_ties));
                 heap.push(HeapElem {
                     encoded_row,
                     chunk: chunk.clone(),
@@ -198,7 +205,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
         for (_, heap) in groups {
             for HeapElem { chunk, row_id, .. } in heap.dump() {
                 if let Some(spilled) =
-                    chunk_builder.append_one_row_ref(chunk.row_at_unchecked_vis(row_id))
+                    chunk_builder.append_one_row(chunk.row_at_unchecked_vis(row_id))
                 {
                     yield spilled
                 }
@@ -263,6 +270,7 @@ mod tests {
             order_pairs,
             offset: 1,
             limit: 3,
+            with_ties: false,
             group_key: vec![2],
             group_key_types: vec![DataType::Int32],
             identity: "GroupTopNExecutor".to_string(),

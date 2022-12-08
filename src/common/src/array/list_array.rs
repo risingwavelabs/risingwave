@@ -14,8 +14,8 @@
 
 use core::fmt;
 use std::cmp::Ordering;
-use std::fmt::{Debug, Display};
-use std::hash::{Hash, Hasher};
+use std::fmt::Debug;
+use std::hash::Hash;
 
 use bytes::{Buf, BufMut};
 use itertools::EitherOrBoth::{Both, Left, Right};
@@ -24,13 +24,13 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, List
 use serde::{Deserializer, Serializer};
 
 use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
-    RowRef, NULL_VAL_FOR_HASH,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult, RowRef,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarRefImpl,
+    deserialize_datum_from, hash_datum, serialize_datum_into, DataType, Datum, DatumRef, Scalar,
+    ScalarRefImpl, ToDatumRef,
 };
 
 /// This is a naive implementation of list array.
@@ -90,7 +90,7 @@ impl ArrayBuilder for ListArrayBuilder {
                 let values_ref = v.values_ref();
                 self.offsets.push(last + values_ref.len());
                 for f in values_ref {
-                    self.value.append_datum_ref(f);
+                    self.value.append_datum(f);
                 }
             }
         }
@@ -138,7 +138,7 @@ impl ListArrayBuilder {
         self.offsets.push(last + row.size());
         self.len += 1;
         for v in row.values() {
-            self.value.append_datum_ref(v);
+            self.value.append_datum(v);
         }
     }
 }
@@ -209,14 +209,6 @@ impl Array for ListArray {
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
-    }
-
-    fn hash_at<H: std::hash::Hasher>(&self, idx: usize, state: &mut H) {
-        if !self.is_null(idx) {
-            self.value.hash_at(idx, state)
-        } else {
-            NULL_VAL_FOR_HASH.hash(state);
-        }
     }
 
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
@@ -306,18 +298,6 @@ pub struct ListValue {
     values: Box<[Datum]>,
 }
 
-impl fmt::Display for ListValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Example of ListValue display: ARRAY[1, 2]
-        write!(f, "ARRAY")?;
-        let mut f = f.debug_list();
-        for v in self.values.iter() {
-            f.entry(&format_args!("{}", v.as_ref().unwrap()));
-        }
-        f.finish()
-    }
-}
-
 impl PartialOrd for ListValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
@@ -328,6 +308,19 @@ impl Ord for ListValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
     }
+}
+
+// Used to display ListValue in explain for better readibilty.
+pub fn display_for_explain(list: &ListValue) -> String {
+    // Example of ListValue display: ARRAY[1, 2]
+    format!(
+        "ARRAY[{}]",
+        list.values
+            .iter()
+            .map(|v| v.as_ref().unwrap().as_scalar_ref_impl().to_text())
+            .collect::<Vec<String>>()
+            .join(", ")
+    )
 }
 
 impl ListValue {
@@ -387,7 +380,7 @@ macro_rules! iter_elems_ref {
                 $($body)*
             }
             ListRef::ValueRef { val } => {
-                let $it = val.values.iter().map(to_datum_ref);
+                let $it = val.values.iter().map(ToDatumRef::to_datum_ref);
                 $($body)*
             }
         }
@@ -424,7 +417,7 @@ impl<'a> ListRef<'a> {
             }
             ListRef::ValueRef { val } => {
                 if let Some(datum) = val.values().iter().nth(index - 1) {
-                    Ok(to_datum_ref(datum))
+                    Ok(datum.to_datum_ref())
                 } else {
                     Ok(None)
                 }
@@ -439,19 +432,18 @@ impl<'a> ListRef<'a> {
         let mut inner_serializer = memcomparable::Serializer::new(vec![]);
         iter_elems_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_ref_into(&datum_ref, &mut inner_serializer)?
+                serialize_datum_into(datum_ref, &mut inner_serializer)?
             }
         });
         serializer.serialize_bytes(&inner_serializer.into_inner())
     }
-}
 
-impl Hash for ListRef<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            ListRef::Indexed { arr, idx } => arr.hash_at(*idx, state),
-            ListRef::ValueRef { val } => val.hash(state),
-        }
+    pub fn hash_scalar_inner<H: std::hash::Hasher>(&self, state: &mut H) {
+        iter_elems_ref!(self, it, {
+            for datum_ref in it {
+                hash_datum(datum_ref, state);
+            }
+        })
     }
 }
 
@@ -503,16 +495,15 @@ impl Debug for ListRef<'_> {
     }
 }
 
-impl Display for ListRef<'_> {
+impl ToText for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     // Refer to PostgreSQL `array_out` or `appendPGArray`.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn to_text(&self) -> String {
         iter_elems_ref!(self, it, {
-            write!(
-                f,
+            format!(
                 "{{{}}}",
                 it.format_with(",", |datum_ref, f| {
-                    let s = display_datum_ref(datum_ref);
+                    let s = datum_ref.to_text();
                     // Never quote null or inner list, but quote empty, verbatim 'null', special
                     // chars and whitespaces.
                     let need_quote = !matches!(datum_ref, None | Some(ScalarRefImpl::List(_)))
@@ -539,6 +530,13 @@ impl Display for ListRef<'_> {
                 })
             )
         })
+    }
+
+    fn to_text_with_type(&self, ty: &DataType) -> String {
+        match ty {
+            DataType::List { .. } => self.to_text(),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -844,16 +842,16 @@ mod tests {
     fn test_list_ref_display() {
         let v = ListValue::new(vec![Some(1.into()), None]);
         let r = ListRef::ValueRef { val: &v };
-        assert_eq!("{1,NULL}".to_string(), format!("{}", r));
+        assert_eq!("{1,NULL}".to_string(), format!("{}", r.to_text()));
     }
 
     #[test]
     fn test_serialize_deserialize() {
         let value = ListValue::new(vec![
-            Some("abcd".to_string().to_scalar_value()),
-            Some("".to_string().to_scalar_value()),
+            Some("abcd".into()),
+            Some("".into()),
             None,
-            Some("a".to_string().to_scalar_value()),
+            Some("a".into()),
         ]);
         let list_ref = ListRef::ValueRef { val: &value };
         let mut serializer = memcomparable::Serializer::new(vec![]);
@@ -911,7 +909,7 @@ mod tests {
                 Ordering::Greater,
             ),
             (
-                ListValue::new(vec![None, Some("".to_string().to_scalar_value())]),
+                ListValue::new(vec![None, Some("".into())]),
                 ListValue::new(vec![None, None]),
                 DataType::Varchar,
                 Ordering::Less,

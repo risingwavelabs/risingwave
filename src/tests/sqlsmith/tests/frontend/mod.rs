@@ -19,12 +19,14 @@ use itertools::Itertools;
 use libtest_mimic::{Arguments, Failed, Trial};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
-use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::LocalFrontend;
-use risingwave_frontend::{handler, Binder, FrontendOpts, Planner, WithOptions};
+use risingwave_frontend::{
+    handler, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef, Planner, WithOptions,
+};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
-    create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
+    create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
 };
 use tokio::runtime::Runtime;
 
@@ -211,6 +213,15 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
     })
 }
 
+fn validate_result<T>(result: Result<T>) -> Result<()> {
+    if let Err(e) = result {
+        if let Some(s) = e.message() && !is_permissible_error(s) {
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
 pub fn run() {
     let args = Arguments::from_args();
     let env = Arc::new(setup_sqlsmith_with_seed(0).unwrap());
@@ -225,10 +236,15 @@ pub fn run() {
                     tables,
                     setup_sql,
                 } = &*env;
-                test_batch_query(session.clone(), tables.clone(), i, setup_sql)?;
+                validate_result(test_batch_query(
+                    session.clone(),
+                    tables.clone(),
+                    i,
+                    setup_sql,
+                ))?;
                 let test_stream_query =
                     test_stream_query(session.clone(), tables.clone(), i, setup_sql);
-                build_runtime().block_on(test_stream_query)?;
+                validate_result(build_runtime().block_on(test_stream_query))?;
                 Ok(())
             })
         })

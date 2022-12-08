@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_pb::catalog::ColumnIndex;
+use risingwave_pb::catalog::{ColumnIndex, SourceInfo};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
@@ -59,10 +59,7 @@ impl fmt::Display for StreamSource {
         let mut builder = f.debug_struct("StreamSource");
         builder
             .field("source", &self.logical.source_catalog().name)
-            .field(
-                "columns",
-                &format_args!("[{}]", &self.column_names().join(", ")),
-            )
+            .field("columns", &self.column_names())
             .finish()
     }
 }
@@ -72,13 +69,16 @@ impl StreamNode for StreamSource {
         let source_catalog = self.logical.source_catalog();
         ProstStreamNode::Source(SourceNode {
             source_id: source_catalog.id,
+            source_name: source_catalog.name.clone(),
             state_table: Some(
                 self.logical
                     .infer_internal_table_catalog()
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
-            info: Some(source_catalog.info.clone()),
+            info: Some(SourceInfo {
+                source_info: Some(source_catalog.info.clone()),
+            }),
             row_id_index: source_catalog
                 .row_id_index
                 .map(|index| ColumnIndex { index: index as _ }),

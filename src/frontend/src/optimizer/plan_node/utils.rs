@@ -123,6 +123,7 @@ impl TableCatalogBuilder {
                 .value_indices
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
+            handle_pk_conflict: false,
         }
     }
 
@@ -147,10 +148,8 @@ impl fmt::Debug for IndicesDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut f = f.debug_list();
         for i in self.indices {
-            f.entry(&format_args!(
-                "{}",
-                self.input_schema.fields.get(*i).unwrap().name
-            ));
+            let name = &self.input_schema.fields.get(*i).unwrap().name;
+            f.entry(&format_args!("{}", name));
         }
         f.finish()
     }

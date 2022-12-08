@@ -81,9 +81,6 @@ pub struct MetaOpts {
     /// Whether run in compaction detection test mode
     pub compaction_deterministic_test: bool,
 
-    /// Start id of SST table file. See [`IdGeneratorManager`] for details.
-    pub sst_id_start: Option<u64>,
-
     pub checkpoint_frequency: usize,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
@@ -98,12 +95,21 @@ pub struct MetaOpts {
     pub periodic_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
+
+    /// The prometheus endpoint for dashboard service.
+    pub prometheus_endpoint: Option<String>,
+
+    /// The storage url for storing backups.
+    pub backup_storage_url: String,
+    /// The storage directory for storing backups.
+    pub backup_storage_directory: String,
 }
 
-impl Default for MetaOpts {
-    fn default() -> Self {
+impl MetaOpts {
+    /// Default opts for testing. Some tests need `enable_recovery=true`
+    pub fn test(enable_recovery: bool) -> Self {
         Self {
-            enable_recovery: false,
+            enable_recovery,
             barrier_interval: Duration::from_millis(250),
             in_flight_barrier_nums: 40,
             minimal_scheduling: false,
@@ -116,22 +122,9 @@ impl Default for MetaOpts {
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
-            sst_id_start: Some(1),
-        }
-    }
-}
-
-impl MetaOpts {
-    /// some test need `enable_recovery=true`
-    #[cfg(test)]
-    pub fn test(enable_recovery: bool) -> Self {
-        Self {
-            enable_recovery,
-            barrier_interval: Duration::from_millis(250),
-            max_idle_ms: 0,
-            in_flight_barrier_nums: 40,
-            checkpoint_frequency: 10,
-            ..Default::default()
+            prometheus_endpoint: None,
+            backup_storage_url: "memory".to_string(),
+            backup_storage_directory: "backup".to_string(),
         }
     }
 }
@@ -142,8 +135,7 @@ where
 {
     pub async fn new(opts: MetaOpts, meta_store: Arc<S>, info: MetaLeaderInfo) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
-        let id_gen_manager =
-            Arc::new(IdGeneratorManager::new(meta_store.clone(), opts.sst_id_start).await);
+        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
@@ -208,7 +200,7 @@ where
 impl MetaSrvEnv<MemStore> {
     // Instance for test.
     pub async fn for_test() -> Self {
-        Self::for_test_opts(MetaOpts::default().into()).await
+        Self::for_test_opts(MetaOpts::test(false).into()).await
     }
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
@@ -239,7 +231,7 @@ impl MetaSrvEnv<MemStore> {
             )
             .await
             .unwrap();
-        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone(), Some(1)).await);
+        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let idle_manager = Arc::new(IdleManager::disabled());

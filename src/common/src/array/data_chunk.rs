@@ -12,24 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
-use std::{fmt, iter};
 
-use auto_enums::auto_enum;
 use itertools::Itertools;
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 
-use super::ArrayResult;
+use super::{ArrayResult, Vis};
 use crate::array::column::Column;
-use crate::array::data_chunk_iter::{Row, RowRef};
+use crate::array::data_chunk_iter::RowRef;
 use crate::array::{ArrayBuilderImpl, StructValue};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
+use crate::row::{Row, Row2};
 use crate::types::struct_type::StructType;
+use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
-use crate::util::value_encoding::serialize_datum_ref;
+use crate::util::value_encoding::serialize_datum;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, PartialEq)]
@@ -37,71 +38,6 @@ use crate::util::value_encoding::serialize_datum_ref;
 pub struct DataChunk {
     columns: Vec<Column>,
     vis2: Vis,
-}
-
-/// `Vis` is a visibility bitmap of rows. When all rows are visible, it is considered compact and
-/// is represented by a single cardinality number rather than that many of ones.
-#[derive(Clone, PartialEq, Debug)]
-pub enum Vis {
-    Bitmap(Bitmap),
-    Compact(usize), // equivalent to all ones of this size
-}
-
-impl From<Bitmap> for Vis {
-    fn from(b: Bitmap) -> Self {
-        Vis::Bitmap(b)
-    }
-}
-
-impl From<usize> for Vis {
-    fn from(c: usize) -> Self {
-        Vis::Compact(c)
-    }
-}
-
-impl From<&Vis> for Vis {
-    fn from(vis: &Vis) -> Self {
-        match vis {
-            Vis::Bitmap(b) => b.clone().into(),
-            Vis::Compact(c) => (*c).into(),
-        }
-    }
-}
-
-impl Vis {
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Vis::Bitmap(b) => b.is_empty(),
-            Vis::Compact(c) => *c == 0,
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        match self {
-            Vis::Bitmap(b) => b.len(),
-            Vis::Compact(c) => *c,
-        }
-    }
-
-    /// # Panics
-    /// Panics if `idx > len`.
-    pub fn is_set(&self, idx: usize) -> bool {
-        match self {
-            Vis::Bitmap(b) => b.is_set(idx),
-            Vis::Compact(c) => {
-                assert!(idx <= *c);
-                true
-            }
-        }
-    }
-
-    #[auto_enum(Iterator)]
-    pub fn iter(&self) -> impl Iterator<Item = bool> + '_ {
-        match self {
-            Vis::Bitmap(b) => b.iter(),
-            Vis::Compact(c) => iter::repeat(true).take(*c),
-        }
-    }
 }
 
 impl DataChunk {
@@ -136,7 +72,7 @@ impl DataChunk {
             .collect::<Vec<_>>();
 
         for row in rows {
-            for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
+            for (datum, builder) in row.iter().zip_eq(array_builders.iter_mut()) {
                 builder.append_datum(datum);
             }
         }
@@ -203,6 +139,13 @@ impl DataChunk {
             Vis::Bitmap(b) => Some(b),
             Vis::Compact(_) => None,
         }
+    }
+
+    pub fn set_vis(&mut self, vis: Vis) {
+        for column in &self.columns {
+            assert_eq!(vis.len(), column.array_ref().len())
+        }
+        self.vis2 = vis;
     }
 
     pub fn set_visibility(&mut self, visibility: Bitmap) {
@@ -316,7 +259,7 @@ impl DataChunk {
                         .array_ref()
                         .create_builder(end_row_idx - start_row_idx + 1);
                     for row_idx in start_row_idx..=end_row_idx {
-                        array_builder.append_datum_ref(column.array_ref().value_at(row_idx));
+                        array_builder.append_datum(column.array_ref().value_at(row_idx));
                     }
                     builder.append_array(&array_builder.finish());
                 });
@@ -402,7 +345,7 @@ impl DataChunk {
                 .map(|v| {
                     match v {
                         None => "".to_owned(), // null
-                        Some(scalar) => scalar.to_string(),
+                        Some(scalar) => scalar.to_text(),
                     }
                 })
                 .collect();
@@ -442,7 +385,7 @@ impl DataChunk {
             .collect();
         for &i in indexes {
             for (builder, col) in array_builders.iter_mut().zip_eq(&self.columns) {
-                builder.append_datum_ref(col.array_ref().value_at(i));
+                builder.append_datum(col.array_ref().value_at(i));
             }
         }
         let columns = array_builders
@@ -468,7 +411,7 @@ impl DataChunk {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
                         unsafe {
                             if vis.is_set_unchecked(i) {
-                                serialize_datum_ref(&c.value_at_unchecked(i), buffer);
+                                serialize_datum(c.value_at_unchecked(i), buffer);
                             }
                         }
                     }
@@ -483,7 +426,7 @@ impl DataChunk {
                     for (i, buffer) in buffers.iter_mut().enumerate() {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
                         unsafe {
-                            serialize_datum_ref(&c.value_at_unchecked(i), buffer);
+                            serialize_datum(c.value_at_unchecked(i), buffer);
                         }
                     }
                 }

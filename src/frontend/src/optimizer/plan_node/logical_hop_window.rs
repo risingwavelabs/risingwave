@@ -20,6 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
 
+use super::generic::GenericPlanNode;
 use super::{
     gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
@@ -46,7 +47,6 @@ impl LogicalHopWindow {
         // if output_indices is not specified, use default output_indices
         let output_indices = output_indices
             .unwrap_or_else(|| (0..input.schema().len() + 2).into_iter().collect_vec());
-        let ctx = input.ctx();
         let output_type = DataType::window_of(&time_col.data_type).unwrap();
         let original_schema: Schema = input
             .schema()
@@ -58,48 +58,39 @@ impl LogicalHopWindow {
                 Field::with_name(output_type, "window_end"),
             ])
             .collect();
-        let actual_schema: Schema = output_indices
-            .iter()
-            .map(|&idx| original_schema[idx].clone())
-            .collect();
         let window_start_index = output_indices
             .iter()
             .position(|&idx| idx == input.schema().len());
         let window_end_index = output_indices
             .iter()
             .position(|&idx| idx == input.schema().len() + 1);
-        let pk_indices = {
-            if window_start_index.is_none() && window_end_index.is_none() {
-                None
-            } else {
-                let mut pk = input
-                    .logical_pk()
-                    .iter()
-                    .filter_map(|&pk_idx| output_indices.iter().position(|&idx| idx == pk_idx))
-                    .collect_vec();
-                if let Some(start_idx) = window_start_index {
-                    pk.push(start_idx);
-                };
-                if let Some(end_idx) = window_end_index {
-                    pk.push(end_idx);
-                };
-                Some(pk)
-            }
+
+        let core = generic::HopWindow {
+            input,
+            time_col,
+            window_slide,
+            window_size,
+            output_indices,
         };
+
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+        let ctx = core.ctx();
         let functional_dependency = {
             let mut fd_set =
-                ColIndexMapping::identity_or_none(input.schema().len(), original_schema.len())
+                ColIndexMapping::identity_or_none(core.input.schema().len(), original_schema.len())
                     .composite(&ColIndexMapping::with_remaining_columns(
-                        &output_indices,
+                        &core.output_indices,
                         original_schema.len(),
                     ))
-                    .rewrite_functional_dependency_set(input.functional_dependency().clone());
+                    .rewrite_functional_dependency_set(core.input.functional_dependency().clone());
             if let Some(start_idx) = window_start_index && let Some(end_idx) = window_end_index {
                 fd_set.add_functional_dependency_by_column_indices(&[start_idx], &[end_idx]);
                 fd_set.add_functional_dependency_by_column_indices(&[end_idx], &[start_idx]);
             }
             fd_set
         };
+
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
         // let pk_indices = match pk_indices {
@@ -108,19 +99,14 @@ impl LogicalHopWindow {
         //     }
         //     _ => pk_indices.unwrap_or_default(),
         // };
+
         let base = PlanBase::new_logical(
             ctx,
-            actual_schema,
+            schema,
             pk_indices.unwrap_or_default(),
             functional_dependency,
         );
-        let core = generic::HopWindow {
-            input,
-            time_col,
-            window_slide,
-            window_size,
-            output_indices,
-        };
+
         LogicalHopWindow { base, core }
     }
 
@@ -331,6 +317,7 @@ impl ColPrunable for LogicalHopWindow {
 
 impl PredicatePushdown for LogicalHopWindow {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        // TODO: hop's predicate pushdown https://github.com/risingwavelabs/risingwave/issues/6606
         gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
@@ -389,18 +376,18 @@ mod test {
 
     use super::*;
     use crate::expr::InputRef;
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
     #[tokio::test]
     /// Pruning
     /// ```text
-    /// HopWindow(time_col: $0 slide: 1 day 00:00:00 size: 3 days 00:00:00)
+    /// HopWindow(time_col: $0 slide: 1 day size: 3 days)
     ///   TableScan(date, v1, v2)
     /// ```
     /// with required columns [4, 2, 3] will result in
     /// ```text
-    ///   HopWindow(time_col: $0 slide: 1 day 00:00:00 size: 3 days 00:00:00 output_indices: [3, 1, 2])
+    ///   HopWindow(time_col: $0 slide: 1 day size: 3 days output_indices: [3, 1, 2])
     ///     TableScan(date, v3)
     /// ```
     async fn test_prune_hop_window_with_order_required() {

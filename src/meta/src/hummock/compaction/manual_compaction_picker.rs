@@ -17,12 +17,18 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
+use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{InputLevel, Level, LevelType, OverlappingLevel, SstableInfo};
+use risingwave_pb::hummock::{
+    CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel, SstableInfo,
+};
 
 use super::overlap_strategy::OverlapInfo;
+use crate::hummock::compaction::level_selector::{LevelSelector, LevelSelectorCore};
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapInfo};
-use crate::hummock::compaction::{CompactionInput, CompactionPicker, ManualCompactionOption};
+use crate::hummock::compaction::{
+    CompactionInput, CompactionPicker, CompactionTask, ManualCompactionOption,
+};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct ManualCompactionPicker {
@@ -224,13 +230,13 @@ impl CompactionPicker for ManualCompactionPicker {
         let mut range_overlap_info = RangeOverlapInfo::default();
         tmp_sst_info.key_range = Some(self.option.key_range.clone());
         range_overlap_info.update(&tmp_sst_info);
-        let mut select_input_ssts = vec![];
         let level = self.option.level;
         let target_level = self.target_level;
         assert!(
             self.option.level == self.target_level || self.option.level + 1 == self.target_level
         );
-        let level_table_infos: Vec<SstableInfo> = levels
+        // We either include all `select_input_ssts` as input, or return None.
+        let mut select_input_ssts: Vec<SstableInfo> = levels
             .get_level(self.option.level)
             .table_infos
             .iter()
@@ -255,34 +261,24 @@ impl CompactionPicker for ManualCompactionPicker {
             })
             .cloned()
             .collect();
-
-        if level_table_infos.is_empty() {
+        if select_input_ssts.is_empty() {
             return None;
         }
-
-        for table in &level_table_infos {
-            if level_handlers[self.option.level].is_pending_compact(&table.id) {
-                continue;
-            }
-
-            if target_level != level {
-                let overlap_files = self.overlap_strategy.check_base_level_overlap(
-                    &[table.clone()],
-                    &levels.levels[target_level - 1].table_infos,
-                );
-
-                if overlap_files
-                    .iter()
-                    .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
-                {
-                    continue;
-                }
-            }
-
-            select_input_ssts.push(table.clone());
-        }
-
         let target_input_ssts = if target_level == level {
+            // For intra level compaction, input SSTs must be consecutive.
+            let (left, _) = levels
+                .get_level(level)
+                .table_infos
+                .iter()
+                .find_position(|p| p.id == select_input_ssts.first().unwrap().id)
+                .unwrap();
+            let (right, _) = levels
+                .get_level(level)
+                .table_infos
+                .iter()
+                .find_position(|p| p.id == select_input_ssts.last().unwrap().id)
+                .unwrap();
+            select_input_ssts = levels.get_level(level).table_infos[left..=right].to_vec();
             vec![]
         } else {
             self.overlap_strategy.check_base_level_overlap(
@@ -290,7 +286,12 @@ impl CompactionPicker for ManualCompactionPicker {
                 &levels.get_level(target_level).table_infos,
             )
         };
-
+        if select_input_ssts
+            .iter()
+            .any(|table| level_handlers[level].is_pending_compact(&table.id))
+        {
+            return None;
+        }
         if target_input_ssts
             .iter()
             .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
@@ -317,6 +318,66 @@ impl CompactionPicker for ManualCompactionPicker {
     }
 }
 
+pub struct ManualCompactionSelector {
+    inner: LevelSelectorCore,
+    option: ManualCompactionOption,
+}
+
+impl ManualCompactionSelector {
+    pub fn new(
+        config: Arc<CompactionConfig>,
+        overlap_strategy: Arc<dyn OverlapStrategy>,
+        option: ManualCompactionOption,
+    ) -> Self {
+        Self {
+            inner: LevelSelectorCore::new(config, overlap_strategy),
+            option,
+        }
+    }
+}
+
+impl LevelSelector for ManualCompactionSelector {
+    fn need_compaction(&self, levels: &Levels, _: &[LevelHandler]) -> bool {
+        let ctx = self.inner.calculate_level_base_size(levels);
+        if self.option.level > 0 && self.option.level < ctx.base_level {
+            return false;
+        }
+        true
+    }
+
+    fn pick_compaction(
+        &self,
+        task_id: HummockCompactionTaskId,
+        levels: &Levels,
+        level_handlers: &mut [LevelHandler],
+    ) -> Option<CompactionTask> {
+        let ctx = self.inner.calculate_level_base_size(levels);
+        let target_level = if self.option.level == 0 {
+            ctx.base_level
+        } else if self.option.level == self.inner.get_config().max_level as usize {
+            self.option.level
+        } else {
+            self.option.level + 1
+        };
+        if self.option.level > 0 && self.option.level < ctx.base_level {
+            return None;
+        }
+        let picker = ManualCompactionPicker::new(
+            self.inner.get_overlap_strategy(),
+            self.option.clone(),
+            target_level,
+        );
+
+        let ret = picker.pick_compaction(levels, level_handlers)?;
+        ret.add_pending_task(task_id, level_handlers);
+        Some(self.inner.create_compaction_task(ret, ctx.base_level))
+    }
+
+    fn name(&self) -> &'static str {
+        "ManualCompactionSelector"
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use std::collections::HashSet;
@@ -324,8 +385,10 @@ pub mod tests {
     pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
 
     use super::*;
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::level_selector::tests::{
-        generate_l0_nonoverlapping_sublevels, generate_l0_overlapping_sublevels, generate_table,
+        assert_compaction_task, generate_l0_nonoverlapping_sublevels,
+        generate_l0_overlapping_sublevels, generate_level, generate_table,
     };
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
@@ -405,6 +468,7 @@ pub mod tests {
                 key_range: KeyRange {
                     left: iterator_test_key_of_epoch(1, 0, 1),
                     right: iterator_test_key_of_epoch(1, 201, 1),
+                    right_exclusive: false,
                 },
                 ..Default::default()
             };
@@ -491,6 +555,7 @@ pub mod tests {
                 key_range: KeyRange {
                     left: iterator_test_key_of_epoch(1, 101, 1),
                     right: iterator_test_key_of_epoch(1, 199, 1),
+                    right_exclusive: false,
                 },
                 internal_table_id: HashSet::from([2]),
             };
@@ -575,6 +640,29 @@ pub mod tests {
         (levels, levels_handler)
     }
 
+    fn generate_intra_test_levels() -> (Levels, Vec<LevelHandler>) {
+        let l0 = generate_l0_overlapping_sublevels(vec![]);
+        let levels = vec![Level {
+            level_idx: 1,
+            level_type: LevelType::Nonoverlapping as i32,
+            table_infos: vec![
+                generate_table(1, 1, 0, 100, 1),
+                generate_table(2, 2, 100, 200, 1),
+                generate_table(3, 2, 200, 300, 1),
+                generate_table(4, 2, 300, 400, 1),
+            ],
+            total_file_size: 0,
+            sub_level_id: 0,
+        }];
+        let levels = Levels {
+            levels,
+            l0: Some(l0),
+        };
+
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        (levels, levels_handler)
+    }
+
     #[test]
     fn test_l0_empty() {
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
@@ -596,6 +684,7 @@ pub mod tests {
             key_range: KeyRange {
                 left: vec![],
                 right: vec![],
+                right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
         };
@@ -615,6 +704,7 @@ pub mod tests {
             key_range: KeyRange {
                 left: vec![],
                 right: vec![],
+                right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
         };
@@ -656,6 +746,7 @@ pub mod tests {
             key_range: KeyRange {
                 left: iterator_test_key_of_epoch(1, 0, 2),
                 right: iterator_test_key_of_epoch(1, 200, 2),
+                right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
         };
@@ -703,6 +794,7 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
+                    right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
             };
@@ -740,6 +832,7 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
+                    right_exclusive: false,
                 },
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100]),
@@ -759,6 +852,7 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
+                    right_exclusive: false,
                 },
                 // Include all sub level's table ids
                 internal_table_id: HashSet::from([1, 2, 3]),
@@ -800,6 +894,7 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
+                    right_exclusive: false,
                 },
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3]),
@@ -840,6 +935,7 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
+                    right_exclusive: false,
                 },
                 // Only include partial top sub level's table id, but the whole top sub level is
                 // picked.
@@ -881,6 +977,7 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
+                    right_exclusive: false,
                 },
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3]),
@@ -910,6 +1007,7 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
+                    right_exclusive: false,
                 },
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100]),
@@ -930,6 +1028,7 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
+                    right_exclusive: false,
                 },
                 // Only include partial input level's table id
                 internal_table_id: HashSet::from([1]),
@@ -978,6 +1077,7 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
+                    right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
             };
@@ -1003,12 +1103,16 @@ pub mod tests {
 
     #[test]
     fn test_ln_to_ln() {
-        let (levels, levels_handler) = generate_test_levels();
+        let (levels, levels_handler) = generate_intra_test_levels();
         // (input_level, sst_id_filter, expected_result_input_level_ssts)
         let sst_id_filters = vec![
+            (1, vec![1], vec![vec![1], vec![]]),
             (1, vec![3], vec![vec![3], vec![]]),
             (1, vec![4], vec![vec![4], vec![]]),
             (1, vec![3, 4], vec![vec![3, 4], vec![]]),
+            (1, vec![1, 4], vec![vec![1, 2, 3, 4], vec![]]),
+            (1, vec![2, 4], vec![vec![2, 3, 4], vec![]]),
+            (1, vec![1, 3], vec![vec![1, 2, 3], vec![]]),
         ];
         for (input_level, sst_id_filter, expected) in &sst_id_filters {
             let option = ManualCompactionOption {
@@ -1017,6 +1121,7 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
+                    right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
             };
@@ -1037,6 +1142,200 @@ pub mod tests {
                     *e
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_manual_compaction_selector_l0() {
+        let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
+        let l0 = generate_l0_nonoverlapping_sublevels(vec![
+            generate_table(0, 1, 0, 500, 1),
+            generate_table(1, 1, 0, 500, 1),
+        ]);
+        assert_eq!(l0.sub_levels.len(), 2);
+        let levels = vec![
+            generate_level(1, vec![]),
+            generate_level(2, vec![]),
+            generate_level(3, vec![]),
+            Level {
+                level_idx: 4,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(2, 1, 0, 100, 1),
+                    generate_table(3, 1, 101, 200, 1),
+                    generate_table(4, 1, 222, 300, 1),
+                ],
+                total_file_size: 0,
+                sub_level_id: 0,
+            },
+        ];
+        assert_eq!(levels.len(), 4);
+        let levels = Levels {
+            levels,
+            l0: Some(l0),
+        };
+        let mut levels_handler = (0..5).into_iter().map(LevelHandler::new).collect_vec();
+
+        // pick_l0_to_sub_level
+        {
+            let option = ManualCompactionOption {
+                sst_ids: vec![0, 1],
+                key_range: KeyRange {
+                    left: vec![],
+                    right: vec![],
+                    right_exclusive: false,
+                },
+                internal_table_id: HashSet::default(),
+                level: 0,
+            };
+            let selector = ManualCompactionSelector::new(
+                config.clone(),
+                Arc::new(RangeOverlapStrategy::default()),
+                option,
+            );
+            let task = selector
+                .pick_compaction(1, &levels, &mut levels_handler)
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 0);
+            assert_eq!(task.input.input_levels[1].level_idx, 0);
+            assert_eq!(task.input.target_level, 0);
+        }
+
+        for level_handler in &mut levels_handler {
+            for pending_task_id in &level_handler.pending_tasks_ids() {
+                level_handler.remove_task(*pending_task_id);
+            }
+        }
+
+        // pick_l0_to_base_level
+        {
+            let option = ManualCompactionOption {
+                sst_ids: vec![],
+                key_range: KeyRange {
+                    left: vec![],
+                    right: vec![],
+                    right_exclusive: false,
+                },
+                internal_table_id: HashSet::default(),
+                level: 0,
+            };
+            let selector = ManualCompactionSelector::new(
+                config,
+                Arc::new(RangeOverlapStrategy::default()),
+                option,
+            );
+            let task = selector
+                .pick_compaction(2, &levels, &mut levels_handler)
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 3);
+            assert_eq!(task.input.input_levels[0].level_idx, 0);
+            assert_eq!(task.input.input_levels[1].level_idx, 0);
+            assert_eq!(task.input.input_levels[2].level_idx, 4);
+            assert_eq!(task.input.target_level, 4);
+        }
+    }
+
+    /// tests `DynamicLevelSelector::manual_pick_compaction`
+    #[test]
+    fn test_manual_compaction_selector() {
+        let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
+        let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
+        assert_eq!(l0.sub_levels.len(), 0);
+        let levels = vec![
+            generate_level(1, vec![]),
+            generate_level(2, vec![]),
+            generate_level(
+                3,
+                vec![
+                    generate_table(0, 1, 150, 151, 1),
+                    generate_table(1, 1, 250, 251, 1),
+                ],
+            ),
+            Level {
+                level_idx: 4,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(2, 1, 0, 100, 1),
+                    generate_table(3, 1, 101, 200, 1),
+                    generate_table(4, 1, 222, 300, 1),
+                ],
+                total_file_size: 0,
+                sub_level_id: 0,
+            },
+        ];
+        assert_eq!(levels.len(), 4);
+        let levels = Levels {
+            levels,
+            l0: Some(l0),
+        };
+        let mut levels_handler = (0..5).into_iter().map(LevelHandler::new).collect_vec();
+
+        // pick l3 -> l4
+        {
+            let option = ManualCompactionOption {
+                sst_ids: vec![0, 1],
+                key_range: KeyRange {
+                    left: vec![],
+                    right: vec![],
+                    right_exclusive: false,
+                },
+                internal_table_id: HashSet::default(),
+                level: 3,
+            };
+            let selector = ManualCompactionSelector::new(
+                config.clone(),
+                Arc::new(RangeOverlapStrategy::default()),
+                option,
+            );
+            let task = selector
+                .pick_compaction(1, &levels, &mut levels_handler)
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 3);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 2);
+            assert_eq!(task.input.input_levels[1].level_idx, 4);
+            assert_eq!(task.input.input_levels[1].table_infos.len(), 2);
+            assert_eq!(task.input.target_level, 4);
+        }
+
+        for level_handler in &mut levels_handler {
+            for pending_task_id in &level_handler.pending_tasks_ids() {
+                level_handler.remove_task(*pending_task_id);
+            }
+        }
+
+        // pick l4 -> l4
+        {
+            let option = ManualCompactionOption {
+                sst_ids: vec![],
+                key_range: KeyRange {
+                    left: vec![],
+                    right: vec![],
+                    right_exclusive: false,
+                },
+                internal_table_id: HashSet::default(),
+                level: 4,
+            };
+            let selector = ManualCompactionSelector::new(
+                config,
+                Arc::new(RangeOverlapStrategy::default()),
+                option,
+            );
+
+            let task = selector
+                .pick_compaction(1, &levels, &mut levels_handler)
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 4);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 3);
+            assert_eq!(task.input.input_levels[1].level_idx, 4);
+            assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+            assert_eq!(task.input.target_level, 4);
         }
     }
 }

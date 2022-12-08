@@ -202,7 +202,9 @@ fn build_fragment(
     match stream_node.get_node_body()? {
         NodeBody::Source(_) => current_fragment.fragment_type = FragmentType::Source,
 
-        NodeBody::Materialize(_) => current_fragment.fragment_type = FragmentType::Sink,
+        NodeBody::Materialize(_) => current_fragment.fragment_type = FragmentType::Mview,
+
+        NodeBody::Sink(_) => current_fragment.fragment_type = FragmentType::Sink,
 
         // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
         NodeBody::TopN(_) => current_fragment.is_singleton = true,
@@ -221,6 +223,7 @@ fn build_fragment(
     };
 
     // handle join logic
+    // TODO: frontend won't generate delta index join now, so this branch will never hit.
     if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap() {
         if delta_index_join.get_join_type()? == JoinType::Inner
             && delta_index_join.condition.is_none()

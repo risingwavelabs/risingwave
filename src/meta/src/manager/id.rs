@@ -131,7 +131,7 @@ pub mod IdCategory {
     pub const Worker: IdCategoryType = 4;
     pub const Fragment: IdCategoryType = 5;
     pub const Actor: IdCategoryType = 6;
-    pub const HummockSnapshot: IdCategoryType = 7;
+    pub const Backup: IdCategoryType = 7;
     pub const HummockSstableId: IdCategoryType = 8;
     pub const ParallelUnit: IdCategoryType = 9;
     pub const Source: IdCategoryType = 10;
@@ -156,7 +156,7 @@ pub struct IdGeneratorManager<S> {
     fragment: Arc<StoredIdGenerator<S>>,
     actor: Arc<StoredIdGenerator<S>>,
     user: Arc<StoredIdGenerator<S>>,
-    hummock_snapshot: Arc<StoredIdGenerator<S>>,
+    backup: Arc<StoredIdGenerator<S>>,
     hummock_ss_table_id: Arc<StoredIdGenerator<S>>,
     hummock_compaction_task: Arc<StoredIdGenerator<S>>,
     parallel_unit: Arc<StoredIdGenerator<S>>,
@@ -167,7 +167,7 @@ impl<S> IdGeneratorManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(meta_store: Arc<S>, sst_id_start: Option<Id>) -> Self {
+    pub async fn new(meta_store: Arc<S>) -> Self {
         Self {
             #[cfg(test)]
             test: Arc::new(StoredIdGenerator::new(meta_store.clone(), "test", None).await),
@@ -197,12 +197,9 @@ where
                 )
                 .await,
             ),
-            hummock_snapshot: Arc::new(
-                StoredIdGenerator::new(meta_store.clone(), "hummock_snapshot", Some(1)).await,
-            ),
+            backup: Arc::new(StoredIdGenerator::new(meta_store.clone(), "backup", Some(1)).await),
             hummock_ss_table_id: Arc::new(
-                StoredIdGenerator::new(meta_store.clone(), "hummock_ss_table_id", sst_id_start)
-                    .await,
+                StoredIdGenerator::new(meta_store.clone(), "hummock_ss_table_id", Some(1)).await,
             ),
             hummock_compaction_task: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "hummock_compaction_task", Some(1))
@@ -232,7 +229,7 @@ where
             IdCategory::Fragment => &self.fragment,
             IdCategory::Actor => &self.actor,
             IdCategory::User => &self.user,
-            IdCategory::HummockSnapshot => &self.hummock_snapshot,
+            IdCategory::Backup => &self.backup,
             IdCategory::Worker => &self.worker,
             IdCategory::HummockSstableId => &self.hummock_ss_table_id,
             IdCategory::ParallelUnit => &self.parallel_unit,
@@ -329,7 +326,7 @@ mod tests {
     #[tokio::test]
     async fn test_id_generator_manager() -> MetadataModelResult<()> {
         let meta_store = Arc::new(MemStore::default());
-        let manager = IdGeneratorManager::new(meta_store.clone(), Some(1)).await;
+        let manager = IdGeneratorManager::new(meta_store.clone()).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;
             async move { manager.generate::<{ IdCategory::Test }>().await }
@@ -353,7 +350,7 @@ mod tests {
         let vec_expect = (0..100).map(|e| e * 9999 + 1).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
 
-        let manager = IdGeneratorManager::new(meta_store, Some(1)).await;
+        let manager = IdGeneratorManager::new(meta_store).await;
         let id = manager
             .generate_interval::<{ IdCategory::Actor }>(10)
             .await?;

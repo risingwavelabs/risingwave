@@ -16,9 +16,9 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table};
+use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
 
-use super::{DatabaseId, RelationId, SchemaId, SinkId, SourceId};
+use super::{DatabaseId, RelationId, SchemaId, SinkId, SourceId, ViewId};
 use crate::manager::{IndexId, MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
@@ -31,6 +31,7 @@ pub type Catalog = (
     Vec<Source>,
     Vec<Sink>,
     Vec<Index>,
+    Vec<View>,
 );
 
 type DatabaseKey = String;
@@ -39,8 +40,7 @@ type RelationKey = (DatabaseId, SchemaId, String);
 
 /// [`DatabaseManager`] caches meta catalog information and maintains dependent relationship
 /// between tables.
-pub struct DatabaseManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct DatabaseManager {
     /// Cached database information.
     pub(super) databases: BTreeMap<DatabaseId, Database>,
     /// Cached schema information.
@@ -53,6 +53,8 @@ pub struct DatabaseManager<S: MetaStore> {
     pub(super) indexes: BTreeMap<IndexId, Index>,
     /// Cached table information.
     pub(super) tables: BTreeMap<TableId, Table>,
+    /// Cached view information.
+    pub(super) views: BTreeMap<ViewId, View>,
 
     /// Relation refer count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
@@ -67,17 +69,15 @@ pub struct DatabaseManager<S: MetaStore> {
     pub(super) in_progress_creating_tables: HashMap<TableId, Table>,
 }
 
-impl<S> DatabaseManager<S>
-where
-    S: MetaStore,
-{
-    pub async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+impl DatabaseManager {
+    pub async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let databases = Database::list(env.meta_store()).await?;
         let schemas = Schema::list(env.meta_store()).await?;
         let sources = Source::list(env.meta_store()).await?;
         let sinks = Sink::list(env.meta_store()).await?;
         let tables = Table::list(env.meta_store()).await?;
         let indexes = Index::list(env.meta_store()).await?;
+        let views = View::list(env.meta_store()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -86,31 +86,29 @@ where
                 .into_iter()
                 .map(|database| (database.id, database)),
         );
-
         let schemas = BTreeMap::from_iter(schemas.into_iter().map(|schema| (schema.id, schema)));
-
         let sources = BTreeMap::from_iter(sources.into_iter().map(|source| (source.id, source)));
-
         let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| (sink.id, sink)));
-
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
-
         let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
-                relation_ref_count
-                    .entry(*depend_relation_id)
-                    .and_modify(|e| *e += 1)
-                    .or_insert(1);
+                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
             }
             (table.id, table)
         }));
+        let views = BTreeMap::from_iter(views.into_iter().map(|view| {
+            for depend_relation_id in &view.dependent_relations {
+                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
+            }
+            (view.id, view)
+        }));
 
         Ok(Self {
-            env,
             databases,
             schemas,
             sources,
             sinks,
+            views,
             tables,
             indexes,
             relation_ref_count,
@@ -120,15 +118,16 @@ where
         })
     }
 
-    pub async fn get_catalog(&self) -> MetaResult<Catalog> {
-        Ok((
-            Database::list(self.env.meta_store()).await?,
-            Schema::list(self.env.meta_store()).await?,
-            Table::list(self.env.meta_store()).await?,
-            Source::list(self.env.meta_store()).await?,
-            Sink::list(self.env.meta_store()).await?,
-            Index::list(self.env.meta_store()).await?,
-        ))
+    pub fn get_catalog(&self) -> Catalog {
+        (
+            self.databases.values().cloned().collect_vec(),
+            self.schemas.values().cloned().collect_vec(),
+            self.tables.values().cloned().collect_vec(),
+            self.sources.values().cloned().collect_vec(),
+            self.sinks.values().cloned().collect_vec(),
+            self.indexes.values().cloned().collect_vec(),
+            self.views.values().cloned().collect_vec(),
+        )
     }
 
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
@@ -156,6 +155,12 @@ where
                 && x.name.eq(&relation_key.2)
         }) {
             Err(MetaError::catalog_duplicated("sink", &relation_key.2))
+        } else if self.views.values().any(|x| {
+            x.database_id == relation_key.0
+                && x.schema_id == relation_key.1
+                && x.name.eq(&relation_key.2)
+        }) {
+            Err(MetaError::catalog_duplicated("view", &relation_key.2))
         } else {
             Ok(())
         }
@@ -165,6 +170,18 @@ where
         self.in_progress_creating_tables
             .values()
             .cloned()
+            .collect_vec()
+    }
+
+    pub fn list_tables(&self) -> Vec<Table> {
+        self.tables.values().cloned().collect_vec()
+    }
+
+    pub fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.tables
+            .values()
+            .filter(|table| table.schema_id == schema_id)
+            .map(|table| table.id)
             .collect_vec()
     }
 
@@ -208,8 +225,12 @@ where
         }
     }
 
-    pub fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
-        self.relation_ref_count.get(&relation_id).cloned()
+    pub fn schema_is_empty(&self, schema_id: SchemaId) -> bool {
+        self.tables.values().all(|t| t.schema_id != schema_id)
+            && self.sources.values().all(|s| s.schema_id != schema_id)
+            && self.sinks.values().all(|s| s.schema_id != schema_id)
+            && self.indexes.values().all(|i| i.schema_id != schema_id)
+            && self.views.values().all(|v| v.schema_id != schema_id)
     }
 
     pub fn increase_ref_count(&mut self, relation_id: RelationId) {

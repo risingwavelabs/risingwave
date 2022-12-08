@@ -17,6 +17,7 @@
 mod agg_common;
 mod batch_query;
 mod chain;
+mod dml;
 mod dynamic_filter;
 mod expand;
 mod filter;
@@ -30,23 +31,27 @@ mod lookup;
 mod lookup_union;
 mod merge;
 mod mview;
+mod now;
 mod project;
 mod project_set;
+mod row_id_gen;
 mod sink;
+mod sort;
 mod source;
 mod top_n;
 mod top_n_appendonly;
 mod union;
+mod watermark_filter;
 
 // import for submodules
 use itertools::Itertools;
-use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_storage::StateStore;
 
 use self::batch_query::*;
 use self::chain::*;
+use self::dml::*;
 use self::dynamic_filter::*;
 use self::expand::*;
 use self::filter::*;
@@ -60,22 +65,29 @@ use self::lookup::*;
 use self::lookup_union::*;
 use self::merge::*;
 use self::mview::*;
+use self::now::NowExecutorBuilder;
 use self::project::*;
 use self::project_set::*;
+use self::row_id_gen::RowIdGenExecutorBuilder;
 use self::sink::*;
+use self::sort::*;
 use self::source::*;
 use self::top_n::*;
 use self::top_n_appendonly::*;
 use self::union::*;
+use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
+#[async_trait::async_trait]
 trait ExecutorBuilder {
+    type Node;
+
     /// Create a [`BoxedExecutor`] from [`StreamNode`].
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor>;
@@ -85,8 +97,8 @@ macro_rules! build_executor {
     ($source:expr, $node:expr, $store:expr, $stream:expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $node.get_node_body().unwrap() {
             $(
-                $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor($source, $node, $store, $stream)
+                $proto_type_name(node) => {
+                    <$data_type>::new_boxed_executor($source, node, $store, $stream).await
                 },
             )*
             NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) => unreachable!()
@@ -95,7 +107,7 @@ macro_rules! build_executor {
 }
 
 /// Create an executor from protobuf [`StreamNode`].
-pub fn create_executor(
+pub async fn create_executor(
     params: ExecutorParams,
     stream: &mut LocalStreamManagerCore,
     node: &StreamNode,
@@ -129,5 +141,10 @@ pub fn create_executor(
         NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
         NodeBody::ProjectSet => ProjectSetExecutorBuilder,
         NodeBody::GroupTopN => GroupTopNExecutorBuilder,
+        NodeBody::Sort => SortExecutorBuilder,
+        NodeBody::WatermarkFilter => WatermarkFilterBuilder,
+        NodeBody::Dml => DmlExecutorBuilder,
+        NodeBody::RowIdGen => RowIdGenExecutorBuilder,
+        NodeBody::Now => NowExecutorBuilder,
     }
 }

@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{TableDesc, TableId};
-use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
@@ -26,6 +26,13 @@ use crate::optimizer::property::FieldOrder;
 use crate::WithOptions;
 
 /// Includes full information about a table.
+///
+/// Currently, it can be either:
+/// - a table or a source
+/// - a materialized view
+/// - an index
+///
+/// Use `self.kind()` to determine the type of the table.
 ///
 /// # Column ID & Column Index
 ///
@@ -96,6 +103,16 @@ pub struct TableCatalog {
 
     /// Definition of the materialized view.
     pub definition: String,
+
+    pub handle_pk_conflict: bool,
+}
+
+pub enum TableKind {
+    /// Refer to [`crate::handler::drop_table::check_source`] for how to distinguish between a
+    /// table and a source.
+    TableOrSource,
+    Index,
+    MView,
 }
 
 impl TableCatalog {
@@ -107,6 +124,20 @@ impl TableCatalog {
     pub fn with_id(mut self, id: TableId) -> Self {
         self.id = id;
         self
+    }
+
+    pub fn handle_pk_conflict(&self) -> bool {
+        self.handle_pk_conflict
+    }
+
+    pub fn kind(&self) -> TableKind {
+        if self.is_index {
+            TableKind::Index
+        } else if self.associated_source_id.is_none() {
+            TableKind::MView
+        } else {
+            TableKind::TableOrSource
+        }
     }
 
     /// Get the table catalog's associated source id.
@@ -190,6 +221,7 @@ impl TableCatalog {
                 .map(|i| ProstColumnIndex { index: i as _ }),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
             definition: self.definition.clone(),
+            handle_pk_conflict: self.handle_pk_conflict,
         }
     }
 }
@@ -236,6 +268,7 @@ impl From<ProstTable> for TableCatalog {
             vnode_col_idx: tb.vnode_col_idx.map(|x| x.index as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition.clone(),
+            handle_pk_conflict: tb.handle_pk_conflict,
         }
     }
 }
@@ -251,7 +284,7 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -320,6 +353,7 @@ mod tests {
             vnode_col_idx: None,
             value_indices: vec![0],
             definition: "".into(),
+            handle_pk_conflict: false,
         }
         .into();
 
@@ -377,6 +411,7 @@ mod tests {
                 vnode_col_idx: None,
                 value_indices: vec![0],
                 definition: "".into(),
+                handle_pk_conflict: false
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

@@ -41,6 +41,7 @@ pub mod cache;
 pub mod catalog;
 pub mod collection;
 pub mod config;
+pub mod constants;
 pub mod field_generator;
 pub mod hash;
 pub mod monitor;

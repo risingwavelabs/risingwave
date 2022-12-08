@@ -1,21 +1,37 @@
 /* eslint-disable */
 import { ExprNode } from "./expr";
-import { ColumnCatalog, ColumnOrder, RowFormatType, rowFormatTypeFromJSON, rowFormatTypeToJSON } from "./plan_common";
+import {
+  ColumnCatalog,
+  ColumnOrder,
+  Field,
+  RowFormatType,
+  rowFormatTypeFromJSON,
+  rowFormatTypeToJSON,
+} from "./plan_common";
 
 export const protobufPackage = "catalog";
 
 /**
- * The rust prost library always treats uint64 as required and message as optional.
- * In order to allow `row_id_index` as optional field in `StreamSourceInfo` and `TableSourceInfo`,
- * we wrap uint64 inside this message.
+ * The rust prost library always treats uint64 as required and message as
+ * optional. In order to allow `row_id_index` as optional field in
+ * `StreamSourceInfo` and `TableSourceInfo`, we wrap uint64 inside this message.
  */
 export interface ColumnIndex {
   index: number;
 }
 
+export interface SourceInfo {
+  sourceInfo?: { $case: "streamSource"; streamSource: StreamSourceInfo } | {
+    $case: "tableSource";
+    tableSource: TableSourceInfo;
+  };
+}
+
 export interface StreamSourceInfo {
   rowFormat: RowFormatType;
   rowSchemaLocation: string;
+  useSchemaRegistry: boolean;
+  protoMessageName: string;
 }
 
 export interface TableSourceInfo {
@@ -26,13 +42,19 @@ export interface Source {
   schemaId: number;
   databaseId: number;
   name: string;
-  /** The column index of row ID. If the primary key is specified by the user, this will be `None`. */
+  /**
+   * The column index of row ID. If the primary key is specified by the user,
+   * this will be `None`.
+   */
   rowIdIndex:
     | ColumnIndex
     | undefined;
   /** Columns of the source. */
   columns: ColumnCatalog[];
-  /** Column id of the primary key specified by the user. If the user does not specify a primary key, the vector will be empty. */
+  /**
+   * Column id of the primary key specified by the user. If the user does not
+   * specify a primary key, the vector will be empty.
+   */
   pkColumnIds: number[];
   /** Properties specified by the user in WITH clause. */
   properties: { [key: string]: string };
@@ -53,10 +75,16 @@ export interface Sink {
   schemaId: number;
   databaseId: number;
   name: string;
-  associatedTableId: number;
-  properties: { [key: string]: string };
-  owner: number;
+  columns: ColumnCatalog[];
+  pk: ColumnOrder[];
   dependentRelations: number[];
+  distributionKey: number[];
+  /** pk_indices of the corresponding materialize operator's output. */
+  streamKey: number[];
+  appendonly: boolean;
+  owner: number;
+  properties: { [key: string]: string };
+  definition: string;
 }
 
 export interface Sink_PropertiesEntry {
@@ -77,6 +105,7 @@ export interface Index {
    * The index of `InputRef` is the column index of the primary table.
    */
   indexItem: ExprNode[];
+  originalColumns: number[];
 }
 
 /** See `TableCatalog` struct in frontend crate for more information. */
@@ -97,19 +126,42 @@ export interface Table {
   owner: number;
   properties: { [key: string]: string };
   fragmentId: number;
-  /** an optional column index which is the vnode of each row computed by the table's consistent hash distribution */
+  /**
+   * an optional column index which is the vnode of each row computed by the
+   * table's consistent hash distribution
+   */
   vnodeColIdx:
     | ColumnIndex
     | undefined;
   /**
-   * The column indices which are stored in the state store's value with row-encoding.
-   * Currently is not supported yet and expected to be `[0..columns.len()]`.
+   * The column indices which are stored in the state store's value with
+   * row-encoding. Currently is not supported yet and expected to be
+   * `[0..columns.len()]`.
    */
   valueIndices: number[];
   definition: string;
+  handlePkConflict: boolean;
 }
 
 export interface Table_PropertiesEntry {
+  key: string;
+  value: string;
+}
+
+export interface View {
+  id: number;
+  schemaId: number;
+  databaseId: number;
+  name: string;
+  owner: number;
+  properties: { [key: string]: string };
+  sql: string;
+  dependentRelations: number[];
+  /** User-specified column names. */
+  columns: Field[];
+}
+
+export interface View_PropertiesEntry {
   key: string;
   value: string;
 }
@@ -149,8 +201,65 @@ export const ColumnIndex = {
   },
 };
 
+function createBaseSourceInfo(): SourceInfo {
+  return { sourceInfo: undefined };
+}
+
+export const SourceInfo = {
+  fromJSON(object: any): SourceInfo {
+    return {
+      sourceInfo: isSet(object.streamSource)
+        ? { $case: "streamSource", streamSource: StreamSourceInfo.fromJSON(object.streamSource) }
+        : isSet(object.tableSource)
+        ? { $case: "tableSource", tableSource: TableSourceInfo.fromJSON(object.tableSource) }
+        : undefined,
+    };
+  },
+
+  toJSON(message: SourceInfo): unknown {
+    const obj: any = {};
+    message.sourceInfo?.$case === "streamSource" && (obj.streamSource = message.sourceInfo?.streamSource
+      ? StreamSourceInfo.toJSON(message.sourceInfo?.streamSource)
+      : undefined);
+    message.sourceInfo?.$case === "tableSource" && (obj.tableSource = message.sourceInfo?.tableSource
+      ? TableSourceInfo.toJSON(message.sourceInfo?.tableSource)
+      : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SourceInfo>, I>>(object: I): SourceInfo {
+    const message = createBaseSourceInfo();
+    if (
+      object.sourceInfo?.$case === "streamSource" &&
+      object.sourceInfo?.streamSource !== undefined &&
+      object.sourceInfo?.streamSource !== null
+    ) {
+      message.sourceInfo = {
+        $case: "streamSource",
+        streamSource: StreamSourceInfo.fromPartial(object.sourceInfo.streamSource),
+      };
+    }
+    if (
+      object.sourceInfo?.$case === "tableSource" &&
+      object.sourceInfo?.tableSource !== undefined &&
+      object.sourceInfo?.tableSource !== null
+    ) {
+      message.sourceInfo = {
+        $case: "tableSource",
+        tableSource: TableSourceInfo.fromPartial(object.sourceInfo.tableSource),
+      };
+    }
+    return message;
+  },
+};
+
 function createBaseStreamSourceInfo(): StreamSourceInfo {
-  return { rowFormat: RowFormatType.ROW_UNSPECIFIED, rowSchemaLocation: "" };
+  return {
+    rowFormat: RowFormatType.ROW_UNSPECIFIED,
+    rowSchemaLocation: "",
+    useSchemaRegistry: false,
+    protoMessageName: "",
+  };
 }
 
 export const StreamSourceInfo = {
@@ -158,6 +267,8 @@ export const StreamSourceInfo = {
     return {
       rowFormat: isSet(object.rowFormat) ? rowFormatTypeFromJSON(object.rowFormat) : RowFormatType.ROW_UNSPECIFIED,
       rowSchemaLocation: isSet(object.rowSchemaLocation) ? String(object.rowSchemaLocation) : "",
+      useSchemaRegistry: isSet(object.useSchemaRegistry) ? Boolean(object.useSchemaRegistry) : false,
+      protoMessageName: isSet(object.protoMessageName) ? String(object.protoMessageName) : "",
     };
   },
 
@@ -165,6 +276,8 @@ export const StreamSourceInfo = {
     const obj: any = {};
     message.rowFormat !== undefined && (obj.rowFormat = rowFormatTypeToJSON(message.rowFormat));
     message.rowSchemaLocation !== undefined && (obj.rowSchemaLocation = message.rowSchemaLocation);
+    message.useSchemaRegistry !== undefined && (obj.useSchemaRegistry = message.useSchemaRegistry);
+    message.protoMessageName !== undefined && (obj.protoMessageName = message.protoMessageName);
     return obj;
   },
 
@@ -172,6 +285,8 @@ export const StreamSourceInfo = {
     const message = createBaseStreamSourceInfo();
     message.rowFormat = object.rowFormat ?? RowFormatType.ROW_UNSPECIFIED;
     message.rowSchemaLocation = object.rowSchemaLocation ?? "";
+    message.useSchemaRegistry = object.useSchemaRegistry ?? false;
+    message.protoMessageName = object.protoMessageName ?? "";
     return message;
   },
 };
@@ -337,10 +452,15 @@ function createBaseSink(): Sink {
     schemaId: 0,
     databaseId: 0,
     name: "",
-    associatedTableId: 0,
-    properties: {},
-    owner: 0,
+    columns: [],
+    pk: [],
     dependentRelations: [],
+    distributionKey: [],
+    streamKey: [],
+    appendonly: false,
+    owner: 0,
+    properties: {},
+    definition: "",
   };
 }
 
@@ -351,17 +471,24 @@ export const Sink = {
       schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
-      associatedTableId: isSet(object.associatedTableId) ? Number(object.associatedTableId) : 0,
+      columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
+      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
+      dependentRelations: Array.isArray(object?.dependentRelations)
+        ? object.dependentRelations.map((e: any) => Number(e))
+        : [],
+      distributionKey: Array.isArray(object?.distributionKey)
+        ? object.distributionKey.map((e: any) => Number(e))
+        : [],
+      streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
+      appendonly: isSet(object.appendonly) ? Boolean(object.appendonly) : false,
+      owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
           return acc;
         }, {})
         : {},
-      owner: isSet(object.owner) ? Number(object.owner) : 0,
-      dependentRelations: Array.isArray(object?.dependentRelations)
-        ? object.dependentRelations.map((e: any) => Number(e))
-        : [],
+      definition: isSet(object.definition) ? String(object.definition) : "",
     };
   },
 
@@ -371,19 +498,40 @@ export const Sink = {
     message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
     message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
     message.name !== undefined && (obj.name = message.name);
-    message.associatedTableId !== undefined && (obj.associatedTableId = Math.round(message.associatedTableId));
+    if (message.columns) {
+      obj.columns = message.columns.map((e) => e ? ColumnCatalog.toJSON(e) : undefined);
+    } else {
+      obj.columns = [];
+    }
+    if (message.pk) {
+      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    } else {
+      obj.pk = [];
+    }
+    if (message.dependentRelations) {
+      obj.dependentRelations = message.dependentRelations.map((e) => Math.round(e));
+    } else {
+      obj.dependentRelations = [];
+    }
+    if (message.distributionKey) {
+      obj.distributionKey = message.distributionKey.map((e) => Math.round(e));
+    } else {
+      obj.distributionKey = [];
+    }
+    if (message.streamKey) {
+      obj.streamKey = message.streamKey.map((e) => Math.round(e));
+    } else {
+      obj.streamKey = [];
+    }
+    message.appendonly !== undefined && (obj.appendonly = message.appendonly);
+    message.owner !== undefined && (obj.owner = Math.round(message.owner));
     obj.properties = {};
     if (message.properties) {
       Object.entries(message.properties).forEach(([k, v]) => {
         obj.properties[k] = v;
       });
     }
-    message.owner !== undefined && (obj.owner = Math.round(message.owner));
-    if (message.dependentRelations) {
-      obj.dependentRelations = message.dependentRelations.map((e) => Math.round(e));
-    } else {
-      obj.dependentRelations = [];
-    }
+    message.definition !== undefined && (obj.definition = message.definition);
     return obj;
   },
 
@@ -393,7 +541,13 @@ export const Sink = {
     message.schemaId = object.schemaId ?? 0;
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
-    message.associatedTableId = object.associatedTableId ?? 0;
+    message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
+    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
+    message.distributionKey = object.distributionKey?.map((e) => e) || [];
+    message.streamKey = object.streamKey?.map((e) => e) || [];
+    message.appendonly = object.appendonly ?? false;
+    message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
         if (value !== undefined) {
@@ -403,8 +557,7 @@ export const Sink = {
       },
       {},
     );
-    message.owner = object.owner ?? 0;
-    message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
+    message.definition = object.definition ?? "";
     return message;
   },
 };
@@ -434,7 +587,17 @@ export const Sink_PropertiesEntry = {
 };
 
 function createBaseIndex(): Index {
-  return { id: 0, schemaId: 0, databaseId: 0, name: "", owner: 0, indexTableId: 0, primaryTableId: 0, indexItem: [] };
+  return {
+    id: 0,
+    schemaId: 0,
+    databaseId: 0,
+    name: "",
+    owner: 0,
+    indexTableId: 0,
+    primaryTableId: 0,
+    indexItem: [],
+    originalColumns: [],
+  };
 }
 
 export const Index = {
@@ -450,6 +613,7 @@ export const Index = {
       indexItem: Array.isArray(object?.indexItem)
         ? object.indexItem.map((e: any) => ExprNode.fromJSON(e))
         : [],
+      originalColumns: Array.isArray(object?.originalColumns) ? object.originalColumns.map((e: any) => Number(e)) : [],
     };
   },
 
@@ -467,6 +631,11 @@ export const Index = {
     } else {
       obj.indexItem = [];
     }
+    if (message.originalColumns) {
+      obj.originalColumns = message.originalColumns.map((e) => Math.round(e));
+    } else {
+      obj.originalColumns = [];
+    }
     return obj;
   },
 
@@ -480,6 +649,7 @@ export const Index = {
     message.indexTableId = object.indexTableId ?? 0;
     message.primaryTableId = object.primaryTableId ?? 0;
     message.indexItem = object.indexItem?.map((e) => ExprNode.fromPartial(e)) || [];
+    message.originalColumns = object.originalColumns?.map((e) => e) || [];
     return message;
   },
 };
@@ -504,6 +674,7 @@ function createBaseTable(): Table {
     vnodeColIdx: undefined,
     valueIndices: [],
     definition: "",
+    handlePkConflict: false,
   };
 }
 
@@ -543,6 +714,7 @@ export const Table = {
         ? object.valueIndices.map((e: any) => Number(e))
         : [],
       definition: isSet(object.definition) ? String(object.definition) : "",
+      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
     };
   },
 
@@ -597,6 +769,7 @@ export const Table = {
       obj.valueIndices = [];
     }
     message.definition !== undefined && (obj.definition = message.definition);
+    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     return obj;
   },
 
@@ -639,6 +812,7 @@ export const Table = {
       : undefined;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
+    message.handlePkConflict = object.handlePkConflict ?? false;
     return message;
   },
 };
@@ -661,6 +835,118 @@ export const Table_PropertiesEntry = {
 
   fromPartial<I extends Exact<DeepPartial<Table_PropertiesEntry>, I>>(object: I): Table_PropertiesEntry {
     const message = createBaseTable_PropertiesEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseView(): View {
+  return {
+    id: 0,
+    schemaId: 0,
+    databaseId: 0,
+    name: "",
+    owner: 0,
+    properties: {},
+    sql: "",
+    dependentRelations: [],
+    columns: [],
+  };
+}
+
+export const View = {
+  fromJSON(object: any): View {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
+      databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+      owner: isSet(object.owner) ? Number(object.owner) : 0,
+      properties: isObject(object.properties)
+        ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+          acc[key] = String(value);
+          return acc;
+        }, {})
+        : {},
+      sql: isSet(object.sql) ? String(object.sql) : "",
+      dependentRelations: Array.isArray(object?.dependentRelations)
+        ? object.dependentRelations.map((e: any) => Number(e))
+        : [],
+      columns: Array.isArray(object?.columns)
+        ? object.columns.map((e: any) => Field.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: View): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
+    message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
+    message.name !== undefined && (obj.name = message.name);
+    message.owner !== undefined && (obj.owner = Math.round(message.owner));
+    obj.properties = {};
+    if (message.properties) {
+      Object.entries(message.properties).forEach(([k, v]) => {
+        obj.properties[k] = v;
+      });
+    }
+    message.sql !== undefined && (obj.sql = message.sql);
+    if (message.dependentRelations) {
+      obj.dependentRelations = message.dependentRelations.map((e) => Math.round(e));
+    } else {
+      obj.dependentRelations = [];
+    }
+    if (message.columns) {
+      obj.columns = message.columns.map((e) => e ? Field.toJSON(e) : undefined);
+    } else {
+      obj.columns = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<View>, I>>(object: I): View {
+    const message = createBaseView();
+    message.id = object.id ?? 0;
+    message.schemaId = object.schemaId ?? 0;
+    message.databaseId = object.databaseId ?? 0;
+    message.name = object.name ?? "";
+    message.owner = object.owner ?? 0;
+    message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[key] = String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    message.sql = object.sql ?? "";
+    message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
+    message.columns = object.columns?.map((e) => Field.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseView_PropertiesEntry(): View_PropertiesEntry {
+  return { key: "", value: "" };
+}
+
+export const View_PropertiesEntry = {
+  fromJSON(object: any): View_PropertiesEntry {
+    return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
+  },
+
+  toJSON(message: View_PropertiesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = message.key);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<View_PropertiesEntry>, I>>(object: I): View_PropertiesEntry {
+    const message = createBaseView_PropertiesEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
     return message;

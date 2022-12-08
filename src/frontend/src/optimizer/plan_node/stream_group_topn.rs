@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::property::{Distribution, Order, OrderDisplay};
+use crate::optimizer::property::{Order, OrderDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
@@ -35,19 +35,12 @@ impl StreamGroupTopN {
         assert!(!logical.group_key().is_empty());
         assert!(logical.limit() > 0);
         let input = logical.input();
-        let dist = match input.distribution() {
-            Distribution::HashShard(_) => Distribution::HashShard(logical.group_key().to_vec()),
-            Distribution::UpstreamHashShard(_) => {
-                Distribution::UpstreamHashShard(logical.group_key().to_vec())
-            }
-            _ => input.distribution().clone(),
-        };
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             input.logical_pk().to_vec(),
             input.functional_dependency().clone(),
-            dist,
+            input.distribution().clone(),
             false,
         );
         StreamGroupTopN {
@@ -114,11 +107,11 @@ impl fmt::Display for StreamGroupTopN {
             ),
         );
         builder
-            .field("limit", &format_args!("{}", self.limit()))
-            .field("offset", &format_args!("{}", self.offset()))
-            .field("group_key", &format_args!("{:?}", self.group_key()));
+            .field("limit", &self.limit())
+            .field("offset", &self.offset())
+            .field("group_key", &self.group_key());
         if self.with_ties() {
-            builder.field("with_ties", &format_args!("true"));
+            builder.field("with_ties", &format_args!("{}", "true"));
         }
         builder.finish()
     }

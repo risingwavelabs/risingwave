@@ -27,17 +27,16 @@ pub mod server;
 
 use clap::clap_derive::ArgEnum;
 use clap::Parser;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, ArgEnum)]
 pub enum AsyncStackTraceOption {
     Off,
-    On,
+    On, // default
     Verbose,
 }
 
 /// Command-line arguments for compute-node.
-#[derive(Parser, Debug)]
+#[derive(Parser, Clone, Debug)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:5688")]
@@ -62,16 +61,12 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
-    /// No given `config_path` means to use default config.
-    #[clap(long, default_value = "")]
-    pub config_path: String,
-
     /// Enable reporting tracing information to jaeger.
     #[clap(long)]
     pub enable_jaeger_tracing: bool,
 
     /// Enable async stack tracing for risectl.
-    #[clap(long, arg_enum, default_value_t = AsyncStackTraceOption::Off)]
+    #[clap(long, arg_enum, default_value_t = AsyncStackTraceOption::On)]
     pub async_stack_trace: AsyncStackTraceOption,
 
     /// Path to file cache data directory.
@@ -79,15 +74,30 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "")]
     pub file_cache_dir: String,
 
-    /// Enable managed lru cache, or use local lru cache.
-    #[clap(long)]
-    pub enable_managed_cache: bool,
+    /// Endpoint of the connector node
+    #[clap(long, env = "CONNECTOR_RPC_ENDPOINT")]
+    pub connector_rpc_endpoint: Option<String>,
+
+    /// Te path of `risingwave.toml` configuration file.
+    ///
+    /// If empty, default configuration values will be used.
+    ///
+    /// Note that internal system parameters should be defined in the configuration file at
+    /// [`risingwave_common::config`] instead of command line arguments.
+    #[clap(long, default_value = "")]
+    pub config_path: String,
+
+    /// Total available memory in bytes, used by LRU Manager
+    #[clap(long, default_value_t = default_total_memory_bytes())]
+    pub total_memory_bytes: usize,
+
+    /// The parallelism that the compute node will register to the scheduler of the meta service.
+    #[clap(long, default_value_t = default_parallelism())]
+    pub parallelism: usize,
 }
 
 use std::future::Future;
 use std::pin::Pin;
-
-use risingwave_common::config::{BatchConfig, ServerConfig, StorageConfig, StreamingConfig};
 
 use crate::server::compute_node_serve;
 
@@ -121,22 +131,14 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     })
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ComputeNodeConfig {
-    // For connection
-    #[serde(default)]
-    pub server: ServerConfig,
+fn default_total_memory_bytes() -> usize {
+    use sysinfo::{System, SystemExt};
 
-    // Below for batch query.
-    #[serde(default)]
-    pub batch: BatchConfig,
+    let mut sys = System::new();
+    sys.refresh_memory();
+    sys.total_memory() as usize
+}
 
-    // Below for streaming.
-    #[serde(default)]
-    pub streaming: StreamingConfig,
-
-    // Below for Hummock.
-    #[serde(default)]
-    pub storage: StorageConfig,
+fn default_parallelism() -> usize {
+    std::thread::available_parallelism().unwrap().get()
 }

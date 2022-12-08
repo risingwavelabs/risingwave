@@ -27,7 +27,7 @@ describe t3;
 v1 Int32
 v2 Int32
 v3 Int32
-idx1 index(v1, v2) distributed by(v1, v2)
+idx1 index(v1, v2) include(v3) distributed by(v1, v2)
 
 statement ok
 drop index idx1;
@@ -40,6 +40,7 @@ dev
 query T rowsort
 show schemas;
 ----
+information_schema
 public
 pg_catalog
 
@@ -76,3 +77,23 @@ drop materialized view mv3;
 
 statement ok
 drop table t3;
+
+query TT
+describe pg_matviews;
+----
+schemaname Varchar
+matviewname Varchar
+matviewowner Int32
+definition Varchar
+matviewid Int32
+matviewgraph Varchar
+
+query TT
+show columns from pg_catalog.pg_matviews;
+----
+schemaname Varchar
+matviewname Varchar
+matviewowner Int32
+definition Varchar
+matviewid Int32
+matviewgraph Varchar

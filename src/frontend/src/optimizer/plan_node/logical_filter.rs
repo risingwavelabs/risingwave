@@ -18,8 +18,9 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
+use super::generic::{self, GenericPlanNode};
 use super::{
-    generic, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
@@ -42,8 +43,6 @@ impl LogicalFilter {
         for cond in &predicate.conjunctions {
             assert_input_ref!(cond, input.schema().fields().len());
         }
-        let schema = input.schema().clone();
-        let pk_indices = input.logical_pk().to_vec();
         let mut functional_dependency = input.functional_dependency().clone();
         for i in &predicate.conjunctions {
             if let Some((col, _)) = i.as_eq_const() {
@@ -55,11 +54,16 @@ impl LogicalFilter {
                     .add_functional_dependency_by_column_indices(&[right.index()], &[left.index()]);
             }
         }
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
-        LogicalFilter {
-            base,
-            core: generic::Filter { predicate, input },
-        }
+        let core = generic::Filter { predicate, input };
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
+        LogicalFilter { base, core }
     }
 
     /// Create a `LogicalFilter` unless the predicate is always true
@@ -206,9 +210,9 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     /// Pruning

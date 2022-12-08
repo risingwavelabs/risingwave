@@ -12,20 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
+use super::generic::GenericPlanNode;
 use super::{
     generic, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef, PredicatePushdown,
     StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition};
 use crate::TableCatalog;
 
@@ -38,23 +37,13 @@ pub struct LogicalSource {
 
 impl LogicalSource {
     pub fn new(source_catalog: Rc<SourceCatalog>, ctx: OptimizerContextRef) -> Self {
-        let mut id_to_idx = HashMap::new();
+        let core = generic::Source {
+            catalog: source_catalog,
+        };
 
-        let fields = source_catalog
-            .columns
-            .iter()
-            .enumerate()
-            .map(|(idx, c)| {
-                id_to_idx.insert(c.column_id(), idx);
-                (&c.column_desc).into()
-            })
-            .collect();
-        let pk_indices = source_catalog
-            .pk_col_ids
-            .iter()
-            .map(|c| id_to_idx.get(c).copied())
-            .collect::<Option<Vec<_>>>();
-        let schema = Schema { fields };
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+
         let (functional_dependency, pk_indices) = match pk_indices {
             Some(pk_indices) => (
                 FunctionalDependencySet::with_key(schema.len(), &pk_indices),
@@ -62,11 +51,10 @@ impl LogicalSource {
             ),
             None => (FunctionalDependencySet::new(schema.len()), vec![]),
         };
+
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
-        LogicalSource {
-            base,
-            core: generic::Source(source_catalog),
-        }
+
+        LogicalSource { base, core }
     }
 
     pub(super) fn column_names(&self) -> Vec<String> {
@@ -78,7 +66,7 @@ impl LogicalSource {
     }
 
     pub fn source_catalog(&self) -> Rc<SourceCatalog> {
-        self.core.0.clone()
+        self.core.catalog.clone()
     }
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {

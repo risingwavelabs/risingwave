@@ -15,26 +15,29 @@
 use std::sync::Arc;
 
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_pb::stream_plan::TopNNode;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::TopNExecutor;
 
 pub struct TopNExecutorNewBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for TopNExecutorNewBuilder {
-    fn new_boxed_executor(
+    type Node = TopNNode;
+
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::TopN)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let state_table = StateTable::from_table_catalog(table, store, vnodes);
+        let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
         let order_pairs = table.get_pk().iter().map(OrderPair::from_prost).collect();
         if node.with_ties {
             Ok(TopNExecutor::new_with_ties(

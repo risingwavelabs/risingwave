@@ -385,24 +385,15 @@ impl Binder {
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
-        let lhs = if matches!(&expr, Expr::Array(elements) if elements.is_empty())
-            && matches!(&data_type, AstDataType::Array(_))
-        {
-            // The subexpr `array[]` is invalid and cannot bind by itself without a parent cast.
-            // So we handle `array[]::T[]`/`cast(array[] as T[])` as a whole here.
-            FunctionCall::new_unchecked(
-                ExprType::Array,
-                vec![],
-                // Treat `array[]` as `varchar[]` temporarily before applying cast.
-                DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                },
-            )
-            .into()
-        } else {
-            self.bind_expr(expr)?
-        };
-        lhs.cast_explicit(bind_data_type(&data_type)?)
+        self.bind_cast_inner(expr, bind_data_type(&data_type)?)
+    }
+
+    pub fn bind_cast_inner(&mut self, expr: Expr, data_type: DataType) -> Result<ExprImpl> {
+        if let Expr::Array(ref expr) = expr && matches!(&data_type, DataType::List{ .. } ) {
+            return self.bind_array_cast(expr.clone(), data_type);
+        }
+        let lhs = self.bind_expr(expr)?;
+        lhs.cast_explicit(data_type)
     }
 }
 
@@ -484,6 +475,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 _ => return Err(new_err().into()),
             }
         }
+        AstDataType::Bytea => DataType::Bytea,
         _ => return Err(new_err().into()),
     };
     Ok(data_type)

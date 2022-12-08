@@ -38,13 +38,12 @@ impl MetaServiceOpts {
                 const MESSAGE: &str = "env variable `RW_META_ADDR` not found.
 
 For `./risedev d` use cases, please do the following:
-* use `./risedev d for-ctl` to start the cluster.
 * use `./risedev ctl` to use risectl.
 
 For `./risedev apply-compose-deploy` users,
 * `RW_META_ADDR` will be printed out when deploying. Please copy the bash exports to your console.
 
-risectl requires a full persistent cluster to operate. Please make sure you're not running in minimum mode.";
+Note: the default value of `RW_META_ADDR` is 'http://127.0.0.1:5690'.";
                 bail!(MESSAGE);
             }
         };

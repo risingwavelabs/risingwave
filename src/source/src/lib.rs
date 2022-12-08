@@ -20,6 +20,7 @@
 #![feature(result_option_inspect)]
 #![feature(generators)]
 #![feature(hash_drain_filter)]
+#![feature(type_alias_impl_trait)]
 
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -40,8 +41,11 @@ pub mod parser;
 mod manager;
 pub use manager::test_utils as table_test_utils;
 
+pub mod dml_manager;
+
 mod common;
 pub mod connector_source;
+pub use connector_source::test_utils as connector_test_utils;
 pub mod monitor;
 pub mod row_id;
 mod table;
@@ -54,6 +58,7 @@ pub enum SourceFormat {
     DebeziumJson,
     Avro,
     Maxwell,
+    CanalJson,
 }
 
 #[derive(Debug, EnumAsInner)]

@@ -27,7 +27,7 @@ use crate::expr::{Expr as _, ExprImpl};
 ///
 /// If you also need to cast them to this type, and there are more than 2 exprs, check out
 /// [`align_types`].
-pub fn least_restrictive(lhs: DataType, rhs: DataType) -> Result<DataType> {
+pub fn least_restrictive(lhs: DataType, rhs: DataType) -> std::result::Result<DataType, ErrorCode> {
     if lhs == rhs {
         Ok(lhs)
     } else if cast_ok(&lhs, &rhs, CastContext::Implicit) {
@@ -35,13 +35,18 @@ pub fn least_restrictive(lhs: DataType, rhs: DataType) -> Result<DataType> {
     } else if cast_ok(&rhs, &lhs, CastContext::Implicit) {
         Ok(lhs)
     } else {
-        Err(ErrorCode::BindError(format!("types {:?} and {:?} cannot be matched", lhs, rhs)).into())
+        Err(ErrorCode::BindError(format!(
+            "types {:?} and {:?} cannot be matched",
+            lhs, rhs
+        )))
     }
 }
 
 /// Find the `least_restrictive` type over a list of `exprs`, and add implicit cast when necessary.
 /// Used by `VALUES`, `CASE`, `UNION`, etc. See [PG](https://www.postgresql.org/docs/current/typeconv-union-case.html).
-pub fn align_types<'a>(exprs: impl Iterator<Item = &'a mut ExprImpl>) -> Result<DataType> {
+pub fn align_types<'a>(
+    exprs: impl Iterator<Item = &'a mut ExprImpl>,
+) -> std::result::Result<DataType, ErrorCode> {
     use std::mem::swap;
 
     let exprs = exprs.collect_vec();
@@ -60,7 +65,8 @@ pub fn align_types<'a>(exprs: impl Iterator<Item = &'a mut ExprImpl>) -> Result<
     for e in exprs {
         let mut dummy = ExprImpl::literal_bool(false);
         swap(&mut dummy, e);
-        *e = dummy.cast_implicit(ret_type.clone())?;
+        // unwrap: cast to least_restrictive type always succeeds
+        *e = dummy.cast_implicit(ret_type.clone()).unwrap();
     }
     Ok(ret_type)
 }
@@ -137,9 +143,9 @@ pub enum CastContext {
 
 pub type CastMap = BTreeMap<(DataTypeName, DataTypeName), CastContext>;
 
-impl From<&CastContext> for String {
-    fn from(c: &CastContext) -> Self {
-        match c {
+impl ToString for CastContext {
+    fn to_string(&self) -> String {
+        match self {
             CastContext::Implicit => "IMPLICIT".to_string(),
             CastContext::Assign => "ASSIGN".to_string(),
             CastContext::Explicit => "EXPLICIT".to_string(),

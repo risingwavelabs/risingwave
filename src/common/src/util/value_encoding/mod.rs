@@ -22,8 +22,8 @@ use itertools::Itertools;
 use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::types::struct_type::StructType;
 use crate::types::{
-    to_datum_ref, DataType, Datum, DatumRef, Decimal, IntervalUnit, NaiveDateTimeWrapper,
-    NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl,
+    DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
+    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl, ToDatumRef,
 };
 
 pub mod error;
@@ -34,20 +34,15 @@ pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 /// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
 pub fn serialize_datum_to_bytes(cell: Option<&ScalarImpl>) -> Vec<u8> {
     let mut buf: Vec<u8> = vec![];
-    serialize_datum_ref(&cell.map(|scala| scala.as_scalar_ref_impl()), &mut buf);
+    serialize_datum(cell.map(|scala| scala.as_scalar_ref_impl()), &mut buf);
     buf
 }
 
 /// Serialize a datum into bytes (Not order guarantee, used in value encoding).
-pub fn serialize_datum(cell: &Datum, mut buf: impl BufMut) {
-    serialize_datum_ref(&to_datum_ref(cell), &mut buf);
-}
-
-/// Serialize a datum into bytes (Not order guarantee, used in value encoding).
-pub fn serialize_datum_ref(datum_ref: &DatumRef<'_>, buf: &mut impl BufMut) {
-    if let Some(d) = datum_ref {
+pub fn serialize_datum(datum_ref: impl ToDatumRef, buf: &mut impl BufMut) {
+    if let Some(d) = datum_ref.to_datum_ref() {
         buf.put_u8(1);
-        serialize_value(*d, buf)
+        serialize_value(d, buf)
     } else {
         buf.put_u8(0);
     }
@@ -64,7 +59,7 @@ fn inner_deserialize_datum(data: &mut impl Buf, ty: &DataType) -> Result<Datum> 
     let null_tag = data.get_u8();
     match null_tag {
         0 => Ok(None),
-        1 => deserialize_value(ty, data),
+        1 => Some(deserialize_value(ty, data)).transpose(),
         _ => Err(ValueEncodingError::InvalidTagEncoding(null_tag)),
     }
 }
@@ -77,6 +72,7 @@ fn serialize_value(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Float32(v) => buf.put_f32_le(v.into_inner()),
         ScalarRefImpl::Float64(v) => buf.put_f64_le(v.into_inner()),
         ScalarRefImpl::Utf8(v) => serialize_str(v.as_bytes(), buf),
+        ScalarRefImpl::Bytea(v) => serialize_str(v, buf),
         ScalarRefImpl::Bool(v) => buf.put_u8(v as u8),
         ScalarRefImpl::Decimal(v) => serialize_decimal(&v, buf),
         ScalarRefImpl::Interval(v) => serialize_interval(&v, buf),
@@ -88,7 +84,7 @@ fn serialize_value(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
             serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
-        ScalarRefImpl::List(list) => serialize_list(list, buf),
+        ScalarRefImpl::List(v) => serialize_list(v, buf),
     }
 }
 
@@ -97,7 +93,7 @@ fn serialize_struct(value: StructRef<'_>, buf: &mut impl BufMut) {
         .fields_ref()
         .iter()
         .map(|field_value| {
-            serialize_datum_ref(field_value, buf);
+            serialize_datum(*field_value, buf);
         })
         .collect_vec();
 }
@@ -109,7 +105,7 @@ fn serialize_list(value: ListRef<'_>, buf: &mut impl BufMut) {
     values_ref
         .iter()
         .map(|field_value| {
-            serialize_datum_ref(field_value, buf);
+            serialize_datum(*field_value, buf);
         })
         .collect_vec();
 }
@@ -143,8 +139,8 @@ fn serialize_decimal(decimal: &Decimal, buf: &mut impl BufMut) {
     buf.put_slice(&decimal.unordered_serialize());
 }
 
-fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<Datum> {
-    Ok(Some(match ty {
+fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
+    Ok(match ty {
         DataType::Int16 => ScalarImpl::Int16(data.get_i16_le()),
         DataType::Int32 => ScalarImpl::Int32(data.get_i32_le()),
         DataType::Int64 => ScalarImpl::Int64(data.get_i64_le()),
@@ -159,10 +155,11 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<Datum> {
         DataType::Timestampz => ScalarImpl::Int64(data.get_i64_le()),
         DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
+        DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
         DataType::List {
             datatype: item_type,
         } => deserialize_list(item_type, data)?,
-    }))
+    })
 }
 
 fn deserialize_struct(struct_def: &StructType, data: &mut impl Buf) -> Result<ScalarImpl> {
@@ -184,11 +181,20 @@ fn deserialize_list(item_type: &DataType, data: &mut impl Buf) -> Result<ScalarI
     Ok(ScalarImpl::List(ListValue::new(values)))
 }
 
-fn deserialize_str(data: &mut impl Buf) -> Result<String> {
+fn deserialize_str(data: &mut impl Buf) -> Result<Box<str>> {
     let len = data.get_u32_le();
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
-    String::from_utf8(bytes).map_err(ValueEncodingError::InvalidUtf8)
+    String::from_utf8(bytes)
+        .map(String::into_boxed_str)
+        .map_err(ValueEncodingError::InvalidUtf8)
+}
+
+fn deserialize_bytea(data: &mut impl Buf) -> Vec<u8> {
+    let len = data.get_u32_le();
+    let mut bytes = vec![0; len as usize];
+    data.copy_to_slice(&mut bytes);
+    bytes
 }
 
 fn deserialize_bool(data: &mut impl Buf) -> Result<bool> {

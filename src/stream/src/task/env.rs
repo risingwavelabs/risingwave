@@ -16,6 +16,8 @@ use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_connector::ConnectorParams;
+use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
@@ -28,6 +30,9 @@ pub struct StreamEnvironment {
     /// Endpoint the stream manager listens on.
     server_addr: HostAddr,
 
+    /// Parameters used by connector nodes.
+    connector_params: ConnectorParams,
+
     /// Reference to the source manager.
     source_manager: TableSourceManagerRef,
 
@@ -39,37 +44,47 @@ pub struct StreamEnvironment {
 
     /// State store for table scanning.
     state_store: StateStoreImpl,
+
+    /// Manages dml information.
+    dml_manager: DmlManagerRef,
 }
 
 impl StreamEnvironment {
     pub fn new(
         source_manager: TableSourceManagerRef,
         server_addr: HostAddr,
+        connector_params: ConnectorParams,
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
+        dml_manager: DmlManagerRef,
     ) -> Self {
         StreamEnvironment {
             server_addr,
+            connector_params,
             source_manager,
             config,
             worker_id,
             state_store,
+            dml_manager,
         }
     }
 
     // Create an instance for testing purpose.
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use risingwave_source::dml_manager::DmlManager;
         use risingwave_storage::monitor::StateStoreMetrics;
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
+            connector_params: ConnectorParams::new(None),
             source_manager: Arc::new(TableSourceManager::default()),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 StateStoreMetrics::unused(),
             )),
+            dml_manager: Arc::new(DmlManager::default()),
         }
     }
 
@@ -95,5 +110,13 @@ impl StreamEnvironment {
 
     pub fn state_store(&self) -> StateStoreImpl {
         self.state_store.clone()
+    }
+
+    pub fn connector_params(&self) -> ConnectorParams {
+        self.connector_params.clone()
+    }
+
+    pub fn dml_manager_ref(&self) -> DmlManagerRef {
+        self.dml_manager.clone()
     }
 }

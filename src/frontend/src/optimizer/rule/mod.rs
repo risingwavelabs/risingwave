@@ -69,16 +69,20 @@ mod join_commute;
 mod over_agg_to_topn;
 pub use join_commute::*;
 pub use over_agg_to_topn::*;
+mod union_to_distinct;
+pub use union_to_distinct::*;
+mod agg_project_merge;
+pub use agg_project_merge::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
     ($macro:ident) => {
         $macro! {
-             {ApplyAggRule}
-            ,{ApplyFilterRule}
-            ,{ApplyProjRule}
+             {ApplyAggTransposeRule}
+            ,{ApplyFilterTransposeRule}
+            ,{ApplyProjectTransposeRule}
             ,{ApplyScanRule}
-            ,{ApplyJoinRule}
+            ,{ApplyJoinTransposeRule}
             ,{ApplyToJoinRule}
             ,{MaxOneRowEliminateRule}
             ,{DistinctAggRule}
@@ -94,6 +98,8 @@ macro_rules! for_all_rules {
             ,{IndexSelectionRule}
             ,{OverAggToTopNRule}
             ,{JoinCommuteRule}
+            ,{UnionToDistinctRule}
+            ,{AggProjectMergeRule}
         }
     };
 }

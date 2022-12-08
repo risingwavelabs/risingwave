@@ -43,7 +43,7 @@ pub use relation::{
 };
 use risingwave_common::error::ErrorCode;
 pub use select::{BoundDistinct, BoundSelect};
-pub use set_expr::BoundSetExpr;
+pub use set_expr::*;
 pub use statement::BoundStatement;
 pub use update::BoundUpdate;
 pub use values::BoundValues;

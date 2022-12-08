@@ -47,6 +47,7 @@ export const ExprNode_Type = {
   TUMBLE_START: "TUMBLE_START",
   TO_TIMESTAMP: "TO_TIMESTAMP",
   AT_TIME_ZONE: "AT_TIME_ZONE",
+  DATE_TRUNC: "DATE_TRUNC",
   /** CAST - other functions */
   CAST: "CAST",
   SUBSTR: "SUBSTR",
@@ -203,6 +204,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 105:
     case "AT_TIME_ZONE":
       return ExprNode_Type.AT_TIME_ZONE;
+    case 106:
+    case "DATE_TRUNC":
+      return ExprNode_Type.DATE_TRUNC;
     case 201:
     case "CAST":
       return ExprNode_Type.CAST;
@@ -421,6 +425,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "TO_TIMESTAMP";
     case ExprNode_Type.AT_TIME_ZONE:
       return "AT_TIME_ZONE";
+    case ExprNode_Type.DATE_TRUNC:
+      return "DATE_TRUNC";
     case ExprNode_Type.CAST:
       return "CAST";
     case ExprNode_Type.SUBSTR:
@@ -540,6 +546,7 @@ export const TableFunction_Type = {
   GENERATE: "GENERATE",
   UNNEST: "UNNEST",
   REGEXP_MATCHES: "REGEXP_MATCHES",
+  RANGE: "RANGE",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -559,6 +566,9 @@ export function tableFunction_TypeFromJSON(object: any): TableFunction_Type {
     case 3:
     case "REGEXP_MATCHES":
       return TableFunction_Type.REGEXP_MATCHES;
+    case 4:
+    case "RANGE":
+      return TableFunction_Type.RANGE;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -576,6 +586,8 @@ export function tableFunction_TypeToJSON(object: TableFunction_Type): string {
       return "UNNEST";
     case TableFunction_Type.REGEXP_MATCHES:
       return "REGEXP_MATCHES";
+    case TableFunction_Type.RANGE:
+      return "RANGE";
     case TableFunction_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";

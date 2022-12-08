@@ -15,10 +15,10 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use bytes::BufMut;
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
-use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
@@ -63,11 +63,12 @@ pub fn default_writer_opts() -> SstableWriterOptions {
     }
 }
 
-pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
-    let mut user_key = Vec::new();
-    user_key.put_u32(0);
-    user_key.put_slice(format!("key_test_{:08}", idx * 2).as_bytes());
-    key_with_epoch(user_key, epoch)
+pub fn test_key_of(idx: usize, epoch: u64) -> FullKey<Vec<u8>> {
+    FullKey::for_test(
+        TableId::default(),
+        format!("key_test_{:08}", idx * 2).as_bytes().to_vec(),
+        epoch,
+    )
 }
 
 const MAX_KEY_COUNT: usize = 128 * 1024;
@@ -96,11 +97,11 @@ async fn build_table(
     let mut builder = SstableBuilder::for_test(sstable_id, writer, opt);
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch);
-    let user_len = full_key.len() - 8;
+    let table_key_len = full_key.user_key.table_key.len();
     for i in range {
         let start = (i % 8) as usize;
         let end = start + 8;
-        full_key[(user_len - 8)..user_len].copy_from_slice(&i.to_be_bytes());
+        full_key.user_key.table_key[table_key_len - 8..].copy_from_slice(&i.to_be_bytes());
         builder
             .add(&full_key, HummockValue::put(&value[start..end]), true)
             .await
@@ -108,7 +109,7 @@ async fn build_table(
     }
     let output = builder.finish().await.unwrap();
     let handle = output.writer_output;
-    let sst = output.sst_info;
+    let sst = output.sst_info.sst_info;
     handle.await.unwrap().unwrap();
     sst
 }
@@ -177,6 +178,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         cache_policy: CachePolicy::Disable,
         gc_delete_keys: false,
         watermark: 0,
+        stats_target_table_ids: None,
     };
     Compactor::compact_and_build_sst(
         &mut builder,

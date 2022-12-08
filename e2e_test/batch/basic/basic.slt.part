@@ -11,7 +11,7 @@ values(1+2*3)
 ----
 7
 
-statement error
+statement error 
 values(CAST('abc' AS BOOLEAN))
 
 query I
@@ -27,7 +27,6 @@ select 1+2*3, 4*5;
 statement ok
 start transaction;
 
-
 statement ok
 abort;
 
@@ -35,5 +34,3 @@ query I
 show RW_IMPLICIT_FLUSH;
 ----
 true
-
-

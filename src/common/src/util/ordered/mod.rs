@@ -20,7 +20,7 @@ use itertools::Itertools;
 use OrderedDatum::{NormalOrder, ReversedOrder};
 
 pub use self::serde::*;
-use crate::array::Row;
+use crate::row::Row;
 use crate::types::{serialize_datum_into, Datum};
 use crate::util::sort_util::OrderType;
 
@@ -59,7 +59,7 @@ impl std::fmt::Debug for OrderedRow {
 impl OrderedRow {
     pub fn new(row: Row, order_types: &[OrderType]) -> Self {
         OrderedRow(
-            row.0
+            row.into_inner()
                 .into_iter()
                 .zip_eq(order_types.iter())
                 .map(|(datum, order_type)| match order_type {
@@ -81,7 +81,7 @@ impl OrderedRow {
     }
 
     pub fn into_row(self) -> Row {
-        Row(self.into_vec())
+        Row::new(self.into_vec())
     }
 
     /// Serialize the row into a memcomparable bytes.
@@ -132,10 +132,12 @@ mod tests {
     use crate::types::ScalarImpl;
 
     fn make_row(values: Vec<i64>) -> OrderedRow {
-        let row = Row(values
-            .into_iter()
-            .map(|v| Some(ScalarImpl::Int64(v)))
-            .collect());
+        let row = Row::new(
+            values
+                .into_iter()
+                .map(|v| Some(ScalarImpl::Int64(v)))
+                .collect(),
+        );
         OrderedRow::new(row, ORDER_TYPES)
     }
 

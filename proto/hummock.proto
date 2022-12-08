@@ -4,6 +4,7 @@ package hummock;
 
 import "catalog.proto";
 import "common.proto";
+import "compactor.proto";
 
 option optimize_for = SPEED;
 
@@ -196,9 +197,12 @@ message UnpinSnapshotBeforeResponse {
   common.Status status = 1;
 }
 
+// When `right_exclusive=false`, it represents [left, right], of which both boundary are open. When `right_exclusive=true`,
+// it represents [left, right), of which right is exclusive.
 message KeyRange {
   bytes left = 1;
   bytes right = 2;
+  bool right_exclusive = 3;
 }
 
 message TableOption {
@@ -286,6 +290,7 @@ message GetCompactionTasksResponse {
 message ReportCompactionTasksRequest {
   uint32 context_id = 1;
   CompactTask compact_task = 2;
+  map<uint32, TableStats> table_stats_change = 3;
 }
 
 message ReportCompactionTasksResponse {
@@ -508,6 +513,13 @@ message RiseCtlUpdateCompactionConfigResponse {
   common.Status status = 1;
 }
 
+message SetCompactorRuntimeConfigRequest {
+  uint32 context_id = 1;
+  compactor.CompactorRuntimeConfig config = 2;
+}
+
+message SetCompactorRuntimeConfigResponse {}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -536,9 +548,8 @@ service HummockManagerService {
   rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
+  rpc SetCompactorRuntimeConfig(SetCompactorRuntimeConfigRequest) returns (SetCompactorRuntimeConfigResponse);
 }
-
-service CompactorService {}
 
 message CompactionConfig {
   enum CompactionMode {
@@ -557,4 +568,15 @@ message CompactionConfig {
   uint64 target_file_size_base = 10;
   uint32 compaction_filter_mask = 11;
   uint32 max_sub_compaction = 12;
+}
+
+message TableStats {
+  int64 total_key_size = 1;
+  int64 total_value_size = 2;
+  int64 total_key_count = 3;
+}
+
+message HummockVersionStats {
+  uint64 hummock_version_id = 1;
+  map<uint32, TableStats> table_stats = 2;
 }

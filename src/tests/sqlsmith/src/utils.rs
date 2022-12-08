@@ -36,6 +36,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.bound_relations = old_rels;
         self.bound_columns = old_cols;
     }
+
+    // TODO: <https://github.com/risingwavelabs/risingwave/pull/4431#issuecomment-1327417328>
+    pub(crate) fn _clone_local_context(&mut self) -> Context {
+        let current_bound_relations = self.bound_relations.clone();
+        let current_bound_columns = self.bound_columns.clone();
+        (current_bound_columns, current_bound_relations)
+    }
 }
 
 /// Gen utils
@@ -100,6 +107,7 @@ pub fn data_type_name_to_ast_data_type(type_name: DataTypeName) -> Option<DataTy
         DataTypeName::Float32 => Some(DataType::Real),
         DataTypeName::Float64 => Some(DataType::Double),
         DataTypeName::Varchar => Some(DataType::Varchar),
+        DataTypeName::Bytea => Some(DataType::Bytea),
         DataTypeName::Date => Some(DataType::Date),
         DataTypeName::Timestamp => Some(DataType::Timestamp(false)),
         DataTypeName::Timestampz => Some(DataType::Timestamp(true)),

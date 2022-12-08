@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -27,7 +27,7 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use uuid::Uuid;
 
 use crate::barrier::command::CommandContext;
@@ -39,16 +39,12 @@ use crate::storage::MetaStore;
 use crate::stream::build_actor_connector_splits;
 use crate::MetaResult;
 
-pub type RecoveryResult = Epoch;
-
 impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
 {
     // Retry base interval in milliseconds.
     const RECOVERY_RETRY_BASE_INTERVAL: u64 = 100;
-    // Retry max attempts.
-    const RECOVERY_RETRY_MAX_ATTEMPTS: usize = 10;
     // Retry max interval.
     const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -57,7 +53,6 @@ where
     fn get_retry_strategy() -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(Self::RECOVERY_RETRY_BASE_INTERVAL)
             .max_delay(Self::RECOVERY_RETRY_MAX_INTERVAL)
-            .take(Self::RECOVERY_RETRY_MAX_ATTEMPTS)
             .map(jitter)
     }
 
@@ -69,29 +64,56 @@ where
         .await
     }
 
-    /// Clean up all dirty streaming jobs in topology order before recovery.
+    /// Clean up all dirty streaming jobs.
     async fn clean_dirty_fragments(&self) -> MetaResult<()> {
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
         let table_fragments = self.fragment_manager.list_table_fragments().await?;
-        let to_drop_table_ids = table_fragments
+        let to_drop_table_fragments = table_fragments
             .into_iter()
             .filter(|table_fragment| {
                 !stream_job_ids.contains(&table_fragment.table_id().table_id)
                     || !table_fragment.is_created()
             })
-            .map(|t| t.table_id())
-            .collect::<HashSet<_>>();
+            .collect_vec();
 
-        debug!("clean dirty table fragments: {:?}", to_drop_table_ids);
+        let to_drop_streaming_ids = to_drop_table_fragments
+            .iter()
+            .map(|t| t.table_id())
+            .collect();
+
+        debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
         self.fragment_manager
-            .drop_table_fragments_vec(&to_drop_table_ids)
+            .drop_table_fragments_vec(&to_drop_streaming_ids)
             .await?;
+
+        // unregister compaction group for dirty table fragments.
+        let _ = self.hummock_manager
+            .unregister_table_ids(
+                &to_drop_streaming_ids
+                    .iter()
+                    .map(|t| t.table_id)
+                    .collect_vec(),
+            )
+            .await.inspect_err(|e|
+            tracing::warn!(
+                "Failed to unregister compaction group for {:#?}.\nThey will be cleaned up on node restart.\n{:#?}",
+                to_drop_streaming_ids,
+                e)
+        );
+
+        // clean up source connector dirty changes.
+        self.source_manager
+            .drop_source_change(&to_drop_table_fragments)
+            .await;
 
         Ok(())
     }
 
     /// Recovery the whole cluster from the latest epoch.
-    pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> RecoveryResult {
+    pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> Epoch {
+        // pause discovery of all connector split changes and trigger config change.
+        let _source_pause_guard = self.source_manager.paused.lock().await;
+
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
@@ -182,6 +204,7 @@ where
         let mut cur = 0;
         let mut migrate_map = HashMap::new();
         let mut node_map = HashMap::new();
+        let start = Instant::now();
         while cur < expired_workers.len() {
             let current_nodes = self
                 .cluster_manager
@@ -190,7 +213,7 @@ where
             let new_nodes = current_nodes
                 .into_iter()
                 .filter(|node| {
-                    !info.node_map.contains_key(&node.id) && !node_map.contains_key(&node.id)
+                    !info.actor_map.contains_key(&node.id) && !node_map.contains_key(&node.id)
                 })
                 .collect_vec();
             for new_node in new_nodes {
@@ -210,8 +233,12 @@ where
                     return (migrate_map, node_map);
                 }
             }
+            warn!(
+                "waiting for new worker to join, elapsed: {}s",
+                start.elapsed().as_secs()
+            );
             // wait to get newly joined CN
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
         (migrate_map, node_map)
     }

@@ -1,8 +1,11 @@
 [package]
-edition = "2021"
 name = "risedev"
-version = "0.2.0-alpha"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
@@ -12,17 +15,28 @@ clap = { version = "3", features = ["derive"] }
 console = "0.15"
 dialoguer = "0.10"
 enum-iterator = "1"
-indicatif = "0.16"
+google-cloud-pubsub = "0.7.0"
+indicatif = "0.17"
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = "0.10"
 kafka = { version = "0.9", default-features = false }
 pulldown-cmark = "0.9"
-redis = "0.21"
+redis = "0.22"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_with = "1"
-serde_yaml = "0.8"
+serde_with = "2"
+serde_yaml = "0.9"
 tempfile = "3"
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs"
+] }
+toml = "0.5.9"
+workspace-hack = { path = "../workspace-hack" }
 yaml-rust = "0.4"

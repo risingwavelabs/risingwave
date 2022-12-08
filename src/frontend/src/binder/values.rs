@@ -42,9 +42,9 @@ impl BoundValues {
         self.rows.iter_mut().flatten()
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn is_correlated(&self, depth: Depth) -> bool {
         self.exprs()
-            .any(|expr| expr.has_correlated_input_ref_by_depth())
+            .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
@@ -94,7 +94,7 @@ impl Binder {
             Some(types) => {
                 bound = bound
                     .into_iter()
-                    .map(|vec| Self::cast_on_insert(types.clone(), vec))
+                    .map(|vec| Self::cast_on_insert(&types.clone(), vec))
                     .try_collect()?;
 
                 types
@@ -125,7 +125,7 @@ impl Binder {
         {
             return Err(ErrorCode::NotImplemented("Subquery in VALUES".into(), None.into()).into());
         }
-        if bound_values.is_correlated() {
+        if bound_values.is_correlated(1) {
             return Err(ErrorCode::NotImplemented(
                 "CorrelatedInputRef in VALUES".into(),
                 None.into(),
