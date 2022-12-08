@@ -188,7 +188,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let mut services_leader_rx = leader_rx.clone();
     let mut note_status_leader_rx = leader_rx.clone();
-    let intercept_leader_rx = leader_rx.clone();
 
     // print current leader/follower status of this node + fencing mechanism
     tokio::spawn(async move {
@@ -245,7 +244,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let _enter = span.enter();
 
         let intercept = InterceptorWrapper {
-            leader_rx: intercept_leader_rx,
+            leader_rx: leader_rx,
         };
 
         // failover logic
@@ -612,7 +611,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .unwrap();
     });
 
-    return Ok((join_handle, svc_shutdown_tx));
+    Ok((join_handle, svc_shutdown_tx))
 }
 
 #[derive(Clone)]
