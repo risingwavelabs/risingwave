@@ -77,12 +77,15 @@ pub struct TableCatalog {
 
     pub is_index: bool,
 
+    /// Whether the table is created by `CREATE MATERIALIZED VIEW`.
+    pub is_mview: bool,
+
     /// Distribution key column indices.
     pub distribution_key: Vec<usize>,
 
-    /// The appendonly attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
+    /// The append-only attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
     /// on this to derive an append-only stream plan
-    pub appendonly: bool,
+    pub append_only: bool,
 
     /// Owner of the table.
     pub owner: u32,
@@ -95,7 +98,11 @@ pub struct TableCatalog {
 
     /// An optional column index which is the vnode of each row computed by the table's consistent
     /// hash distribution
-    pub vnode_col_idx: Option<usize>,
+    pub vnode_col_index: Option<usize>,
+
+    /// An optional column index of row id. If the primary key is specified by users, this will be
+    /// `None`.
+    pub row_id_index: Option<usize>,
 
     /// The column indices which are stored in the state store's value with row-encoding. Currently
     /// is not supported yet and expected to be `[0..columns.len()]`
@@ -133,7 +140,7 @@ impl TableCatalog {
     pub fn kind(&self) -> TableKind {
         if self.is_index {
             TableKind::Index
-        } else if self.associated_source_id.is_none() {
+        } else if self.is_mview {
             TableKind::MView
         } else {
             TableKind::TableOrSource
@@ -168,7 +175,7 @@ impl TableCatalog {
             stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
-            appendonly: self.appendonly,
+            appendonly: self.append_only,
             retention_seconds: table_options
                 .retention_seconds
                 .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
@@ -207,17 +214,21 @@ impl TableCatalog {
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
             is_index: self.is_index,
+            is_mview: self.is_mview,
             distribution_key: self
                 .distribution_key
                 .iter()
                 .map(|k| *k as i32)
                 .collect_vec(),
-            appendonly: self.appendonly,
+            appendonly: self.append_only,
             owner: self.owner,
             properties: self.properties.inner().clone(),
             fragment_id: self.fragment_id,
-            vnode_col_idx: self
-                .vnode_col_idx
+            vnode_col_index: self
+                .vnode_col_index
+                .map(|i| ProstColumnIndex { index: i as _ }),
+            row_id_index: self
+                .row_id_index
                 .map(|i| ProstColumnIndex { index: i as _ }),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
             definition: self.definition.clone(),
@@ -255,17 +266,19 @@ impl From<ProstTable> for TableCatalog {
             pk,
             columns,
             is_index: tb.is_index,
+            is_mview: tb.is_mview,
             distribution_key: tb
                 .distribution_key
                 .iter()
                 .map(|k| *k as usize)
                 .collect_vec(),
             stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
-            appendonly: tb.appendonly,
+            append_only: tb.appendonly,
             owner: tb.owner,
             properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
-            vnode_col_idx: tb.vnode_col_idx.map(|x| x.index as usize),
+            vnode_col_index: tb.vnode_col_index.map(|x| x.index as usize),
+            row_id_index: tb.row_id_index.map(|x| x.index as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition.clone(),
             handle_pk_conflict: tb.handle_pk_conflict,
@@ -303,6 +316,7 @@ mod tests {
     fn test_into_table_catalog() {
         let table: TableCatalog = ProstTable {
             is_index: false,
+            is_mview: false,
             id: 0,
             schema_id: 0,
             database_id: 0,
@@ -350,10 +364,11 @@ mod tests {
                 String::from("300"),
             )]),
             fragment_id: 0,
-            vnode_col_idx: None,
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,
+            vnode_col_index: None,
+            row_id_index: None,
         }
         .into();
 
@@ -361,6 +376,7 @@ mod tests {
             table,
             TableCatalog {
                 is_index: false,
+                is_mview: false,
                 id: TableId::new(0),
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),
@@ -401,17 +417,18 @@ mod tests {
                     direct: Direction::Asc,
                 }],
                 distribution_key: vec![],
-                appendonly: false,
+                append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
                 properties: WithOptions::new(HashMap::from([(
                     String::from(PROPERTIES_RETENTION_SECOND_KEY),
                     String::from("300")
                 )])),
                 fragment_id: 0,
-                vnode_col_idx: None,
+                vnode_col_index: None,
+                row_id_index: None,
                 value_indices: vec![0],
                 definition: "".into(),
-                handle_pk_conflict: false
+                handle_pk_conflict: false,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

@@ -367,7 +367,7 @@ mod tests {
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_pb::catalog::Table as ProstTable;
+    use risingwave_pb::catalog::{ColumnIndex, Table as ProstTable};
     use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
     use tokio::task;
 
@@ -395,6 +395,7 @@ mod tests {
     fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
         ProstTable {
             is_index: false,
+            is_mview: false,
             id: 0,
             schema_id: 0,
             database_id: 0,
@@ -474,7 +475,8 @@ mod tests {
                 String::from("300"),
             )]),
             fragment_id: 0,
-            vnode_col_idx: None,
+            vnode_col_index: None,
+            row_id_index: Some(ColumnIndex { index: 0 }),
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,

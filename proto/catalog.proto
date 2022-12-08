@@ -97,6 +97,7 @@ message Table {
     uint32 associated_source_id = 9;
   }
   bool is_index = 10;
+  bool is_mview = 11;
   repeated int32 distribution_key = 12;
   // pk_indices of the corresponding materialize operator's output.
   repeated int32 stream_key = 13;
@@ -106,13 +107,16 @@ message Table {
   uint32 fragment_id = 17;
   // an optional column index which is the vnode of each row computed by the
   // table's consistent hash distribution
-  ColumnIndex vnode_col_idx = 18;
+  ColumnIndex vnode_col_index = 18;
+  // An optional column index of row id. If the primary key is specified by users, 
+  // this will be `None`.
+  ColumnIndex row_id_index = 19;
   // The column indices which are stored in the state store's value with
   // row-encoding. Currently is not supported yet and expected to be
   // `[0..columns.len()]`.
-  repeated int32 value_indices = 19;
-  string definition = 20;
-  bool handle_pk_conflict = 21;
+  repeated int32 value_indices = 20;
+  string definition = 21;
+  bool handle_pk_conflict = 22;
 }
 
 message View {

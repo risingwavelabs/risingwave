@@ -260,6 +260,7 @@ pub(crate) fn gen_materialize_plan(
             handle_pk_conflict,
             false, // TODO(Yuanxin): true
             None,  // TODO(Yuanxin): row_id_index
+            false,
         )?
     };
     let mut table = materialize

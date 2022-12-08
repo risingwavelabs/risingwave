@@ -190,13 +190,14 @@ impl<S: StateStore> StateTable<S> {
             None => Distribution::fallback(),
         };
 
-        let vnode_col_idx_in_pk = table_catalog
-            .vnode_col_idx
-            .as_ref()
-            .and_then(|vnode_col_idx| {
-                let vnode_col_idx = vnode_col_idx.index as usize;
-                pk_indices.iter().position(|&i| vnode_col_idx == i)
-            });
+        let vnode_col_idx_in_pk =
+            table_catalog
+                .vnode_col_index
+                .as_ref()
+                .and_then(|vnode_col_idx| {
+                    let vnode_col_idx = vnode_col_idx.index as usize;
+                    pk_indices.iter().position(|&i| vnode_col_idx == i)
+                });
         let input_value_indices = table_catalog
             .value_indices
             .iter()

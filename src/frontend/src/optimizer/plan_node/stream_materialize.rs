@@ -66,8 +66,10 @@ impl StreamMaterialize {
         user_cols: FixedBitSet,
         out_names: Vec<String>,
         is_index: bool,
+        is_mview: bool,
         definition: String,
         handle_pk_conflict: bool,
+        row_id_index: Option<usize>,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
@@ -160,12 +162,14 @@ impl StreamMaterialize {
             stream_key: pk_indices.clone(),
             distribution_key: base.dist.dist_column_indices().to_vec(),
             is_index,
-            appendonly: input.append_only(),
+            is_mview,
+            append_only: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
-            vnode_col_idx: None,
+            vnode_col_index: None,
+            row_id_index,
             value_indices,
             definition,
             handle_pk_conflict,
