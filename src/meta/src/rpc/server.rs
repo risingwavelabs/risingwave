@@ -484,7 +484,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let intercept_clone = intercept.clone();
 
         // run follower services until node becomes leader
-        let heartbeat_srv_clone = heartbeat_srv.clone();
         let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
         let (follower_shutdown_tx, follower_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let (follower_finished_tx, follower_finished_rx) = tokio::sync::oneshot::channel::<()>();
@@ -494,11 +493,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 let health_srv = HealthServiceImpl::new();
                 tonic::transport::Server::builder()
                     .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
-                    .add_service(HeartbeatServiceServer::with_interceptor(
-                        // TODO: remove heartbeat srv. Replace with follower srv
-                        heartbeat_srv_clone,
-                        intercept_clone.clone(),
-                    ))
                     .add_service(HealthServer::with_interceptor(health_srv, intercept_clone))
                     .serve_with_shutdown(address_info.listen_addr, async move {
                         tokio::select! {
@@ -521,19 +515,15 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                     .unwrap();
                 match follower_finished_tx.send(()) {
                     Ok(_) => tracing::info!("Signaling that follower service is down"),
-                    Err(_) => tracing::info!(
+                    Err(_) => tracing::error!(
                         "Error when signaling that follower service is down. Receiver dropped"
                     ),
                 }
             });
         }
 
-        // loop until this node becomes a leader
-        // TODO: use while loop
-        loop {
-            if services_leader_rx.borrow().clone().1 {
-                break;
-            }
+        // wait until this node becomes a leader
+        while !services_leader_rx.borrow().clone().1 {
             if services_leader_rx.changed().await.is_err() {
                 panic!("Leader sender dropped");
             }
