@@ -45,7 +45,7 @@ pub mod resource_util {
         env::consts::OS.eq(DEFAULT_LINUX_IDENTIFIER)
     }
 
-    // returns a cgroup version if it exists, else returns None.
+    // Returns a cgroup version if it exists, else returns None.
     // Checks for the existence of the root hierarchy directory.
     fn get_cgroup_version() -> Option<CgroupVersion> {
         // check if cgroup exists.
