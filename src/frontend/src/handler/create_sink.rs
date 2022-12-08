@@ -40,7 +40,7 @@ fn into_sink_prost(table: Table) -> ProstSink {
         dependent_relations: table.dependent_relations,
         distribution_key: table.distribution_key,
         stream_key: table.stream_key,
-        appendonly: table.appendonly,
+        append_only: table.append_only,
         properties: table.properties,
         owner: table.owner,
         definition: table.definition,

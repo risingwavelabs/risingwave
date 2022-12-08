@@ -468,7 +468,7 @@ mod tests {
             dependent_relations: vec![],
             distribution_key: (0..column_count as i32).collect_vec(),
             optional_associated_source_id: None,
-            appendonly: false,
+            append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: HashMap::from([(
                 String::from(PROPERTIES_RETENTION_SECOND_KEY),

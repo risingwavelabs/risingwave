@@ -175,7 +175,7 @@ impl TableCatalog {
             stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
-            appendonly: self.append_only,
+            append_only: self.append_only,
             retention_seconds: table_options
                 .retention_seconds
                 .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
@@ -220,7 +220,7 @@ impl TableCatalog {
                 .iter()
                 .map(|k| *k as i32)
                 .collect_vec(),
-            appendonly: self.append_only,
+            append_only: self.append_only,
             owner: self.owner,
             properties: self.properties.inner().clone(),
             fragment_id: self.fragment_id,
@@ -273,7 +273,7 @@ impl From<ProstTable> for TableCatalog {
                 .map(|k| *k as usize)
                 .collect_vec(),
             stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
-            append_only: tb.appendonly,
+            append_only: tb.append_only,
             owner: tb.owner,
             properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
@@ -357,7 +357,7 @@ mod tests {
             distribution_key: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
-            appendonly: false,
+            append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: HashMap::from([(
                 String::from(PROPERTIES_RETENTION_SECOND_KEY),
