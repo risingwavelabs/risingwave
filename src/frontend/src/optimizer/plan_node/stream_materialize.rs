@@ -150,7 +150,7 @@ impl StreamMaterialize {
         }
 
         let ctx = input.ctx();
-        let properties = ctx.inner().with_options.internal_table_subset();
+        let properties = ctx.with_options().internal_table_subset();
         let table = TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
