@@ -37,7 +37,7 @@ pub mod resource_util {
     const DEFAULT_LINUX_IDENTIFIER: &str = "linux";
     const DEFAULT_IN_CONTAINER_ENV_VARIABLE: &str = "IN_CONTAINER";
 
-    pub fn get_default_root_hierarchy() -> String {
+    fn get_default_root_hierarchy() -> String {
         String::from(DEFAULT_CGROUP_ROOT_HIERARCYHY)
     }
 
