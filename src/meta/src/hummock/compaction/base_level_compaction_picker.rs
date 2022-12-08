@@ -537,7 +537,7 @@ pub mod tests {
                     generate_table(2, 1, 400, 699, 2),
                     generate_table(3, 1, 700, 999, 2),
                 ],
-                total_file_size: 0,
+                total_file_size: 900,
                 sub_level_id: 0,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
