@@ -28,7 +28,7 @@ echo "--- Rust cargo-sort check"
 cargo sort -c -w
 
 echo "--- Rust cargo-hakari check"
-cargo hakari verify
+cargo hakari generate --diff
 
 echo "--- Rust format check"
 cargo fmt --all -- --check
