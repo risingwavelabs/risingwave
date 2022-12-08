@@ -543,6 +543,7 @@ mod default {
         pub fn total_memory_available_bytes() -> usize {
             16 * 1024 * 1024 * 1024
         }
+
         #[cfg(not(madsim))]
         pub fn total_memory_available_bytes() -> usize {
             use util::resource_util;
