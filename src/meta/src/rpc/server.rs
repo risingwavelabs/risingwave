@@ -418,10 +418,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let _enter = span.enter();
         let mut was_leader = false;
         loop {
-            // TODO: panic if sender dropped?
             if note_status_leader_rx.changed().await.is_err() {
-                tracing::error!("Issue receiving leader value from channel");
-                continue;
+                panic!("Issue receiving leader value from channel");
             }
 
             let (leader_addr, is_leader) = note_status_leader_rx.borrow().clone();
@@ -458,6 +456,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     // TODO:
     // we only can define leader services when they are needed. Otherwise they already do things
+    // FIXME: Start leader services if follower becomes leader
 
     tokio::spawn(async move {
         let span = tracing::span!(tracing::Level::INFO, "services");
@@ -467,17 +466,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             leader_rx: intercept_leader_rx,
         };
 
-        // FIXME: Start leader services if follower becomes leader
-
         // failover logic
         let (svc_shutdown_tx, svc_shutdown_rx) = tokio::sync::oneshot::channel();
 
-        loop {
-            if services_leader_rx.changed().await.is_err() {
-                tracing::error!("Issue receiving leader value from channel");
-                continue;
-            }
-            break;
+        if services_leader_rx.changed().await.is_err() {
+            panic!("Issue receiving leader value from channel");
         }
 
         let is_leader = services_leader_rx.borrow().clone().1;
@@ -502,18 +495,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                     .unwrap();
             });
 
-            // Follower to leader in next PR
-
             // loop until this node becomes a leader
             loop {
-                loop {
-                    // TODO: Do we really want to loop to get a value?
-                    // Do we want to panic if sender drops?
-                    if services_leader_rx.changed().await.is_err() {
-                        tracing::error!("Issue receiving leader value from channel");
-                        continue;
-                    }
-                    break;
+                if services_leader_rx.changed().await.is_err() {
+                    panic!("Issue receiving leader value from channel");
                 }
                 if services_leader_rx.borrow().clone().1 {
                     break;
