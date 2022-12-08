@@ -23,10 +23,11 @@ mod plan_correlated_id_finder;
 mod plan_rewriter;
 mod plan_visitor;
 pub use plan_visitor::PlanVisitor;
+mod optimizer_context;
 mod rule;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
+pub use optimizer_context::*;
 use property::Order;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -203,6 +204,14 @@ impl PlanRoot {
             .into());
         }
 
+        // Predicate push down before translate apply, because we need to calculate the domain
+        // and predicate push down can reduce the size of domain.
+        plan = plan.predicate_pushdown(Condition::true_cond());
+        if explain_trace {
+            ctx.trace("Predicate Push Down:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
         // join.
@@ -216,10 +225,10 @@ impl PlanRoot {
             plan,
             "General Unnesting(Push Down Apply)".to_string(),
             vec![
-                ApplyAggRule::create(),
-                ApplyFilterRule::create(),
-                ApplyProjRule::create(),
-                ApplyJoinRule::create(),
+                ApplyAggTransposeRule::create(),
+                ApplyFilterTransposeRule::create(),
+                ApplyProjectTransposeRule::create(),
+                ApplyJoinTransposeRule::create(),
                 ApplyScanRule::create(),
             ],
             ApplyOrder::TopDown,
@@ -583,8 +592,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_as_subplan() {

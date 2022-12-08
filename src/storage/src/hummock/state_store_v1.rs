@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures::TryFutureExt;
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
@@ -60,7 +61,7 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore, StateStoreIter,
+    define_state_store_write_associated_type,
 };
 
 impl HummockStorageV1 {
@@ -411,7 +412,7 @@ impl HummockStorageV1 {
 }
 
 impl StateStoreRead for HummockStorageV1 {
-    type Iter = HummockStateStoreIter;
+    type IterStream = StreamTypeOfIter<HummockStateStoreIter>;
 
     define_state_store_read_associated_type!();
 
@@ -432,9 +433,9 @@ impl StateStoreRead for HummockStorageV1 {
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        let iter =
-            self.iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options);
-        iter.in_span(self.tracing.new_tracer("hummock_iter"))
+        self.iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options)
+            .map_ok(|iter| iter.into_stream())
+            .in_span(self.tracing.new_tracer("hummock_iter"))
     }
 }
 
@@ -605,11 +606,9 @@ impl HummockStateStoreIter {
 }
 
 impl StateStoreIter for HummockStateStoreIter {
-    // TODO: directly return `&[u8]` to user instead of `Bytes`.
-    type Item = (FullKey<Vec<u8>>, Bytes);
+    type Item = StateStoreIterItem;
 
-    type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
+    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {

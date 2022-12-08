@@ -14,6 +14,7 @@
 
 use std::future::Future;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -58,6 +59,9 @@ pub struct Configuration {
 
     /// The probability of etcd request timeout.
     pub etcd_timeout_rate: f32,
+
+    /// Path to etcd data file.
+    pub etcd_data_path: Option<PathBuf>,
 }
 
 impl Configuration {
@@ -70,6 +74,7 @@ impl Configuration {
             compactor_nodes: 2,
             compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
         }
     }
 }
@@ -107,17 +112,22 @@ impl Cluster {
         println!("{:#?}", conf);
 
         // etcd node
+        let etcd_data = conf
+            .etcd_data_path
+            .as_ref()
+            .map(|path| std::fs::read_to_string(path).unwrap());
         handle
             .create_node()
             .name("etcd")
             .ip("192.168.10.1".parse().unwrap())
-            .init(move || async move {
+            .init(move || {
                 let addr = "0.0.0.0:2388".parse().unwrap();
-                etcd_client::SimServer::builder()
-                    .timeout_rate(conf.etcd_timeout_rate)
-                    .serve(addr)
-                    .await
-                    .unwrap();
+                let mut builder =
+                    etcd_client::SimServer::builder().timeout_rate(conf.etcd_timeout_rate);
+                if let Some(data) = &etcd_data {
+                    builder = builder.load(data.clone());
+                }
+                builder.serve(addr)
             })
             .build();
 
@@ -195,6 +205,8 @@ impl Cluster {
                 "192.168.1.1:5690",
                 "--state-store",
                 "hummock+memory-shared",
+                "--parallelism",
+                &conf.compute_node_cores.to_string(),
             ]);
             handle
                 .create_node()
