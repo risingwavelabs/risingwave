@@ -24,6 +24,7 @@ use crate::source::{SplitId, SplitMetaData};
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct CdcSplit {
     pub source_id: u32,
+    pub partition: String,
     pub start_offset: Option<String>,
 }
 
@@ -42,14 +43,15 @@ impl SplitMetaData for CdcSplit {
 }
 
 impl CdcSplit {
-    pub fn new(source_id: u32, start_offset: String) -> CdcSplit {
+    pub fn new(source_id: u32, partition: String, start_offset: String) -> CdcSplit {
         Self {
             source_id,
+            partition,
             start_offset: Some(start_offset),
         }
     }
 
     pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        Self::new(self.source_id, start_offset)
+        Self::new(self.source_id, self.partition.clone(), start_offset)
     }
 }

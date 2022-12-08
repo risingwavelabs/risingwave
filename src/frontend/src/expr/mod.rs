@@ -111,7 +111,7 @@ impl ExprImpl {
     /// A literal varchar value.
     #[inline(always)]
     pub fn literal_varchar(v: String) -> Self {
-        Literal::new(Some(v.to_scalar_value()), DataType::Varchar).into()
+        Literal::new(Some(v.into()), DataType::Varchar).into()
     }
 
     /// A literal null value.

@@ -21,10 +21,10 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
 use super::RwPgResponse;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub fn handle_set(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     name: Ident,
     value: Vec<SetVariableValue>,
 ) -> Result<RwPgResponse> {
@@ -33,19 +33,19 @@ pub fn handle_set(
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
     // We remark that the name of session parameter is always case-insensitive.
-    context
-        .session_ctx
+    handler_args
+        .session
         .set_config(&name.real_value().to_lowercase(), string_vals)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_OPTION))
 }
 
-pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Result<RwPgResponse> {
-    let config_reader = context.session_ctx.config();
+pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Result<RwPgResponse> {
+    let config_reader = handler_args.session.config();
     // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
     let name = variable.iter().map(|e| e.real_value()).join(" ");
     if name.eq_ignore_ascii_case("ALL") {
-        return handle_show_all(&context);
+        return handle_show_all(handler_args.clone());
     }
     let row = Row::new(vec![Some(config_reader.get(&name)?.into())]);
 
@@ -61,8 +61,8 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
     ))
 }
 
-pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<RwPgResponse> {
-    let config_reader = context.session_ctx.config();
+pub(super) fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    let config_reader = handler_args.session.config();
 
     let all_variables = config_reader.get_all();
 

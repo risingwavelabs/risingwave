@@ -21,7 +21,7 @@ use risingwave_common::catalog::{Field, Schema};
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{assert_input_ref, Expr, ExprDisplay, ExprImpl, InputRef};
-use crate::session::OptimizerContextRef;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 
 fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
@@ -184,6 +184,12 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     /// column corresponds more than one out columns, mapping to any one
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.o2i_col_mapping().inverse()
+    }
+
+    pub fn is_all_inputref(&self) -> bool {
+        self.exprs
+            .iter()
+            .all(|expr| matches!(expr, ExprImpl::InputRef(_)))
     }
 
     pub fn is_identity(&self) -> bool {

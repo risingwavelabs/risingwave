@@ -21,9 +21,29 @@ use crate::optimizer::plan_node::{LogicalApply, LogicalProject};
 use crate::optimizer::PlanRef;
 use crate::utils::ColIndexMapping;
 
-/// Push `LogicalApply` down `LogicalProject`.
-pub struct ApplyProjRule {}
-impl Rule for ApplyProjRule {
+/// Transpose `LogicalApply` and `LogicalProject`.
+///
+/// Before:
+///
+/// ```text
+///     LogicalApply
+///    /            \
+///  Domain      LogicalProject
+///                  |
+///                Input
+/// ```
+///
+/// After:
+///
+/// ```text
+///    LogicalProject
+///          |
+///    LogicalApply
+///    /            \
+///  Domain        Input
+/// ```
+pub struct ApplyProjectTransposeRule {}
+impl Rule for ApplyProjectTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
@@ -84,9 +104,9 @@ impl Rule for ApplyProjRule {
     }
 }
 
-impl ApplyProjRule {
+impl ApplyProjectTransposeRule {
     pub fn create() -> BoxedRule {
-        Box::new(ApplyProjRule {})
+        Box::new(ApplyProjectTransposeRule {})
     }
 }
 

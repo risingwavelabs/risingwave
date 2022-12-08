@@ -15,7 +15,7 @@
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
-use crate::session::OptimizerContextRef;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::utils::Condition;
 
 /// [`Filter`] iterates over its input and returns elements for which `predicate` evaluates to
