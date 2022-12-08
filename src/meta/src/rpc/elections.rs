@@ -83,16 +83,25 @@ async fn campaign<S: MetaStore>(
     };
 
     // get old leader info and lease
-    let current_leader_info = match get_infos(meta_store).await {
+    let (current_leader_info, current_lease_info) = match get_infos(meta_store).await {
         None => return None,
         Some(infos) => {
-            let (leader, _) = infos;
-            leader
+            let (leader, lease) = infos;
+            (leader, lease)
         }
     };
 
+    // Delete leader info, if leader lease timed out
+    let lease_expired = if !current_leader_info.is_empty() {
+        let some_time = lease_time_sec / 2;
+        let lease_info = MetaLeaseInfo::decode(current_lease_info.as_slice()).unwrap();
+        lease_info.get_lease_expire_time() + some_time < since_epoch().as_secs()
+    } else {
+        false
+    };
+
     // Initial leader election
-    if current_leader_info.is_empty() {
+    if current_leader_info.is_empty() || lease_expired {
         tracing::info!("We have no leader");
 
         // cluster has no leader
