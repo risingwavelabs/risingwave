@@ -242,8 +242,6 @@ pub fn spawn_data_generation_stream<T: Send + 'static>(
 
 #[cfg(test)]
 mod tests {
-    use std::str::from_utf8;
-
     use maplit::*;
     use nexmark::event::EventType;
 
@@ -265,11 +263,7 @@ mod tests {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
         let split_impl = SplitImpl::Cdc(CdcSplit::new(1001, offset_str.to_string()));
         let encoded_split = split_impl.encode_to_bytes();
-        // encoded bytes can convert to a valid string
-        let ret = from_utf8(encoded_split.as_ref());
-        assert!(ret.is_ok());
-        let string = ret.unwrap().to_string();
-        let restored_split_impl = SplitImpl::restore_from_bytes(string.as_bytes())?;
+        let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
         assert_eq!(
             split_impl.encode_to_bytes(),
             restored_split_impl.encode_to_bytes()

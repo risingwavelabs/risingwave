@@ -77,7 +77,7 @@ impl Source {
             type_name: "".to_string(),
         };
         let value = Field {
-            data_type: DataType::Varchar,
+            data_type: DataType::Bytea,
             name: "offset".to_string(),
             sub_fields: vec![],
             type_name: "".to_string(),
