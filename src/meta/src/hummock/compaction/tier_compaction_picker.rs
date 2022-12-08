@@ -114,7 +114,7 @@ impl TierCompactionPicker {
             // do not pick a compact task with large write amplification.
             if level.level_type == non_overlapping_type
                 && is_write_amp_large
-                && compaction_bytes < max_compaction_bytes
+                && (select_level_inputs.len() == 1 || compaction_bytes < max_compaction_bytes)
             {
                 continue;
             }

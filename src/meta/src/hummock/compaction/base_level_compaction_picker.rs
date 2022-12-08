@@ -123,8 +123,7 @@ impl CompactionPicker for LevelCompactionPicker {
             }
 
             let all_level_amplification =
-                cal_file_size(&levels.get_level(self.target_level).table_infos) * 100
-                    / l0_total_file_size;
+                levels.get_level(self.target_level).total_file_size * 100 / l0_total_file_size;
             if all_level_amplification > MAX_WRITE_AMPLIFICATION
                 && l0_total_file_size < self.config.max_compaction_bytes
             {
@@ -470,7 +469,16 @@ pub mod tests {
     // compact the whole level and upper sub-level when the write-amplification is more than 1.5.
     #[test]
     fn test_compact_whole_level_write_amplification_limit() {
-        let picker = create_compaction_picker_for_test();
+        let config = CompactionConfigBuilder::new()
+            .level0_tier_compact_file_number(2)
+            .max_compaction_bytes(1000)
+            .build();
+        let picker = LevelCompactionPicker::new(
+            1,
+            Arc::new(config),
+            Arc::new(RangeOverlapStrategy::default()),
+        );
+
         let mut levels = Levels {
             levels: vec![Level {
                 level_idx: 1,
@@ -507,6 +515,14 @@ pub mod tests {
         assert_eq!(ret.input_levels[2].table_infos[0].id, 1);
         assert_eq!(ret.input_levels[2].table_infos[1].id, 2);
         assert_eq!(ret.input_levels[2].table_infos[2].id, 3);
+        levels.levels[0].table_infos[0].file_size += 1600 - levels.levels[0].total_file_size;
+        levels.levels[0].total_file_size = 1600;
+        let sub_level = &mut levels.l0.as_mut().unwrap().sub_levels[0];
+        sub_level.table_infos[0].file_size += 1000 - sub_level.total_file_size;
+        sub_level.total_file_size = 1000;
+        levels.l0.as_mut().unwrap().sub_levels[1].total_file_size = 1000;
+        let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
+        assert_eq!(ret.input_levels.len(), 2);
     }
 
     #[test]
