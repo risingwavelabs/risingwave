@@ -131,12 +131,12 @@ pub(crate) fn rebalance_actor_vnode(
     assert!(target_actor_count > 0);
 
     // represents the balance of each actor, used to sort later
+    #[derive(Debug)]
     struct Balance {
         actor_id: ActorId,
         balance: i32,
         builder: BitmapBuilder,
     }
-
     let (expected, mut remain) = VirtualNode::COUNT.div_rem(&target_actor_count);
 
     tracing::debug!(
@@ -591,10 +591,24 @@ where
 
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
-            let actor_vnode =
-                rebalance_actor_vnode(&fragment.actors, &actors_to_remove, &actors_to_create);
+            match fragment.distribution_type() {
+                FragmentDistributionType::Single => {
+                    // Skip rebalance action for single distribution (always None)
+                    fragment_actor_bitmap
+                        .insert(fragment.fragment_id as FragmentId, Default::default());
+                }
+                FragmentDistributionType::Hash => {
+                    let actor_vnode = rebalance_actor_vnode(
+                        &fragment.actors,
+                        &actors_to_remove,
+                        &actors_to_create,
+                    );
 
-            fragment_actor_bitmap.insert(fragment.fragment_id as FragmentId, actor_vnode);
+                    fragment_actor_bitmap.insert(fragment.fragment_id as FragmentId, actor_vnode);
+                }
+
+                FragmentDistributionType::Unspecified => unreachable!(),
+            }
         }
 
         // Index for fragment -> { actor -> parallel_unit } after reschedule.
@@ -646,6 +660,7 @@ where
             ctx: &RescheduleContext,
             fragment_id: &FragmentId,
             upstream_fragment_id: &FragmentId,
+            fragment_map: &HashMap<FragmentId, Fragment>,
             fragment_actors_after_reschedule: &HashMap<
                 FragmentId,
                 BTreeMap<ActorId, ParallelUnitId>,
@@ -663,10 +678,13 @@ where
                 return;
             }
 
-            let upstream_fragment_bitmap = fragment_updated_bitmap
+            let fragment = fragment_map.get(fragment_id).unwrap();
+
+            // If the upstream is a Singleton Fragment, there will be no Bitmap changes
+            let mut upstream_fragment_bitmap = fragment_updated_bitmap
                 .get(upstream_fragment_id)
                 .cloned()
-                .unwrap();
+                .unwrap_or_default();
 
             let upstream_fragment_actor_map = fragment_actors_after_reschedule
                 .get(upstream_fragment_id)
@@ -681,18 +699,28 @@ where
             }
 
             let mut fragment_bitmap = HashMap::new();
-            for (upstream_actor_id, bitmap) in upstream_fragment_bitmap {
-                let parallel_unit_id = upstream_fragment_actor_map.get(&upstream_actor_id).unwrap();
-                let actor_id = parallel_unit_id_to_actor_id.get(parallel_unit_id).unwrap();
+            for (upstream_actor_id, parallel_unit_id) in upstream_fragment_actor_map {
+                let actor_id = parallel_unit_id_to_actor_id.get(&parallel_unit_id).unwrap();
 
-                // Copy the bitmap
-                fragment_bitmap.insert(*actor_id, bitmap);
+                if let Some(bitmap) = upstream_fragment_bitmap.remove(&upstream_actor_id) {
+                    // Copy the bitmap
+                    fragment_bitmap.insert(*actor_id, bitmap);
+                }
 
                 no_shuffle_upstream_actor_map.insert(*actor_id as ActorId, upstream_actor_id);
                 no_shuffle_downstream_actors_map
                     .entry(upstream_actor_id)
                     .or_default()
                     .insert(*fragment_id, *actor_id);
+            }
+
+            match fragment.distribution_type() {
+                FragmentDistributionType::Hash => {}
+                FragmentDistributionType::Single => {
+                    // single distribution should update nothing
+                    assert!(fragment_bitmap.is_empty());
+                }
+                FragmentDistributionType::Unspecified => unreachable!(),
             }
 
             fragment_updated_bitmap
@@ -705,6 +733,7 @@ where
                         ctx,
                         downstream_fragment_id,
                         fragment_id,
+                        fragment_map,
                         fragment_actors_after_reschedule,
                         fragment_updated_bitmap,
                         no_shuffle_upstream_actor_map,
@@ -728,6 +757,7 @@ where
                             &ctx,
                             downstream_fragment_id,
                             fragment_id,
+                            &ctx.fragment_map,
                             &fragment_actors_after_reschedule,
                             &mut fragment_actor_bitmap,
                             &mut no_shuffle_upstream_actor_map,
@@ -751,8 +781,6 @@ where
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
             assert!(!fragment.actors.is_empty());
-
-            let updated_bitmap = fragment_actor_bitmap.get(fragment_id).unwrap();
 
             for (actor_to_create, sample_actor) in actors_to_create
                 .iter()
@@ -806,7 +834,10 @@ where
                     &mut new_actor,
                 )?;
 
-                if let Some(bitmap) = updated_bitmap.get(new_actor_id) {
+                if let Some(bitmap) = fragment_actor_bitmap
+                    .get(fragment_id)
+                    .and_then(|actor_bitmaps| actor_bitmaps.get(new_actor_id))
+                {
                     new_actor.vnode_bitmap = Some(bitmap.to_protobuf());
                 }
 
@@ -975,12 +1006,17 @@ where
                             ],
                         })
                     } else {
+                        // Changes of the bitmap must occur in the case of HashDistribution
                         Some(actor_mapping_from_bitmaps(
                             fragment_actor_bitmap.get(&fragment_id).unwrap(),
                         ))
                     }
                 }
-                FragmentDistributionType::Single => None,
+
+                FragmentDistributionType::Single => {
+                    assert!(fragment_actor_bitmap.get(&fragment_id).unwrap().is_empty());
+                    None
+                }
                 FragmentDistributionType::Unspecified => unreachable!(),
             };
 
@@ -1020,26 +1056,35 @@ where
                     None
                 };
 
-            let mut vnode_bitmap_updates = fragment_actor_bitmap.remove(&fragment_id).unwrap();
+            let vnode_bitmap_updates = match fragment.distribution_type() {
+                FragmentDistributionType::Hash => {
+                    let mut vnode_bitmap_updates =
+                        fragment_actor_bitmap.remove(&fragment_id).unwrap();
 
-            // We need to keep the bitmaps from changed actors only,
-            // otherwise the barrier will become very large with many actors
-            for actor_id in actors_after_reschedule.keys() {
-                assert!(vnode_bitmap_updates.contains_key(actor_id));
+                    // We need to keep the bitmaps from changed actors only,
+                    // otherwise the barrier will become very large with many actors
+                    for actor_id in actors_after_reschedule.keys() {
+                        assert!(vnode_bitmap_updates.contains_key(actor_id));
 
-                // retain actor
-                if let Some(actor) = ctx.actor_map.get(actor_id) {
-                    let bitmap = vnode_bitmap_updates.get(actor_id).unwrap();
+                        // retain actor
+                        if let Some(actor) = ctx.actor_map.get(actor_id) {
+                            let bitmap = vnode_bitmap_updates.get(actor_id).unwrap();
 
-                    if let Some(buffer) = actor.vnode_bitmap.as_ref() {
-                        let prev_bitmap = Bitmap::from(buffer);
+                            if let Some(buffer) = actor.vnode_bitmap.as_ref() {
+                                let prev_bitmap = Bitmap::from(buffer);
 
-                        if prev_bitmap.eq(bitmap) {
-                            vnode_bitmap_updates.remove(actor_id);
+                                if prev_bitmap.eq(bitmap) {
+                                    vnode_bitmap_updates.remove(actor_id);
+                                }
+                            }
                         }
                     }
+
+                    vnode_bitmap_updates
                 }
-            }
+                FragmentDistributionType::Single => HashMap::new(),
+                FragmentDistributionType::Unspecified => unreachable!(),
+            };
 
             let upstream_fragment_dispatcher_ids =
                 upstream_fragment_dispatcher_set.into_iter().collect_vec();

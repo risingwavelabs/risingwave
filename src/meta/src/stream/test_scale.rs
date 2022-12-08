@@ -284,6 +284,40 @@ mod tests {
     }
 
     #[test]
+    fn test_rebalance_single_migration() {
+        for parallel_unit_num in vec![1] {
+            let actors = build_fake_actors(
+                &(0..parallel_unit_num)
+                    .map(|i| (i as ActorId, i as ParallelUnitId))
+                    .collect_vec(),
+            );
+
+            for idx in 0..parallel_unit_num {
+                let actors_to_remove = btreeset! {idx as ActorId};
+                let actors_to_add = btreeset! {parallel_unit_num as ActorId};
+                let result = rebalance_actor_vnode(&actors, &actors_to_remove, &actors_to_add);
+
+                assert_eq!(
+                    result.len(),
+                    actors.len() - actors_to_remove.len() + actors_to_add.len()
+                );
+
+                check_bitmaps(&result);
+
+                for actor in &actors {
+                    if actor.actor_id == idx as ActorId {
+                        continue;
+                    }
+
+                    let target_bitmap = result.get(&actor.actor_id).unwrap();
+                    let prev_bitmap = Bitmap::from(actor.vnode_bitmap.as_ref().unwrap());
+                    assert!(prev_bitmap.eq(target_bitmap));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn test_rebalance_migration() {
         for parallel_unit_num in simulated_parallel_unit_nums(Some(3), None) {
             let actors = build_fake_actors(
