@@ -15,6 +15,7 @@
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use tokio_postgres::error::Error as PgError;
+use std::time::Instant;
 
 use crate::{
     create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
@@ -23,16 +24,32 @@ use crate::{
 /// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {
     let mut rng = rand::rngs::SmallRng::from_entropy();
+
+    let now = Instant::now();
     let (tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
+    let elapsed_time = now.elapsed();
+    tracing::info!("Finished create table in {}s", elapsed_time.as_secs());
 
+    let now = Instant::now();
     test_sqlsmith(client, &mut rng, tables.clone(), &setup_sql).await;
-    tracing::info!("Passed sqlsmith tests");
-    test_batch_queries(client, &mut rng, tables.clone(), &setup_sql, count).await;
-    tracing::info!("Passed batch queries");
-    test_stream_queries(client, &mut rng, tables.clone(), &setup_sql, count).await;
-    tracing::info!("Passed stream queries");
+    let elapsed_time = now.elapsed();
+    tracing::info!("Finished testing sqlsmith in {}s", elapsed_time.as_secs());
 
+    let now = Instant::now();
+    test_batch_queries(client, &mut rng, tables.clone(), &setup_sql, count).await;
+    let elapsed_time = now.elapsed();
+    tracing::info!("Finished testing batch queries in {}s", elapsed_time.as_secs());
+
+    let now = Instant::now();
+    test_stream_queries(client, &mut rng, tables.clone(), &setup_sql, count).await;
+    let elapsed_time = now.elapsed();
+    tracing::info!("Finished testing stream queries in {}s", elapsed_time.as_secs());
+
+    let now = Instant::now();
     drop_tables(&mviews, testdata, client).await;
+    let elapsed_time = now.elapsed();
+    tracing::info!("Finished cleanup in {}s", elapsed_time.as_secs());
+
 }
 
 /// Sanity checks for sqlsmith
@@ -80,8 +97,11 @@ async fn test_batch_queries<R: Rng>(
         .await
         .unwrap();
     let mut skipped = 0;
-    for _ in 0..sample_size {
-        let sql = sql_gen(rng, tables.clone());
+    let now = Instant::now();
+    let sqls: Vec<String> = (0..sample_size).map(|_| sql_gen(rng, tables.clone())).collect();
+    let elapsed_time = now.elapsed();
+    tracing::info!("Finished generating batch queries in {}s", elapsed_time.as_secs());
+    for sql in sqls {
         tracing::info!("Executing: {}", sql);
         let response = client.query(sql.as_str(), &[]).await;
         skipped += validate_response(setup_sql, &format!("{};", sql), response);
@@ -98,9 +118,12 @@ async fn test_stream_queries<R: Rng>(
     sample_size: usize,
 ) -> f64 {
     let mut skipped = 0;
-    for _ in 0..sample_size {
-        let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
-        tracing::info!("Executing: {}", sql);
+    let now = Instant::now();
+    let sqls: Vec<(String, Table)> = (0..sample_size).map(|_| mview_sql_gen(rng, tables.clone(), "stream_query")).collect();
+    let elapsed_time = now.elapsed();
+    tracing::info!("Finished generating stream queries in {}s", elapsed_time.as_secs());
+    for (sql, table) in sqls {
+        tracing::debug!("Executing: {}", sql);
         let response = client.execute(&sql, &[]).await;
         skipped += validate_response(setup_sql, &format!("{};", sql), response);
         drop_mview_table(&table, client).await;
