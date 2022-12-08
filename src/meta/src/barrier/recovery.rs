@@ -127,9 +127,10 @@ where
             let mut new_epoch = prev_epoch.next();
 
             // Migrate actors in expired CN to newly joined one.
-            if self.migrate_actors(&info).await.inspect_err(|err| {
+            let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
                 error!(err = ?err, "migrate actors failed");
-            })? {
+            })?;
+            if migrated {
                 info = self.resolve_actor_info_for_recovery().await;
             }
 
