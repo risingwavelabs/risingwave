@@ -279,6 +279,7 @@ impl ToStream for LogicalFilter {
                         Type::Add | Type::Subtract => {
                             let mut now_delta_expr = function_call.clone();
                             now_delta_expr.inputs_mut()[0] = ExprImpl::from(InputRef::new(0, DataType::Timestamp));
+                            // We cannot call `LogicalProject::to_stream()` here, because its input is already a stream.
                             StreamProject::new(LogicalProject::new(StreamNow::new(self.ctx()).into(), vec![ExprImpl::from(now_delta_expr)])).into()
                         },
                         // We can panic here because we have checked above
