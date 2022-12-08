@@ -42,7 +42,7 @@ use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
-use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
+use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -799,8 +799,7 @@ fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<Pg
         session,
         Arc::from(sql),
         WithOptions::try_from(&stmt)?,
-        false,
-        false,
+        ExplainOptions::default(),
     );
     let session = context.session_ctx().clone();
 

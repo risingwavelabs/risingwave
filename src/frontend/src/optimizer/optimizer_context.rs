@@ -18,6 +18,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use risingwave_sqlparser::ast::ExplainOptions;
+
 use crate::expr::CorrelatedId;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::PlanNodeId;
@@ -30,10 +32,8 @@ pub struct OptimizerContext {
     next_plan_node_id: RefCell<i32>,
     /// For debugging purposes, store the SQL string in Context
     sql: Arc<str>,
-    /// It indicates whether the explain mode is verbose for explain statement
-    explain_verbose: bool,
-    /// It indicates whether the explain mode is trace for explain statement
-    explain_trace: bool,
+    /// Explain options
+    explain_options: ExplainOptions,
     /// Store the trace of optimizer
     optimizer_trace: RefCell<Vec<String>>,
     /// Store correlated id
@@ -49,8 +49,7 @@ impl OptimizerContext {
             handler_args.session,
             handler_args.sql,
             handler_args.with_options,
-            false,
-            false,
+            ExplainOptions::default(),
         )
     }
 
@@ -58,15 +57,13 @@ impl OptimizerContext {
         session_ctx: Arc<SessionImpl>,
         sql: Arc<str>,
         with_options: WithOptions,
-        explain_verbose: bool,
-        explain_trace: bool,
+        explain_options: ExplainOptions,
     ) -> Self {
         Self {
             session_ctx,
             next_plan_node_id: RefCell::new(0),
             sql,
-            explain_verbose,
-            explain_trace,
+            explain_options,
             optimizer_trace: RefCell::new(vec![]),
             next_correlated_id: RefCell::new(0),
             with_options,
@@ -81,8 +78,7 @@ impl OptimizerContext {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_plan_node_id: RefCell::new(0),
             sql: Arc::from(""),
-            explain_verbose: false,
-            explain_trace: false,
+            explain_options: ExplainOptions::default(),
             optimizer_trace: RefCell::new(vec![]),
             next_correlated_id: RefCell::new(0),
             with_options: Default::default(),
@@ -101,16 +97,17 @@ impl OptimizerContext {
     }
 
     pub fn is_explain_verbose(&self) -> bool {
-        self.explain_verbose
+        self.explain_options.verbose
     }
 
     pub fn is_explain_trace(&self) -> bool {
-        self.explain_trace
+        self.explain_options.trace
     }
 
     pub fn trace(&self, str: impl Into<String>) {
-        self.optimizer_trace.borrow_mut().push(str.into());
-        self.optimizer_trace.borrow_mut().push("\n".to_string());
+        let mut optimizer_trace = self.optimizer_trace.borrow_mut();
+        optimizer_trace.push(str.into());
+        optimizer_trace.push("\n".to_string());
     }
 
     pub fn take_trace(&self) -> Vec<String> {
@@ -130,11 +127,10 @@ impl std::fmt::Debug for OptimizerContext {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "QueryContext {{ next_plan_node_id = {}, sql = {}, explain_verbose = {}, explain_trace = {}, next_correlated_id = {}, with_options = {:?} }}",
+            "QueryContext {{ next_plan_node_id = {}, sql = {}, explain_options = {}, next_correlated_id = {}, with_options = {:?} }}",
             self.next_plan_node_id.borrow(),
             self.sql,
-            self.explain_verbose,
-            self.explain_trace,
+            self.explain_options,
             self.next_correlated_id.borrow(),
             &self.with_options
         )

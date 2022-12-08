@@ -42,8 +42,7 @@ pub(super) fn handle_explain(
         handler_args.session,
         handler_args.sql,
         handler_args.with_options,
-        options.verbose,
-        options.trace,
+        options.clone(),
     );
 
     if analyze {

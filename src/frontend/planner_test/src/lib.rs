@@ -34,7 +34,7 @@ use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef,
     PlanRef, Planner, WithOptions,
 };
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -306,12 +306,15 @@ impl TestCase {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
+                    let explain_options = ExplainOptions {
+                        verbose: true,
+                        ..Default::default()
+                    };
                     let context = OptimizerContext::new(
                         session.clone(),
                         Arc::from(sql),
                         WithOptions::try_from(&stmt)?,
-                        true, // use explain verbose in planner tests
-                        false,
+                        explain_options,
                     );
                     let ret = self.apply_query(&stmt, context.into())?;
                     if do_check_result {
