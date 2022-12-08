@@ -190,6 +190,9 @@ impl ToBatch for LogicalFilter {
     }
 }
 
+/// Apply filters by selectivity and then applicabiliy of watermark - equality condition
+/// first, then conditions of the form T > now() - Y (the timestamp needs to be greater
+/// than a watermark), then conditions similar to T < now() - Y
 fn convert_comparator_to_priority(comparator: Type) -> i32 {
     match comparator {
         Type::Equal => 0,
@@ -259,9 +262,6 @@ impl ToStream for LogicalFilter {
                     })
                 })
                 .collect_vec();
-            // Apply filters by selectivity and then applicabiliy of watermark - equality condition
-            // first, then conditions of the form T > now() - Y (the timestamp needs to be greater
-            // than a watermark), then conditions similar to T < now() - Y
             now_conds.sort_by_key(|(comparator_priority, _)| *comparator_priority);
             let simple_logical = LogicalFilter::new(self.input(), Condition { conjunctions });
             let mut cur_streaming = PlanRef::from(StreamFilter::new(
