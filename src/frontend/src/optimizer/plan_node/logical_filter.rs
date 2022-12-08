@@ -297,7 +297,7 @@ impl ToStream for LogicalFilter {
                                     self.schema().fields()[left_index].data_type(),
                                 )),
                                 ExprImpl::from(InputRef::new(
-                                    0,
+                                    self.schema().len(),
                                     rht.schema().fields()[0].data_type(),
                                 )),
                             ],
