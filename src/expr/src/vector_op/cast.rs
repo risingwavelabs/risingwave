@@ -15,11 +15,9 @@
 use std::any::type_name;
 use std::str::FromStr;
 
-use bytes::{Bytes, BytesMut};
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use itertools::Itertools;
 use num_traits::ToPrimitive;
-use postgres_types::ToSql;
 use risingwave_common::array::{Array, ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
@@ -245,33 +243,9 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-#[inline(always)]
 pub fn timestampz_to_utc_string(elem: i64) -> Box<str> {
-    // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
-    // from session. See #3552.
-    let secs = elem.div_euclid(1_000_000);
-    let nsecs = elem.rem_euclid(1_000_000) * 1000;
-    let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
-    // PostgreSQL uses a space rather than `T` to separate the date and time.
-    // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-OUTPUT
-    instant
-        .format("%Y-%m-%d %H:%M:%S%.f%:z")
-        .to_string()
+    elem.to_text_with_type(&DataType::Timestampz)
         .into_boxed_str()
-}
-
-pub fn timestampz_to_utc_binary(elem: i64) -> Bytes {
-    // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
-    // from session. See #3552.
-    let secs = elem.div_euclid(1_000_000);
-    let nsecs = elem.rem_euclid(1_000_000) * 1000;
-    let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
-    let mut out = BytesMut::new();
-    // postgres_types::Type::ANY is only used as a placeholder.
-    instant
-        .to_sql(&postgres_types::Type::ANY, &mut out)
-        .unwrap();
-    out.freeze()
 }
 
 #[inline(always)]
@@ -662,7 +636,6 @@ fn scalar_cast(
 mod tests {
 
     use num_traits::FromPrimitive;
-    use risingwave_common::types::to_text::format_bytes;
 
     use super::*;
 
@@ -905,32 +878,41 @@ mod tests {
 
     #[test]
     fn test_bytea() {
-        assert_eq!(format_bytes(&str_to_bytea("fgo").unwrap()), r"\x66676f");
+        assert_eq!(str_to_bytea("fgo").unwrap().as_ref().to_text(), r"\x66676f");
         assert_eq!(
-            format_bytes(&str_to_bytea(r"\xDeadBeef").unwrap()),
-            r"\xdeadbeef"
-        );
-        assert_eq!(format_bytes(&str_to_bytea("12CD").unwrap()), r"\x31324344");
-        assert_eq!(format_bytes(&str_to_bytea("1234").unwrap()), r"\x31323334");
-        assert_eq!(format_bytes(&str_to_bytea(r"\x12CD").unwrap()), r"\x12cd");
-        assert_eq!(
-            format_bytes(&str_to_bytea(r"\x De Ad Be Ef ").unwrap()),
+            str_to_bytea(r"\xDeadBeef").unwrap().as_ref().to_text(),
             r"\xdeadbeef"
         );
         assert_eq!(
-            format_bytes(&str_to_bytea("x De Ad Be Ef ").unwrap()),
+            str_to_bytea("12CD").unwrap().as_ref().to_text(),
+            r"\x31324344"
+        );
+        assert_eq!(
+            str_to_bytea("1234").unwrap().as_ref().to_text(),
+            r"\x31323334"
+        );
+        assert_eq!(
+            str_to_bytea(r"\x12CD").unwrap().as_ref().to_text(),
+            r"\x12cd"
+        );
+        assert_eq!(
+            str_to_bytea(r"\x De Ad Be Ef ").unwrap().as_ref().to_text(),
+            r"\xdeadbeef"
+        );
+        assert_eq!(
+            str_to_bytea("x De Ad Be Ef ").unwrap().as_ref().to_text(),
             r"\x7820446520416420426520456620"
         );
         assert_eq!(
-            format_bytes(&str_to_bytea(r"De\\123dBeEf").unwrap()),
+            str_to_bytea(r"De\\123dBeEf").unwrap().as_ref().to_text(),
             r"\x44655c3132336442654566"
         );
         assert_eq!(
-            format_bytes(&str_to_bytea(r"De\123dBeEf").unwrap()),
+            str_to_bytea(r"De\123dBeEf").unwrap().as_ref().to_text(),
             r"\x4465536442654566"
         );
         assert_eq!(
-            format_bytes(&str_to_bytea(r"De\\000dBeEf").unwrap()),
+            str_to_bytea(r"De\\000dBeEf").unwrap().as_ref().to_text(),
             r"\x44655c3030306442654566"
         );
     }

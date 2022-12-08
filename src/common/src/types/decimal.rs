@@ -24,6 +24,7 @@ use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
+use super::DataType;
 use crate::array::ArrayResult;
 use crate::error::Result as RwResult;
 use crate::types::Decimal::Normalized;
@@ -43,6 +44,13 @@ pub enum Decimal {
 impl ToText for Decimal {
     fn to_text(&self) -> String {
         self.to_string()
+    }
+
+    fn to_text_with_type(&self, ty: &DataType) -> String {
+        match ty {
+            DataType::Decimal => self.to_text(),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -68,36 +76,41 @@ impl Decimal {
 }
 
 impl ToBinary for Decimal {
-    fn to_binary(&self) -> RwResult<Option<Bytes>> {
-        let mut output = BytesMut::new();
-        match self {
-            Decimal::Normalized(d) => {
-                d.to_sql(&Type::ANY, &mut output).unwrap();
-                return Ok(Some(output.freeze()));
+    fn to_binary_with_type(&self, ty: &DataType) -> RwResult<Option<Bytes>> {
+        match ty {
+            DataType::Decimal => {
+                let mut output = BytesMut::new();
+                match self {
+                    Decimal::Normalized(d) => {
+                        d.to_sql(&Type::ANY, &mut output).unwrap();
+                        return Ok(Some(output.freeze()));
+                    }
+                    Decimal::NaN => {
+                        output.reserve(8);
+                        output.put_u16(0);
+                        output.put_i16(0);
+                        output.put_u16(0xC000);
+                        output.put_i16(0);
+                    }
+                    Decimal::PositiveInf => {
+                        output.reserve(8);
+                        output.put_u16(0);
+                        output.put_i16(0);
+                        output.put_u16(0xD000);
+                        output.put_i16(0);
+                    }
+                    Decimal::NegativeInf => {
+                        output.reserve(8);
+                        output.put_u16(0);
+                        output.put_i16(0);
+                        output.put_u16(0xF000);
+                        output.put_i16(0);
+                    }
+                };
+                Ok(Some(output.freeze()))
             }
-            Decimal::NaN => {
-                output.reserve(8);
-                output.put_u16(0);
-                output.put_i16(0);
-                output.put_u16(0xC000);
-                output.put_i16(0);
-            }
-            Decimal::PositiveInf => {
-                output.reserve(8);
-                output.put_u16(0);
-                output.put_i16(0);
-                output.put_u16(0xD000);
-                output.put_i16(0);
-            }
-            Decimal::NegativeInf => {
-                output.reserve(8);
-                output.put_u16(0);
-                output.put_i16(0);
-                output.put_u16(0xF000);
-                output.put_i16(0);
-            }
-        };
-        Ok(Some(output.freeze()))
+            _ => unreachable!(),
+        }
     }
 }
 

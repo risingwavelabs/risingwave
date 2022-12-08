@@ -22,7 +22,7 @@ use risingwave_common::util::sort_util::OrderType;
 use super::super::utils::TableCatalogBuilder;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::session::OptimizerContextRef;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::TableCatalog;
 
 /// [`Source`] returns contents of a table or other equivalent object
@@ -77,7 +77,7 @@ impl Source {
             type_name: "".to_string(),
         };
         let value = Field {
-            data_type: DataType::Varchar,
+            data_type: DataType::Bytea,
             name: "offset".to_string(),
             sub_fields: vec![],
             type_name: "".to_string(),

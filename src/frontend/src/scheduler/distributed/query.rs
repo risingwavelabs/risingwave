@@ -394,12 +394,12 @@ pub(crate) mod tests {
         LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
-    use crate::optimizer::PlanRef;
+    use crate::optimizer::{OptimizerContext, PlanRef};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
     use crate::scheduler::{ExecutionContext, HummockSnapshotManager, QueryExecutionInfo};
-    use crate::session::{OptimizerContext, SessionImpl};
+    use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
 
