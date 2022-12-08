@@ -24,7 +24,7 @@ use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_frontend::{
     handler, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef, Planner, WithOptions,
 };
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{ExplainOptions, Statement};
 use risingwave_sqlsmith::{
     create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
 };
@@ -159,6 +159,7 @@ fn test_batch_query(
         session.clone(),
         Arc::from(sql),
         WithOptions::try_from(&stmt)?,
+        ExplainOptions::default(),
     )
     .into();
 
