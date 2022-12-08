@@ -90,13 +90,16 @@ impl Default for AddressInfo {
     }
 }
 
+// TODO: in imports do something like tokio::sync::watch::Sender<()> as watchSender
+// and oneshot::sender as oneshotSender
+
 pub async fn rpc_serve(
     address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
-) -> MetaResult<(JoinHandle<()>, Sender<()>)> {
+) -> MetaResult<(JoinHandle<()>, tokio::sync::watch::Sender<()>)> {
     match meta_store_backend {
         MetaStoreBackend::Etcd {
             endpoints,
@@ -171,12 +174,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
-) -> MetaResult<(JoinHandle<()>, Sender<()>)> {
+) -> MetaResult<(JoinHandle<()>, tokio::sync::watch::Sender<()>)> {
     // Contains address info with port
     //   address_info.listen_addr;
 
     // Initialize managers.
-    let (info, lease_handle, lease_shutdown, mut leader_rx) = register_leader_for_meta(
+    let (info, lease_handle, lease_shutdown, leader_rx) = register_leader_for_meta(
         address_info.listen_addr.clone().to_string(),
         meta_store.clone(),
         lease_interval_secs,
@@ -390,7 +393,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
 
-    let (idle_send, mut idle_recv) = tokio::sync::oneshot::channel();
+    let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
     sub_tasks.push(
         IdleManager::start_idle_checker(env.idle_manager_ref(), Duration::from_secs(30), idle_send)
             .await,
@@ -458,9 +461,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     // we only can define leader services when they are needed. Otherwise they already do things
     // FIXME: Start leader services if follower becomes leader
 
+    // TODO: maybe do not use a channel here
+    // What I need is basically a oneshot channel with one producer and multiple consumers
     let (svc_shutdown_tx, mut svc_shutdown_rx) = tokio::sync::watch::channel(());
 
-    tokio::spawn(async move {
+    let join_handle = tokio::spawn(async move {
         let span = tracing::span!(tracing::Level::INFO, "services");
         let _enter = span.enter();
 
@@ -476,48 +481,77 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         let is_leader = services_leader_rx.borrow().clone().1;
         let was_follower = !is_leader;
-        let heartbeat_srv_clone = heartbeat_srv.clone();
         let intercept_clone = intercept.clone();
 
         // run follower services until node becomes leader
+        let heartbeat_srv_clone = heartbeat_srv.clone();
         let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
+        let (follower_shutdown_tx, follower_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let (follower_finished_tx, follower_finished_rx) = tokio::sync::oneshot::channel::<()>();
         if !is_leader {
             tracing::info!("Starting follower services");
             tokio::spawn(async move {
+                let health_srv = HealthServiceImpl::new();
                 tonic::transport::Server::builder()
                     .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
                     .add_service(HeartbeatServiceServer::with_interceptor(
-                        heartbeat_srv_clone, // TODO: Change this to health service!
-                        intercept_clone,
+                        // TODO: remove heartbeat srv. Replace with follower srv
+                        heartbeat_srv_clone,
+                        intercept_clone.clone(),
                     ))
+                    .add_service(HealthServer::with_interceptor(health_srv, intercept_clone))
                     .serve_with_shutdown(address_info.listen_addr, async move {
-                        if svc_shutdown_rx_clone.changed().await.is_err() {
-                            tracing::error!("service shutdown sender dropped");
-                        }
+                        tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {},
+                        // shutdown service if all services should be shut down
+                        res = svc_shutdown_rx_clone.changed() =>  {
+                            if res.is_err() {
+                                tracing::error!("service shutdown sender dropped");
+                            }
+                        },
+                        // shutdown service if follower becomes leader
+                        res = follower_shutdown_rx =>  {
+                              if res.is_err() {
+                                  tracing::error!("follower service shutdown sender dropped");
+                              }
+                            },
+                          }
                     })
                     .await
                     .unwrap();
+                match follower_finished_tx.send(()) {
+                    Ok(_) => tracing::info!("Signaling that follower service is down"),
+                    Err(_) => tracing::info!(
+                        "Error when signaling that follower service is down. Receiver dropped"
+                    ),
+                }
             });
+        }
 
-            // loop until this node becomes a leader
-            loop {
-                if services_leader_rx.changed().await.is_err() {
-                    panic!("Leader sender dropped");
-                }
-                if services_leader_rx.borrow().clone().1 {
-                    break;
-                }
+        // loop until this node becomes a leader
+        // TODO: use while loop
+        loop {
+            if services_leader_rx.borrow().clone().1 {
+                break;
+            }
+            if services_leader_rx.changed().await.is_err() {
+                panic!("Leader sender dropped");
             }
         }
-        tracing::info!("Node is leader");
 
         // shut down follower svc if node used to be follower
         if was_follower {
-            tracing::info!("Shutting down follower services");
-            match svc_shutdown_tx.send(()) {
-                Ok(_) => tracing::info!("Succeeded shutting down follower services"),
-                Err(_) => tracing::error!("Error when shutdown follower services"),
+            match follower_shutdown_tx.send(()) {
+                // TODO: Do I always use this error format?
+                // Receiver, sender dropped?
+                Ok(_) => tracing::info!("Shutting down follower services"),
+                Err(_) => tracing::error!("Follower service receiver dropped"),
             }
+            // Wait until follower service is
+            match follower_finished_rx.await {
+                Ok(_) => tracing::info!("Follower services shut down"),
+                Err(_) => tracing::error!("Follower service shutdown finished sender dropped"),
+            };
         }
 
         // TODO: leader services should only be DEFINED if this is a leader node
@@ -563,32 +597,26 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 intercept.clone(),
             ))
             .serve_with_shutdown(address_info.listen_addr, async move {
-                if svc_shutdown_rx.changed().await.is_err() {
-                    tracing::error!("service shutdown sender dropped");
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {},
+                    res = svc_shutdown_rx.changed() => {
+                        tracing::info!("svc_shutdown_rx.changed()");
+                        if res.is_err() {
+                            tracing::error!("service shutdown sender dropped");
+                        }
+                        shutdown_all.await;
+                    },
+                    _ = idle_recv => {
+                        tracing::info!("idle_recv");
+                        shutdown_all.await;
+                    },
                 }
             })
             .await
             .unwrap();
     });
 
-    // TODO: Do I still need below code? Not needed if I use serve_with_shutdown
-    // Do in different PR
-    // TODO: Use tonic's serve_with_shutdown for a graceful shutdown. Now it does not work,
-    // as the graceful shutdown waits all connections to disconnect in order to finish the stop.
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
-    let join_handle = tokio::spawn(async move {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {},
-            _ = &mut shutdown_recv => {
-                shutdown_all.await;
-            },
-            _ = &mut idle_recv => {
-                shutdown_all.await;
-            },
-        }
-    });
-
-    Ok((join_handle, shutdown_send))
+    return Ok((join_handle, svc_shutdown_tx));
 }
 
 #[derive(Clone)]
