@@ -108,7 +108,7 @@ message Table {
   // an optional column index which is the vnode of each row computed by the
   // table's consistent hash distribution
   ColumnIndex vnode_col_index = 18;
-  // An optional column index of row id. If the primary key is specified by users, 
+  // An optional column index of row id. If the primary key is specified by users,
   // this will be `None`.
   ColumnIndex row_id_index = 19;
   // The column indices which are stored in the state store's value with
