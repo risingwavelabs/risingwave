@@ -419,7 +419,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let mut was_leader = false;
         loop {
             if note_status_leader_rx.changed().await.is_err() {
-                panic!("Issue receiving leader value from channel");
+                panic!("Leader sender dropped");
             }
 
             let (leader_addr, is_leader) = note_status_leader_rx.borrow().clone();
@@ -458,6 +458,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     // we only can define leader services when they are needed. Otherwise they already do things
     // FIXME: Start leader services if follower becomes leader
 
+    let (svc_shutdown_tx, mut svc_shutdown_rx) = tokio::sync::watch::channel(());
+
     tokio::spawn(async move {
         let span = tracing::span!(tracing::Level::INFO, "services");
         let _enter = span.enter();
@@ -467,10 +469,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         };
 
         // failover logic
-        let (svc_shutdown_tx, svc_shutdown_rx) = tokio::sync::oneshot::channel();
 
         if services_leader_rx.changed().await.is_err() {
-            panic!("Issue receiving leader value from channel");
+            panic!("Leader sender dropped");
         }
 
         let is_leader = services_leader_rx.borrow().clone().1;
@@ -479,6 +480,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let intercept_clone = intercept.clone();
 
         // run follower services until node becomes leader
+        let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
         if !is_leader {
             tracing::info!("Starting follower services");
             tokio::spawn(async move {
@@ -489,7 +491,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                         intercept_clone,
                     ))
                     .serve_with_shutdown(address_info.listen_addr, async move {
-                        svc_shutdown_rx.await.unwrap();
+                        if svc_shutdown_rx_clone.changed().await.is_err() {
+                            tracing::error!("service shutdown sender dropped");
+                        }
                     })
                     .await
                     .unwrap();
@@ -498,7 +502,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             // loop until this node becomes a leader
             loop {
                 if services_leader_rx.changed().await.is_err() {
-                    panic!("Issue receiving leader value from channel");
+                    panic!("Leader sender dropped");
                 }
                 if services_leader_rx.borrow().clone().1 {
                     break;
@@ -520,49 +524,51 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // https://risingwave-labs.slack.com/archives/C046M5Y0WH2/p1670327569092569
 
         tracing::info!("Starting leader services");
-        tokio::spawn(async move {
-            tonic::transport::Server::builder()
-                .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
-                .add_service(HeartbeatServiceServer::with_interceptor(
-                    heartbeat_srv,
-                    intercept.clone(),
-                ))
-                .add_service(ClusterServiceServer::with_interceptor(
-                    cluster_srv,
-                    intercept.clone(),
-                ))
-                .add_service(StreamManagerServiceServer::with_interceptor(
-                    stream_srv,
-                    intercept.clone(),
-                ))
-                .add_service(HummockManagerServiceServer::with_interceptor(
-                    hummock_srv,
-                    intercept.clone(),
-                ))
-                .add_service(NotificationServiceServer::with_interceptor(
-                    notification_srv,
-                    intercept.clone(),
-                ))
-                .add_service(DdlServiceServer::with_interceptor(
-                    ddl_srv,
-                    intercept.clone(),
-                ))
-                .add_service(UserServiceServer::with_interceptor(
-                    user_srv,
-                    intercept.clone(),
-                ))
-                .add_service(ScaleServiceServer::with_interceptor(
-                    scale_srv,
-                    intercept.clone(),
-                ))
-                .add_service(HealthServer::with_interceptor(
-                    health_srv,
-                    intercept.clone(),
-                ))
-                .serve(address_info.listen_addr)
-                .await
-                .unwrap();
-        });
+        tonic::transport::Server::builder()
+            .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
+            .add_service(HeartbeatServiceServer::with_interceptor(
+                heartbeat_srv,
+                intercept.clone(),
+            ))
+            .add_service(ClusterServiceServer::with_interceptor(
+                cluster_srv,
+                intercept.clone(),
+            ))
+            .add_service(StreamManagerServiceServer::with_interceptor(
+                stream_srv,
+                intercept.clone(),
+            ))
+            .add_service(HummockManagerServiceServer::with_interceptor(
+                hummock_srv,
+                intercept.clone(),
+            ))
+            .add_service(NotificationServiceServer::with_interceptor(
+                notification_srv,
+                intercept.clone(),
+            ))
+            .add_service(DdlServiceServer::with_interceptor(
+                ddl_srv,
+                intercept.clone(),
+            ))
+            .add_service(UserServiceServer::with_interceptor(
+                user_srv,
+                intercept.clone(),
+            ))
+            .add_service(ScaleServiceServer::with_interceptor(
+                scale_srv,
+                intercept.clone(),
+            ))
+            .add_service(HealthServer::with_interceptor(
+                health_srv,
+                intercept.clone(),
+            ))
+            .serve_with_shutdown(address_info.listen_addr, async move {
+                if svc_shutdown_rx.changed().await.is_err() {
+                    tracing::error!("service shutdown sender dropped");
+                }
+            })
+            .await
+            .unwrap();
     });
 
     // TODO: Do I still need below code? Not needed if I use serve_with_shutdown
