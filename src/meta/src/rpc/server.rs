@@ -320,9 +320,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             };
         }
 
-        // TODO: leader services should only be DEFINED if this is a leader node
-        // https://risingwave-labs.slack.com/archives/C046M5Y0WH2/p1670327569092569
-
         // leader services defined below
         tracing::info!("Starting leader services");
 
