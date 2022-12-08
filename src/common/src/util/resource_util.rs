@@ -42,10 +42,7 @@ pub mod resource_util {
     }
 
     fn is_linux_machine() -> bool {
-        if env::consts::OS.eq(DEFAULT_LINUX_IDENTIFIER){
-            return true;
-        }
-        false
+        env::consts::OS.eq(DEFAULT_LINUX_IDENTIFIER)
     }
 
     // returns a cgroup version if it exists, else returns None.
