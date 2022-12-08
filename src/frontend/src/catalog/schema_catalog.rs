@@ -185,7 +185,11 @@ impl SchemaCatalog {
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.is_table())
+            .filter(|(_, v)| {
+                v.is_table()
+                    && v.associated_source_id.is_some()  // TODO(Yuanxin): Remove this.
+                    && self.get_source_by_name(v.name()).unwrap().kind() == SourceKind::Table
+            })
             .map(|(_, v)| v)
     }
 
