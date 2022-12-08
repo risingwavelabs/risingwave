@@ -121,7 +121,7 @@ pub struct StateTable<S: StateStore> {
     /// latest watermark
     cur_watermark: Option<ScalarImpl>,
 
-    /// number of commits with watermark since the last time we did state cleaning by watermark
+    /// number of commits with watermark since the last time we did state cleaning by watermark.
     num_wmked_commits_since_last_clean: usize,
 }
 
