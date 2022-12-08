@@ -15,8 +15,9 @@
 // Copyright 2020 TiKV Project Authors. Licensed under Apache-2.0.
 
 use std::cmp::{self};
-use std::hash::Hasher;
 use std::ptr;
+
+use xxhash_rust::xxh64;
 
 use super::{HummockError, HummockResult};
 
@@ -54,9 +55,7 @@ pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
 
 /// Calculates the ``XxHash`` of the given data.
 pub fn xxhash64_checksum(data: &[u8]) -> u64 {
-    let mut hasher = twox_hash::XxHash64::with_seed(0);
-    hasher.write(data);
-    hasher.finish()
+    xxh64::xxh64(data, 0)
 }
 
 /// Verifies the checksum of the data equals the given checksum with xxhash64.

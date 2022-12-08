@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::Hasher;
+use xxhash_rust::xxh64;
 
 use crate::backup_restore::error::{BackupError, BackupResult};
 
 pub fn xxhash64_checksum(data: &[u8]) -> u64 {
-    let mut hasher = twox_hash::XxHash64::with_seed(0);
-    hasher.write(data);
-    hasher.finish()
+    xxh64::xxh64(data, 0)
 }
 
 pub fn xxhash64_verify(data: &[u8], checksum: u64) -> BackupResult<()> {
