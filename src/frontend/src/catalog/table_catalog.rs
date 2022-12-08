@@ -411,7 +411,7 @@ mod tests {
                 vnode_col_idx: None,
                 value_indices: vec![0],
                 definition: "".into(),
-                handle_pk_conflict: false
+                handle_pk_conflict: false,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
