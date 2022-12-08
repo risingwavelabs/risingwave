@@ -118,8 +118,7 @@ export interface Table {
   pk: ColumnOrder[];
   dependentRelations: number[];
   optionalAssociatedSourceId?: { $case: "associatedSourceId"; associatedSourceId: number };
-  isIndex: boolean;
-  isMview: boolean;
+  tableType: Table_TableType;
   distributionKey: number[];
   /** pk_indices of the corresponding materialize operator's output. */
   streamKey: number[];
@@ -149,6 +148,59 @@ export interface Table {
   valueIndices: number[];
   definition: string;
   handlePkConflict: boolean;
+}
+
+export const Table_TableType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  TABLE: "TABLE",
+  MATERIALIZED_VIEW: "MATERIALIZED_VIEW",
+  INDEX: "INDEX",
+  INTERNAL: "INTERNAL",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type Table_TableType = typeof Table_TableType[keyof typeof Table_TableType];
+
+export function table_TableTypeFromJSON(object: any): Table_TableType {
+  switch (object) {
+    case 0:
+    case "UNSPECIFIED":
+      return Table_TableType.UNSPECIFIED;
+    case 1:
+    case "TABLE":
+      return Table_TableType.TABLE;
+    case 2:
+    case "MATERIALIZED_VIEW":
+      return Table_TableType.MATERIALIZED_VIEW;
+    case 3:
+    case "INDEX":
+      return Table_TableType.INDEX;
+    case 4:
+    case "INTERNAL":
+      return Table_TableType.INTERNAL;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return Table_TableType.UNRECOGNIZED;
+  }
+}
+
+export function table_TableTypeToJSON(object: Table_TableType): string {
+  switch (object) {
+    case Table_TableType.UNSPECIFIED:
+      return "UNSPECIFIED";
+    case Table_TableType.TABLE:
+      return "TABLE";
+    case Table_TableType.MATERIALIZED_VIEW:
+      return "MATERIALIZED_VIEW";
+    case Table_TableType.INDEX:
+      return "INDEX";
+    case Table_TableType.INTERNAL:
+      return "INTERNAL";
+    case Table_TableType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
 }
 
 export interface Table_PropertiesEntry {
@@ -672,8 +724,7 @@ function createBaseTable(): Table {
     pk: [],
     dependentRelations: [],
     optionalAssociatedSourceId: undefined,
-    isIndex: false,
-    isMview: false,
+    tableType: Table_TableType.UNSPECIFIED,
     distributionKey: [],
     streamKey: [],
     appendOnly: false,
@@ -703,14 +754,11 @@ export const Table = {
       optionalAssociatedSourceId: isSet(object.associatedSourceId)
         ? { $case: "associatedSourceId", associatedSourceId: Number(object.associatedSourceId) }
         : undefined,
-      isIndex: isSet(object.isIndex) ? Boolean(object.isIndex) : false,
-      isMview: isSet(object.isMview) ? Boolean(object.isMview) : false,
+      tableType: isSet(object.tableType) ? table_TableTypeFromJSON(object.tableType) : Table_TableType.UNSPECIFIED,
       distributionKey: Array.isArray(object?.distributionKey)
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
-      streamKey: Array.isArray(object?.streamKey)
-        ? object.streamKey.map((e: any) => Number(e))
-        : [],
+      streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
       appendOnly: isSet(object.appendOnly) ? Boolean(object.appendOnly) : false,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
@@ -753,8 +801,7 @@ export const Table = {
     }
     message.optionalAssociatedSourceId?.$case === "associatedSourceId" &&
       (obj.associatedSourceId = Math.round(message.optionalAssociatedSourceId?.associatedSourceId));
-    message.isIndex !== undefined && (obj.isIndex = message.isIndex);
-    message.isMview !== undefined && (obj.isMview = message.isMview);
+    message.tableType !== undefined && (obj.tableType = table_TableTypeToJSON(message.tableType));
     if (message.distributionKey) {
       obj.distributionKey = message.distributionKey.map((e) => Math.round(e));
     } else {
@@ -807,8 +854,7 @@ export const Table = {
         associatedSourceId: object.optionalAssociatedSourceId.associatedSourceId,
       };
     }
-    message.isIndex = object.isIndex ?? false;
-    message.isMview = object.isMview ?? false;
+    message.tableType = object.tableType ?? Table_TableType.UNSPECIFIED;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
     message.appendOnly = object.appendOnly ?? false;
