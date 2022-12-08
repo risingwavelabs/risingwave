@@ -61,6 +61,8 @@ impl EtcdService {
             .arg("risedev-meta")
             .arg("--max-txn-ops")
             .arg("999999")
+            .arg("--max-request-bytes")
+            .arg("10485760")
             .arg("--auto-compaction-mode")
             .arg("periodic")
             .arg("--auto-compaction-retention")
