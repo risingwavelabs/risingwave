@@ -61,12 +61,11 @@ impl FilterKeyExtractorImpl {
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
 
         let match_read_pattern = !dist_key_in_pk_indices.is_empty()
-            && *dist_key_in_pk_indices.iter().min().unwrap() + dist_key_in_pk_indices.len() - 1
-                == *dist_key_in_pk_indices.iter().max().unwrap();
+            && get_dist_key_start_index_in_pk(&dist_key_in_pk_indices).is_some();
         if !match_read_pattern {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
-            FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default())
+            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor::default())
         } else {
             FilterKeyExtractorImpl::Schema(SchemaFilterKeyExtractor::new(table_catalog))
         }

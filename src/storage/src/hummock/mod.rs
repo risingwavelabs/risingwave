@@ -329,7 +329,8 @@ pub async fn get_from_sstable_info(
     } else {
         get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
     };
-
+    // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
+    // contain `TablePrefix` and `VnodePrefix`.
     let dist_key = &ukey.table_key[VirtualNode::SIZE..];
     if read_options.check_bloom_filter
         && !hit_sstable_bloom_filter(sstable.value(), dist_key, local_stats)
