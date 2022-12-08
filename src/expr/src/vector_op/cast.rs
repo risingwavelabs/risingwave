@@ -256,7 +256,7 @@ where
 {
     elem.trim()
         .parse()
-        .map_err(|_| ExprError::Cast(type_name::<str>(), type_name::<T>()))
+        .map_err(|_| ExprError::Parse(type_name::<T>()))
 }
 
 /// Define the cast function to primitive types.
@@ -281,8 +281,7 @@ macro_rules! define_cast_to_primitive {
             {
                 elem.[<to_ $ty>]()
                     .ok_or_else(|| {
-                        ExprError::Cast(
-                            std::any::type_name::<T>(),
+                        ExprError::CastOutOfRange(
                             std::any::type_name::<$ty>()
                         )
                     })
@@ -345,7 +344,7 @@ where
     <T1 as TryInto<T2>>::Error: std::fmt::Display,
 {
     elem.try_into()
-        .map_err(|_| ExprError::Cast(std::any::type_name::<T1>(), std::any::type_name::<T2>()))
+        .map_err(|_| ExprError::CastOutOfRange(std::any::type_name::<T2>()))
 }
 
 #[inline(always)]

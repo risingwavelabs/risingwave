@@ -30,8 +30,8 @@ pub enum ExprError {
     #[error("Unsupported cast: {0:?} to {1:?}")]
     UnsupportedCast(DataType, DataType),
 
-    #[error("Can't cast {0} to {1}")]
-    Cast(&'static str, &'static str),
+    #[error("Casting to {0} out of range")]
+    CastOutOfRange(&'static str),
 
     #[error("Numeric out of range")]
     NumericOutOfRange,
