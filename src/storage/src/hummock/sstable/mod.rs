@@ -146,7 +146,7 @@ impl Sstable {
             true
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
-            let hash = xxh32::xxh32(dist_key, 1);
+            let hash = xxh32::xxh32(dist_key, 0);
             let bloom = Bloom::new(&self.meta.bloom_filter);
             bloom.surely_not_have_hash(hash)
         } else {
