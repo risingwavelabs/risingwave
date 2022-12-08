@@ -36,7 +36,7 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) 
 }
 
 /// Sanity checks for sqlsmith
-pub async fn test_sqlsmith<R: Rng>(
+async fn test_sqlsmith<R: Rng>(
     client: &tokio_postgres::Client,
     rng: &mut R,
     tables: Vec<Table>,
@@ -150,6 +150,7 @@ async fn create_tables(
     (tables, mviews, setup_sql)
 }
 
+/// Drops mview tables.
 async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
     client
         .execute(&format!("DROP MATERIALIZED VIEW {}", mview.name), &[])
@@ -157,6 +158,7 @@ async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
         .unwrap();
 }
 
+/// Drops mview tables and seed tables
 async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::Client) {
     tracing::info!("Cleaning tables...");
 
