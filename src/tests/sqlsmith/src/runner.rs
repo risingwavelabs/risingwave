@@ -101,11 +101,23 @@ async fn test_batch_queries<R: Rng>(
     let sqls: Vec<String> = (0..sample_size).map(|_| sql_gen(rng, tables.clone())).collect();
     let elapsed_time = now.elapsed();
     tracing::info!("Finished generating batch queries in {}s", elapsed_time.as_secs());
+
+    let mut results = vec![];
+    let now = Instant::now();
     for sql in sqls {
-        tracing::info!("Executing: {}", sql);
-        let response = client.query(sql.as_str(), &[]).await;
-        skipped += validate_response(setup_sql, &format!("{};", sql), response);
+        tracing::debug!("Executing: {}", sql);
+        let result = client.query(sql.as_str(), &[]).await;
+        results.push((sql, result));
     }
+    let elapsed_time = now.elapsed();
+    tracing::info!("Finished executing batch queries in {}s", elapsed_time.as_secs());
+
+    let now = Instant::now();
+    for (sql, result) in results {
+        skipped += validate_response(setup_sql, &format!("{};", sql), result);
+    }
+    let elapsed_time = now.elapsed();
+    tracing::info!("Finished validating batch queries in {}s", elapsed_time.as_secs());
     skipped as f64 / sample_size as f64
 }
 
