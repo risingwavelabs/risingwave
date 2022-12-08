@@ -269,6 +269,8 @@ impl ToStream for LogicalFilter {
             let mut cur_streaming = PlanRef::from(StreamFilter::new(
                 simple_logical.clone_with_input(new_input),
             ));
+            // Rewrite each now condition. Replace `NowExpr` with `StreamNow` and replace
+            // `LogicalFilter` with `DynamicFilter`.
             for (_, now_cond) in now_conds {
                 let left_index = must_match!(now_cond.inputs()[0], ExprImpl::InputRef(box ref input_ref) => input_ref.index());
                 let rht = must_match!(now_cond.inputs()[1], ExprImpl::FunctionCall(box ref function_call) => {
