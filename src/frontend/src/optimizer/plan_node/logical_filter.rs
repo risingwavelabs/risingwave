@@ -263,6 +263,8 @@ impl ToStream for LogicalFilter {
                 })
                 .collect_vec();
             now_conds.sort_by_key(|(comparator_priority, _)| *comparator_priority);
+            // We do simple logical filters first because it can reduce size of dynamic filter's
+            // cache.
             let simple_logical = LogicalFilter::new(self.input(), Condition { conjunctions });
             let mut cur_streaming = PlanRef::from(StreamFilter::new(
                 simple_logical.clone_with_input(new_input),
