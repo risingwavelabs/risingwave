@@ -153,7 +153,7 @@ pub struct SchemaFilterKeyExtractor {
 impl FilterKeyExtractor for SchemaFilterKeyExtractor {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
         if full_key.len() < TABLE_PREFIX_LEN + VirtualNode::SIZE {
-            return full_key;
+            return &[];
         }
 
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);

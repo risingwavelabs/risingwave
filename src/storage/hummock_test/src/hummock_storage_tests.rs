@@ -623,7 +623,7 @@ async fn test_state_store_sync() {
                         ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
-                        check_bloom_filter: true,
+                        check_bloom_filter: false,
                         dist_key_hint: None,
                     },
                 )
@@ -666,7 +666,7 @@ async fn test_state_store_sync() {
                         ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
-                        check_bloom_filter: true,
+                        check_bloom_filter: false,
                         dist_key_hint: None,
                     },
                 )
@@ -687,7 +687,7 @@ async fn test_state_store_sync() {
                     ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,
-                    check_bloom_filter: true,
+                    check_bloom_filter: false,
                     dist_key_hint: None,
                 },
             )
@@ -725,7 +725,7 @@ async fn test_state_store_sync() {
                     ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,
-                    check_bloom_filter: true,
+                    check_bloom_filter: false,
                     dist_key_hint: None,
                 },
             )
@@ -954,7 +954,7 @@ async fn test_multiple_epoch_sync() {
                             ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
-                            check_bloom_filter: true,
+                            check_bloom_filter: false,
                             dist_key_hint: None,
                         },
                     )
@@ -971,7 +971,7 @@ async fn test_multiple_epoch_sync() {
                         ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
-                        check_bloom_filter: true,
+                        check_bloom_filter: false,
                         dist_key_hint: None,
                     },
                 )
@@ -987,7 +987,7 @@ async fn test_multiple_epoch_sync() {
                             ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
-                            check_bloom_filter: true,
+                            check_bloom_filter: false,
                             dist_key_hint: None,
                         },
                     )

@@ -140,13 +140,13 @@ impl Sstable {
         !self.meta.bloom_filter.is_empty()
     }
 
-    pub fn surely_not_have_user_key(&self, user_key: &[u8]) -> bool {
+    pub fn surely_not_have_dist_key(&self, dist_key: &[u8]) -> bool {
         let enable_bloom_filter: fn() -> bool = || {
             fail_point!("disable_bloom_filter", |_| false);
             true
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
-            let hash = xxh32::xxh32(user_key, 1);
+            let hash = xxh32::xxh32(dist_key, 1);
             let bloom = Bloom::new(&self.meta.bloom_filter);
             bloom.surely_not_have_hash(hash)
         } else {

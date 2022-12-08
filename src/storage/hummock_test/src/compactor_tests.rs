@@ -315,7 +315,7 @@ pub(crate) mod tests {
                 (32 * 1000) << 16,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: true,
+                    check_bloom_filter: false,
                     dist_key_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
@@ -439,7 +439,7 @@ pub(crate) mod tests {
                 129,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: true,
+                    check_bloom_filter: false,
                     dist_key_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,

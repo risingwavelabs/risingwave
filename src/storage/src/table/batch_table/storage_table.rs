@@ -249,7 +249,8 @@ impl<S: StateStore> StorageTable<S> {
 
         let read_options = ReadOptions {
             dist_key_hint: None,
-            check_bloom_filter: self.dist_key_indices == key_indices && !key_indices.is_empty(),
+            check_bloom_filter: !self.dist_key_indices.is_empty()
+                && self.dist_key_indices == key_indices,
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
