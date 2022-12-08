@@ -14,6 +14,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
 use risingwave_common::config::load_config;
@@ -56,12 +57,42 @@ pub async fn compactor_serve(
     );
 
     // Register to the cluster.
-    let meta_client =
-        MetaClient::register_new(&opts.meta_address, WorkerType::Compactor, &client_addr, 0)
-            .await
-            .unwrap();
-    tracing::info!("Assigned compactor id {}", meta_client.worker_id());
-    meta_client.activate(&client_addr).await.unwrap();
+    let mut client_res =
+        MetaClient::register_new(&opts.meta_address, WorkerType::ComputeNode, &client_addr, 0)
+            .await;
+
+    // FIXME: even after initializing the meta_client we have to be careful when talking to meta
+    // every call to meta may fail if the current meta is not a leader
+    // Below code does not handle meta failover
+
+    tracing::info!(
+        "Trying to connect against meta node {}. May be a follower",
+        &opts.meta_address
+    );
+    let mut used_leader_addr = opts.meta_address;
+    loop {
+        if client_res.as_ref().is_ok() {
+            break;
+        }
+        let e = client_res.as_ref().err().unwrap();
+        let e_str = e.to_string();
+        // FIXME Can we do this better? Error is:
+        // gRPC error (The operation was aborted): http://127.0.0.1:25690
+        let leader_addr = e_str
+            .split("gRPC error (The operation was aborted): ")
+            .collect::<Vec<&str>>()[1];
+        used_leader_addr = leader_addr.to_string();
+
+        thread::sleep(Duration::from_millis(5000));
+        client_res =
+            MetaClient::register_new(leader_addr, WorkerType::ComputeNode, &client_addr, 0).await;
+    }
+    tracing::info!(
+        "Succeeded to connect against leader meta node {}",
+        used_leader_addr,
+    );
+
+    let meta_client = client_res.unwrap();
 
     // Boot compactor
     let registry = prometheus::Registry::new();
