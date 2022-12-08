@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
@@ -27,6 +28,7 @@ use super::{
     CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
     DEFAULT_RESTART_INTERVAL,
 };
+use crate::error::StorageResult;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -35,7 +37,6 @@ use crate::hummock::{
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
-use crate::store::StateStoreIter;
 
 pub fn default_config_for_test() -> StorageConfig {
     StorageConfig {
@@ -303,9 +304,10 @@ pub async fn gen_default_test_sstable(
     .await
 }
 
-pub async fn count_iter(iter: &mut impl StateStoreIter) -> usize {
+pub async fn count_stream<T>(s: impl Stream<Item = StorageResult<T>> + Send) -> usize {
+    futures::pin_mut!(s);
     let mut c: usize = 0;
-    while iter.next().await.unwrap().is_some() {
+    while s.try_next().await.unwrap().is_some() {
         c += 1
     }
     c

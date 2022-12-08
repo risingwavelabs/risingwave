@@ -28,10 +28,10 @@ use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::handler::util::col_descs_to_rows;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
-pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Result<RwPgResponse> {
+    let session = handler_args.session;
     let mut binder = Binder::new(&session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.

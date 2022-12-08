@@ -29,10 +29,11 @@ use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
+use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
-use crate::optimizer::{PlanRef, PlanRoot};
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn gen_create_index_plan(
@@ -328,7 +329,7 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
 }
 
 pub async fn handle_create_index(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     if_not_exists: bool,
     index_name: ObjectName,
     table_name: ObjectName,
@@ -336,7 +337,7 @@ pub async fn handle_create_index(
     include: Vec<Ident>,
     distributed_by: Vec<Ident>,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx.clone();
+    let session = handler_args.session.clone();
 
     let (graph, index_table, index) = {
         {
@@ -352,6 +353,7 @@ pub async fn handle_create_index(
             }
         }
 
+        let context = OptimizerContext::new_with_handler_args(handler_args);
         let (plan, index_table, index) = gen_create_index_plan(
             &session,
             context.into(),

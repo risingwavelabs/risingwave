@@ -70,7 +70,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
-axum = "0.5"
+axum = "0.6"
 tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
 workspace-hack = { path = "../workspace-hack" }
 

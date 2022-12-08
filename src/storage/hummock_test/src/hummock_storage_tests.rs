@@ -16,6 +16,7 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::TryStreamExt;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
@@ -40,9 +41,8 @@ use risingwave_storage::hummock::{MemoryLimiter, SstableIdManager, SstableStore}
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    ReadOptions, StateStoreIterExt, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
+    ReadOptions, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
 };
-use risingwave_storage::StateStoreIter;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
@@ -346,7 +346,7 @@ async fn test_storage_basic() {
     assert_eq!(value, None);
 
     // Write aa bb
-    let mut iter = hummock_storage
+    let iter = hummock_storage
         .iter(
             (Unbounded, Included(b"ee".to_vec())),
             epoch1,
@@ -360,21 +360,22 @@ async fn test_storage_basic() {
         )
         .await
         .unwrap();
+    futures::pin_mut!(iter);
     assert_eq!(
         Some((
             FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch1),
             Bytes::copy_from_slice(&b"111"[..])
         )),
-        iter.next().await.unwrap()
+        iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
             FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
             Bytes::copy_from_slice(&b"222"[..])
         )),
-        iter.next().await.unwrap()
+        iter.try_next().await.unwrap()
     );
-    assert_eq!(None, iter.next().await.unwrap());
+    assert_eq!(None, iter.try_next().await.unwrap());
 
     // Get the anchor value at the first snapshot
     let value = hummock_storage
@@ -412,7 +413,7 @@ async fn test_storage_basic() {
         .unwrap();
     assert_eq!(value, Bytes::from("111111"));
     // Update aa, write cc
-    let mut iter = hummock_storage
+    let iter = hummock_storage
         .iter(
             (Unbounded, Included(b"ee".to_vec())),
             epoch2,
@@ -426,31 +427,32 @@ async fn test_storage_basic() {
         )
         .await
         .unwrap();
+    futures::pin_mut!(iter);
     assert_eq!(
         Some((
             FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch2),
             Bytes::copy_from_slice(&b"111111"[..])
         )),
-        iter.next().await.unwrap()
+        iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
             FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
             Bytes::copy_from_slice(&b"222"[..])
         )),
-        iter.next().await.unwrap()
+        iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
             FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch2),
             Bytes::copy_from_slice(&b"333"[..])
         )),
-        iter.next().await.unwrap()
+        iter.try_next().await.unwrap()
     );
-    assert_eq!(None, iter.next().await.unwrap());
+    assert_eq!(None, iter.try_next().await.unwrap());
 
     // Delete aa, write dd,ee
-    let mut iter = hummock_storage
+    let iter = hummock_storage
         .iter(
             (Unbounded, Included(b"ee".to_vec())),
             epoch3,
@@ -464,35 +466,36 @@ async fn test_storage_basic() {
         )
         .await
         .unwrap();
+    futures::pin_mut!(iter);
     assert_eq!(
         Some((
             FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
             Bytes::copy_from_slice(&b"222"[..])
         )),
-        iter.next().await.unwrap()
+        iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
             FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch2),
             Bytes::copy_from_slice(&b"333"[..])
         )),
-        iter.next().await.unwrap()
+        iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
             FullKey::for_test(TableId::default(), b"dd".to_vec(), epoch3),
             Bytes::copy_from_slice(&b"444"[..])
         )),
-        iter.next().await.unwrap()
+        iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
             FullKey::for_test(TableId::default(), b"ee".to_vec(), epoch3),
             Bytes::copy_from_slice(&b"555"[..])
         )),
-        iter.next().await.unwrap()
+        iter.try_next().await.unwrap()
     );
-    assert_eq!(None, iter.next().await.unwrap());
+    assert_eq!(None, iter.try_next().await.unwrap());
 
     // TODO: add more test cases after sync is supported
 }
@@ -679,7 +682,7 @@ async fn test_state_store_sync() {
 
     // test iter
     {
-        let mut iter = hummock_storage
+        let iter = hummock_storage
             .iter(
                 (Unbounded, Included(b"eeee".to_vec())),
                 epoch1,
@@ -693,6 +696,7 @@ async fn test_state_store_sync() {
             )
             .await
             .unwrap();
+        futures::pin_mut!(iter);
 
         let kv_map = [
             (b"aaaa", "1111", epoch1),
@@ -703,7 +707,7 @@ async fn test_state_store_sync() {
         ];
 
         for (k, v, e) in kv_map {
-            let result = iter.next().await.unwrap();
+            let result = iter.try_next().await.unwrap();
             assert_eq!(
                 result,
                 Some((
@@ -713,11 +717,11 @@ async fn test_state_store_sync() {
             );
         }
 
-        assert!(iter.next().await.unwrap().is_none());
+        assert!(iter.try_next().await.unwrap().is_none());
     }
 
     {
-        let mut iter = hummock_storage
+        let iter = hummock_storage
             .iter(
                 (Unbounded, Included(b"eeee".to_vec())),
                 epoch2,
@@ -732,6 +736,8 @@ async fn test_state_store_sync() {
             .await
             .unwrap();
 
+        futures::pin_mut!(iter);
+
         let kv_map = [
             (b"aaaa", "1111", epoch1),
             (b"bbbb", "2222", epoch1),
@@ -741,7 +747,7 @@ async fn test_state_store_sync() {
         ];
 
         for (k, v, e) in kv_map {
-            let result = iter.next().await.unwrap();
+            let result = iter.try_next().await.unwrap();
             assert_eq!(
                 result,
                 Some((
@@ -1113,7 +1119,7 @@ async fn test_iter_with_min_epoch() {
     {
         // test before sync
         {
-            let mut iter = hummock_storage
+            let iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch1,
@@ -1128,12 +1134,14 @@ async fn test_iter_with_min_epoch() {
                 .await
                 .unwrap();
 
-            let result = iter.collect(None).await.unwrap();
+            futures::pin_mut!(iter);
+
+            let result: Vec<_> = iter.try_collect().await.unwrap();
             assert_eq!(10, result.len());
         }
 
         {
-            let mut iter = hummock_storage
+            let iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch2,
@@ -1148,12 +1156,12 @@ async fn test_iter_with_min_epoch() {
                 .await
                 .unwrap();
 
-            let result = iter.collect(None).await.unwrap();
+            let result: Vec<_> = iter.try_collect().await.unwrap();
             assert_eq!(20, result.len());
         }
 
         {
-            let mut iter = hummock_storage
+            let iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch2,
@@ -1168,7 +1176,9 @@ async fn test_iter_with_min_epoch() {
                 .await
                 .unwrap();
 
-            let result = iter.collect(None).await.unwrap();
+            futures::pin_mut!(iter);
+
+            let result: Vec<_> = iter.try_collect().await.unwrap();
             assert_eq!(10, result.len());
         }
     }
@@ -1190,7 +1200,7 @@ async fn test_iter_with_min_epoch() {
         try_wait_epoch_for_test(epoch2, &version_update_notifier_tx).await;
 
         {
-            let mut iter = hummock_storage
+            let iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch1,
@@ -1205,12 +1215,14 @@ async fn test_iter_with_min_epoch() {
                 .await
                 .unwrap();
 
-            let result = iter.collect(None).await.unwrap();
+            futures::pin_mut!(iter);
+
+            let result: Vec<_> = iter.try_collect().await.unwrap();
             assert_eq!(10, result.len());
         }
 
         {
-            let mut iter = hummock_storage
+            let iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch2,
@@ -1225,12 +1237,14 @@ async fn test_iter_with_min_epoch() {
                 .await
                 .unwrap();
 
-            let result = iter.collect(None).await.unwrap();
+            futures::pin_mut!(iter);
+
+            let result: Vec<_> = iter.try_collect().await.unwrap();
             assert_eq!(20, result.len());
         }
 
         {
-            let mut iter = hummock_storage
+            let iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch2,
@@ -1245,7 +1259,9 @@ async fn test_iter_with_min_epoch() {
                 .await
                 .unwrap();
 
-            let result = iter.collect(None).await.unwrap();
+            futures::pin_mut!(iter);
+
+            let result: Vec<_> = iter.try_collect().await.unwrap();
             assert_eq!(10, result.len());
         }
     }
@@ -1378,7 +1394,7 @@ async fn test_hummock_version_reader() {
                 )
                 .unwrap();
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch1,
@@ -1394,7 +1410,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
             }
 
@@ -1407,7 +1423,7 @@ async fn test_hummock_version_reader() {
                 )
                 .unwrap();
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1423,7 +1439,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(20, result.len());
             }
 
@@ -1436,7 +1452,7 @@ async fn test_hummock_version_reader() {
                 )
                 .unwrap();
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1452,7 +1468,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
             }
         }
@@ -1503,7 +1519,7 @@ async fn test_hummock_version_reader() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch1,
@@ -1519,7 +1535,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
             }
 
@@ -1541,7 +1557,7 @@ async fn test_hummock_version_reader() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1557,7 +1573,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(20, result.len());
             }
 
@@ -1579,7 +1595,7 @@ async fn test_hummock_version_reader() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1595,7 +1611,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
             }
 
@@ -1617,7 +1633,7 @@ async fn test_hummock_version_reader() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let mut iter = hummock_version_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch3,
@@ -1633,7 +1649,7 @@ async fn test_hummock_version_reader() {
                     .await
                     .unwrap();
 
-                let result = iter.collect(None).await.unwrap();
+                let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(30, result.len());
             }
 
@@ -1661,7 +1677,7 @@ async fn test_hummock_version_reader() {
                         read_snapshot.2.max_committed_epoch()
                     );
 
-                    let mut iter = hummock_version_reader
+                    let iter = hummock_version_reader
                         .iter(
                             key_range.clone(),
                             epoch2,
@@ -1677,7 +1693,7 @@ async fn test_hummock_version_reader() {
                         .await
                         .unwrap();
 
-                    let result = iter.collect(None).await.unwrap();
+                    let result: Vec<_> = iter.try_collect().await.unwrap();
                     assert_eq!(8, result.len());
                 }
 
@@ -1699,7 +1715,7 @@ async fn test_hummock_version_reader() {
                         read_snapshot.2.max_committed_epoch()
                     );
 
-                    let mut iter = hummock_version_reader
+                    let iter = hummock_version_reader
                         .iter(
                             key_range.clone(),
                             epoch3,
@@ -1715,7 +1731,7 @@ async fn test_hummock_version_reader() {
                         .await
                         .unwrap();
 
-                    let result = iter.collect(None).await.unwrap();
+                    let result: Vec<_> = iter.try_collect().await.unwrap();
                     assert_eq!(18, result.len());
                 }
             }

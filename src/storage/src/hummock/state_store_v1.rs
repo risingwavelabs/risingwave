@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures::TryFutureExt;
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
@@ -38,7 +39,7 @@ use tracing::log::warn;
 use super::iterator::{
     ConcatIteratorInner, DirectedUserIterator, DirectionEnum, HummockIteratorUnion,
 };
-use super::utils::{search_sst_idx, validate_epoch};
+use super::utils::validate_epoch;
 use super::{
     get_from_order_sorted_uncommitted_data, get_from_sstable_info, hit_sstable_bloom_filter,
     HummockStorageV1, SstableIteratorType,
@@ -51,7 +52,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::ReadVersion;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::utils::prune_ssts;
+use crate::hummock::utils::{prune_ssts, search_sst_idx};
 use crate::hummock::{
     DeleteRangeAggregator, ForwardIter, HummockEpoch, HummockError, HummockIteratorType,
     HummockResult,
@@ -61,7 +62,7 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore, StateStoreIter,
+    define_state_store_write_associated_type,
 };
 
 impl HummockStorageV1 {
@@ -302,22 +303,24 @@ impl HummockStorageV1 {
             None
         };
         for level in pinned_version.levels(table_id) {
-            let table_infos = prune_ssts(level.table_infos.iter(), table_id, &table_key_range);
-            if table_infos.is_empty() {
+            if level.table_infos.is_empty() {
                 continue;
             }
             if level.level_type == LevelType::Nonoverlapping as i32 {
-                debug_assert!(can_concat(&table_infos));
+                debug_assert!(can_concat(&level.table_infos));
                 let start_table_idx = match encoded_user_key_range.start_bound() {
-                    Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
+                    Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
                     _ => 0,
                 };
                 let end_table_idx = match encoded_user_key_range.end_bound() {
-                    Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
-                    _ => table_infos.len().saturating_sub(1),
+                    Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
+                    _ => level.table_infos.len().saturating_sub(1),
                 };
-                assert!(start_table_idx < table_infos.len() && end_table_idx < table_infos.len());
-                let matched_table_infos = &table_infos[start_table_idx..=end_table_idx];
+                assert!(
+                    start_table_idx < level.table_infos.len()
+                        && end_table_idx < level.table_infos.len()
+                );
+                let matched_table_infos = &level.table_infos[start_table_idx..=end_table_idx];
 
                 let pruned_sstables = match T::Direction::direction() {
                     DirectionEnum::Backward => matched_table_infos.iter().rev().collect_vec(),
@@ -353,6 +356,7 @@ impl HummockStorageV1 {
                     iter_read_options.clone(),
                 )));
             } else {
+                let table_infos = prune_ssts(level.table_infos.iter(), table_id, &table_key_range);
                 for table_info in table_infos.into_iter().rev() {
                     let sstable = self
                         .sstable_store
@@ -413,7 +417,7 @@ impl HummockStorageV1 {
 }
 
 impl StateStoreRead for HummockStorageV1 {
-    type Iter = HummockStateStoreIter;
+    type IterStream = StreamTypeOfIter<HummockStateStoreIter>;
 
     define_state_store_read_associated_type!();
 
@@ -483,9 +487,9 @@ impl StateStoreRead for HummockStorageV1 {
             // not check
         }
 
-        let iter =
-            self.iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options);
-        iter.in_span(self.tracing.new_tracer("hummock_iter"))
+        self.iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options)
+            .map_ok(|iter| iter.into_stream())
+            .in_span(self.tracing.new_tracer("hummock_iter"))
     }
 }
 
@@ -656,11 +660,9 @@ impl HummockStateStoreIter {
 }
 
 impl StateStoreIter for HummockStateStoreIter {
-    // TODO: directly return `&[u8]` to user instead of `Bytes`.
-    type Item = (FullKey<Vec<u8>>, Bytes);
+    type Item = StateStoreIterItem;
 
-    type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
+    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
