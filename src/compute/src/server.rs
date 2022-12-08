@@ -120,7 +120,7 @@ pub async fn compute_node_serve(
             leader_addr,
             WorkerType::ComputeNode,
             &client_addr,
-            config.streaming.worker_node_parallelism,
+            opts.parallelism,
         )
         .await;
     }
