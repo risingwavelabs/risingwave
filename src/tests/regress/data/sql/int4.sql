@@ -176,3 +176,5 @@ SELECT gcd((-2147483648)::int4, (-2147483648)::int4); -- overflow
 
 SELECT lcm((-2147483648)::int4, 1::int4); -- overflow
 SELECT lcm(2147483647::int4, 2147483646::int4); -- overflow
+
+DROP TABLE INT4_TBL;
