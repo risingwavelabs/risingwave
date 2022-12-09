@@ -37,26 +37,26 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 /// [`StreamSourceCore`] stores the necessary information for the source executor to execute on the
 /// external connector.
 pub struct StreamSourceCore<S: StateStore> {
-    table_id: TableId,
-    source_name: String,
+    pub source_id: TableId,
+    pub source_name: String,
 
-    column_ids: Vec<ColumnId>,
+    pub column_ids: Vec<ColumnId>,
 
-    source_identify: String,
+    pub source_identify: String,
 
     /// `source_desc_builder` will be taken (`mem::take`) on execution. A `SourceDesc` (currently
     /// named `SourceDescV2`) will be constructed and used for execution.
-    source_desc_builder: Option<SourceDescBuilderV2>,
+    pub source_desc_builder: Option<SourceDescBuilderV2>,
 
     /// Split info for stream source. A source executor might read data from several splits of
     /// external connector.
-    stream_source_splits: Vec<SplitImpl>,
+    pub stream_source_splits: Vec<SplitImpl>,
 
     /// Stores information of the splits.
-    split_state_store: SourceStateTableHandler<S>,
+    pub split_state_store: SourceStateTableHandler<S>,
 
     /// In-memory cache for the splits.
-    state_cache: HashMap<SplitId, SplitImpl>,
+    pub state_cache: HashMap<SplitId, SplitImpl>,
 }
 
 pub struct SourceExecutorV2<S: StateStore> {
@@ -79,6 +79,9 @@ pub struct SourceExecutorV2<S: StateStore> {
 
     /// Expected barrier latency.
     expected_barrier_latency_ms: u64,
+
+    // FIXME(Yuanxin): Remove this.
+    _store: S,
 }
 
 impl<S: StateStore> SourceExecutorV2<S> {
@@ -92,6 +95,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         expected_barrier_latency_ms: u64,
         executor_id: u64,
+        _store: S,
     ) -> Self {
         Self {
             ctx,
@@ -102,6 +106,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             expected_barrier_latency_ms,
+            _store,
         }
     }
 
@@ -123,7 +128,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
                 source_desc.metrics.clone(),
                 SourceContext::new(
                     self.ctx.id,
-                    self.stream_source_core.as_ref().unwrap().table_id,
+                    self.stream_source_core.as_ref().unwrap().source_id,
                 ),
             )
             .await
@@ -466,7 +471,7 @@ impl<S: StateStore> Debug for SourceExecutorV2<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(core) = &self.stream_source_core {
             f.debug_struct("SourceExecutor")
-                .field("source_id", &core.table_id)
+                .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
                 .field("pk_indices", &self.pk_indices)
                 .finish()
@@ -527,8 +532,8 @@ mod tests {
         ));
         let source_desc_builder = create_source_desc_builder(
             &schema,
-            row_id_index,
             pk_column_ids,
+            row_id_index,
             source_info,
             properties,
         );
@@ -538,7 +543,7 @@ mod tests {
         )
         .await;
         let core = StreamSourceCore::<MemoryStateStore> {
-            table_id,
+            source_id: table_id,
             column_ids,
             source_identify: "Table_".to_string() + &table_id.table_id().to_string(),
             source_desc_builder: Some(source_desc_builder),
@@ -557,6 +562,7 @@ mod tests {
             barrier_rx,
             u64::MAX,
             1,
+            MemoryStateStore::new(),
         );
         let mut executor = Box::new(executor).execute();
 
@@ -614,8 +620,8 @@ mod tests {
 
         let source_desc_builder = create_source_desc_builder(
             &schema,
-            row_id_index,
             pk_column_ids,
+            row_id_index,
             source_info,
             properties,
         );
@@ -630,7 +636,7 @@ mod tests {
         .await;
 
         let core = StreamSourceCore::<MemoryStateStore> {
-            table_id,
+            source_id: table_id,
             column_ids: column_ids.clone(),
             source_identify: "Table_".to_string() + &table_id.table_id().to_string(),
             source_desc_builder: Some(source_desc_builder),
@@ -649,6 +655,7 @@ mod tests {
             barrier_rx,
             u64::MAX,
             1,
+            MemoryStateStore::new(),
         );
 
         let mut materialize = MaterializeExecutor::for_test(

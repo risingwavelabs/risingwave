@@ -29,9 +29,8 @@ impl Planner {
         }
         let plan: PlanRef = LogicalInsert::create(
             input,
-            insert.table_source.name,
-            insert.table_source.source_id,
-            insert.table_source.associated_mview_id,
+            insert.table_name.clone(),
+            insert.table_id,
             insert.column_idxs,
         )?
         .into();

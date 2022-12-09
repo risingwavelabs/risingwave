@@ -18,13 +18,21 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
-use crate::binder::{Binder, BoundTableSource};
+use crate::binder::Binder;
+use crate::catalog::TableId;
 use crate::expr::{ExprImpl, InputRef};
+use crate::user::UserId;
 
 #[derive(Debug)]
 pub struct BoundInsert {
-    /// Used for injecting deletion chunks to the source.
-    pub table_source: BoundTableSource,
+    /// Id of the table to perform inserting.
+    pub table_id: TableId,
+
+    /// Name of the table to perform inserting.
+    pub table_name: String,
+
+    /// Owner of the table to perform inserting.
+    pub owner: UserId,
 
     /// User defined columns in which to insert
     /// Is equal to [0, 2, 1] for insert statement
@@ -42,18 +50,20 @@ pub struct BoundInsert {
 impl Binder {
     pub(super) fn bind_insert(
         &mut self,
-        source_name: ObjectName,
+        name: ObjectName,
         columns: Vec<Ident>,
         source: Query,
     ) -> Result<BoundInsert> {
-        let (schema_name, source_name) =
-            Self::resolve_schema_qualified_name(&self.db_name, source_name)?;
-        let table_source = self.bind_table_source(schema_name.as_deref(), &source_name)?;
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
 
-        let expected_types: Vec<DataType> = table_source
-            .columns
+        let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name)?;
+        let table_id = table_catalog.id;
+        let owner = table_catalog.owner;
+        let table_columns = table_catalog.columns.clone();
+
+        let expected_types: Vec<DataType> = table_columns
             .iter()
-            .map(|c| c.data_type.clone())
+            .map(|c| c.data_type().clone())
             .collect();
 
         // When the column types of `source` query do not match `expected_types`, casting is
@@ -122,8 +132,9 @@ impl Binder {
         let mut target_table_col_idxs: Vec<usize> = vec![];
         'outer: for query_column in &columns {
             let column_name = query_column.real_value();
-            for (col_idx, table_column) in table_source.columns.iter().enumerate() {
-                if column_name == table_column.name {
+            for (col_idx, table_column) in table_columns.iter().enumerate() {
+                if column_name == table_column.name() {
+                    // FIXME(Yuanxin): type?
                     target_table_col_idxs.push(col_idx);
                     continue 'outer;
                 }
@@ -131,7 +142,7 @@ impl Binder {
             // Invalid column name found
             return Err(RwError::from(ErrorCode::BindError(format!(
                 "Column {} not found in table {}",
-                column_name, table_source.name
+                column_name, table_name
             ))));
         }
 
@@ -160,10 +171,12 @@ impl Binder {
         }
 
         let insert = BoundInsert {
-            table_source,
+            table_id,
+            table_name,
+            owner,
+            column_idxs: target_table_col_idxs,
             source,
             cast_exprs,
-            column_idxs: target_table_col_idxs,
         };
 
         Ok(insert)

@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
@@ -28,34 +28,40 @@ use crate::TableCatalog;
 /// [`Source`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
 pub struct Source {
-    pub catalog: Rc<SourceCatalog>,
+    pub catalog: Option<Rc<SourceCatalog>>,
+    /// NOTE(Yuanxin): Here we store column descriptions for plan generating, even if the source
+    /// catalog is empty.
+    pub column_descs: Vec<ColumnDesc>,
 }
 
 impl GenericPlanNode for Source {
     fn schema(&self) -> Schema {
-        let fields = self
-            .catalog
-            .columns
-            .iter()
-            .map(|c| (&c.column_desc).into())
-            .collect();
-        Schema { fields }
+        if let Some(catalog) = &self.catalog {
+            let fields = catalog
+                .columns
+                .iter()
+                .map(|c| (&c.column_desc).into())
+                .collect();
+            Schema { fields }
+        } else {
+            Default::default()
+        }
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        let mut id_to_idx = HashMap::new();
-        self.catalog
-            .columns
-            .iter()
-            .enumerate()
-            .for_each(|(idx, c)| {
+        if let Some(catalog) = &self.catalog {
+            let mut id_to_idx = HashMap::new();
+            catalog.columns.iter().enumerate().for_each(|(idx, c)| {
                 id_to_idx.insert(c.column_id(), idx);
             });
-        self.catalog
-            .pk_col_ids
-            .iter()
-            .map(|c| id_to_idx.get(c).copied())
-            .collect::<Option<Vec<_>>>()
+            catalog
+                .pk_col_ids
+                .iter()
+                .map(|c| id_to_idx.get(c).copied())
+                .collect::<Option<Vec<_>>>()
+        } else {
+            None
+        }
     }
 
     fn ctx(&self) -> OptimizerContextRef {

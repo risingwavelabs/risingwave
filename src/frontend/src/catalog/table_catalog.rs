@@ -77,12 +77,15 @@ pub struct TableCatalog {
 
     pub is_index: bool,
 
+    /// Whether this table is created via `CREATE MATERIALZIED VIEW`.
+    pub is_mview: bool,
+
     /// Distribution key column indices.
     pub distribution_key: Vec<usize>,
 
-    /// The appendonly attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
+    /// The append-only attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
     /// on this to derive an append-only stream plan
-    pub appendonly: bool,
+    pub append_only: bool,
 
     /// Owner of the table.
     pub owner: u32,
@@ -108,9 +111,7 @@ pub struct TableCatalog {
 }
 
 pub enum TableKind {
-    /// Refer to [`crate::handler::drop_table::check_source`] for how to distinguish between a
-    /// table and a source.
-    TableOrSource,
+    Table,
     Index,
     MView,
 }
@@ -133,10 +134,10 @@ impl TableCatalog {
     pub fn kind(&self) -> TableKind {
         if self.is_index {
             TableKind::Index
-        } else if self.associated_source_id.is_none() {
+        } else if self.is_mview {
             TableKind::MView
         } else {
-            TableKind::TableOrSource
+            TableKind::Table
         }
     }
 
@@ -168,7 +169,7 @@ impl TableCatalog {
             stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
-            appendonly: self.appendonly,
+            appendonly: self.append_only,
             retention_seconds: table_options
                 .retention_seconds
                 .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
@@ -212,7 +213,7 @@ impl TableCatalog {
                 .iter()
                 .map(|k| *k as i32)
                 .collect_vec(),
-            appendonly: self.appendonly,
+            appendonly: self.append_only,
             owner: self.owner,
             properties: self.properties.inner().clone(),
             fragment_id: self.fragment_id,
@@ -222,6 +223,7 @@ impl TableCatalog {
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
             definition: self.definition.clone(),
             handle_pk_conflict: self.handle_pk_conflict,
+            is_mview: self.is_mview,
         }
     }
 }
@@ -261,7 +263,7 @@ impl From<ProstTable> for TableCatalog {
                 .map(|k| *k as usize)
                 .collect_vec(),
             stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
-            appendonly: tb.appendonly,
+            append_only: tb.appendonly,
             owner: tb.owner,
             properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
@@ -269,6 +271,7 @@ impl From<ProstTable> for TableCatalog {
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition.clone(),
             handle_pk_conflict: tb.handle_pk_conflict,
+            is_mview: tb.is_mview,
         }
     }
 }
@@ -354,6 +357,7 @@ mod tests {
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,
+            is_mview: false,
         }
         .into();
 
@@ -401,7 +405,7 @@ mod tests {
                     direct: Direction::Asc,
                 }],
                 distribution_key: vec![],
-                appendonly: false,
+                append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
                 properties: WithOptions::new(HashMap::from([(
                     String::from(PROPERTIES_RETENTION_SECOND_KEY),
@@ -411,7 +415,8 @@ mod tests {
                 vnode_col_idx: None,
                 value_indices: vec![0],
                 definition: "".into(),
-                handle_pk_conflict: false
+                handle_pk_conflict: false,
+                is_mview: false,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

@@ -78,9 +78,8 @@ impl ToBatchProst for BatchInsert {
             .map(|&i| i as u32)
             .collect();
         NodeBody::Insert(InsertNode {
-            table_source_id: self.logical.source_id().table_id(),
-            associated_mview_id: self.logical.associated_mview_id().table_id(),
             column_idxs: c_idxs,
+            table_id: self.logical.table_id().table_id(),
         })
     }
 }

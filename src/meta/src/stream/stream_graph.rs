@@ -567,8 +567,10 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::Source(node) => {
-                        if let Some(table) = &mut node.state_table {
-                            update_table(table, "SourceInternalTable");
+                        if let Some(source) = &mut node.source_inner {
+                            if let Some(table) = &mut source.state_table {
+                                update_table(table, "SourceInternalTable");
+                            }
                         }
                     }
 
@@ -1076,7 +1078,11 @@ impl ActorGraphBuilder {
                 vec![node.get_table_id()]
             }
             NodeBody::Source(node) => {
-                vec![node.state_table.as_ref().unwrap().id]
+                if let Some(source) = &node.source_inner {
+                    vec![source.state_table.as_ref().unwrap().id]
+                } else {
+                    vec![]
+                }
             }
             NodeBody::Arrange(node) => {
                 vec![node.table.as_ref().unwrap().id]

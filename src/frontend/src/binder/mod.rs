@@ -38,8 +38,8 @@ pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundTableSource,
-    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
+    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundWindowTableFunction, Relation,
+    WindowTableFunctionKind,
 };
 use risingwave_common::error::ErrorCode;
 pub use select::{BoundDistinct, BoundSelect};

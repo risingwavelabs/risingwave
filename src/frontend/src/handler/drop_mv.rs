@@ -24,7 +24,6 @@ use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableKind;
 use crate::catalog::CatalogError;
-use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_mv(
@@ -76,10 +75,9 @@ pub async fn handle_drop_mv(
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
 
-        // If associated source is `Some`, then it is actually a materialized source / table v2.
+        // If associated source is `Some`, then it is actually a materialized source / table.
         match table.kind() {
-            TableKind::TableOrSource => {
-                check_source(&reader, db_name, schema_name, &table_name)?;
+            TableKind::Table => {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP TABLE` to drop a table.".to_owned(),
                 )));

@@ -17,7 +17,6 @@ use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::drop_table::check_source;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
@@ -55,13 +54,10 @@ pub async fn handle_drop_index(
                     _ => return Err(err.into()),
                 };
                 return match reader.get_table_by_name(db_name, schema_path, &index_name) {
-                    Ok((table, schema_name)) => match table.kind() {
-                        TableKind::TableOrSource => {
-                            check_source(&reader, db_name, schema_name, &index_name)?;
-                            Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                                "Use `DROP TABLE` to drop a table.".to_owned(),
-                            )))
-                        }
+                    Ok((table, _)) => match table.kind() {
+                        TableKind::Table => Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                            "Use `DROP TABLE` to drop a table.".to_owned(),
+                        ))),
                         TableKind::MView => Err(RwError::from(ErrorCode::InvalidInputSyntax(
                             "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
                         ))),

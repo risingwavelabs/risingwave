@@ -24,7 +24,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_connector::source::{
     ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
 };
-use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -365,9 +364,7 @@ where
             let sources = catalog_manager.list_sources().await;
 
             for source in sources {
-                if let Some(StreamSource(_)) = source.info {
-                    Self::create_source_worker(&source, &mut managed_sources, false).await?
-                }
+                Self::create_source_worker(&source, &mut managed_sources, false).await?
             }
         }
 
@@ -517,7 +514,7 @@ where
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
-        } else if let Some(StreamSource(_)) = source.info {
+        } else {
             Self::create_source_worker(source, &mut core.managed_sources, true).await?;
         }
         Ok(())

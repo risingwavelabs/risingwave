@@ -492,6 +492,7 @@ impl PlanRoot {
         handle_pk_conflict: bool,
         enable_dml: bool,
         row_id_index: Option<usize>,
+        is_user_mview: bool,
     ) -> Result<StreamMaterialize> {
         let out_names = if let Some(col_names) = col_names {
             col_names
@@ -504,14 +505,8 @@ impl PlanRoot {
             // FIXME: Store `Field` or `Schema` in `TableSource` to avoid downcasting in the future.
             // Or do we have a better solution to this?
             let logical_source = self.plan.downcast_ref::<LogicalSource>().unwrap();
-            let column_descs = logical_source
-                .core
-                .catalog
-                .columns
-                .iter()
-                .map(|column_catalog| column_catalog.column_desc.clone())
-                .collect_vec();
-            stream_plan = StreamDml::new(stream_plan, column_descs).into();
+            stream_plan =
+                StreamDml::new(stream_plan, logical_source.core.column_descs.clone()).into();
         }
         if let Some(row_id_index) = row_id_index {
             // Insert a row id gen eexecutor after the previous executor.
@@ -528,6 +523,7 @@ impl PlanRoot {
             false,
             definition,
             handle_pk_conflict,
+            is_user_mview,
         )
     }
 
@@ -543,6 +539,7 @@ impl PlanRoot {
             self.out_names.clone(),
             true,
             "".into(),
+            false,
             false,
         )
     }
@@ -565,6 +562,7 @@ impl PlanRoot {
             col_names,
             false,
             definition,
+            false,
             false,
         )
         .map(|plan| plan.rewrite_into_sink(properties))

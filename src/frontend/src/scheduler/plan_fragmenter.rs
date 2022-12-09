@@ -596,18 +596,19 @@ impl BatchPlanFragmenter {
         }
 
         if let Some(source_node) = node.as_batch_source() {
-            let property = ConnectorProperties::extract(
-                source_node.logical().source_catalog().properties.clone(),
-            )?;
-            let mut enumerator = block_on(SplitEnumeratorImpl::create(property))?;
-            let split_info = block_on(enumerator.list_splits())?;
-            Ok(Some(SourceScanInfo::new(split_info)))
-        } else {
-            node.inputs()
-                .into_iter()
-                .find_map(|n| Self::collect_stage_source(n).transpose())
-                .transpose()
+            let source_catalog = source_node.logical().source_catalog();
+            if let Some(source_catalog) = source_catalog {
+                let property = ConnectorProperties::extract(source_catalog.properties.clone())?;
+                let mut enumerator = block_on(SplitEnumeratorImpl::create(property))?;
+                let split_info = block_on(enumerator.list_splits())?;
+                return Ok(Some(SourceScanInfo::new(split_info)));
+            }
         }
+
+        node.inputs()
+            .into_iter()
+            .find_map(|n| Self::collect_stage_source(n).transpose())
+            .transpose()
     }
 
     /// Check whether this stage contains a table scan node and the table's information if so.

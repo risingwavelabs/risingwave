@@ -143,6 +143,7 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
             index: 0,
             order_type: 1,
         }],
+        is_mview: false,
         ..Default::default()
     }
 }

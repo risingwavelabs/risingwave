@@ -291,10 +291,10 @@ pub struct SourceDescV2 {
 
 #[derive(Clone)]
 pub struct SourceDescBuilderV2 {
-    row_id_index: Option<ProstColumnIndex>,
     columns: Vec<ProstColumnCatalog>,
     metrics: Arc<SourceMetrics>,
     pk_column_ids: Vec<i32>,
+    row_id_index: Option<ProstColumnIndex>,
     properties: HashMap<String, String>,
     source_info: ProstStreamSourceInfo,
     connector_params: ConnectorParams,
@@ -304,20 +304,20 @@ pub struct SourceDescBuilderV2 {
 impl SourceDescBuilderV2 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        row_id_index: Option<ProstColumnIndex>,
         columns: Vec<ProstColumnCatalog>,
         metrics: Arc<SourceMetrics>,
         pk_column_ids: Vec<i32>,
+        row_id_index: Option<ProstColumnIndex>,
         properties: HashMap<String, String>,
         source_info: ProstStreamSourceInfo,
         connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
     ) -> Self {
         Self {
-            row_id_index,
             columns,
             metrics,
             pk_column_ids,
+            row_id_index,
             properties,
             source_info,
             connector_params,
@@ -386,8 +386,8 @@ pub mod test_utils {
 
     pub fn create_source_desc_builder(
         schema: &Schema,
-        row_id_index: Option<u64>,
         pk_column_ids: Vec<i32>,
+        row_id_index: Option<u64>,
         source_info: StreamSourceInfo,
         properties: HashMap<String, String>,
     ) -> SourceDescBuilderV2 {
@@ -411,10 +411,10 @@ pub mod test_utils {
             })
             .collect();
         SourceDescBuilderV2 {
-            row_id_index,
             columns,
             metrics: Default::default(),
             pk_column_ids,
+            row_id_index,
             properties,
             source_info,
             connector_params: Default::default(),

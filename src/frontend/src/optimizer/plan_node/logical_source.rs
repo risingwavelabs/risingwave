@@ -15,6 +15,7 @@
 use std::fmt;
 use std::rc::Rc;
 
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::generic::GenericPlanNode;
@@ -36,9 +37,14 @@ pub struct LogicalSource {
 }
 
 impl LogicalSource {
-    pub fn new(source_catalog: Rc<SourceCatalog>, ctx: OptimizerContextRef) -> Self {
+    pub fn new(
+        source_catalog: Option<Rc<SourceCatalog>>,
+        column_descs: Vec<ColumnDesc>,
+        ctx: OptimizerContextRef,
+    ) -> Self {
         let core = generic::Source {
             catalog: source_catalog,
+            column_descs,
         };
 
         let schema = core.schema();
@@ -65,7 +71,7 @@ impl LogicalSource {
             .collect()
     }
 
-    pub fn source_catalog(&self) -> Rc<SourceCatalog> {
+    pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
     }
 
@@ -78,12 +84,16 @@ impl_plan_tree_node_for_leaf! {LogicalSource}
 
 impl fmt::Display for LogicalSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "LogicalSource {{ source: {}, columns: [{}] }}",
-            self.source_catalog().name,
-            self.column_names().join(", ")
-        )
+        if let Some(catalog) = self.source_catalog() {
+            write!(
+                f,
+                "LogicalSource {{ source: {}, columns: [{}] }}",
+                catalog.name,
+                self.column_names().join(", ")
+            )
+        } else {
+            write!(f, "LogicalSource")
+        }
     }
 }
 

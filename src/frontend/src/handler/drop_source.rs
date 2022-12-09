@@ -14,14 +14,13 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::PermissionDenied;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::privilege::check_super_user;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::source_catalog::SourceKind;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_source(
@@ -65,15 +64,6 @@ pub async fn handle_drop_source(
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
 
-        match source.kind() {
-            SourceKind::Table => {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP TABLE` to drop a table.".to_owned(),
-                )))
-            }
-            SourceKind::Stream => {}
-        }
-
         let table_id = catalog_reader
             .get_table_by_name(db_name, SchemaPath::Name(schema_name), &source_name)
             .map(|(table, _)| table.id())
@@ -85,9 +75,8 @@ pub async fn handle_drop_source(
     let catalog_writer = session.env().catalog_writer();
     if let Some(table_id) = table_id {
         // Dropping a materialized source.
-        catalog_writer
-            .drop_materialized_source(source_id, table_id)
-            .await?;
+        // TODO(Yuanxin): This should be removed after unsupporting `CREATE MATERIALIZED SOURCE`.
+        catalog_writer.drop_table(Some(source_id), table_id).await?;
     } else {
         catalog_writer.drop_source(source_id).await?;
     }

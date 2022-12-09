@@ -17,7 +17,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
-use risingwave_common::util::is_stream_source;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -215,7 +214,9 @@ impl TableFragments {
     /// Find the source node inside the stream node, if any.
     pub fn find_source_node(stream_node: &StreamNode) -> Option<&SourceNode> {
         if let Some(NodeBody::Source(source)) = stream_node.node_body.as_ref() {
-            return Some(source);
+            if source.source_inner.is_some() {
+                return Some(source);
+            }
         }
 
         for child in &stream_node.input {
@@ -235,8 +236,7 @@ impl TableFragments {
             for actor in &fragment.actors {
                 if let Some(source_id) =
                     TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
-                        .filter(|s| is_stream_source(s))
-                        .map(|s| s.source_id)
+                        .map(|s| s.source_inner.as_ref().unwrap().source_id)
                 {
                     source_fragments
                         .entry(source_id)

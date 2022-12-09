@@ -71,7 +71,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_table(
         &self,
-        source: ProstSource,
+        source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
     ) -> Result<()>;
@@ -87,7 +87,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()>;
 
-    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()>;
+    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()>;
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
 
@@ -172,14 +172,11 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn create_table(
         &self,
-        source: ProstSource,
+        source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
-        let (_, _, version) = self
-            .meta_client
-            .create_materialized_source(source, table, graph)
-            .await?;
+        let (_, version) = self.meta_client.create_table(source, table, graph).await?;
         self.wait_version(version).await
     }
 
@@ -193,11 +190,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
-        let version = self
-            .meta_client
-            .drop_materialized_source(source_id, table_id)
-            .await?;
+    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
+        let version = self.meta_client.drop_table(source_id, table_id).await?;
         self.wait_version(version).await
     }
 

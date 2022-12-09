@@ -20,16 +20,14 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, Source as ProstSource, Table as ProstTable, TableSourceInfo,
+    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
 };
 use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, TableConstraint,
 };
 
-use super::create_source::make_prost_source;
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
@@ -39,6 +37,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::build_graph;
+use crate::Binder;
 
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
@@ -201,7 +200,7 @@ pub(crate) fn gen_create_table_plan(
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-) -> Result<(PlanRef, ProstSource, ProstTable)> {
+) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
@@ -209,21 +208,78 @@ pub(crate) fn gen_create_table_plan(
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
     let properties = context.inner().with_options.inner().clone();
 
+    let db_name = session.database();
+    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+
     // TODO(Yuanxin): Detect if there is an external source based on `properties` (WITH CONNECTOR)
-    // and make prost source accordingly.
-    let source = make_prost_source(
-        session,
-        table_name,
+    // and set `has_external_source` accordingly.
+    let has_external_source = false;
+    let source = if has_external_source {
+        Some(ProstSource {
+            id: 0,
+            schema_id,
+            database_id,
+            name: name.clone(),
+            row_id_index: row_id_index.clone(),
+            columns: columns.clone(),
+            pk_column_ids,
+            properties,
+            info: Some(StreamSourceInfo::default()),
+            owner: session.user_id(),
+        })
+    } else {
+        None
+    };
+
+    let column_descs = columns
+        .iter()
+        .map(|column| column.column_desc.clone().unwrap().into())
+        .collect_vec();
+
+    let source_node: PlanRef = if let Some(source) = &source {
+        LogicalSource::new(Some(Rc::new((source).into())), column_descs, context).into()
+    } else {
+        LogicalSource::new(None, column_descs, context).into()
+    };
+
+    let row_id_index = row_id_index.as_ref().map(|index| index.index as _);
+    // row_id_index is Some means that the user has not specified pk, then we will add a hidden
+    // column to store pk, and materialize executor do not need to handle pk conflict.
+    let handle_pk_conflict = row_id_index.is_none();
+    let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
+    required_cols.toggle_range(..);
+    let mut out_names = source_node.schema().names();
+    if let Some(row_id_index) = row_id_index {
+        required_cols.toggle(row_id_index);
+        out_names.remove(row_id_index);
+    }
+
+    let mut plan_root = PlanRoot::new(
+        source_node,
+        RequiredDist::Any,
+        Order::any(),
+        required_cols,
+        out_names,
+    );
+
+    let materialize = plan_root.gen_materialize_plan(
+        name,
+        "".into(),
+        None,
+        handle_pk_conflict,
+        true,
         row_id_index,
-        columns,
-        pk_column_ids,
-        properties,
-        Info::TableSource(TableSourceInfo {}),
+        false,
     )?;
-    let (plan, table) = gen_materialize_plan(context, source.clone(), session.user_id())?;
-    Ok((plan, source, table))
+
+    let mut table = materialize.table().to_prost(schema_id, database_id);
+    table.owner = session.user_id();
+
+    Ok((materialize.into(), source, table))
 }
 
+/// TODO(Yuanxin): Remove this method after unsupporting `CREATE MATERIALIZED SOURCE`.
 pub(crate) fn gen_materialize_plan(
     context: OptimizerContextRef,
     source: ProstSource,
@@ -231,7 +287,16 @@ pub(crate) fn gen_materialize_plan(
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
-        let source_node: PlanRef = LogicalSource::new(Rc::new((&source).into()), context).into();
+        let source_node: PlanRef = LogicalSource::new(
+            Some(Rc::new((&source).into())),
+            source
+                .columns
+                .iter()
+                .map(|column| column.column_desc.clone().unwrap().into())
+                .collect(),
+            context,
+        )
+        .into();
         let row_id_index = source.row_id_index.as_ref().map(|index| index.index as _);
         // row_id_index is Some means that the user has not specified pk, then we will add a hidden
         // column to store pk, and materialize executor do not need to handle pk conflict.
@@ -257,8 +322,9 @@ pub(crate) fn gen_materialize_plan(
             "".into(),
             None,
             handle_pk_conflict,
-            false, // TODO(Yuanxin): true
-            None,  // TODO(Yuanxin): row_id_index
+            false,
+            None,
+            false,
         )?
     };
     let mut table = materialize
@@ -309,8 +375,6 @@ pub async fn handle_create_table(
 
     let catalog_writer = session.env().catalog_writer();
 
-    // TODO(Yuanxin): `source` will contain either an external source or nothing. Rewrite
-    // `create_table` accordingly.
     catalog_writer.create_table(source, table, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))

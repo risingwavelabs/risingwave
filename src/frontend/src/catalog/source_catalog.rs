@@ -14,9 +14,7 @@
 
 use std::collections::HashMap;
 
-use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::source_info::SourceInfo;
-use risingwave_pb::catalog::Source as ProstSource;
+use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
 
 use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, SourceId};
@@ -36,24 +34,9 @@ pub struct SourceCatalog {
     pub pk_col_ids: Vec<ColumnId>,
     pub append_only: bool,
     pub owner: u32,
-    pub info: SourceInfo,
+    pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
     pub properties: HashMap<String, String>,
-}
-
-#[derive(PartialEq, Eq)]
-pub enum SourceKind {
-    Table,
-    Stream,
-}
-
-impl SourceCatalog {
-    pub fn kind(&self) -> SourceKind {
-        match self.info {
-            SourceInfo::StreamSource(_) => SourceKind::Stream,
-            SourceInfo::TableSource(_) => SourceKind::Table,
-        }
-    }
 }
 
 impl From<&ProstSource> for SourceCatalog {
@@ -68,11 +51,6 @@ impl From<&ProstSource> for SourceCatalog {
             .map(Into::into)
             .collect();
         let with_options = WithOptions::new(prost.properties.clone());
-        let info = match &prost.info {
-            Some(Info::StreamSource(info_inner)) => SourceInfo::StreamSource(info_inner.clone()),
-            Some(Info::TableSource(info_inner)) => SourceInfo::TableSource(info_inner.clone()),
-            None => unreachable!(),
-        };
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
         let row_id_index = prost
             .row_id_index
@@ -89,7 +67,7 @@ impl From<&ProstSource> for SourceCatalog {
             pk_col_ids,
             append_only,
             owner,
-            info,
+            info: prost.info.clone().unwrap(),
             row_id_index,
             properties: with_options.into_inner(),
         }

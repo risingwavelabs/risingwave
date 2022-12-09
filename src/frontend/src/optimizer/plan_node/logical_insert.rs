@@ -34,8 +34,7 @@ use crate::utils::Condition;
 pub struct LogicalInsert {
     pub base: PlanBase,
     table_source_name: String, // explain-only
-    source_id: TableId,        // TODO: use SourceId
-    associated_mview_id: TableId,
+    table_id: TableId,
     input: PlanRef,
     column_idxs: Vec<usize>, // columns in which to insert
 }
@@ -45,8 +44,7 @@ impl LogicalInsert {
     pub fn new(
         input: PlanRef,
         table_source_name: String,
-        source_id: TableId,
-        associated_mview_id: TableId,
+        table_id: TableId,
         column_idxs: Vec<usize>,
     ) -> Self {
         let ctx = input.ctx();
@@ -56,8 +54,7 @@ impl LogicalInsert {
         Self {
             base,
             table_source_name,
-            source_id,
-            associated_mview_id,
+            table_id,
             input,
             column_idxs,
         }
@@ -67,27 +64,14 @@ impl LogicalInsert {
     pub fn create(
         input: PlanRef,
         table_source_name: String,
-        source_id: TableId,
         table_id: TableId,
         column_idxs: Vec<usize>,
     ) -> Result<Self> {
-        Ok(Self::new(
-            input,
-            table_source_name,
-            source_id,
-            table_id,
-            column_idxs,
-        ))
+        Ok(Self::new(input, table_source_name, table_id, column_idxs))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         write!(f, "{} {{ table: {} }}", name, self.table_source_name)
-    }
-
-    /// Get the logical insert's source id.
-    #[must_use]
-    pub fn source_id(&self) -> TableId {
-        self.source_id
     }
 
     // Get the column indexes in which to insert to
@@ -97,8 +81,8 @@ impl LogicalInsert {
     }
 
     #[must_use]
-    pub fn associated_mview_id(&self) -> TableId {
-        self.associated_mview_id
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 }
 
@@ -111,8 +95,7 @@ impl PlanTreeNodeUnary for LogicalInsert {
         Self::new(
             input,
             self.table_source_name.clone(),
-            self.source_id,
-            self.associated_mview_id,
+            self.table_id,
             self.column_idxs.clone(),
         )
     }

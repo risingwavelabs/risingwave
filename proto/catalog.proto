@@ -14,21 +14,12 @@ message ColumnIndex {
   uint64 index = 1;
 }
 
-message SourceInfo {
-  oneof source_info {
-    StreamSourceInfo stream_source = 1;
-    TableSourceInfo table_source = 2;
-  }
-}
-
 message StreamSourceInfo {
   plan_common.RowFormatType row_format = 1;
   string row_schema_location = 2;
   bool use_schema_registry = 3;
   string proto_message_name = 4;
 }
-
-message TableSourceInfo {}
 
 message Source {
   uint32 id = 1;
@@ -45,12 +36,10 @@ message Source {
   repeated int32 pk_column_ids = 7;
   // Properties specified by the user in WITH clause.
   map<string, string> properties = 8;
-  // Information of either stream source (connector) or table source.
-  oneof info {
-    StreamSourceInfo stream_source = 9;
-    TableSourceInfo table_source = 10;
-  }
-  uint32 owner = 11;
+
+  uint32 owner = 9;
+
+  StreamSourceInfo info = 10;
 }
 
 message Sink {
@@ -113,6 +102,7 @@ message Table {
   repeated int32 value_indices = 19;
   string definition = 20;
   bool handle_pk_conflict = 21;
+  bool is_mview = 22;
 }
 
 message View {

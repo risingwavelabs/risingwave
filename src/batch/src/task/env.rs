@@ -18,7 +18,6 @@ use risingwave_common::config::BatchConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::dml_manager::DmlManagerRef;
-use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
 use crate::executor::BatchTaskMetrics;
@@ -35,9 +34,6 @@ pub struct BatchEnvironment {
 
     /// Reference to the task manager.
     task_manager: Arc<BatchManager>,
-
-    /// Reference to the source manager. This is used to query the sources.
-    source_manager: TableSourceManagerRef,
 
     /// Batch related configurations.
     config: Arc<BatchConfig>,
@@ -61,7 +57,6 @@ pub struct BatchEnvironment {
 impl BatchEnvironment {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        source_manager: TableSourceManagerRef,
         task_manager: Arc<BatchManager>,
         server_addr: HostAddr,
         config: Arc<BatchConfig>,
@@ -74,7 +69,6 @@ impl BatchEnvironment {
         BatchEnvironment {
             server_addr,
             task_manager,
-            source_manager,
             config,
             worker_id,
             state_store,
@@ -94,7 +88,6 @@ impl BatchEnvironment {
         BatchEnvironment {
             task_manager: Arc::new(BatchManager::new(BatchConfig::default())),
             server_addr: "127.0.0.1:5688".parse().unwrap(),
-            source_manager: std::sync::Arc::new(TableSourceManager::default()),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
@@ -112,14 +105,6 @@ impl BatchEnvironment {
 
     pub fn task_manager(&self) -> Arc<BatchManager> {
         self.task_manager.clone()
-    }
-
-    pub fn source_manager(&self) -> &TableSourceManager {
-        &self.source_manager
-    }
-
-    pub fn source_manager_ref(&self) -> TableSourceManagerRef {
-        self.source_manager.clone()
     }
 
     pub fn config(&self) -> &BatchConfig {

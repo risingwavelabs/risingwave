@@ -113,7 +113,7 @@ impl TableCatalogBuilder {
             stream_key: vec![],
             distribution_key,
             is_index: false,
-            appendonly: false,
+            append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: self.properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
@@ -124,6 +124,7 @@ impl TableCatalogBuilder {
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
             handle_pk_conflict: false,
+            is_mview: false,
         }
     }
 

@@ -54,7 +54,7 @@ message SourceNode {
   repeated plan_common.ColumnCatalog columns = 2;
   map<string, string> properties = 3;
   bytes split = 4;
-  catalog.SourceInfo info = 5;
+  catalog.StreamSourceInfo info = 5;
 }
 
 message ProjectNode {
@@ -66,23 +66,20 @@ message FilterNode {
 }
 
 message InsertNode {
-  uint32 table_source_id = 1;
+  // Id of the table to perform inserting.
+  uint32 table_id = 1;
   repeated uint32 column_idxs = 2;
-  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
-  uint32 associated_mview_id = 3;
 }
 
 message DeleteNode {
-  uint32 table_source_id = 1;
-  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
-  uint32 associated_mview_id = 2;
+  // Id of the table to perform deleting.
+  uint32 table_id = 1;
 }
 
 message UpdateNode {
-  uint32 table_source_id = 1;
+  // Id of the table to perform updating.
+  uint32 table_id = 1;
   repeated expr.ExprNode exprs = 2;
-  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
-  uint32 associated_mview_id = 3;
 }
 
 message ValuesNode {

@@ -70,7 +70,13 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        Ok(LogicalSource::new(Rc::new(source.catalog), self.ctx()).into())
+        let column_descs = source
+            .catalog
+            .columns
+            .iter()
+            .map(|column| column.column_desc.clone())
+            .collect_vec();
+        Ok(LogicalSource::new(Some(Rc::new(source.catalog)), column_descs, self.ctx()).into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
