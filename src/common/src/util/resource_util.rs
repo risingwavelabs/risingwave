@@ -89,7 +89,7 @@ pub mod memory {
     /// Returns the total memory used by the system in bytes.
     ///
     /// If running in container, this function will read the cgroup interface files for the
-    /// memory used, if interface files are not found, will return the memory used in the system 
+    /// memory used, if interface files are not found, will return the memory used in the system
     /// as default. The cgroup mount point is assumed to be at /sys/fs/cgroup by default.
     ///
     /// [`with_capacity`]: #method.with_capacity
@@ -115,8 +115,8 @@ pub mod memory {
     /// Returns the total memory available by the system in bytes.
     ///
     /// If running in container, this function will read the cgroup interface files for the
-    /// memory available/limit, if interface files are not found, will return the system memory volume by default.
-    /// The cgroup mount point is assumed to be at /sys/fs/cgroup by default.
+    /// memory available/limit, if interface files are not found, will return the system memory
+    /// volume by default. The cgroup mount point is assumed to be at /sys/fs/cgroup by default.
     ///
     /// [`with_capacity`]: #method.with_capacity
     ///
@@ -125,7 +125,7 @@ pub mod memory {
     /// Basic usage:
     ///
     /// ``` ignore
-    /// let mem_available = memory::total_memory_avialable_bytes();
+    /// let mem_available = memory::total_memory_available_bytes();
     /// ```
     pub fn total_memory_available_bytes() -> usize {
         if !super::runtime::is_linux_machine() || !super::runtime::is_running_in_container() {
@@ -199,10 +199,11 @@ pub mod cpu {
 
     /// Returns the total number of cpu available as a float.
     ///
-    /// If running in container, this function will return the cpu limit by the container. If not, 
-    /// it will return the ```available_parallelism``` by the system. A panic will be invoked if invoking process
-    /// does not have permission to read appropriate values by ```std::thread::available_parallelism``` or if the platform is not supported.
-    /// The cgroup mount point is assumed to be at /sys/fs/cgroup by default.
+    /// If running in container, this function will return the cpu limit by the container. If not,
+    /// it will return the ```available_parallelism``` by the system. A panic will be invoked if
+    /// invoking process does not have permission to read appropriate values by
+    /// ```std::thread::available_parallelism``` or if the platform is not supported. The cgroup
+    /// mount point is assumed to be at /sys/fs/cgroup by default.
     ///
     /// [`with_capacity`]: #method.with_capacity
     ///
