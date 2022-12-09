@@ -24,10 +24,11 @@ use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
-use risingwave_pb::leader::leader_server::LeaderServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
+use risingwave_pb::leader::leader_server::LeaderServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
+use risingwave_pb::meta::leader_service_server::LeaderServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
@@ -54,8 +55,8 @@ use crate::manager::{
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
-use crate::rpc::service::leader_service::LeaderServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
+use crate::rpc::service::leader_service::LeaderServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
@@ -262,7 +263,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let intercept_clone = intercept.clone();
 
         // TODO: remove interceptor. Not needed if we have LeaderService
-        let leader_srv = LeaderServiceImpl::new(f_leader_svc_leader_rx); 
+        let leader_srv = LeaderServiceImpl::new(f_leader_svc_leader_rx);
 
         // run follower services until node becomes leader
         let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
@@ -276,7 +277,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 tonic::transport::Server::builder()
                     .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
                     .add_service(HealthServer::with_interceptor(health_srv, intercept_clone))
-                    .add_service(LeaderServer::new(leader_srv))
+                    .add_service(LeaderServiceServer::new(leader_srv))
                     .serve_with_shutdown(address_info.listen_addr, async move {
                         tokio::select! {
                         _ = tokio::signal::ctrl_c() => {},
@@ -558,13 +559,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 }
             }
         };
-        let leader_srv = LeaderServiceImpl::new(l_leader_svc_leader_rx); 
+        let leader_srv = LeaderServiceImpl::new(l_leader_svc_leader_rx);
 
         // leader services defined above
 
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
-            .add_service(LeaderServer::new(leader_srv))
+            .add_service(LeaderServiceServer::new(leader_srv))
             .add_service(HeartbeatServiceServer::with_interceptor(
                 heartbeat_srv,
                 intercept.clone(),

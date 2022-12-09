@@ -14,7 +14,8 @@
 
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::leader::leader_server::Leader;
-use risingwave_pb::leader::{LeaderRequest, LeaderResponse};
+use risingwave_pb::meta::leader_service_server::LeaderService;
+use risingwave_pb::meta::{LeaderRequest, LeaderResponse};
 use tokio::sync::watch::Receiver;
 use tonic::{Request, Response, Status};
 
@@ -31,8 +32,11 @@ impl LeaderServiceImpl {
     }
 }
 
+//  expected struct `risingwave_pb::meta::LeaderRequest`, found struct
+// `risingwave_pb::leader::LeaderRequest`
+
 #[async_trait::async_trait]
-impl Leader for LeaderServiceImpl {
+impl LeaderService for LeaderServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
     async fn leader(
         &self,
