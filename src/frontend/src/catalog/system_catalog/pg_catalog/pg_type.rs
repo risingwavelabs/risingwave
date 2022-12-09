@@ -23,8 +23,33 @@ use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 /// The catalog `pg_type` stores information about data types.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-type.html`]
 pub const PG_TYPE_TABLE_NAME: &str = "pg_type";
-pub const PG_TYPE_COLUMNS: &[SystemCatalogColumnsDef<'_>] =
-    &[(DataType::Int32, "oid"), (DataType::Varchar, "typname")];
+pub const PG_TYPE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
+    (DataType::Int32, "oid"),
+    (DataType::Varchar, "typname"),
+    // 0
+    (DataType::Int32, "typelem"),
+    // false
+    (DataType::Boolean, "typnotnull"),
+    // 0
+    (DataType::Int32, "typbasetype"),
+    // -1
+    (DataType::Int32, "typtypmod"),
+    // 0
+    (DataType::Int32, "typcollation"),
+    // 0
+    (DataType::Int32, "typlen"),
+    // 0
+    (DataType::Int32, "typnamespace"),
+    // 'b'
+    (DataType::Varchar, "typtype"),
+    // 0
+    (DataType::Int32, "typrelid"),
+    // None
+    (DataType::Varchar, "typdefault"),
+    // None
+    (DataType::Varchar, "typcategory"),
+
+];
 
 // TODO: uniform the default data with `TypeOid` under `pg_field_descriptor`.
 pub const PG_TYPE_DATA: &[(i32, &str)] = &[
@@ -50,6 +75,17 @@ pub static PG_TYPE_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
             Row::new(vec![
                 Some(ScalarImpl::Int32(*oid)),
                 Some(ScalarImpl::Utf8((*name).into())),
+                Some(ScalarImpl::Int32(0)),
+                Some(ScalarImpl::Bool(false)),
+                Some(ScalarImpl::Int32(0)),
+                Some(ScalarImpl::Int32(-1)),
+                Some(ScalarImpl::Int32(0)),
+                Some(ScalarImpl::Int32(0)),
+                Some(ScalarImpl::Int32(0)),
+                Some(ScalarImpl::Utf8("b".into())),
+                Some(ScalarImpl::Int32(0)),
+                None,
+                None,
             ])
         })
         .collect_vec()

@@ -37,6 +37,7 @@ pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
 pub const INFORMATION_SCHEMA_SCHEMA_NAME: &str = "information_schema";
 pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
+pub const RESERVED_PG_TABLE_FUNCTION_PREFIX: &str = "pg_";
 pub const DEFAULT_SUPER_USER: &str = "root";
 pub const DEFAULT_SUPER_USER_ID: u32 = 1;
 // This is for compatibility with customized utils for PostgreSQL.

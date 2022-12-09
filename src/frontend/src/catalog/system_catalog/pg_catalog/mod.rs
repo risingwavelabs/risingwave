@@ -17,11 +17,15 @@ pub mod pg_attribute;
 pub mod pg_cast;
 pub mod pg_class;
 pub mod pg_collation;
+pub mod pg_database;
+pub mod pg_description;
 pub mod pg_index;
 pub mod pg_matviews;
 pub mod pg_namespace;
 pub mod pg_opclass;
 pub mod pg_operator;
+pub mod pg_settings;
+pub mod pg_keywords;
 pub mod pg_type;
 pub mod pg_user;
 pub mod pg_views;
@@ -34,11 +38,15 @@ pub use pg_attribute::*;
 pub use pg_cast::*;
 pub use pg_class::*;
 pub use pg_collation::*;
+pub use pg_database::*;
+pub use pg_description::*;
+pub use pg_keywords::*;
 pub use pg_index::*;
 pub use pg_matviews::*;
 pub use pg_namespace::*;
 pub use pg_opclass::*;
 pub use pg_operator::*;
+pub use pg_settings::*;
 pub use pg_type::*;
 pub use pg_user::*;
 pub use pg_views::*;
@@ -421,5 +429,72 @@ impl SysCatalogReaderImpl {
                     .chain(view_rows)
             })
             .collect_vec())
+    }
+
+    pub(super) fn read_database_info(&self) -> Result<Vec<Row>> {
+        let reader = self.catalog_reader.read_guard();
+        let databases = reader.get_all_database_names();
+
+        Ok(databases
+            .iter()
+            .map(|db| new_pg_database_row(reader.get_database_by_name(db).unwrap().id(), db))
+            .collect_vec())
+    }
+
+    pub(super) fn read_description_info(&self) -> Result<Vec<Row>> {
+        let reader = self.catalog_reader.read_guard();
+        let schemas = reader.iter_schemas(&self.auth_context.database)?;
+        let schema_infos = reader.get_all_schema_info(&self.auth_context.database)?;
+
+        Ok(schemas
+            .zip_eq(schema_infos.iter())
+            .flat_map(|(schema, _)| {
+                let rows = schema
+                    .iter_table()
+                    .map(|table| new_pg_description_row(table.id().table_id))
+                    .collect_vec();
+
+                let mvs = schema
+                    .iter_mv()
+                    .map(|mv| new_pg_description_row(mv.id().table_id))
+                    .collect_vec();
+
+                let indexes = schema
+                    .iter_index()
+                    .map(|index| new_pg_description_row(index.id.index_id()))
+                    .collect_vec();
+
+                let sources = schema
+                    .iter_source()
+                    .map(|source| new_pg_description_row(source.id))
+                    .collect_vec();
+
+                let sys_tables = schema
+                    .iter_system_tables()
+                    .map(|table| new_pg_description_row(table.id().table_id))
+                    .collect_vec();
+
+                let views = schema
+                    .iter_view()
+                    .map(|view| new_pg_description_row(view.id))
+                    .collect_vec();
+
+                rows.into_iter()
+                    .chain(mvs.into_iter())
+                    .chain(indexes.into_iter())
+                    .chain(sources.into_iter())
+                    .chain(sys_tables.into_iter())
+                    .chain(views.into_iter())
+                    .collect_vec()
+            })
+            .collect_vec())
+    }
+
+    pub(super) fn read_settings_info(&self) -> Result<Vec<Row>> {
+        Ok(PG_SETTINGS_DATA_ROWS.clone())
+    }
+
+    pub(super) fn read_keywords_info(&self) -> Result<Vec<Row>> {
+        Ok(PG_KEYWORDS_DATA_ROWS.clone())
     }
 }
