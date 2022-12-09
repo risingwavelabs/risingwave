@@ -34,22 +34,24 @@ pub struct ConfigExpander;
 impl ConfigExpander {
     /// Transforms `risedev.yml` to a fully expanded yaml file.
     ///
+    /// # Arguments
+    ///
     /// * `config` is the full content of `risedev.yml`.
     /// * `profile` is the selected config profile called by `risedev dev <profile>`. It is one of
     ///   the keys in the `risedev` section.
+    ///
+    /// # Returns
+    ///
+    /// A pair of `config_path` and expanded steps (items in `{profile}.steps` section in YAML)
     pub fn expand(config: &str, profile: &str) -> Result<(String, Yaml)> {
         Self::expand_with_extra_info(config, profile, HashMap::new())
     }
 
-    /// Expand user config into full config.
     /// See [`ConfigExpander::expand`] for other information.
     ///
     /// # Arguments
-    /// - `profile` is the name of user-specified profile
-    /// - `extra_info` is additional variables for variable expansion by [`DollarExpander`].
     ///
-    /// # Returns
-    /// A pair of config_path and expanded steps (items in `steps` section in YAML)
+    /// - `extra_info` is additional variables for variable expansion by [`DollarExpander`].
     pub fn expand_with_extra_info(
         config: &str,
         profile: &str,
@@ -91,7 +93,7 @@ impl ConfigExpander {
             .clone();
 
         let steps = UseExpander::new(template_section)?.visit(steps)?;
-        let steps = DollarExpander::new(extra_info.clone()).visit(steps)?;
+        let steps = DollarExpander::new(extra_info).visit(steps)?;
         let steps = IdExpander::new(&steps)?.visit(steps)?;
         let steps = ProvideExpander::new(&steps)?.visit(steps)?;
 
