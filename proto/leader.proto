@@ -13,4 +13,3 @@ message LeaderResponse {
 service Leader {
   rpc Leader(LeaderRequest) returns (LeaderResponse);
 }
-
