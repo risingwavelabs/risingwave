@@ -1713,7 +1713,7 @@ checksum = "421fe0f90f2ab22016f32a9881be5134fdd71c65298917084b0c7477cbc3856e"
 dependencies = [
  "async-trait",
  "deadpool-runtime",
- "num_cpus 1.14.0",
+ "num_cpus",
  "retain_mut",
  "tokio",
 ]
@@ -3454,7 +3454,7 @@ dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
  "futures-util",
- "num_cpus 1.14.0",
+ "num_cpus",
  "once_cell",
  "parking_lot 0.12.1",
  "quanta",
@@ -3693,15 +3693,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "578ede34cf02f8924ab9447f50c28075b4d3e5b269972345e7e0372b38c6cdcd"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "num_cpus"
-version = "0.2.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cee7e88156f3f9e19bdd598f8d6c9db7bf4078f99f8381f43a55b09648d1a6e3"
-dependencies = [
- "libc",
 ]
 
 [[package]]
@@ -4805,7 +4796,7 @@ dependencies = [
  "crossbeam-channel",
  "crossbeam-deque",
  "crossbeam-utils",
- "num_cpus 1.14.0",
+ "num_cpus",
 ]
 
 [[package]]
@@ -5163,7 +5154,6 @@ dependencies = [
  "memcomparable",
  "more-asserts",
  "num-traits",
- "num_cpus 0.2.13",
  "parking_lot 0.12.1",
  "parse-display",
  "paste",
@@ -6956,7 +6946,7 @@ version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
 dependencies = [
- "num_cpus 1.14.0",
+ "num_cpus",
 ]
 
 [[package]]
@@ -7080,7 +7070,7 @@ dependencies = [
  "libc",
  "memchr",
  "mio",
- "num_cpus 1.14.0",
+ "num_cpus",
  "parking_lot 0.12.1",
  "pin-project-lite",
  "signal-hook-registry",

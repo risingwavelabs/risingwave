@@ -539,8 +539,8 @@ mod default {
 
         #[cfg(not(madsim))]
         pub fn total_memory_available_bytes() -> usize {
-            use util::resource_util;
-            resource_util::memory::total_memory_available_bytes()
+            use crate::util::resource_util;
+            resource_util::memory::total_memory_used_bytes()
         }
     }
 

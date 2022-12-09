@@ -30,12 +30,12 @@ mod future_utils;
 pub mod hash_util;
 pub mod ordered;
 pub mod prost;
+pub mod resource_util;
 pub mod scan_range;
 pub mod schema_check;
 pub mod sort_util;
 pub mod value_encoding;
 pub mod worker_util;
-pub mod resource_util;
 
 pub use future_utils::select_all;
 
