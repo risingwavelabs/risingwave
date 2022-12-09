@@ -21,7 +21,6 @@ mod resolve_id;
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
@@ -35,7 +34,7 @@ use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef,
     PlanRef, Planner, WithOptions,
 };
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -307,12 +306,16 @@ impl TestCase {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
+                    let explain_options = ExplainOptions {
+                        verbose: true,
+                        ..Default::default()
+                    };
                     let context = OptimizerContext::new(
                         session.clone(),
                         Arc::from(sql),
                         WithOptions::try_from(&stmt)?,
+                        explain_options,
                     );
-                    context.explain_verbose.store(true, Ordering::Relaxed); // use explain verbose in planner tests
                     let ret = self.apply_query(&stmt, context.into())?;
                     if do_check_result {
                         check_result(self, &ret)?;
@@ -413,7 +416,7 @@ impl TestCase {
         stmt: &Statement,
         context: OptimizerContextRef,
     ) -> Result<TestCaseResult> {
-        let session = context.inner().session_ctx.clone();
+        let session = context.session_ctx().clone();
         let mut ret = TestCaseResult::default();
 
         let bound = {
