@@ -17,7 +17,7 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use risingwave_pb::data::Column as ProstColumn;
 
-use super::{Array, ArrayError, ArrayResult, PrimitiveArray};
+use super::{Array, ArrayError, ArrayResult, I64Array};
 use crate::array::{ArrayImpl, ArrayRef};
 
 /// Column is owned by `DataChunk`. It consists of logic data type and physical array
@@ -88,10 +88,9 @@ impl Column {
                 new_columns[key] = columns[key].clone();
             }
             new_columns.extend(columns.iter().cloned());
-            let flags = Column::from(PrimitiveArray::<i64>::from_slice(&vec![
-                Some(i as i64);
-                cardinality
-            ]));
+            let flags = Column::from(I64Array::from_iter(
+                std::iter::repeat(i as i64).take(cardinality),
+            ));
             new_columns.push(flags);
             yield new_columns;
         }

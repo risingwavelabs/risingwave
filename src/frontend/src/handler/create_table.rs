@@ -33,6 +33,7 @@ use super::create_source::make_prost_source;
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
@@ -260,6 +261,7 @@ pub(crate) fn gen_materialize_plan(
             handle_pk_conflict,
             false, // TODO(Yuanxin): true
             None,  // TODO(Yuanxin): row_id_index
+            TableType::Table,
         )?
     };
     let mut table = materialize
