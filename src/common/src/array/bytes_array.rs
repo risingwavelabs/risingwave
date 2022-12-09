@@ -24,9 +24,9 @@ use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
-#[derive(Debug, Clone)]
 /// The layout of `BytesArray` is the same as `Utf8Array`. Now the `BytesGuard` and `BytesWriter` is
 /// not added yet, can add it when we need to support corresponding expression.
+#[derive(Debug, Clone)]
 pub struct BytesArray {
     offset: Vec<usize>,
     bitmap: Bitmap,
@@ -41,8 +41,8 @@ impl Array for BytesArray {
 
     fn value_at(&self, idx: usize) -> Option<&[u8]> {
         if !self.is_null(idx) {
-            let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
-            Some(data_slice)
+            // SAFETY: The idx is checked in `is_null` and the offset should always be valid.
+            Some(unsafe { self.non_null_value_at_unchecked(idx) })
         } else {
             None
         }
@@ -50,8 +50,7 @@ impl Array for BytesArray {
 
     unsafe fn value_at_unchecked(&self, idx: usize) -> Option<&[u8]> {
         if !self.is_null_unchecked(idx) {
-            let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
-            Some(data_slice)
+            Some(self.non_null_value_at_unchecked(idx))
         } else {
             None
         }
@@ -128,12 +127,55 @@ impl Array for BytesArray {
 }
 
 impl BytesArray {
-    pub fn from_slice(data: &[Option<&[u8]>]) -> Self {
-        let mut builder = <Self as Array>::Builder::new(data.len());
-        for i in data {
-            builder.append(*i);
+    /// Retrieve the ownership of the single bytes value.
+    ///
+    /// Panics if there're multiple or no values.
+    pub fn into_single_value(self) -> Option<Box<[u8]>> {
+        assert_eq!(self.len(), 1);
+        if !self.is_null(0) {
+            Some(self.data.into_boxed_slice())
+        } else {
+            None
+        }
+    }
+
+    /// Retrieve the non-null bytes value at the given index, without checking whether the value is
+    /// null and whether the index is out of bound.
+    ///
+    /// # Safety
+    /// Calling this method with an out-of-bound index or a null value is undefined behavior.
+    #[inline(always)]
+    unsafe fn non_null_value_at_unchecked(&self, idx: usize) -> &[u8] {
+        self.data
+            .get_unchecked(*self.offset.get_unchecked(idx)..*self.offset.get_unchecked(idx + 1))
+    }
+
+    #[cfg(test)]
+    pub(super) fn data(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+impl<'a> FromIterator<Option<&'a [u8]>> for BytesArray {
+    fn from_iter<I: IntoIterator<Item = Option<&'a [u8]>>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+        for i in iter {
+            builder.append(i);
         }
         builder.finish()
+    }
+}
+
+impl<'a> FromIterator<&'a Option<&'a [u8]>> for BytesArray {
+    fn from_iter<I: IntoIterator<Item = &'a Option<&'a [u8]>>>(iter: I) -> Self {
+        iter.into_iter().cloned().collect()
+    }
+}
+
+impl<'a> FromIterator<&'a [u8]> for BytesArray {
+    fn from_iter<I: IntoIterator<Item = &'a [u8]>>(iter: I) -> Self {
+        iter.into_iter().map(Some).collect()
     }
 }
 
@@ -200,5 +242,30 @@ impl ArrayBuilder for BytesArrayBuilder {
             data: self.data,
             offset: self.offset,
         }
+    }
+}
+
+impl BytesArrayBuilder {
+    /// `append_partial` will add a partial dirty data of the new record.
+    /// The partial data will keep untracked until `finish_partial` was called.
+    pub(super) unsafe fn append_partial(&mut self, x: &[u8]) {
+        self.data.extend_from_slice(x);
+    }
+
+    /// `finish_partial` will create a new record based on the current dirty data.
+    /// `finish_partial` was safe even if we don't call `append_partial`, which is equivalent to
+    /// appending an empty bytes.
+    pub(super) fn finish_partial(&mut self) {
+        self.offset.push(self.data.len());
+        self.bitmap.append(true);
+    }
+
+    /// Rollback the partial-written data by [`Self::append_partial`].
+    ///
+    /// This is a safe method, if no `append_partial` was called, then the call has no effect.
+    pub(super) fn rollback_partial(&mut self) {
+        let &last_offset = self.offset.last().unwrap();
+        assert!(last_offset <= self.data.len());
+        self.data.truncate(last_offset);
     }
 }
