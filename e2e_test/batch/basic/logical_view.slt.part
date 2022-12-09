@@ -9,7 +9,7 @@ SELECT * FROM v1;
 ----
 1
 
-statement error 
+statement error
 CREATE VIEW v2(a, b) AS SELECT 1;
 
 statement ok
@@ -37,7 +37,7 @@ SELECT * FROM v3;
 
 # v3 depends on t. We can't drop t.
 
-statement error 
+statement error
 DROP TABLE t;
 
 # Currently it is allowed to drop a view even it is depended by another view.
@@ -45,13 +45,13 @@ DROP TABLE t;
 statement ok
 DROP VIEW v2;
 
-statement error 
+statement error
 SELECT * from v3;
 
 statement ok
 DROP VIEW v3;
 
-statement error 
+statement error
 SELECT * FROM v3;
 
 # We can drop t and v2 now
@@ -61,3 +61,30 @@ DROP TABLE t;
 
 statement ok
 DROP VIEW v1;
+
+# Test struct field accessing
+
+statement ok
+create table t1 (s struct<v1 int, v2 VARCHAR>);
+
+statement ok
+create view v2 as select (s).v1, (s).v2 from t1;
+
+statement ok
+insert into t1 values ((114, '514'));
+
+query IT
+select v1, v2 from v2;
+----
+114 514
+
+query I
+select count(*) from v2;
+----
+1
+
+statement ok
+drop view v2;
+
+statement ok
+drop table t1;
