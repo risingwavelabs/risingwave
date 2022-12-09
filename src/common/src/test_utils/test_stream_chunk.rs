@@ -83,11 +83,7 @@ impl BigStreamChunk {
             .collect();
 
         let col = {
-            let array = I32Array::from_slice(
-                &std::iter::repeat(Some(114_514))
-                    .take(capacity)
-                    .collect_vec(),
-            );
+            let array = I32Array::from_iter(std::iter::repeat(114_514).take(capacity));
             Column::from(array)
         };
 
