@@ -15,6 +15,8 @@
 #![cfg_attr(not(madsim), allow(dead_code))]
 #![feature(once_cell)]
 
+use std::path::PathBuf;
+
 use clap::Parser;
 
 #[cfg(not(madsim))]
@@ -104,6 +106,14 @@ pub struct Args {
     /// test data.
     #[clap(long)]
     sqlsmith: Option<usize>,
+
+    /// Load etcd data from toml file.
+    #[clap(long)]
+    etcd_data: Option<PathBuf>,
+
+    /// Dump etcd data into toml file before exit.
+    #[clap(long)]
+    etcd_dump: Option<PathBuf>,
 }
 
 #[cfg(madsim)]
@@ -123,6 +133,7 @@ async fn main() {
         compactor_nodes: args.compactor_nodes,
         compute_node_cores: args.compute_node_cores,
         etcd_timeout_rate: args.etcd_timeout_rate,
+        etcd_data_path: args.etcd_data,
     };
     let kill_opts = KillOpts {
         kill_meta: args.kill_meta || args.kill,
@@ -164,4 +175,16 @@ async fn main() {
             }
         })
         .await;
+
+    if let Some(path) = args.etcd_dump {
+        cluster
+            .run_on_client(async move {
+                let mut client = etcd_client::Client::connect(["192.168.10.1:2388"], None)
+                    .await
+                    .unwrap();
+                let dump = client.dump().await.unwrap();
+                std::fs::write(path, dump).unwrap();
+            })
+            .await;
+    }
 }

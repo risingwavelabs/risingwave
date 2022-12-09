@@ -23,8 +23,8 @@ pub(crate) mod tests {
     use itertools::Itertools;
     use rand::Rng;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::config::constant::hummock::CompactionFilterFlag;
     use risingwave_common::config::StorageConfig;
+    use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::util::epoch::Epoch;
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
@@ -315,8 +315,8 @@ pub(crate) mod tests {
                 (32 * 1000) << 16,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: true,
-                    prefix_hint: None,
+                    check_bloom_filter: false,
+                    dist_key_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },
@@ -334,7 +334,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: true,
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },
@@ -439,8 +439,8 @@ pub(crate) mod tests {
                 129,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: true,
-                    prefix_hint: None,
+                    check_bloom_filter: false,
+                    dist_key_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },
@@ -791,7 +791,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: false,
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     table_id: TableId::from(existing_table_ids),
                     retention_seconds: None,
                 },
@@ -962,7 +962,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: false,
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                 },
@@ -1122,7 +1122,11 @@ pub(crate) mod tests {
         storage.wait_version(version).await;
 
         // 6. scan kv to check key table_id
-        let bloom_filter_key = key_prefix.to_vec();
+        let bloom_filter_key = [
+            existing_table_id.to_be_bytes().to_vec(),
+            key_prefix.to_vec(),
+        ]
+        .concat();
         let start_bound_key = key_prefix.to_vec();
         let end_bound_key = next_key(start_bound_key.as_slice());
         let scan_result = storage
@@ -1136,7 +1140,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: true,
-                    prefix_hint: Some(bloom_filter_key),
+                    dist_key_hint: Some(bloom_filter_key),
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                 },

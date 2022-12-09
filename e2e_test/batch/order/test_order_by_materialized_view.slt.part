@@ -18,6 +18,7 @@ statement ok
 CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM t ORDER BY v ASC;
 
 # No additional BatchSort used with materialized view sorted ascending
+
 query I
 SELECT * FROM mv1 ORDER BY v ASC;
 ----
@@ -73,6 +74,7 @@ SELECT * FROM mv1 ORDER BY v ASC;
 50
 
 # Additional BatchSort used with materialized view sorted ascending
+
 query II
 SELECT * FROM mv1 ORDER BY v DESC;
 ----
@@ -134,6 +136,7 @@ statement ok
 CREATE MATERIALIZED VIEW mv2 AS SELECT * FROM t ORDER BY v DESC;
 
 # No additional BatchSort used with materialized view sorted descending
+
 query I
 SELECT * FROM mv2 ORDER BY v DESC;
 ----
@@ -189,6 +192,7 @@ SELECT * FROM mv2 ORDER BY v DESC;
 1
 
 # Additional BatchSort used with materialized view sorted descending
+
 query II
 SELECT * FROM mv2 ORDER BY v ASC;
 ----

@@ -324,7 +324,7 @@ mod tests {
         assert!(expr.is_ok());
 
         let res = expr.unwrap().eval(&DataChunk::new_dummy(1)).unwrap();
-        assert_eq!(*res, ArrayImpl::Utf8(Utf8Array::from_slice(&[Some("foo")])));
+        assert_eq!(*res, ArrayImpl::Utf8(Utf8Array::from_iter(["foo"])));
     }
 
     #[test]

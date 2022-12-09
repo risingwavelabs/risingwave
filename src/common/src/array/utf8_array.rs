@@ -126,15 +126,30 @@ impl Array for Utf8Array {
     }
 }
 
-impl Utf8Array {
-    pub fn from_slice(data: &[Option<&str>]) -> Self {
-        let mut builder = <Self as Array>::Builder::new(data.len());
-        for i in data {
-            builder.append(*i);
+impl<'a> FromIterator<Option<&'a str>> for Utf8Array {
+    fn from_iter<I: IntoIterator<Item = Option<&'a str>>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+        for i in iter {
+            builder.append(i);
         }
         builder.finish()
     }
+}
 
+impl<'a> FromIterator<&'a Option<&'a str>> for Utf8Array {
+    fn from_iter<I: IntoIterator<Item = &'a Option<&'a str>>>(iter: I) -> Self {
+        iter.into_iter().cloned().collect()
+    }
+}
+
+impl<'a> FromIterator<&'a str> for Utf8Array {
+    fn from_iter<I: IntoIterator<Item = &'a str>>(iter: I) -> Self {
+        iter.into_iter().map(Some).collect()
+    }
+}
+
+impl Utf8Array {
     /// Retrieve the ownership of the single string value. Panics if there're multiple or no values.
     pub fn into_single_value(self) -> Option<Box<str>> {
         assert_eq!(self.len(), 1);
@@ -394,7 +409,7 @@ mod tests {
             Some("666666"),
         ];
 
-        let array = Utf8Array::from_slice(&input);
+        let array = Utf8Array::from_iter(&input);
         assert_eq!(array.len(), input.len());
 
         assert_eq!(
@@ -416,7 +431,7 @@ mod tests {
             Some("666666"),
         ];
 
-        let array = Utf8Array::from_slice(&input);
+        let array = Utf8Array::from_iter(&input);
         let buffers = array.to_protobuf().values;
         assert!(buffers.len() >= 2);
     }
@@ -459,7 +474,7 @@ mod tests {
                 .collect_vec(),
         ];
 
-        let arrs = vecs.iter().map(|v| Utf8Array::from_slice(v)).collect_vec();
+        let arrs = vecs.iter().map(Utf8Array::from_iter).collect_vec();
 
         let hasher_builder = RandomXxHashBuilder64::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];

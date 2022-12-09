@@ -26,6 +26,7 @@ futures-async-stream = "0.2"
 hex = "0.4.3"
 humantime = "2.1"
 itertools = "0.10"
+itoa = "1.0"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", branch = "evict_by_timestamp" }
 memcomparable = { version = "0.1", features = ["decimal"] }
 more-asserts = "0.3"
@@ -41,6 +42,7 @@ rand = "0.8"
 regex = "1"
 risingwave_pb = { path = "../prost" }
 rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
+ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
@@ -49,7 +51,6 @@ spin = "0.9"
 static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"
-sysinfo = "0.26"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1"

@@ -29,6 +29,7 @@ use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
 
 pub struct CdcSplitReader {
     source_id: u64,
+    start_offset: Option<String>,
     props: CdcProperties,
 }
 
@@ -50,6 +51,7 @@ impl SplitReader for CdcSplitReader {
             if let SplitImpl::Cdc(cdc_split) = split {
                 return Ok(Self {
                     source_id: cdc_split.source_id as u64,
+                    start_offset: cdc_split.start_offset,
                     props,
                 });
             }
@@ -79,7 +81,7 @@ impl CdcSplitReader {
                     database_name: props.database_name.clone(),
                     table_name: props.table_name.clone(),
                     partition: props.parititon.clone(),
-                    start_offset: props.start_offset.clone(),
+                    start_offset: self.start_offset.unwrap_or_default(),
                     include_schema_events: false,
                 },
             )

@@ -1,5 +1,5 @@
 # Copied from https://github.com/duckdb/duckdb (MIT licensed).
-# Copyright 2018-2022 Stichting DuckDB Foundation 
+# Copyright 2018-2022 Stichting DuckDB Foundation
 
 # description: Test FULL OUTER JOIN with many matches
 
@@ -16,9 +16,10 @@ statement ok
 CREATE TABLE integers2(k int, l int);
 
 statement ok
-INSERT INTO integers SELECT a k, 2 l FROM generate_series(2000, 3999, 1) t1(a);
+INSERT INTO integers2 SELECT a k, 2 l FROM generate_series(2000, 3999, 1) t1(a);
 
 # equality join
+
 query I
 SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.i=integers2.k
 ----
@@ -30,6 +31,7 @@ SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.i=integers2.
 # 16000 values hashing to 8b9eab043624ff470b00a981c1d588d9
 
 # range join
+
 query I
 SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.j>integers2.l
 ----
@@ -41,6 +43,7 @@ SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.j>integers2.
 # 16000 values hashing to 8b9eab043624ff470b00a981c1d588d9
 
 # inequality join
+
 query I
 SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.j+1<>integers2.l;
 ----
@@ -52,6 +55,7 @@ SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.j+1<>integer
 # 16000 values hashing to 8b9eab043624ff470b00a981c1d588d9
 
 # complex join condition
+
 query I
 SELECT COUNT(*) FROM integers FULL OUTER JOIN integers2 ON integers.j+integers2.l<>3;
 ----
