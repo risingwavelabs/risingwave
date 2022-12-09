@@ -196,9 +196,11 @@ where
                         .is_paused
                         .store(true, Ordering::Relaxed);
                     tokio::select! {
-                        _ = self.compaction_resume_handle.notifier.notified() => {self.compaction_resume_handle
+                        _ = self.compaction_resume_handle.notifier.notified() => {
+                            self.compaction_resume_handle
                             .is_paused
-                            .store(false, Ordering::Relaxed);},
+                            .store(false, Ordering::Relaxed);
+                        },
                         _ = &mut shutdown_rx => {
                             return;
                         }
