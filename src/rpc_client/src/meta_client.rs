@@ -31,7 +31,7 @@ use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
     Source as ProstSource, Table as ProstTable, View as ProstView,
 };
-use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
@@ -864,8 +864,7 @@ impl GrpcMetaClient {
                 .await
                 .inspect_err(|e| {
                     tracing::warn!(
-                        // TODO: remove first try
-                        "First try: Failed to connect to meta server {}, wait for online: {}",
+                        "Failed to connect to meta server {}, wait for online: {}",
                         addr,
                         e
                     );
@@ -882,10 +881,10 @@ impl GrpcMetaClient {
             .await
             .expect("Expect that leader service always knows who leader is")
             .into_inner();
-        let leader_addr_ = resp
+        let leader_addr_: HostAddress = resp
             .leader_addr
             .expect("Expect that leader service always knows who leader is");
-        let leader_addr_string = format!("{}:{}", leader_addr_.host, leader_addr_.port);
+        let leader_addr_string = format!("http://{}:{}", leader_addr_.host, leader_addr_.port);
         let leader_addr = leader_addr_string.as_str();
         if leader_addr.ne(addr) {
             // TODO: Write this as function. DNRY
@@ -911,19 +910,13 @@ impl GrpcMetaClient {
                     .await
                     .inspect_err(|e| {
                         tracing::warn!(
-                            // TODO: remove second try
-                            "Second try: Failed to connect to meta server {}, wait for online: {}",
+                            "Failed to connect to meta server {}, wait for online: {}",
                             leader_addr,
                             e
                         );
                     })
             })
-            .await;
-            if channel.is_err() {
-                // TODO: remove this
-                panic!("channel err is {:?}", channel.err());
-            }
-            let channel = channel.unwrap();
+            .await?;
             let cluster_client = ClusterServiceClient::new(channel.clone());
             let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
             let ddl_client = DdlServiceClient::new(channel.clone());
