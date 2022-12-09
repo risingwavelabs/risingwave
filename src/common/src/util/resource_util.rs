@@ -221,8 +221,7 @@ pub mod cpu {
 
     // Returns the CPU limit of the container.
     fn get_container_cpu_limit(cgroup_version: Option<super::CgroupVersion>) -> Option<f32> {
-        if !super::util::is_controller_activated(super::Controller::Cpu) || cgroup_version.is_none()
-        {
+        if !super::util::is_controller_activated(super::Controller::Cpu) || cgroup_version.is_none() {
             return None;
         }
 
@@ -275,6 +274,7 @@ pub mod cpu {
 mod util {
     use std::fs;
     use std::path::Path;
+
     // Returns a cgroup version if it exists, else returns None.
     // Checks for the existence of the root hierarchy directory.
     pub fn get_cgroup_version() -> Option<super::CgroupVersion> {
@@ -303,7 +303,7 @@ mod util {
         }
     }
 
-    // parses the filepath and checks for existence of controller_name in file.
+    // Parses the filepath and checks for the existence of controller_name in the file.
     pub fn parse_controller_enable_file_for_cgroup_v2(
         file_path: &str,
         controller_name: &str,
