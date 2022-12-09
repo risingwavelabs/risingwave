@@ -303,7 +303,7 @@ mod util {
         }
     }
 
-    // parses the filepath and checks for existence of controller_name in file.
+    // Parses the filepath and checks for the existence of controller_name in the file.
     pub fn parse_controller_enable_file_for_cgroup_v2(
         file_path: &str,
         controller_name: &str,
