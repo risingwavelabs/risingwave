@@ -79,15 +79,28 @@ pub mod memory {
         sys.total_memory() as usize
     }
 
-    // Returns the used memory of the system
+    // Returns the used memory of the system.
     fn get_system_memory_used() -> usize {
         let mut sys = System::new();
         sys.refresh_memory();
         sys.used_memory() as usize
     }
 
-    // Returns total memory used, if running in container, will return total memory used in
-    // container that process runs in.
+    /// Returns the total memory used by the system in bytes.
+    ///
+    /// If running in container, this function will read the cgroup interface files for the
+    /// memory used, if interface files are not found, will return the memory used in the system 
+    /// as default. The cgroup mount point is assumed to be at /sys/fs/cgroup by default.
+    ///
+    /// [`with_capacity`]: #method.with_capacity
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ``` ignore
+    /// let mem_used = memory::total_memory_used_bytes();
+    /// ```
     pub fn total_memory_used_bytes() -> usize {
         if !super::runtime::is_linux_machine() || !super::runtime::is_running_in_container() {
             return get_system_memory_used();
@@ -99,8 +112,21 @@ pub mod memory {
         )
     }
 
-    // Returns total memory available, if running in container, will return total memory limit in
-    // container that process runs in.
+    /// Returns the total memory available by the system in bytes.
+    ///
+    /// If running in container, this function will read the cgroup interface files for the
+    /// memory available/limit, if interface files are not found, will return the system memory volume by default.
+    /// The cgroup mount point is assumed to be at /sys/fs/cgroup by default.
+    ///
+    /// [`with_capacity`]: #method.with_capacity
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ``` ignore
+    /// let mem_available = memory::total_memory_avialable_bytes();
+    /// ```
     pub fn total_memory_available_bytes() -> usize {
         if !super::runtime::is_linux_machine() || !super::runtime::is_running_in_container() {
             return get_system_memory();
@@ -171,7 +197,22 @@ pub mod cpu {
     const V1_CPU_PERIOD_HIERARCHY: &str = "/cpu/cpu.cfs_period_us";
     const V2_CPU_LIMIT_HIERARCHY: &str = "/cpu.max";
 
-    // Returns the total number of CPU available, will return cpu limit if running in container.
+    /// Returns the total number of cpu available as a float.
+    ///
+    /// If running in container, this function will return the cpu limit by the container. If not, 
+    /// it will return the ```available_parallelism``` by the system. A panic will be invoked if invoking process
+    /// does not have permission to read appropriate values by ```std::thread::available_parallelism``` or if the platform is not supported.
+    /// The cgroup mount point is assumed to be at /sys/fs/cgroup by default.
+    ///
+    /// [`with_capacity`]: #method.with_capacity
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ``` ignore
+    /// let cpu_available = cpu::total_cpu_available();
+    /// ```
     pub fn total_cpu_available() -> f32 {
         if !super::runtime::is_linux_machine() || !super::runtime::is_running_in_container() {
             return get_system_cpu();
@@ -282,7 +323,7 @@ mod util {
         };
     }
 
-    // Given a certain controller, check if it is enabled
+    // Given a certain controller, checks if it is enabled.
     // For cgroup_v1, existence of directory with controller name is checked in cgroup default root
     // hierarchy. e.g if directory "/sys/fs/cgroup"/cpu" exists then CPU controller is enabled.
     // For cgroup_v2, check the controller list path for the controller name.
@@ -318,7 +359,7 @@ mod util {
         }
     }
 
-    // Helper functions helps to parse the string inside the cgroup cpu limit file.
+    // Helper function to parse the string inside the cgroup cpu limit file.
     pub fn parse_cgroup_v2_cpu_limit_string(cpu_limit_string: &str) -> Option<f32> {
         let cpu_data: Vec<&str> = cpu_limit_string.split_whitespace().collect();
         match cpu_data.get(0..2) {
@@ -405,7 +446,7 @@ mod util {
                 ),
             ]);
 
-            let test_file_path = "resource-util-test";
+            let test_file_path = "resource-util-test-1";
             for tc in test_cases {
                 let curr_test_case = &tc.1;
                 if curr_test_case.file_exists {
@@ -475,7 +516,7 @@ mod util {
                 ),
             ]);
 
-            let test_file_path = "resource-util-test";
+            let test_file_path = "resource-util-test-2";
             for tc in test_cases {
                 let curr_test_case = &tc.1;
                 if curr_test_case.file_exists {
@@ -560,7 +601,7 @@ mod util {
                 ),
             ]);
 
-            let test_file_path = "resource-util-test";
+            let test_file_path = "resource-util-test-3";
             for tc in test_cases {
                 let curr_test_case = &tc.1;
                 if curr_test_case.file_exists {
