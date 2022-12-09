@@ -1,3 +1,0 @@
-[meta]
-enable_compaction_deterministic = true
-max_heartbeat_interval_secs = 600

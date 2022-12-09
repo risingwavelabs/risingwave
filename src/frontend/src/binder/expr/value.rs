@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DateTimeField, Decimal, IntervalUnit, ScalarImpl};
-use risingwave_expr::vector_op::cast::str_parse;
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
 
 use crate::binder::Binder;
@@ -58,15 +57,13 @@ impl Binder {
             (Some(ScalarImpl::Int32(int_32)), DataType::Int32)
         } else if let Ok(int_64) = s.parse::<i64>() {
             (Some(ScalarImpl::Int64(int_64)), DataType::Int64)
-        } else if let Ok(decimal) = str_parse::<Decimal>(&s) {
+        } else if let Ok(decimal) = s.parse::<Decimal>() {
             // Notice: when the length of decimal exceeds 29(>= 30), it will be rounded up.
             (Some(ScalarImpl::Decimal(decimal)), DataType::Decimal)
         } else if let Some(scientific) = Decimal::from_scientific(&s) {
             (Some(ScalarImpl::Decimal(scientific)), DataType::Decimal)
         } else {
-            return Err(RwError::from(ErrorCode::InternalError(format!(
-                "Unable to bind {s} to a number"
-            ))));
+            return Err(ErrorCode::BindError(format!("Number {s} overflows")).into());
         };
         Ok(Literal::new(data, data_type))
     }
