@@ -15,6 +15,7 @@
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use async_recursion::async_recursion;
 use async_trait::async_trait;
 use aws_sdk_kinesis::error::GetRecordsError;
 use aws_sdk_kinesis::model::ShardIteratorType;
@@ -122,7 +123,11 @@ impl KinesisSplitReader {
                         continue;
                     }
                     self.latest_offset = Some(chunk.last().unwrap().offset.clone());
-                    tracing::debug!("shard {:?} latest offset: {:?}", self.shard_id, self.latest_offset);
+                    tracing::debug!(
+                        "shard {:?} latest offset: {:?}",
+                        self.shard_id,
+                        self.latest_offset
+                    );
                     yield chunk;
                 }
                 Err(SdkError::ServiceError { err, .. }) if err.is_expired_iterator_exception() => {
@@ -162,10 +167,11 @@ impl KinesisSplitReader {
         }
     }
 
+    #[async_recursion]
     async fn new_shard_iter(&mut self) -> Result<()> {
         let (starting_seq_num, iter_type) = if self.latest_offset.is_some() {
             (
-                self.latest_offset.take(),
+                self.latest_offset.clone(),
                 ShardIteratorType::AfterSequenceNumber,
             )
         } else {
@@ -192,11 +198,35 @@ impl KinesisSplitReader {
             .shard_iterator_type(iter_type)
             .set_starting_sequence_number(starting_seq_num)
             .send()
-            .await?;
+            .await;
 
-        self.shard_iter = resp.shard_iterator().map(String::from);
-
-        Ok(())
+        match resp {
+            Ok(resp) => {
+                self.shard_iter = resp.shard_iterator().map(String::from);
+                Ok(())
+            }
+            Err(SdkError::ServiceError { err, .. }) if err.is_resource_not_found_exception() => {
+                tracing::warn!(
+                    "stream {:?} shard {:?} not found, retry",
+                    self.stream_name,
+                    self.shard_id
+                );
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                self.new_shard_iter().await
+            }
+            Err(SdkError::ServiceError { err, .. })
+                if err.is_provisioned_throughput_exceeded_exception() =>
+            {
+                tracing::warn!(
+                    "stream {:?} shard {:?} throughput exceeded, retry",
+                    self.stream_name,
+                    self.shard_id
+                );
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                self.new_shard_iter().await
+            }
+            Err(e) => Err(anyhow!(e)),
+        }
     }
 
     async fn get_records(
