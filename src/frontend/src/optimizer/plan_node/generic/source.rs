@@ -22,46 +22,36 @@ use risingwave_common::util::sort_util::OrderType;
 use super::super::utils::TableCatalogBuilder;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::TableCatalog;
 
 /// [`Source`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
 pub struct Source {
+    /// If there is an external stream source, `catalog` will be `Some`. Otherwise, it is `None`.
     pub catalog: Option<Rc<SourceCatalog>>,
-    /// NOTE(Yuanxin): Here we store column descriptions for plan generating, even if the source
-    /// catalog is empty.
+    /// NOTE(Yuanxin): Here we store column descriptions and pk column ids for plan generating,
+    /// even if there is no external stream source.
     pub column_descs: Vec<ColumnDesc>,
+    pub pk_col_ids: Vec<ColumnId>,
 }
 
 impl GenericPlanNode for Source {
     fn schema(&self) -> Schema {
-        if let Some(catalog) = &self.catalog {
-            let fields = catalog
-                .columns
-                .iter()
-                .map(|c| (&c.column_desc).into())
-                .collect();
-            Schema { fields }
-        } else {
-            Default::default()
-        }
+        let fields = self.column_descs.iter().map(Into::into).collect();
+        Schema { fields }
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        if let Some(catalog) = &self.catalog {
-            let mut id_to_idx = HashMap::new();
-            catalog.columns.iter().enumerate().for_each(|(idx, c)| {
-                id_to_idx.insert(c.column_id(), idx);
-            });
-            catalog
-                .pk_col_ids
-                .iter()
-                .map(|c| id_to_idx.get(c).copied())
-                .collect::<Option<Vec<_>>>()
-        } else {
-            None
-        }
+        let mut id_to_idx = HashMap::new();
+        self.column_descs.iter().enumerate().for_each(|(idx, c)| {
+            id_to_idx.insert(c.column_id, idx);
+        });
+        self.pk_col_ids
+            .iter()
+            .map(|c| id_to_idx.get(c).copied())
+            .collect::<Option<Vec<_>>>()
     }
 
     fn ctx(&self) -> OptimizerContextRef {

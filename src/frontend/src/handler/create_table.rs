@@ -31,6 +31,7 @@ use risingwave_sqlparser::ast::{
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::handler::HandlerArgs;
@@ -207,10 +208,8 @@ pub(crate) fn gen_create_table_plan(
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
-    let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
+    let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect_vec();
     let properties = context.with_options().inner().clone();
-
-    // dbg!(&columns);
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -227,7 +226,7 @@ pub(crate) fn gen_create_table_plan(
             name: name.clone(),
             row_id_index: row_id_index.clone(),
             columns: columns.clone(),
-            pk_column_ids,
+            pk_column_ids: pk_column_ids.clone(),
             properties,
             info: Some(StreamSourceInfo::default()),
             owner: session.user_id(),
@@ -236,28 +235,27 @@ pub(crate) fn gen_create_table_plan(
         None
     };
 
-    // dbg!(&source);
-
+    let source_catalog: Option<Rc<SourceCatalog>> =
+        source.as_ref().map(|source| Rc::new(source.into()));
+    let pk_column_ids = pk_column_ids
+        .iter()
+        .map(|id| ColumnId::new(*id))
+        .collect_vec();
     let column_descs = columns
         .iter()
         .map(|column| column.column_desc.clone().unwrap().into())
         .collect_vec();
 
-    let source_node: PlanRef = if let Some(source) = &source {
-        LogicalSource::new(Some(Rc::new((source).into())), column_descs, context).into()
-    } else {
-        LogicalSource::new(None, column_descs, context).into()
-    };
+    let source_node: PlanRef =
+        LogicalSource::new(source_catalog, column_descs, pk_column_ids, context).into();
 
-    // dbg!(&source_node);
-
-    let row_id_index = row_id_index.as_ref().map(|index| index.index as _);
-    // row_id_index is Some means that the user has not specified pk, then we will add a hidden
-    // column to store pk, and materialize executor do not need to handle pk conflict.
-    let handle_pk_conflict = row_id_index.is_none();
     let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
     required_cols.toggle_range(..);
     let mut out_names = source_node.schema().names();
+
+    // `row_id_index` being `Some` means the user has not specified the primary key. In that case,
+    // we will add a hidden column as the primary key.
+    let row_id_index = row_id_index.as_ref().map(|index| index.index as _);
     if let Some(row_id_index) = row_id_index {
         required_cols.toggle(row_id_index);
         out_names.remove(row_id_index);
@@ -270,6 +268,9 @@ pub(crate) fn gen_create_table_plan(
         required_cols,
         out_names,
     );
+
+    // The materialize executor need not handle primary key conflict if the primary key is row id.
+    let handle_pk_conflict = row_id_index.is_none();
 
     let materialize = plan_root.gen_materialize_plan(
         name,
@@ -301,6 +302,11 @@ pub(crate) fn gen_materialize_plan(
                 .columns
                 .iter()
                 .map(|column| column.column_desc.clone().unwrap().into())
+                .collect(),
+            source
+                .pk_column_ids
+                .iter()
+                .map(|id| ColumnId::new(*id))
                 .collect(),
             context,
         )
@@ -411,16 +417,9 @@ mod tests {
         let catalog_reader = session.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
-        // Check source exists.
-        let (source, schema_name) = catalog_reader
-            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
-            .unwrap();
-        assert_eq!(source.name, "t");
-        assert!(source.append_only);
-
         // Check table exists.
         let (table, _) = catalog_reader
-            .get_table_by_name(DEFAULT_DATABASE_NAME, SchemaPath::Name(schema_name), "t")
+            .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
             .unwrap();
         assert_eq!(table.name(), "t");
 

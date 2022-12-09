@@ -477,10 +477,6 @@ where
 
         // 2. resolve the dependent relations.
         let dependent_relations = get_dependent_relations(&fragment_graph)?;
-        assert!(
-            !dependent_relations.is_empty(),
-            "there should be at lease 1 dependent relation when creating table or sink"
-        );
         stream_job.set_dependent_relations(dependent_relations);
 
         // 3. Mark current relation as "creating" and add reference count to dependent relations.
@@ -533,14 +529,14 @@ where
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
             | StreamingJob::Table(_, table) => {
-                table.fragment_id = actor_graph_builder.fill_mview_or_sink_id(
+                table.fragment_id = actor_graph_builder.fill_database_object_id(
                     table.database_id,
                     table.schema_id,
                     table.id.into(),
                 );
             }
             StreamingJob::Sink(sink) => {
-                actor_graph_builder.fill_mview_or_sink_id(
+                actor_graph_builder.fill_database_object_id(
                     sink.database_id,
                     sink.schema_id,
                     sink.id.into(),
@@ -643,18 +639,20 @@ where
             StreamingJob::Table(source, table) => {
                 creating_internal_table_ids.push(table.id);
                 if let Some(source) = source {
+                    let internal_tables = ctx.internal_tables();
+                    assert_eq!(internal_tables.len(), 1);
                     self.catalog_manager
                         .finish_create_table_procedure_with_source(
                             source,
                             table,
-                            &ctx.internal_tables()[0],
+                            &internal_tables[0],
                         )
                         .await?
                 } else {
                     let internal_tables = ctx.internal_tables();
-                    debug_assert_eq!(internal_tables.len(), 1);
+                    assert!(internal_tables.is_empty());
                     self.catalog_manager
-                        .finish_create_table_procedure(internal_tables, table)
+                        .finish_create_table_procedure(ctx.internal_tables(), table)
                         .await?
                 }
             }
@@ -756,11 +754,11 @@ where
             .select_table_fragments_by_table_id(&table_id.into())
             .await?;
         let internal_table_ids = table_fragment.internal_table_ids();
-        assert_eq!(internal_table_ids.len(), 1);
 
         let (version, delete_jobs) = if let Some(source_id) = source_id {
             // Drop table and source in catalog. Check `source_id` if it is the table's
             // `associated_source_id`. Indexes also need to be dropped atomically.
+            assert_eq!(internal_table_ids.len(), 1);
             let (version, delete_jobs) = self
                 .catalog_manager
                 .drop_table_with_source(source_id, table_id, internal_table_ids[0])
@@ -771,6 +769,7 @@ where
                 .await;
             (version, delete_jobs)
         } else {
+            assert!(internal_table_ids.is_empty());
             self.catalog_manager
                 .drop_table(table_id, internal_table_ids)
                 .await?

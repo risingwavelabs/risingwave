@@ -63,10 +63,15 @@ impl Binder {
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name)?;
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
-        let table_columns = table_catalog.columns.clone();
+        let columns_to_insert = table_catalog
+            .columns
+            .clone()
+            .into_iter()
+            .filter(|c| !c.is_hidden())
+            .collect_vec();
         let row_id_index = table_catalog.row_id_index;
 
-        let expected_types: Vec<DataType> = table_columns
+        let expected_types: Vec<DataType> = columns_to_insert
             .iter()
             .map(|c| c.data_type().clone())
             .collect();
@@ -137,9 +142,8 @@ impl Binder {
         let mut target_table_col_indices: Vec<usize> = vec![];
         'outer: for query_column in &columns {
             let column_name = query_column.real_value();
-            for (col_idx, table_column) in table_columns.iter().enumerate() {
+            for (col_idx, table_column) in columns_to_insert.iter().enumerate() {
                 if column_name == table_column.name() {
-                    // FIXME(Yuanxin): type?
                     target_table_col_indices.push(col_idx);
                     continue 'outer;
                 }

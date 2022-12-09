@@ -787,7 +787,7 @@ impl ActorGraphBuilder {
         })
     }
 
-    pub fn fill_mview_or_sink_id(
+    pub fn fill_database_object_id(
         &mut self,
         database_id: DatabaseId,
         schema_id: SchemaId,
@@ -800,23 +800,32 @@ impl ActorGraphBuilder {
             table_id: TableId,
             fragment_id: FragmentId,
         }
-        fn fill_mview_or_sink_id_inner(stream_node: &mut StreamNode, ctx: &FillIdContext) -> usize {
+        fn fill_database_object_id_inner(
+            stream_node: &mut StreamNode,
+            ctx: &FillIdContext,
+        ) -> usize {
             let mut mview_count = 0;
             let node_body = stream_node.node_body.as_mut().unwrap();
-            if let NodeBody::Materialize(materialize_node) = node_body {
-                materialize_node.table_id = ctx.table_id.table_id;
-                materialize_node.table.as_mut().unwrap().id = ctx.table_id.table_id;
-                materialize_node.table.as_mut().unwrap().database_id = ctx.database_id;
-                materialize_node.table.as_mut().unwrap().schema_id = ctx.schema_id;
-                materialize_node.table.as_mut().unwrap().fragment_id = ctx.fragment_id;
-                mview_count += 1;
-            }
-            if let NodeBody::Sink(sink_node) = node_body {
-                sink_node.table_id = ctx.table_id.table_id;
-                mview_count += 1;
+            match node_body {
+                NodeBody::Materialize(materialize_node) => {
+                    materialize_node.table_id = ctx.table_id.table_id;
+                    materialize_node.table.as_mut().unwrap().id = ctx.table_id.table_id;
+                    materialize_node.table.as_mut().unwrap().database_id = ctx.database_id;
+                    materialize_node.table.as_mut().unwrap().schema_id = ctx.schema_id;
+                    materialize_node.table.as_mut().unwrap().fragment_id = ctx.fragment_id;
+                    mview_count += 1;
+                }
+                NodeBody::Sink(sink_node) => {
+                    sink_node.table_id = ctx.table_id.table_id;
+                    mview_count += 1;
+                }
+                NodeBody::Dml(dml_node) => {
+                    dml_node.table_id = ctx.table_id.table_id;
+                }
+                _ => {}
             }
             for input in &mut stream_node.input {
-                mview_count += fill_mview_or_sink_id_inner(input, ctx);
+                mview_count += fill_database_object_id_inner(input, ctx);
             }
             mview_count
         }
@@ -824,7 +833,7 @@ impl ActorGraphBuilder {
         let mut mview_count = 0;
         let mut fragment_id = 0;
         for fragment in self.fragment_graph.fragments_mut().values_mut() {
-            let delta = fill_mview_or_sink_id_inner(
+            let delta = fill_database_object_id_inner(
                 fragment.node.as_mut().unwrap(),
                 &FillIdContext {
                     database_id,

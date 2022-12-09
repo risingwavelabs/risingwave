@@ -24,6 +24,7 @@ use super::{
     StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
@@ -40,11 +41,13 @@ impl LogicalSource {
     pub fn new(
         source_catalog: Option<Rc<SourceCatalog>>,
         column_descs: Vec<ColumnDesc>,
+        pk_col_ids: Vec<ColumnId>,
         ctx: OptimizerContextRef,
     ) -> Self {
         let core = generic::Source {
             catalog: source_catalog,
             column_descs,
+            pk_col_ids,
         };
 
         let schema = core.schema();
