@@ -150,6 +150,7 @@ impl StreamMaterialize {
         }
 
         let ctx = input.ctx();
+        let distribution_key = base.dist.dist_column_indices().to_vec();
         let properties = ctx.with_options().internal_table_subset();
         let table = TableCatalog {
             id: TableId::placeholder(),
@@ -158,7 +159,7 @@ impl StreamMaterialize {
             columns,
             pk: pk_list,
             stream_key: pk_indices.clone(),
-            distribution_key: base.dist.dist_column_indices().to_vec(),
+            distribution_key,
             is_index,
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,

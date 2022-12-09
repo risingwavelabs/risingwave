@@ -542,7 +542,7 @@ impl HummockVersionReader {
         }
         let mut staging_sst_iter_count = 0;
         // encode once
-        let bloom_filter_prefix_hash = if let Some(prefix) = read_options.prefix_hint.as_ref() {
+        let bloom_filter_prefix_hash = if let Some(prefix) = read_options.dist_key_hint.as_ref() {
             let h = Sstable::hash_for_bloom_filter(
                 &UserKey::new(read_options.table_id, TableKey(prefix)).encode(),
             );

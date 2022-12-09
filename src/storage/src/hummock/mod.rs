@@ -22,6 +22,7 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
@@ -329,6 +330,9 @@ pub async fn get_from_sstable_info(
     } else {
         get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
     };
+    // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
+    // contain `TablePrefix` and `VnodePrefix`.
+    let dist_key = &ukey.table_key[VirtualNode::SIZE..];
     if read_options.check_bloom_filter
         && !hit_sstable_bloom_filter(sstable.value(), filter_key_hash, local_stats)
     {
@@ -337,7 +341,6 @@ pub async fn get_from_sstable_info(
         }
         return Ok(None);
     }
-
     // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
     // use default before refinement.
     let mut iter = SstableIterator::create(
@@ -386,7 +389,6 @@ pub fn hit_sstable_bloom_filter(
     if surely_not_have {
         local_stats.bloom_filter_true_negative_count += 1;
     }
-
     !surely_not_have
 }
 
