@@ -300,6 +300,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             left_to_output,
         );
 
+        let watermark_can_clean_state = !matches!(self.comparator, LessThan | LessThanOrEqual);
+        let mut unused_clean_hint = None;
+
         #[for_await]
         for msg in aligned_stream {
             match msg? {
@@ -354,6 +357,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         }
                     }
                 }
+                AlignedMessage::WatermarkLeft(_) => {
+                    // Do nothing.
+                }
+                AlignedMessage::WatermarkRight(watermark) => {
+                    if watermark_can_clean_state {
+                        unused_clean_hint = Some(watermark);
+                    }
+                }
                 AlignedMessage::Barrier(barrier) => {
                     // Flush the difference between the `prev_value` and `current_value`
                     //
@@ -382,6 +393,12 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             yield Message::Chunk(chunk);
                         }
                     }
+
+                    if let Some(mut watermark) = unused_clean_hint.take() {
+                        self.range_cache.shrink(watermark.val.clone());
+                        watermark.col_idx = self.key_l;
+                        yield Message::Watermark(watermark);
+                    };
 
                     // Update the committed value on RHS if it has changed.
                     if last_committed_epoch_row != current_epoch_row {
