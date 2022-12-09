@@ -37,7 +37,10 @@ const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
 const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
-const PARSE_ERROR_STR_TO_TIMESTAMPZ: &str = "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)";
+const PARSE_ERROR_STR_TO_TIMESTAMPZ: &str = concat!(
+    "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
+    , "\nFor example: '2021-04-01 00:00:00+00:00'"
+);
 const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
 const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
@@ -256,7 +259,7 @@ where
 {
     elem.trim()
         .parse()
-        .map_err(|_| ExprError::Cast(type_name::<str>(), type_name::<T>()))
+        .map_err(|_| ExprError::Parse(type_name::<T>()))
 }
 
 /// Define the cast function to primitive types.
@@ -281,8 +284,7 @@ macro_rules! define_cast_to_primitive {
             {
                 elem.[<to_ $ty>]()
                     .ok_or_else(|| {
-                        ExprError::Cast(
-                            std::any::type_name::<T>(),
+                        ExprError::CastOutOfRange(
                             std::any::type_name::<$ty>()
                         )
                     })
@@ -345,7 +347,7 @@ where
     <T1 as TryInto<T2>>::Error: std::fmt::Display,
 {
     elem.try_into()
-        .map_err(|_| ExprError::Cast(std::any::type_name::<T1>(), std::any::type_name::<T2>()))
+        .map_err(|_| ExprError::CastOutOfRange(std::any::type_name::<T2>()))
 }
 
 #[inline(always)]
@@ -622,7 +624,7 @@ fn scalar_cast(
                             }
                         )*
                         _ => {
-                            return Err(ExprError::Cast2(source_type.clone(), target_type.clone()));
+                            return Err(ExprError::UnsupportedCast(source_type.clone(), target_type.clone()));
                         }
                     }
                 };
