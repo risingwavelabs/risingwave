@@ -139,7 +139,7 @@ message CreateTableResponse {
 message DropTableRequest {
   oneof source_id {
     uint32 id = 1;
-  } 
+  }
   uint32 table_id = 2;
 }
 
