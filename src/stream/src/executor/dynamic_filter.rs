@@ -300,7 +300,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             left_to_output,
         );
 
-        let is_watermark_direct_accord = !matches!(self.comparator, LessThan | LessThanOrEqual);
+        let watermark_can_clean_state = !matches!(self.comparator, LessThan | LessThanOrEqual);
         let mut unused_clean_hint = None;
 
         #[for_await]
@@ -361,7 +361,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     // Do nothing.
                 }
                 AlignedMessage::WatermarkRight(watermark) => {
-                    if is_watermark_direct_accord {
+                    if watermark_can_clean_state {
                         unused_clean_hint = Some(watermark);
                     }
                 }
