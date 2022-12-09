@@ -1,4 +1,4 @@
-## Configurations (`risingwave.toml`)
+# Configurations (`risingwave.toml`)
 
 `risingwave.toml` is the configuration file for risingwave. It can be provided to risingwave nodes via command line argument `--config-path`.
 
