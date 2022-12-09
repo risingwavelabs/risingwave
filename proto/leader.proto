@@ -4,8 +4,7 @@ package leader;
 
 import "common.proto";
 
-message LeaderRequest {
-}
+message LeaderRequest {}
 
 message LeaderResponse {
   common.HostAddress leaderAddr = 1;
