@@ -154,7 +154,7 @@ impl Cluster {
             "--config-path",
             &conf.config_path,
             "--listen-addr",
-            "0.0.0.0:5690",
+            "192.168.1.1:5690",
             "--backend",
             "etcd",
             "--etcd-endpoints",
