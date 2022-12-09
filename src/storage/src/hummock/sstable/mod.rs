@@ -154,7 +154,7 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn hash_for_bloom_filter(user_key: &[u8]) -> u32 {
+    pub fn hash_for_bloom_filter(dist_key: &[u8]) -> u32 {
         xxh32::xxh32(dist_key, 0)
     }
 

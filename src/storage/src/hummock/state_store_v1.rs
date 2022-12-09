@@ -122,12 +122,12 @@ impl HummockStorageV1 {
             table_counts += table_count;
         }
 
+        let dist_key_hash = Sstable::hash_for_bloom_filter(table_key.dist_key());
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
         let encoded_user_key = UserKey::new(read_options.table_id, table_key).encode();
         // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
         // read/write path.
-        let user_key_hash = Sstable::hash_for_bloom_filter(&encoded_user_key);
         assert!(pinned_version.is_valid());
         for level in pinned_version.levels(table_id) {
             if level.table_infos.is_empty() {
@@ -144,7 +144,7 @@ impl HummockStorageV1 {
                             sstable_info,
                             full_key,
                             &read_options,
-                            user_key_hash,
+                            dist_key_hash,
                             &mut local_stats,
                         )
                         .await?
@@ -180,7 +180,7 @@ impl HummockStorageV1 {
                         &level.table_infos[table_info_idx],
                         full_key,
                         &read_options,
-                        user_key_hash,
+                        dist_key_hash,
                         &mut local_stats,
                     )
                     .await?
@@ -299,11 +299,10 @@ impl HummockStorageV1 {
         );
         assert!(pinned_version.is_valid());
         // encode once
-        let bloom_filter_prefix_hash = if let Some(prefix) = read_options.dist_key_hint.as_ref() {
-            Some(Sstable::hash_for_bloom_filter(&prefix))
-        } else {
-            None
-        };
+        let bloom_filter_prefix_hash = read_options
+            .dist_key_hint
+            .as_ref()
+            .map(|hint| Sstable::hash_for_bloom_filter(hint));
         for level in pinned_version.levels(table_id) {
             if level.table_infos.is_empty() {
                 continue;

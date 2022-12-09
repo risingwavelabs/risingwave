@@ -22,7 +22,6 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
@@ -319,7 +318,7 @@ pub async fn get_from_sstable_info(
     sstable_info: &SstableInfo,
     full_key: FullKey<&[u8]>,
     read_options: &ReadOptions,
-    filter_key_hash: u32,
+    dist_key_hash: u32,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
@@ -332,9 +331,8 @@ pub async fn get_from_sstable_info(
     };
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
-    let dist_key = &ukey.table_key[VirtualNode::SIZE..];
     if read_options.check_bloom_filter
-        && !hit_sstable_bloom_filter(sstable.value(), filter_key_hash, local_stats)
+        && !hit_sstable_bloom_filter(sstable.value(), dist_key_hash, local_stats)
     {
         if delete_epoch.is_some() {
             return Ok(Some(HummockValue::Delete));
@@ -402,7 +400,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
     let epoch = full_key.epoch;
-    let user_key_hash = Sstable::hash_for_bloom_filter(full_key.user_key.encode().as_slice());
+    let dist_key_hash = Sstable::hash_for_bloom_filter(full_key.user_key.table_key.dist_key());
     for data_list in order_sorted_uncommitted_data {
         for data in data_list {
             match data {
@@ -423,7 +421,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
                         &sst_info,
                         full_key,
                         read_options,
-                        user_key_hash,
+                        dist_key_hash,
                         local_stats,
                     )
                     .await?
