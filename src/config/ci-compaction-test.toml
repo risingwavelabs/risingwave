@@ -4,4 +4,5 @@ max_heartbeat_interval_secs = 600
 
 [streaming]
 barrier_interval_ms = 250
-checkpoint_frequency = 5
+in_flight_barrier_nums = 40
+checkpoint_frequency = 10
