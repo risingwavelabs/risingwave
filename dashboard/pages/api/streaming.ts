@@ -15,7 +15,7 @@
  *
  */
 import sortBy from "lodash/sortBy"
-import { Source, Table } from "../../proto/gen/catalog"
+import { Sink, Source, Table } from "../../proto/gen/catalog"
 import { ActorLocation, TableFragments } from "../../proto/gen/meta"
 import api from "./api"
 
@@ -31,7 +31,21 @@ export async function getFragments(): Promise<TableFragments[]> {
   return fragmentList
 }
 
-export async function getMaterializedViews(): Promise<Table[]> {
+export interface Relation {
+  id: number
+  name: string
+  dependentRelations: number[]
+}
+
+export async function getRelations(): Promise<Relation[]> {
+  const materialized_views: Relation[] = await getMaterializedViews()
+  const sinks: Relation[] = await getSinks()
+  let relations = materialized_views.concat(sinks)
+  relations = sortBy(relations, (x) => x.id)
+  return relations
+}
+
+export async function getMaterializedViews() {
   let mvList: Table[] = (await api.get("/api/materialized_views")).map(
     Table.fromJSON
   )
@@ -39,10 +53,16 @@ export async function getMaterializedViews(): Promise<Table[]> {
   return mvList
 }
 
-export async function getDataSources(): Promise<Source[]> {
+export async function getDataSources() {
   let sourceList: Source[] = (await api.get("/api/sources")).map(
     Source.fromJSON
   )
   sourceList = sortBy(sourceList, (x) => x.id)
   return sourceList
+}
+
+export async function getSinks() {
+  let sinkList: Sink[] = (await api.get("/api/sinks")).map(Sink.fromJSON)
+  sinkList = sortBy(sinkList, (x) => x.id)
+  return sinkList
 }
