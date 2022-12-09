@@ -76,11 +76,11 @@ impl SplitReader for NexmarkSplitReader {
         // If the user doesn't specify the event type in the source definition, then the user
         // intends to use unified source(three different types of events together).
         if let Some(event_type) = properties.table_type.as_ref() {
-            generator = generator.with_type_filter(event_type.clone());
+            generator = generator.with_type_filter(*event_type);
         }
 
         Ok(NexmarkSplitReader {
-            generator: generator,
+            generator,
             assigned_split,
             split_id,
             max_chunk_size: properties.max_chunk_size,
