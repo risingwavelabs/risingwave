@@ -355,7 +355,11 @@ fn main() -> Result<()> {
         .nth(1)
         .unwrap_or_else(|| "default".to_string());
 
-    let risedev_config = ConfigExpander::expand(&risedev_config, &task_name)?.1;
+    let (config_path, risedev_config) = ConfigExpander::expand(&risedev_config, &task_name)?;
+
+    let config_file_target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
+    std::fs::copy(config_path, config_file_target).expect("failed to copy risingwave config file");
+
     {
         let mut out_str = String::new();
         let mut emitter = YamlEmitter::new(&mut out_str);
@@ -365,7 +369,7 @@ fn main() -> Result<()> {
             &out_str,
         )?;
     }
-    let services = ConfigExpander::deserialize(&risedev_config, &task_name)?;
+    let services = ConfigExpander::deserialize(&risedev_config)?;
 
     let mut manager = ProgressManager::new();
     // Always create a progress before calling `task_main`. Otherwise the progress bar won't be

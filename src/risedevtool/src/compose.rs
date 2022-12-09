@@ -81,6 +81,9 @@ pub struct ComposeConfig {
     /// The directory to output all configs. If disabled, all config files will be embedded into
     /// the docker-compose file.
     pub config_directory: String,
+
+    /// The path of `risingwave.toml`
+    pub rw_config_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -162,7 +165,7 @@ impl Compose for ComputeNodeConfig {
         }
 
         std::fs::copy(
-            Path::new("src").join("config").join("risingwave.toml"),
+            Path::new(config.rw_config_path.as_str()),
             Path::new(&config.config_directory).join("risingwave.toml"),
         )?;
 
@@ -203,7 +206,7 @@ impl Compose for MetaNodeConfig {
         let command = get_cmd_args(&command, true)?;
 
         std::fs::copy(
-            Path::new("src").join("config").join("risingwave.toml"),
+            Path::new(config.rw_config_path.as_str()),
             Path::new(&config.config_directory).join("risingwave.toml"),
         )?;
 
@@ -261,7 +264,7 @@ impl Compose for CompactorConfig {
         let command = get_cmd_args(&command, true)?;
 
         std::fs::copy(
-            Path::new("src").join("config").join("risingwave.toml"),
+            Path::new(config.rw_config_path.as_str()),
             Path::new(&config.config_directory).join("risingwave.toml"),
         )?;
 

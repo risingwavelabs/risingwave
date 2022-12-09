@@ -30,7 +30,7 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio::signal;
 
-async fn load_risedev_config(profile: &str) -> Result<(Option<String>, Vec<ServiceConfig>)> {
+async fn load_risedev_config(profile: &str) -> Result<(String, Vec<ServiceConfig>)> {
     let risedev_config = {
         let mut content = String::new();
         File::open("risedev.yml")
@@ -40,7 +40,7 @@ async fn load_risedev_config(profile: &str) -> Result<(Option<String>, Vec<Servi
         content
     };
     let (config_path, risedev_config) = ConfigExpander::expand(&risedev_config, profile)?;
-    let services = ConfigExpander::deserialize(&risedev_config, profile)?;
+    let services = ConfigExpander::deserialize(&risedev_config)?;
 
     Ok((config_path, services))
 }
@@ -62,8 +62,8 @@ pub async fn playground() -> Result<()> {
     };
     let force_shared_hummock_in_mem = std::env::var("FORCE_SHARED_HUMMOCK_IN_MEM").is_ok();
 
-    let apply_config_file = |cmd: &mut Command, config_path: Option<&str>| {
-        let path = Path::new(config_path.unwrap_or("src/config/risingwave.toml"));
+    let apply_config_file = |cmd: &mut Command, config_path: &str| {
+        let path = Path::new(config_path);
         println!("config file: {}", path.display());
         if path.exists() {
             cmd.arg("--config-path").arg(path);
@@ -104,7 +104,7 @@ pub async fn playground() -> Result<()> {
                                 HummockInMemoryStrategy::Isolated
                             },
                         )?;
-                        apply_config_file(&mut command, config_path.as_deref());
+                        apply_config_file(&mut command, config_path.as_ref());
                         if c.enable_tiered_cache {
                             let prefix_data = env::var("PREFIX_DATA")?;
                             command.arg("--file-cache-dir").arg(
@@ -120,7 +120,7 @@ pub async fn playground() -> Result<()> {
                     ServiceConfig::MetaNode(c) => {
                         let mut command = Command::new("meta-node");
                         MetaNodeService::apply_command_args(&mut command, c)?;
-                        apply_config_file(&mut command, config_path.as_deref());
+                        apply_config_file(&mut command, config_path.as_ref());
                         rw_services.push(RisingWaveService::Meta(
                             command.get_args().map(ToOwned::to_owned).collect(),
                         ));
@@ -128,7 +128,7 @@ pub async fn playground() -> Result<()> {
                     ServiceConfig::Frontend(c) => {
                         let mut command = Command::new("frontend-node");
                         FrontendService::apply_command_args(&mut command, c)?;
-                        apply_config_file(&mut command, config_path.as_deref());
+                        apply_config_file(&mut command, config_path.as_ref());
                         rw_services.push(RisingWaveService::Frontend(
                             command.get_args().map(ToOwned::to_owned).collect(),
                         ));
@@ -136,7 +136,7 @@ pub async fn playground() -> Result<()> {
                     ServiceConfig::Compactor(c) => {
                         let mut command = Command::new("compactor");
                         CompactorService::apply_command_args(&mut command, c)?;
-                        apply_config_file(&mut command, config_path.as_deref());
+                        apply_config_file(&mut command, config_path.as_ref());
                         rw_services.push(RisingWaveService::Compactor(
                             command.get_args().map(ToOwned::to_owned).collect(),
                         ));
