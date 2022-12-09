@@ -132,12 +132,12 @@ pub struct PrimitiveArray<T: PrimitiveArrayItemType> {
     data: Vec<T>,
 }
 
-impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+impl<T: PrimitiveArrayItemType> FromIterator<Option<T>> for PrimitiveArray<T> {
+    fn from_iter<I: IntoIterator<Item = Option<T>>>(iter: I) -> Self {
         let iter = iter.into_iter();
         let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
         for i in iter {
-            builder.append(Some(i));
+            builder.append(i);
         }
         builder.finish()
     }
@@ -145,12 +145,13 @@ impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
 
 impl<'a, T: PrimitiveArrayItemType> FromIterator<&'a Option<T>> for PrimitiveArray<T> {
     fn from_iter<I: IntoIterator<Item = &'a Option<T>>>(iter: I) -> Self {
-        let iter = iter.into_iter();
-        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
-        for i in iter {
-            builder.append(*i);
-        }
-        builder.finish()
+        iter.into_iter().cloned().collect()
+    }
+}
+
+impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        iter.into_iter().map(Some).collect()
     }
 }
 

@@ -35,12 +35,12 @@ impl BoolArray {
     }
 }
 
-impl<'a> FromIterator<&'a bool> for BoolArray {
-    fn from_iter<I: IntoIterator<Item = &'a bool>>(iter: I) -> Self {
+impl FromIterator<Option<bool>> for BoolArray {
+    fn from_iter<I: IntoIterator<Item = Option<bool>>>(iter: I) -> Self {
         let iter = iter.into_iter();
         let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
         for i in iter {
-            builder.append(Some(*i));
+            builder.append(i);
         }
         builder.finish()
     }
@@ -48,12 +48,13 @@ impl<'a> FromIterator<&'a bool> for BoolArray {
 
 impl<'a> FromIterator<&'a Option<bool>> for BoolArray {
     fn from_iter<I: IntoIterator<Item = &'a Option<bool>>>(iter: I) -> Self {
-        let iter = iter.into_iter();
-        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
-        for i in iter {
-            builder.append(*i);
-        }
-        builder.finish()
+        iter.into_iter().cloned().collect()
+    }
+}
+
+impl FromIterator<bool> for BoolArray {
+    fn from_iter<I: IntoIterator<Item = bool>>(iter: I) -> Self {
+        iter.into_iter().map(Some).collect()
     }
 }
 

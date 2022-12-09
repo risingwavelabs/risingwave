@@ -126,12 +126,12 @@ impl Array for Utf8Array {
     }
 }
 
-impl<'a> FromIterator<&'a str> for Utf8Array {
-    fn from_iter<I: IntoIterator<Item = &'a str>>(iter: I) -> Self {
+impl<'a> FromIterator<Option<&'a str>> for Utf8Array {
+    fn from_iter<I: IntoIterator<Item = Option<&'a str>>>(iter: I) -> Self {
         let iter = iter.into_iter();
         let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
         for i in iter {
-            builder.append(Some(i));
+            builder.append(i);
         }
         builder.finish()
     }
@@ -139,12 +139,13 @@ impl<'a> FromIterator<&'a str> for Utf8Array {
 
 impl<'a> FromIterator<&'a Option<&'a str>> for Utf8Array {
     fn from_iter<I: IntoIterator<Item = &'a Option<&'a str>>>(iter: I) -> Self {
-        let iter = iter.into_iter();
-        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
-        for i in iter {
-            builder.append(*i);
-        }
-        builder.finish()
+        iter.into_iter().cloned().collect()
+    }
+}
+
+impl<'a> FromIterator<&'a str> for Utf8Array {
+    fn from_iter<I: IntoIterator<Item = &'a str>>(iter: I) -> Self {
+        iter.into_iter().map(Some).collect()
     }
 }
 

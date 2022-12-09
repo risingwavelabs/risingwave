@@ -287,7 +287,7 @@ mod tests {
                 .as_slice(),
         );
 
-        let visible_array = BoolArray::from_iter(&visible);
+        let visible_array = BoolArray::from_iter(visible.iter().cloned());
 
         let col1 = visible_array.into();
         let schema = Schema {

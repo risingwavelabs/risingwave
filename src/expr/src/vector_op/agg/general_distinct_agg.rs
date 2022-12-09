@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn vec_distinct_min_float32() -> Result<()> {
-        let input = F32Array::from_iter(&[Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]);
+        let input = F32Array::from_iter([Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]);
         let agg_kind = AggKind::Min;
         let input_type = DataType::Float32;
         let return_type = DataType::Float32;
@@ -329,10 +329,11 @@ mod tests {
         let input = I32Array::from_iter([1, 2, 3]);
         let expected = &[Some(2)];
         test_case(input.into(), expected)?;
+        #[allow(clippy::needless_borrow)]
         let input = I32Array::from_iter(&[]);
         let expected = &[None];
         test_case(input.into(), expected)?;
-        let input = I32Array::from_iter(&[None]);
+        let input = I32Array::from_iter([None]);
         let expected = &[Some(0)];
         test_case(input.into(), expected)
     }
