@@ -36,7 +36,8 @@ pub struct LogicalInsert {
     table_source_name: String, // explain-only
     table_id: TableId,
     input: PlanRef,
-    column_idxs: Vec<usize>, // columns in which to insert
+    column_indices: Vec<usize>, // columns in which to insert
+    row_id_index: Option<usize>,
 }
 
 impl LogicalInsert {
@@ -45,7 +46,8 @@ impl LogicalInsert {
         input: PlanRef,
         table_source_name: String,
         table_id: TableId,
-        column_idxs: Vec<usize>,
+        column_indices: Vec<usize>,
+        row_id_index: Option<usize>,
     ) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
@@ -56,7 +58,8 @@ impl LogicalInsert {
             table_source_name,
             table_id,
             input,
-            column_idxs,
+            column_indices,
+            row_id_index,
         }
     }
 
@@ -65,9 +68,16 @@ impl LogicalInsert {
         input: PlanRef,
         table_source_name: String,
         table_id: TableId,
-        column_idxs: Vec<usize>,
+        column_indices: Vec<usize>,
+        row_id_index: Option<usize>,
     ) -> Result<Self> {
-        Ok(Self::new(input, table_source_name, table_id, column_idxs))
+        Ok(Self::new(
+            input,
+            table_source_name,
+            table_id,
+            column_indices,
+            row_id_index,
+        ))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
@@ -76,13 +86,18 @@ impl LogicalInsert {
 
     // Get the column indexes in which to insert to
     #[must_use]
-    pub fn column_idxs(&self) -> Vec<usize> {
-        self.column_idxs.clone()
+    pub fn column_indices(&self) -> Vec<usize> {
+        self.column_indices.clone()
     }
 
     #[must_use]
     pub fn table_id(&self) -> TableId {
         self.table_id
+    }
+
+    #[must_use]
+    pub fn row_id_index(&self) -> Option<usize> {
+        self.row_id_index
     }
 }
 
@@ -96,7 +111,8 @@ impl PlanTreeNodeUnary for LogicalInsert {
             input,
             self.table_source_name.clone(),
             self.table_id,
-            self.column_idxs.clone(),
+            self.column_indices.clone(),
+            self.row_id_index,
         )
     }
 }

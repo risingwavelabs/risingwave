@@ -95,15 +95,7 @@ impl RowIdGenExecutor {
             let msg = msg?;
             if let Message::Chunk(chunk) = msg {
                 // For chunk message, we fill the row id column and then yield it.
-                let len = chunk.cardinality();
                 let (ops, mut columns, bitmap) = chunk.into_inner();
-                if columns.get(self.row_id_index).is_none() {
-                    let mut builder = I64ArrayBuilder::new(len);
-                    for _ in 0..len {
-                        builder.append_null();
-                    }
-                    columns.insert(self.row_id_index, Column::from(builder.finish()))
-                }
                 columns[self.row_id_index] = self
                     .gen_row_id_column_by_op(&columns[self.row_id_index], &ops)
                     .await;
@@ -154,7 +146,7 @@ mod tests {
         ]);
         let pk_indices = vec![0];
         let row_id_index = 0;
-        let vnodes = Bitmap::all_high_bits(VirtualNode::COUNT);
+        let row_id_generator = Bitmap::all_high_bits(VirtualNode::COUNT);
         let (mut tx, upstream) = MockSource::channel(schema.clone(), pk_indices.clone());
         let row_id_gen_executor = Box::new(RowIdGenExecutor::new(
             Box::new(upstream),
@@ -162,7 +154,7 @@ mod tests {
             pk_indices,
             1,
             row_id_index,
-            vnodes,
+            row_id_generator,
         ));
 
         let mut row_id_gen_executor = row_id_gen_executor.execute();

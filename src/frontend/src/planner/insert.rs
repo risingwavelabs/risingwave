@@ -31,7 +31,8 @@ impl Planner {
             input,
             insert.table_name.clone(),
             insert.table_id,
-            insert.column_idxs,
+            insert.column_indices,
+            insert.row_id_index,
         )?
         .into();
         // For insert, frontend will only schedule one task so do not need this to be single.

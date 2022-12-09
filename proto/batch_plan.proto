@@ -68,7 +68,8 @@ message FilterNode {
 message InsertNode {
   // Id of the table to perform inserting.
   uint32 table_id = 1;
-  repeated uint32 column_idxs = 2;
+  repeated uint32 column_indices = 2;
+  catalog.ColumnIndex row_id_index = 3;
 }
 
 message DeleteNode {

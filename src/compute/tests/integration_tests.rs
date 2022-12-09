@@ -116,11 +116,11 @@ async fn test_table_materialize() -> StreamResult<()> {
         "fields.v1.seed" => "12345",
     ));
     let pk_column_ids = vec![0];
-    let row_id_index = 0;
+    let row_id_index: usize = 0;
     let source_builder = create_source_desc_builder(
         &schema,
         pk_column_ids,
-        Some(row_id_index),
+        Some(row_id_index as _),
         source_info,
         properties,
     );
@@ -186,7 +186,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         all_schema.clone(),
         pk_indices.clone(),
         3,
-        row_id_index as _,
+        row_id_index,
         vnodes,
     );
 
@@ -223,6 +223,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         insert_inner,
         "InsertExecutor".to_string(),
         vec![], // ignore insertion order
+        Some(row_id_index),
     ));
 
     tokio::spawn(async move {

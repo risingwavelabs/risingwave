@@ -210,6 +210,8 @@ pub(crate) fn gen_create_table_plan(
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
     let properties = context.with_options().inner().clone();
 
+    // dbg!(&columns);
+
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
@@ -234,6 +236,8 @@ pub(crate) fn gen_create_table_plan(
         None
     };
 
+    // dbg!(&source);
+
     let column_descs = columns
         .iter()
         .map(|column| column.column_desc.clone().unwrap().into())
@@ -244,6 +248,8 @@ pub(crate) fn gen_create_table_plan(
     } else {
         LogicalSource::new(None, column_descs, context).into()
     };
+
+    // dbg!(&source_node);
 
     let row_id_index = row_id_index.as_ref().map(|index| index.index as _);
     // row_id_index is Some means that the user has not specified pk, then we will add a hidden

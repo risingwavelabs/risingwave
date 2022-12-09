@@ -16,7 +16,9 @@ use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
+use risingwave_common::array::{
+    ArrayBuilder, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
+};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -36,7 +38,9 @@ pub struct InsertExecutor {
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
-    column_idxs: Vec<usize>,
+    column_indices: Vec<usize>,
+
+    row_id_index: Option<usize>,
 }
 
 impl InsertExecutor {
@@ -45,7 +49,8 @@ impl InsertExecutor {
         dml_manager: DmlManagerRef,
         child: BoxedExecutor,
         identity: String,
-        column_idxs: Vec<usize>,
+        column_indices: Vec<usize>,
+        row_id_index: Option<usize>,
     ) -> Self {
         Self {
             table_id,
@@ -55,7 +60,8 @@ impl InsertExecutor {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
             identity,
-            column_idxs,
+            column_indices,
+            row_id_index,
         }
     }
 }
@@ -87,17 +93,24 @@ impl InsertExecutor {
 
             let (mut columns, _) = data_chunk.into_parts();
 
-            // No need to check for duplicate columns. This is already validated in binder
-            if !&self.column_idxs.is_sorted() {
+            // No need to check for duplicate columns. This is already validated in binder.
+            if !&self.column_indices.is_sorted() {
                 let mut ordered_cols: Vec<Column> = columns.clone();
-                for (i, idx) in self.column_idxs.iter().enumerate() {
+                for (i, idx) in self.column_indices.iter().enumerate() {
                     ordered_cols[*idx] = columns[i].clone()
                 }
                 columns = ordered_cols
             }
 
-            // We do not generate row id here, for row id will be appended and filled in row id gen
-            // executor.
+            // If the user does not specify the primary key, then we need to add a column as the
+            // primary key.
+            if let Some(row_id_index) = self.row_id_index {
+                let mut builder = I64ArrayBuilder::new(len);
+                for _ in 0..len {
+                    builder.append_null();
+                }
+                columns.insert(row_id_index, Column::from(builder.finish()))
+            }
 
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
 
@@ -139,8 +152,8 @@ impl BoxedExecutorBuilder for InsertExecutor {
         )?;
 
         let table_id = TableId::new(insert_node.table_id);
-        let column_idxs = insert_node
-            .column_idxs
+        let column_indices = insert_node
+            .column_indices
             .iter()
             .map(|&i| i as usize)
             .collect();
@@ -150,7 +163,11 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source.context().dml_manager(),
             child,
             source.plan_node().get_identity().clone(),
-            column_idxs,
+            column_indices,
+            insert_node
+                .row_id_index
+                .as_ref()
+                .map(|index| index.index as _),
         )))
     }
 }
@@ -195,6 +212,8 @@ mod tests {
         schema.fields.push(struct_field);
         schema.fields.push(Field::unnamed(DataType::Int64)); // row_id column
 
+        let row_id_index = Some(3);
+
         let col1 = column_nonnull! { I32Array, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I32Array, [2, 4, 6, 8, 10] };
         let array = StructArray::from_slices(
@@ -232,6 +251,7 @@ mod tests {
             Box::new(mock_executor),
             "InsertExecutor".to_string(),
             vec![], // Ignoring insertion order
+            row_id_index,
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();

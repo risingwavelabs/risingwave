@@ -34,11 +34,15 @@ pub struct BoundInsert {
     /// Owner of the table to perform inserting.
     pub owner: UserId,
 
+    // An optional column index of row ID. If the primary key is specified by the user,
+    // this will be `None`.
+    pub row_id_index: Option<usize>,
+
     /// User defined columns in which to insert
     /// Is equal to [0, 2, 1] for insert statement
     /// create table t1 (v1 int, v2 int, v3 int); insert into t1 (v1, v3, v2) values (5, 6, 7);
     /// Empty if user does not define insert columns
-    pub column_idxs: Vec<usize>,
+    pub column_indices: Vec<usize>,
 
     pub source: BoundQuery,
 
@@ -60,6 +64,7 @@ impl Binder {
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_columns = table_catalog.columns.clone();
+        let row_id_index = table_catalog.row_id_index;
 
         let expected_types: Vec<DataType> = table_columns
             .iter()
@@ -129,13 +134,13 @@ impl Binder {
             }
         };
 
-        let mut target_table_col_idxs: Vec<usize> = vec![];
+        let mut target_table_col_indices: Vec<usize> = vec![];
         'outer: for query_column in &columns {
             let column_name = query_column.real_value();
             for (col_idx, table_column) in table_columns.iter().enumerate() {
                 if column_name == table_column.name() {
                     // FIXME(Yuanxin): type?
-                    target_table_col_idxs.push(col_idx);
+                    target_table_col_indices.push(col_idx);
                     continue 'outer;
                 }
             }
@@ -150,21 +155,21 @@ impl Binder {
         // create table t1 (v1 int, v2 int);
         // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
         // insert into t1 (v1) values (5, 6);         // ...less target columns than values
-        let (eq_len, msg) = match target_table_col_idxs.len().cmp(&expected_types.len()) {
+        let (eq_len, msg) = match target_table_col_indices.len().cmp(&expected_types.len()) {
             std::cmp::Ordering::Equal => (true, ""),
             std::cmp::Ordering::Greater => (false, "INSERT has more target columns than values"),
             std::cmp::Ordering::Less => (false, "INSERT has less target columns than values"),
         };
-        if !eq_len && !target_table_col_idxs.is_empty() {
+        if !eq_len && !target_table_col_indices.is_empty() {
             return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
         }
 
         // Check if column was used multiple times in query e.g.
         // insert into t1 (v1, v1) values (1, 5);
-        let mut uniq_cols = target_table_col_idxs.clone();
+        let mut uniq_cols = target_table_col_indices.clone();
         uniq_cols.sort_unstable();
         uniq_cols.dedup();
-        if target_table_col_idxs.len() != uniq_cols.len() {
+        if target_table_col_indices.len() != uniq_cols.len() {
             return Err(RwError::from(ErrorCode::BindError(
                 "Column specified more than once".to_string(),
             )));
@@ -174,7 +179,8 @@ impl Binder {
             table_id,
             table_name,
             owner,
-            column_idxs: target_table_col_idxs,
+            row_id_index,
+            column_indices: target_table_col_indices,
             source,
             cast_exprs,
         };
