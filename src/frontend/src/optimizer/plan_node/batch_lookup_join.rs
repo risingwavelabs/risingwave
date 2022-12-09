@@ -83,7 +83,7 @@ impl BatchLookupJoin {
                     .composite(&logical.i2o_col_mapping());
                 l2o.rewrite_provided_distribution(left)
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 
