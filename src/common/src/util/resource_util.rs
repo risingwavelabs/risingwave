@@ -97,7 +97,6 @@ pub mod memory {
     /// # Examples
     ///
     /// Basic usage:
-    ///
     /// ``` ignore
     /// let mem_used = memory::total_memory_used_bytes();
     /// ```
@@ -123,7 +122,6 @@ pub mod memory {
     /// # Examples
     ///
     /// Basic usage:
-    ///
     /// ``` ignore
     /// let mem_available = memory::total_memory_available_bytes();
     /// ```
@@ -210,7 +208,6 @@ pub mod cpu {
     /// # Examples
     ///
     /// Basic usage:
-    ///
     /// ``` ignore
     /// let cpu_available = cpu::total_cpu_available();
     /// ```
