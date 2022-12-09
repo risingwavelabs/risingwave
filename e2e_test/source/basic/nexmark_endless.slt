@@ -16,7 +16,11 @@ include ../../streaming/nexmark/views/q18.slt.part
 include ../../streaming/nexmark/views/q20.slt.part
 
 
+<<<<<<< HEAD
 sleep 15s
+=======
+sleep 180s
+>>>>>>> 6bf3e5bb0 (increase sleep time)
 
 statement ok
 flush;
