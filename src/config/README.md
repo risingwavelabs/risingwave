@@ -23,5 +23,3 @@ risedev:
     steps:
       - use: ...
 ```
-
-It will be *merged together* with the base config `./risingwave.toml` . The merged config will be put at `.risingwave/config/risingwave.toml` , which is the `config-path` arg passed to risingwave nodes by risedev.
