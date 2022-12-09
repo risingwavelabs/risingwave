@@ -871,8 +871,6 @@ impl GrpcMetaClient {
         })
         .await?;
 
-        tracing::info!("here"); // TODO: remove this
-
         // TODO: We only want to do a ping. Request does not need fields
         let mut leader_client = LeaderServiceClient::new(channel.clone());
         let resp = leader_client
@@ -883,9 +881,14 @@ impl GrpcMetaClient {
         let leader_addr_: HostAddress = resp
             .leader_addr
             .expect("Expect that leader service always knows who leader is");
+
         let leader_addr_string = format!("http://{}:{}", leader_addr_.host, leader_addr_.port);
+        // TODO: the http here may be incorrect
+        // error in sim test
+        // FIXME
+        // Connecting against leader meta http://0.0.0.0:5690, instead of follower meta 192.168.1.1:5690
         let leader_addr = leader_addr_string.as_str();
-        if leader_addr.ne(addr) {
+        if false && leader_addr.ne(addr) {
             // TODO: Write this as function. DNRY
             tracing::info!(
                 "Connecting against leader meta {}, instead of follower meta {}",
