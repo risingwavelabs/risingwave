@@ -359,7 +359,7 @@ fn main() -> Result<()> {
 
     if let Some(config_path) = &config_path {
         let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
-        std::fs::copy(config_path, target).expect("failed to copy risingwave config file");
+        std::fs::copy(config_path, target)?;
     }
 
     {
