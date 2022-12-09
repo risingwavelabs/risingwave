@@ -21,6 +21,7 @@ pub mod notification_service;
 pub mod scale_service;
 pub mod stream_service;
 pub mod user_service;
+pub mod leader_service;
 
 use std::pin::Pin;
 use std::task::{Context, Poll};

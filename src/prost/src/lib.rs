@@ -75,6 +75,9 @@ pub mod monitor_service;
 #[cfg_attr(madsim, path = "sim/health.rs")]
 pub mod health;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/leader.rs")]
+pub mod leader;
+#[rustfmt::skip]
 #[path = "connector_service.serde.rs"]
 pub mod connector_service_serde;
 #[rustfmt::skip]

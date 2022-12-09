@@ -56,7 +56,7 @@ use crate::handler::handle;
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
 use crate::health_service::HealthServiceImpl;
-use crate::meta_client::{self, FrontendMetaClient, FrontendMetaClientImpl};
+use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
 use crate::observer::FrontendObserverNode;
 use crate::optimizer::OptimizerContext;
@@ -172,7 +172,7 @@ impl FrontendEnv {
             "Trying to connect against meta node {}. May be a follower",
             opts.meta_addr.clone().as_str(),
         );
-        let mut used_leader_addr = client_address.clone();
+        let used_leader_addr = client_address.clone();
         loop {
             if client_res.as_ref().is_ok() {
                 break;

@@ -30,6 +30,25 @@ service HeartbeatService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
 
+message LeaderRequest {
+  message ExtraInfo {
+    oneof info {
+      uint64 hummock_gc_watermark = 1;
+    }
+  }
+  uint32 node_id = 1;
+  // Lightweight info piggybacked by Leader request.
+  repeated ExtraInfo info = 2;
+}
+
+message LeaderResponse {
+    common.HostAddress leaderAddr = 1;
+}
+
+service LeaderService {
+  rpc Leader(LeaderRequest) returns (LeaderResponse);
+}
+
 // Fragments of a Streaming Job
 message TableFragments {
   // The state of the fragments of this table

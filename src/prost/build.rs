@@ -20,25 +20,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed={}", proto_dir);
 
     let proto_files = vec![
+        "batch_plan",
         "catalog",
         "common",
+        "compactor",
         "compute",
+        "connector_service",
         "data",
         "ddl_service",
         "expr",
-        "plan_common",
+        "health",
+        "hummock",
+        "leader",
         "meta",
-        "batch_plan",
-        "task_service",
-        "connector_service",
+        "monitor_service",
+        "plan_common",
+        "source",
         "stream_plan",
         "stream_service",
-        "compactor",
-        "hummock",
+        "task_service",
         "user",
-        "source",
-        "monitor_service",
-        "health",
     ];
     let protos: Vec<String> = proto_files
         .iter()

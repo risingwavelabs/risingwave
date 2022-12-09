@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package leader;
+
+import "common.proto";
+
+message LeaderRequest {
+}
+
+message LeaderResponse {
+  common.HostAddress leaderAddr = 1;
+}
+
+service Leader {
+  rpc Leader(LeaderRequest) returns (LeaderResponse);
+}
+
