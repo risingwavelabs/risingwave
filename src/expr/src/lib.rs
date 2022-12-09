@@ -21,12 +21,11 @@
 #![feature(exclusive_range_pattern)]
 #![feature(once_cell)]
 
-pub mod error;
+mod error;
 pub mod expr;
 pub mod sig;
 pub mod table_function;
 pub mod vector_op;
 
-pub use error::ExprError;
-pub use risingwave_common::{bail, ensure};
-pub type Result<T> = std::result::Result<T, ExprError>;
+pub use error::{ExprError, Result};
+use risingwave_common::{bail, ensure};
