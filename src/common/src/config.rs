@@ -532,7 +532,7 @@ mod default {
         pub fn total_memory_available_bytes() -> usize {
             16 * 1024 * 1024 * 1024
         }
-        
+
         #[allow(dead_code)]
         #[cfg(not(madsim))]
         pub fn total_memory_available_bytes() -> usize {

@@ -219,7 +219,8 @@ pub mod cpu {
 
     // Returns the CPU limit of the container.
     fn get_container_cpu_limit(cgroup_version: Option<super::CgroupVersion>) -> Option<f32> {
-        if !super::util::is_controller_activated(super::Controller::Cpu) || cgroup_version.is_none() {
+        if !super::util::is_controller_activated(super::Controller::Cpu) || cgroup_version.is_none()
+        {
             return None;
         }
 
