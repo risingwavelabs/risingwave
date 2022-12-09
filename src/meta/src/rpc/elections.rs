@@ -297,7 +297,9 @@ async fn get_infos_obj<S: MetaStore>(
 }
 
 fn gen_rand_lease_id() -> u64 {
-    rand::thread_rng().gen_range(0..std::u64::MAX)
+    123
+    // FIXME: Make this random again
+    // rand::thread_rng().gen_range(0..std::u64::MAX)
 }
 
 /// Used to manage single leader setup. `run_elections` will continuously run elections to determine
