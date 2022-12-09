@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn vec_distinct_sum_int32() -> Result<()> {
-        let input = I32Array::from_iter([1, 2, 3]);
+        let input = I32Array::from_iter([1, 1, 3]);
         let agg_kind = AggKind::Sum;
         let input_type = DataType::Int32;
         let return_type = DataType::Int64;
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn vec_distinct_sum_int64() -> Result<()> {
-        let input = I64Array::from_iter([1, 2, 3]);
+        let input = I64Array::from_iter([1, 1, 3]);
         let agg_kind = AggKind::Sum;
         let input_type = DataType::Int64;
         let return_type = DataType::Decimal;
@@ -326,7 +326,7 @@ mod tests {
             assert_eq!(actual, expected);
             Ok(())
         };
-        let input = I32Array::from_iter([1, 2, 3]);
+        let input = I32Array::from_iter([1, 1, 3]);
         let expected = &[Some(2)];
         test_case(input.into(), expected)?;
         #[allow(clippy::needless_borrow)]
