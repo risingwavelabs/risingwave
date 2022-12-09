@@ -864,13 +864,16 @@ impl GrpcMetaClient {
                 .await
                 .inspect_err(|e| {
                     tracing::warn!(
-                        "Failed to connect to meta server {}, wait for online: {}",
+                        // TODO: remove first try
+                        "First try: Failed to connect to meta server {}, wait for online: {}",
                         addr,
                         e
                     );
                 })
         })
         .await?;
+
+        tracing::info!("here"); // TODO: remove this
 
         // TODO: We only want to do a ping. Request does not need fields
         let mut leader_client = LeaderServiceClient::new(channel.clone());
@@ -908,13 +911,19 @@ impl GrpcMetaClient {
                     .await
                     .inspect_err(|e| {
                         tracing::warn!(
-                            "Failed to connect to meta server {}, wait for online: {}",
+                            // TODO: remove second try
+                            "Second try: Failed to connect to meta server {}, wait for online: {}",
                             leader_addr,
                             e
                         );
                     })
             })
-            .await?;
+            .await;
+            if channel.is_err() {
+                // TODO: remove this
+                panic!("channel err is {:?}", channel.err());
+            }
+            let channel = channel.unwrap();
             let cluster_client = ClusterServiceClient::new(channel.clone());
             let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
             let ddl_client = DdlServiceClient::new(channel.clone());
