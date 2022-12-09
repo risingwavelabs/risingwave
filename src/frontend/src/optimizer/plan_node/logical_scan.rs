@@ -473,8 +473,7 @@ impl LogicalScan {
                 self.core.table_desc.clone(),
                 self.base
                     .ctx
-                    .inner()
-                    .session_ctx
+                    .session_ctx()
                     .config()
                     .get_max_split_range_gap(),
             )?;

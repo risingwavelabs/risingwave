@@ -591,7 +591,7 @@ async fn open_hummock_iters(
                 range.clone(),
                 epoch,
                 ReadOptions {
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     table_id: TableId { table_id },
                     retention_seconds: None,
                     check_bloom_filter: false,

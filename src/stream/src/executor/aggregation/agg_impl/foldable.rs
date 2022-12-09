@@ -508,7 +508,7 @@ mod tests {
             agg.apply_batch(
                 &ops,
                 None,
-                &[&ArrayImpl::Float64(F64Array::from_slice(&data))],
+                &[&ArrayImpl::Float64(F64Array::from_iter(&data))],
             )
             .unwrap();
             assert_eq!(
