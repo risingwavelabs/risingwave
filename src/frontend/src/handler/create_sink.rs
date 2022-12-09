@@ -99,7 +99,7 @@ pub fn gen_sink_plan(
     // If colume names not specified, use the name in materialized view.
     let col_names = get_column_names(&bound, session, stmt.columns)?;
 
-    let properties = context.inner().with_options.clone();
+    let properties = context.with_options().clone();
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     let col_names = if let Some(col_names) = col_names {

@@ -43,7 +43,7 @@ pub fn infer_left_internal_table_catalog(
     pk_indices.extend(me.logical_pk());
 
     let mut internal_table_catalog_builder =
-        TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
+        TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
@@ -66,7 +66,7 @@ pub fn infer_right_internal_table_catalog(input: &impl stream::StreamPlanRef) ->
     );
 
     let mut internal_table_catalog_builder =
-        TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
+        TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);

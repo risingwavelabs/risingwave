@@ -14,12 +14,12 @@
 
 use std::ops::{Bound, RangeBounds};
 
-use itertools::Itertools;
 use paste::paste;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
 use super::value_encoding::serialize_datum_to_bytes;
+use crate::catalog::get_dist_key_in_pk_indices;
 use crate::hash::VirtualNode;
 use crate::row::{Row2, RowExt};
 use crate::types::{Datum, ScalarImpl};
@@ -84,20 +84,7 @@ impl ScanRange {
             return None;
         }
 
-        let dist_key_in_pk_indices = dist_key_indices
-            .iter()
-            .map(|&di| {
-                pk_indices
-                    .iter()
-                    .position(|&pi| di == pi)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "distribution keys {:?} must be a subset of primary keys {:?}",
-                            dist_key_indices, pk_indices
-                        )
-                    })
-            })
-            .collect_vec();
+        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(dist_key_indices, pk_indices);
         let pk_prefix_len = self.eq_conds.len();
         if dist_key_in_pk_indices.iter().any(|&i| i >= pk_prefix_len) {
             return None;

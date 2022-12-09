@@ -209,7 +209,7 @@ pub(crate) fn gen_create_table_plan(
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
-    let properties = context.inner().with_options.inner().clone();
+    let properties = context.with_options().inner().clone();
 
     // TODO(Yuanxin): Detect if there is an external source based on `properties` (WITH CONNECTOR)
     // and make prost source accordingly.

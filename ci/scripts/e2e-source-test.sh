@@ -58,7 +58,7 @@ mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cd
 # start risingwave cluster
 cargo make ci-start ci-1cn-1fe-with-recovery
 # start cdc connector node
-nohup java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-source.log 2>&1 &
+nohup java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-node.log 2>&1 &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 # wait for cdc loading
