@@ -156,58 +156,14 @@ impl FrontendEnv {
         tracing::info!("Client address is {}", frontend_address);
 
         // Register in meta by calling `AddWorkerNode` RPC.
-        let mut client_res = MetaClient::register_new(
+        let meta_client = MetaClient::register_new(
             opts.meta_addr.clone().as_str(),
             WorkerType::ComputeNode,
             &frontend_address,
             0,
         )
-        .await;
-
-        // FIXME: even after initializing the meta_client we have to be careful when talking to meta
-        // every call to meta may fail if the current meta is not a leader
-        // Below code does not handle meta failover
-
-        tracing::info!(
-            "Trying to connect against meta node {}. May be a follower",
-            opts.meta_addr.clone().as_str(),
-        );
-        let used_leader_addr = client_address.clone();
-        loop {
-            if client_res.as_ref().is_ok() {
-                break;
-            }
-            let e = client_res.as_ref().err().unwrap();
-            let e_str = e.to_string();
-            // FIXME Can we do this better? Error is:
-            // gRPC error (The operation was aborted): http://127.0.0.1:25690
-            let tmp = e_str
-                .split("gRPC error (The operation was aborted): ")
-                .collect::<Vec<&str>>();
-
-            // FIXME: meta needs a service that responds with leader addr
-            if tmp.len() != 2 {
-                panic!(
-                    "Follower did not reply with leader address. Error was {}",
-                    e_str
-                );
-            }
-            let leader_addr = tmp[1];
-
-            thread::sleep(Duration::from_millis(5000));
-            client_res = MetaClient::register_new(
-                leader_addr,
-                WorkerType::ComputeNode,
-                &frontend_address,
-                0,
-            )
-            .await;
-        }
-        tracing::info!(
-            "Succeeded to connect against leader meta node {}",
-            used_leader_addr,
-        );
-        let meta_client = client_res.unwrap();
+        .await
+        .unwrap();
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),

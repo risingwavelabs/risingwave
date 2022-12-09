@@ -14,7 +14,6 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use async_stack_trace::StackTraceManager;
@@ -84,8 +83,6 @@ pub async fn compute_node_serve(
     info!("current meta_addr is {}", opts.meta_address);
 
     // Register to the cluster. We're not ready to serve until activate is called.
-
-    // TODO: also use this technique to connect against meta leader in the frontend node
 
     let meta_client = MetaClient::register_new(
         &opts.meta_address,
