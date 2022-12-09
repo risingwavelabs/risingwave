@@ -40,7 +40,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub use bool_array::{BoolArray, BoolArrayBuilder};
-pub use bytes_array::{BytesArray, BytesArrayBuilder};
+pub use bytes_array::*;
 pub use chrono_array::{
     NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
     NaiveTimeArray, NaiveTimeArrayBuilder,

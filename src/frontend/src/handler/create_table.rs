@@ -33,6 +33,7 @@ use super::create_source::make_prost_source;
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
@@ -226,7 +227,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
-    let properties = context.inner().with_options.inner().clone();
+    let properties = context.with_options().inner().clone();
 
     // TODO(Yuanxin): Detect if there is an external source based on `properties` (WITH CONNECTOR)
     // and make prost source accordingly.
@@ -278,6 +279,7 @@ pub(crate) fn gen_materialize_plan(
             handle_pk_conflict,
             false, // TODO(Yuanxin): true
             None,  // TODO(Yuanxin): row_id_index
+            TableType::Table,
         )?
     };
     let mut table = materialize
