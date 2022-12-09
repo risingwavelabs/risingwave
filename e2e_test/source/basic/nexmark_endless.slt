@@ -1,12 +1,20 @@
 include ../../nexmark/create_sources.slt.part
 
 # Note: It will take a very long time to create all of the NexMark materialized views,
-# so we just create Q5 and Q7 here
-include ../../streaming/nexmark/views/q7.slt.part
+# so we just create stateful queries here
+include ../../streaming/nexmark/views/q3.slt.part
+include ../../streaming/nexmark/views/q4.slt.part
 include ../../streaming/nexmark/views/q5.slt.part
+include ../../streaming/nexmark/views/q7.slt.part
+include ../../streaming/nexmark/views/q8.slt.part
+include ../../streaming/nexmark/views/q9.slt.part
+include ../../streaming/nexmark/views/q14.slt.part
+include ../../streaming/nexmark/views/q15.slt.part
+include ../../streaming/nexmark/views/q16.slt.part
+include ../../streaming/nexmark/views/q17.slt.part
+include ../../streaming/nexmark/views/q18.slt.part
+include ../../streaming/nexmark/views/q20.slt.part
 
-statement ok
-create materialized view nexmark_mv as select * from nexmark;
 
 sleep 15s
 
@@ -14,7 +22,17 @@ statement ok
 flush;
 
 query I
-select count(*) > 0 as has_results from nexmark_mv;
+select count(*) > 0 as has_results from nexmark_q3;
+----
+t
+
+query I
+select count(*) > 0 as has_results from nexmark_q4;
+----
+t
+
+query I
+select count(*) > 0 as has_results from nexmark_q5;
 ----
 t
 
@@ -24,17 +42,80 @@ select count(*) > 0 as has_results from nexmark_q7;
 t
 
 query I
-select count(*) > 0 as has_results from nexmark_q5;
+select count(*) > 0 as has_results from nexmark_q8;
 ----
 t
 
+query I
+select count(*) > 0 as has_results from nexmark_q9;
+----
+t
+
+query I
+select count(*) > 0 as has_results from nexmark_q14;
+----
+t
+
+query I
+select count(*) > 0 as has_results from nexmark_q15;
+----
+t
+
+query I
+select count(*) > 0 as has_results from nexmark_q16;
+----
+t
+
+query I
+select count(*) > 0 as has_results from nexmark_q17;
+----
+t
+
+query I
+select count(*) > 0 as has_results from nexmark_q18;
+----
+t
+
+query I
+select count(*) > 0 as has_results from nexmark_q20;
+----
+t
+
+
 statement ok
-drop materialized view nexmark_q7;
+drop materialized view nexmark_q3;
+
+statement ok
+drop materialized view nexmark_q4;
 
 statement ok
 drop materialized view nexmark_q5;
 
 statement ok
-drop materialized view nexmark_mv;
+drop materialized view nexmark_q7;
+
+statement ok
+drop materialized view nexmark_q8;
+
+statement ok
+drop materialized view nexmark_q9;
+
+statement ok
+drop materialized view nexmark_q14;
+
+statement ok
+drop materialized view nexmark_q15;
+
+statement ok
+drop materialized view nexmark_q16;
+
+statement ok
+drop materialized view nexmark_q17;
+
+statement ok
+drop materialized view nexmark_q18;
+
+statement ok
+drop materialized view nexmark_q20;
 
 include ../nexmark/drop_sources.slt.part
