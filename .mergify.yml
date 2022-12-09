@@ -2,7 +2,7 @@ shared:
   - commit_message_template: &commit_message_template |
       {{title}}
       
-      {{body}}
+      {{body | get_section("## What's changed and what's your intention?")}}
       
       {% for user in approved_reviews_by %}
       Approved-By: {{user}}
