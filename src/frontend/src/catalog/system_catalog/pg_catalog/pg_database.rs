@@ -17,7 +17,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-/// The catalog `pg_database` stores database. 
+/// The catalog `pg_database` stores database.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-namespace.html`]
 pub const PG_DATABASE_TABLE_NAME: &str = "pg_database";
 pub const PG_DATABASE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
@@ -33,10 +33,10 @@ pub const PG_DATABASE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "datctype"),
 ];
 
-pub fn new_pg_database_row(id: u32, name: &String) -> Row {
+pub fn new_pg_database_row(id: u32, name: &str) -> Row {
     Row::new(vec![
         Some(ScalarImpl::Int32(id as i32)),
-        Some(ScalarImpl::Utf8(name.as_str().into())),
+        Some(ScalarImpl::Utf8(name.into())),
         None,
         Some(ScalarImpl::Int32(6)),
         Some(ScalarImpl::Utf8("C".into())),

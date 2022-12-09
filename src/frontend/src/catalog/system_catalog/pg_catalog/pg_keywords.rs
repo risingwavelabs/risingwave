@@ -14,11 +14,12 @@
 
 use std::sync::LazyLock;
 
-use risingwave_common::{types::DataType, row::Row};
+use risingwave_common::row::Row;
+use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-/// The catalog `pg_keywords` stores keywords. `pg_get_keywords` returns the content of this table. 
+/// The catalog `pg_keywords` stores keywords. `pg_get_keywords` returns the content of this table.
 /// Ref: [`https://www.postgresql.org/docs/15/functions-info.html`]
 pub const PG_KEYWORDS_TABLE_NAME: &str = "pg_keywords";
 pub const PG_KEYWORDS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
@@ -28,6 +29,5 @@ pub const PG_KEYWORDS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
 ];
 
 // TODO: set reserved keywords here
-pub static PG_KEYWORDS_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
-    vec![Row::new(vec![None, None, None])]
-});
+pub static PG_KEYWORDS_DATA_ROWS: LazyLock<Vec<Row>> =
+    LazyLock::new(|| vec![Row::new(vec![None, None, None])]);

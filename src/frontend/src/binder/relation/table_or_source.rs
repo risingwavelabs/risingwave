@@ -356,4 +356,11 @@ impl Binder {
             owner,
         })
     }
+
+    pub(crate) fn resolve_regclass(&self, class_name: &str) -> Result<u32> {
+        let schema_path = SchemaPath::Path(&self.search_path, &self.auth_context.user_name);
+        Ok(self
+            .catalog
+            .get_id_by_class_name(&self.db_name, schema_path, class_name)?)
+    }
 }

@@ -48,7 +48,6 @@ pub const PG_TYPE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "typdefault"),
     // None
     (DataType::Varchar, "typcategory"),
-
 ];
 
 // TODO: uniform the default data with `TypeOid` under `pg_field_descriptor`.

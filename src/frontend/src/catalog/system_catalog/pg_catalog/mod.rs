@@ -20,12 +20,12 @@ pub mod pg_collation;
 pub mod pg_database;
 pub mod pg_description;
 pub mod pg_index;
+pub mod pg_keywords;
 pub mod pg_matviews;
 pub mod pg_namespace;
 pub mod pg_opclass;
 pub mod pg_operator;
 pub mod pg_settings;
-pub mod pg_keywords;
 pub mod pg_type;
 pub mod pg_user;
 pub mod pg_views;
@@ -40,8 +40,8 @@ pub use pg_class::*;
 pub use pg_collation::*;
 pub use pg_database::*;
 pub use pg_description::*;
-pub use pg_keywords::*;
 pub use pg_index::*;
+pub use pg_keywords::*;
 pub use pg_matviews::*;
 pub use pg_namespace::*;
 pub use pg_opclass::*;
@@ -207,6 +207,9 @@ impl SysCatalogReaderImpl {
         Ok(schemas
             .zip_eq(schema_infos.iter())
             .flat_map(|(schema, schema_info)| {
+                // !!! If we need to add more class types, remember to update
+                // Catalog::get_id_by_class_name_inner accordingly.
+
                 let rows = schema
                     .iter_table()
                     .map(|table| {
