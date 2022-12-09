@@ -91,6 +91,7 @@ pub struct StateTable<S: StateStore> {
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
 
+    /// The distribution key start index in primary key, used to calculate bloom filter key.
     distribution_key_start_index_in_pk: Option<usize>,
 
     /// Virtual nodes that the table is partitioned into.
