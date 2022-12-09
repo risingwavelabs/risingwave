@@ -528,11 +528,6 @@ mod default {
             10
         }
 
-        pub fn worker_node_parallelism() -> usize {
-            use crate::util::resource_util;
-            resource_util::cpu::total_cpu_available() as usize
-        }
-
         #[cfg(madsim)]
         pub fn total_memory_available_bytes() -> usize {
             16 * 1024 * 1024 * 1024
