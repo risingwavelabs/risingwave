@@ -14,9 +14,11 @@
  * limitations under the License.
  *
  */
+
 import sortBy from "lodash/sortBy"
 import { Sink, Source, Table } from "../../proto/gen/catalog"
 import { ActorLocation, TableFragments } from "../../proto/gen/meta"
+import { ColumnCatalog } from "../../proto/gen/plan_common"
 import api from "./api"
 
 export async function getActors(): Promise<ActorLocation[]> {
@@ -34,7 +36,9 @@ export async function getFragments(): Promise<TableFragments[]> {
 export interface Relation {
   id: number
   name: string
+  owner: number
   dependentRelations: number[]
+  columns: ColumnCatalog[]
 }
 
 export async function getRelations(): Promise<Relation[]> {
@@ -45,10 +49,11 @@ export async function getRelations(): Promise<Relation[]> {
   return relations
 }
 
-export async function getMaterializedViews() {
+export async function getMaterializedViews(withInternal: boolean = false) {
   let mvList: Table[] = (await api.get("/api/materialized_views")).map(
     Table.fromJSON
   )
+  mvList = mvList.filter((mv) => withInternal || !mv.name.startsWith("__"))
   mvList = sortBy(mvList, (x) => x.id)
   return mvList
 }
