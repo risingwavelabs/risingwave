@@ -258,7 +258,7 @@ impl Default for BatchManager {
 mod tests {
     use risingwave_common::config::BatchConfig;
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::make_i32_literal;
+    use risingwave_expr::expr::test_utils::make_i32_literal;
     use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;

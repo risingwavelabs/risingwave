@@ -26,6 +26,7 @@ use risingwave_pb::expr::ExprNode;
 use crate::expr::Expression;
 use crate::{bail, ensure, ExprError, Result};
 
+/// A literal expression.
 #[derive(Debug)]
 pub struct LiteralExpression {
     return_type: DataType,
