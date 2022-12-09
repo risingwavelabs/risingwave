@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::thread::panicking;
 use std::time::Duration;
 
 use async_trait::async_trait;

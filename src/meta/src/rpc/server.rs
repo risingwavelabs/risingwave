@@ -25,7 +25,6 @@ use risingwave_pb::common::HostAddress;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
-use risingwave_pb::leader::leader_server::LeaderServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::leader_service_server::LeaderServiceServer;
@@ -190,8 +189,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     .await?;
 
     let mut services_leader_rx = leader_rx.clone();
-    let mut f_leader_svc_leader_rx = leader_rx.clone();
-    let mut l_leader_svc_leader_rx = leader_rx.clone();
+    let f_leader_svc_leader_rx = leader_rx.clone();
+    let l_leader_svc_leader_rx = leader_rx.clone();
     let mut note_status_leader_rx = leader_rx.clone();
 
     // print current leader/follower status of this node + fencing mechanism
@@ -248,9 +247,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let span = tracing::span!(tracing::Level::INFO, "services");
         let _enter = span.enter();
 
-        let intercept = InterceptorWrapper {
-            leader_rx: leader_rx,
-        };
+        let intercept = InterceptorWrapper { leader_rx };
 
         // failover logic
 
