@@ -24,8 +24,7 @@ use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
-/// The layout of `BytesArray` is the same as `Utf8Array`. Now the `BytesGuard` and `BytesWriter` is
-/// not added yet, can add it when we need to support corresponding expression.
+/// `BytesArray` is a collection of Rust `[u8]`s.
 #[derive(Debug, Clone)]
 pub struct BytesArray {
     offset: Vec<usize>,
@@ -246,16 +245,20 @@ impl ArrayBuilder for BytesArrayBuilder {
 }
 
 impl BytesArrayBuilder {
+    pub fn writer(&mut self) -> BytesWriter<'_> {
+        BytesWriter { builder: self }
+    }
+
     /// `append_partial` will add a partial dirty data of the new record.
     /// The partial data will keep untracked until `finish_partial` was called.
-    pub(super) unsafe fn append_partial(&mut self, x: &[u8]) {
+    unsafe fn append_partial(&mut self, x: &[u8]) {
         self.data.extend_from_slice(x);
     }
 
     /// `finish_partial` will create a new record based on the current dirty data.
     /// `finish_partial` was safe even if we don't call `append_partial`, which is equivalent to
     /// appending an empty bytes.
-    pub(super) fn finish_partial(&mut self) {
+    fn finish_partial(&mut self) {
         self.offset.push(self.data.len());
         self.bitmap.append(true);
     }
@@ -263,9 +266,60 @@ impl BytesArrayBuilder {
     /// Rollback the partial-written data by [`Self::append_partial`].
     ///
     /// This is a safe method, if no `append_partial` was called, then the call has no effect.
-    pub(super) fn rollback_partial(&mut self) {
+    fn rollback_partial(&mut self) {
         let &last_offset = self.offset.last().unwrap();
         assert!(last_offset <= self.data.len());
         self.data.truncate(last_offset);
+    }
+}
+
+pub struct BytesWriter<'a> {
+    builder: &'a mut BytesArrayBuilder,
+}
+
+pub struct WrittenGuard(());
+
+impl<'a> BytesWriter<'a> {
+    /// `write_ref` will consume `BytesWriter` and pass the ownership of `builder` to `BytesGuard`.
+    pub fn write_ref(self, value: &[u8]) -> WrittenGuard {
+        self.builder.append(Some(value));
+        WrittenGuard(())
+    }
+
+    /// `begin` will create a `PartialBytesWriter`, which allow multiple appendings to create a new
+    /// record.
+    pub fn begin(self) -> PartialBytesWriter<'a> {
+        PartialBytesWriter {
+            builder: self.builder,
+        }
+    }
+}
+
+pub struct PartialBytesWriter<'a> {
+    builder: &'a mut BytesArrayBuilder,
+}
+
+impl<'a> PartialBytesWriter<'a> {
+    /// `write_ref` will append partial dirty data to `builder`.
+    /// `PartialBytesWriter::write_ref` is different from `BytesWriter::write_ref`
+    /// in that it allows us to call it multiple times.
+    pub fn write_ref(&mut self, value: &[u8]) {
+        // SAFETY: We'll clean the dirty `builder` in the `drop`.
+        unsafe { self.builder.append_partial(value) }
+    }
+
+    /// `finish` will be called while the entire record is written.
+    /// Exactly one new record was appended and the `builder` can be safely used.
+    pub fn finish(self) -> WrittenGuard {
+        self.builder.finish_partial();
+
+        WrittenGuard(())
+    }
+}
+
+impl<'a> Drop for PartialBytesWriter<'a> {
+    fn drop(&mut self) {
+        // If `finish` is not called, we should rollback the data.
+        self.builder.rollback_partial();
     }
 }

@@ -14,11 +14,12 @@
 
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
+use super::bytes_array::{BytesWriter, PartialBytesWriter, WrittenGuard};
 use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, BytesArray, BytesArrayBuilder};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
 
-/// `Utf8Array` is a collection of Rust Utf8 `String`s. It's a wrapper of `BytesArray`.
+/// `Utf8Array` is a collection of Rust Utf8 `str`s. It's a wrapper of `BytesArray`.
 #[derive(Debug, Clone)]
 pub struct Utf8Array {
     bytes: BytesArray,
@@ -150,44 +151,21 @@ impl ArrayBuilder for Utf8ArrayBuilder {
 
 impl Utf8ArrayBuilder {
     pub fn writer(&mut self) -> StringWriter<'_> {
-        StringWriter { builder: self }
-    }
-
-    /// `append_partial` will add a partial dirty data of the new record.
-    /// The partial data will keep untracked until `finish_partial` was called.
-    #[inline]
-    unsafe fn append_partial(&mut self, x: &str) {
-        self.bytes.append_partial(x.as_bytes());
-    }
-
-    /// `finish_partial` will create a new record based on the current dirty data.
-    /// `finish_partial` was safe even if we don't call `append_partial`, which is equivalent to
-    /// appending an empty string.
-    #[inline]
-    fn finish_partial(&mut self) {
-        self.bytes.finish_partial();
-    }
-
-    /// Rollback the partial-written data by [`Self::append_partial`].
-    ///
-    /// This is a safe method, if no `append_partial` was called, then the call has no effect.
-    #[inline]
-    fn rollback_partial(&mut self) {
-        self.bytes.rollback_partial();
+        StringWriter {
+            bytes: self.bytes.writer(),
+        }
     }
 }
 
 pub struct StringWriter<'a> {
-    builder: &'a mut Utf8ArrayBuilder,
+    bytes: BytesWriter<'a>,
 }
-
-pub struct WrittenGuard(());
 
 impl<'a> StringWriter<'a> {
     /// `write_ref` will consume `StringWriter` and pass the ownership of `builder` to `BytesGuard`.
+    #[inline]
     pub fn write_ref(self, value: &str) -> WrittenGuard {
-        self.builder.append(Some(value));
-        WrittenGuard(())
+        self.bytes.write_ref(value.as_bytes())
     }
 
     /// `write_from_char_iter` will consume `StringWriter` and write the characters from the `iter`.
@@ -207,37 +185,30 @@ impl<'a> StringWriter<'a> {
     /// record.
     pub fn begin(self) -> PartialStringWriter<'a> {
         PartialStringWriter {
-            builder: self.builder,
+            bytes: self.bytes.begin(),
         }
     }
 }
 
+// Note: dropping an unfinished `PartialStringWriter` will rollback the partial data, which is the
+// behavior of the inner `PartialBytesWriter`.
 pub struct PartialStringWriter<'a> {
-    builder: &'a mut Utf8ArrayBuilder,
+    bytes: PartialBytesWriter<'a>,
 }
 
 impl<'a> PartialStringWriter<'a> {
     /// `write_ref` will append partial dirty data to `builder`.
     /// `PartialStringWriter::write_ref` is different from `StringWriter::write_ref`
     /// in that it allows us to call it multiple times.
+    #[inline]
     pub fn write_ref(&mut self, value: &str) {
-        // SAFETY: We'll clean the dirty `builder` in the `drop`.
-        unsafe { self.builder.append_partial(value) }
+        self.bytes.write_ref(value.as_bytes());
     }
 
     /// `finish` will be called while the entire record is written.
     /// Exactly one new record was appended and the `builder` can be safely used.
     pub fn finish(self) -> WrittenGuard {
-        self.builder.finish_partial();
-
-        WrittenGuard(())
-    }
-}
-
-impl<'a> Drop for PartialStringWriter<'a> {
-    fn drop(&mut self) {
-        // If `finish` is not called, we should rollback the data.
-        self.builder.rollback_partial();
+        self.bytes.finish()
     }
 }
 
