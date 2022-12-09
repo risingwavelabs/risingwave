@@ -275,6 +275,7 @@ pub mod cpu {
 mod util {
     use std::fs;
     use std::path::Path;
+
     // Returns a cgroup version if it exists, else returns None.
     // Checks for the existence of the root hierarchy directory.
     pub fn get_cgroup_version() -> Option<super::CgroupVersion> {
