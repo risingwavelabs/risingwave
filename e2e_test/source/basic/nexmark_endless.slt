@@ -5,10 +5,18 @@ include ../../nexmark/create_sources.slt.part
 include ../../streaming/nexmark/views/q7.slt.part
 include ../../streaming/nexmark/views/q5.slt.part
 
+statement ok
+create materialized view nexmark_mv as select * from nexmark;
+
 sleep 15s
 
 statement ok
 flush;
+
+query I
+select count(*) > 0 as has_results from nexmark_mv;
+----
+t
 
 query I
 select count(*) > 0 as has_results from nexmark_q7;
