@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::thread::panicking;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -110,6 +111,10 @@ impl MetaClient {
         addr: &HostAddr,
         worker_node_parallelism: usize,
     ) -> Result<Self> {
+        // FIXME: even after initializing the meta_client we have to be careful when talking to meta
+        // every call to meta may fail if the current meta is not a leader
+        // Below code does not handle meta failover
+
         let grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
@@ -847,7 +852,7 @@ impl GrpcMetaClient {
         let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
             .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
             .map(jitter);
-        let mut channel = tokio_retry::Retry::spawn(retry_strategy.clone(), || async {
+        let channel = tokio_retry::Retry::spawn(retry_strategy.clone(), || async {
             let endpoint = endpoint.clone();
             endpoint
                 .http2_keep_alive_interval(Duration::from_secs(
@@ -886,12 +891,12 @@ impl GrpcMetaClient {
                 leader_addr,
                 addr
             );
-            let endpoint = Endpoint::from_shared(addr.to_string())?
+            let endpoint = Endpoint::from_shared(leader_addr.to_string())?
                 .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
             let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
                 .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
                 .map(jitter);
-            channel = tokio_retry::Retry::spawn(retry_strategy.clone(), || async {
+            let channel = tokio_retry::Retry::spawn(retry_strategy.clone(), || async {
                 let endpoint = endpoint.clone();
                 endpoint
                     .http2_keep_alive_interval(Duration::from_secs(
@@ -904,12 +909,30 @@ impl GrpcMetaClient {
                     .inspect_err(|e| {
                         tracing::warn!(
                             "Failed to connect to meta server {}, wait for online: {}",
-                            addr,
+                            leader_addr,
                             e
                         );
                     })
             })
             .await?;
+            let cluster_client = ClusterServiceClient::new(channel.clone());
+            let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
+            let ddl_client = DdlServiceClient::new(channel.clone());
+            let hummock_client = HummockManagerServiceClient::new(channel.clone());
+            let notification_client = NotificationServiceClient::new(channel.clone());
+            let stream_client = StreamManagerServiceClient::new(channel.clone());
+            let user_client = UserServiceClient::new(channel.clone());
+            let scale_client = ScaleServiceClient::new(channel);
+            return Ok(Self {
+                cluster_client,
+                heartbeat_client,
+                ddl_client,
+                hummock_client,
+                notification_client,
+                stream_client,
+                user_client,
+                scale_client,
+            });
         }
 
         let cluster_client = ClusterServiceClient::new(channel.clone());

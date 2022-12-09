@@ -85,60 +85,16 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
 
-    let mut client_res = MetaClient::register_new(
+    // TODO: also use this technique to connect against meta leader in the frontend node
+
+    let meta_client = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::ComputeNode,
         &client_addr,
         opts.parallelism,
     )
-    .await;
-
-    // FIXME: even after initializing the meta_client we have to be careful when talking to meta
-    // every call to meta may fail if the current meta is not a leader
-    // Below code does not handle meta failover
-
-    tracing::info!(
-        "Trying to connect against meta node {}. May be a follower",
-        &opts.meta_address
-    );
-    let mut used_leader_addr = opts.meta_address;
-    loop {
-        if client_res.as_ref().is_ok() {
-            break;
-        }
-        let e = client_res.as_ref().err().unwrap();
-        let e_str = e.to_string();
-        // FIXME Can we do this better? Error is:
-        // gRPC error (The operation was aborted): http://127.0.0.1:25690
-        let tmp = e_str
-            .split("gRPC error (The operation was aborted): ")
-            .collect::<Vec<&str>>();
-
-        // FIXME: meta needs a service that responds with leader addr
-        if tmp.len() != 2 {
-            panic!(
-                "Follower did not reply with leader address. Error was {}",
-                e_str
-            );
-        }
-        let leader_addr = tmp[1];
-        used_leader_addr = leader_addr.to_string();
-
-        thread::sleep(Duration::from_millis(5000));
-        client_res = MetaClient::register_new(
-            leader_addr,
-            WorkerType::ComputeNode,
-            &client_addr,
-            opts.parallelism,
-        )
-        .await;
-    }
-    tracing::info!(
-        "Succeeded to connect against leader meta node {}",
-        used_leader_addr,
-    );
-
-    let meta_client = client_res.unwrap();
+    .await
+    .unwrap();
 
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
