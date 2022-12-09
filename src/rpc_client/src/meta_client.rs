@@ -878,17 +878,19 @@ impl GrpcMetaClient {
             .await
             .expect("Expect that leader service always knows who leader is")
             .into_inner();
-        let leader_addr_: HostAddress = resp
+        let leader_addr: HostAddress = resp
             .leader_addr
             .expect("Expect that leader service always knows who leader is");
 
-        let leader_addr_string = format!("http://{}:{}", leader_addr_.host, leader_addr_.port);
+        let leader_addr = format!("http://{}:{}", leader_addr.host, leader_addr.port);
         // TODO: the http here may be incorrect
         // error in sim test
         // FIXME
+        // export RUST_LOG=info
+        // ./risedev sslt -- --kill-rate=0.0 --kill "e2e_test/streaming/**/*.slt"
         // Connecting against leader meta http://0.0.0.0:5690, instead of follower meta 192.168.1.1:5690
-        let leader_addr = leader_addr_string.as_str();
-        if false && leader_addr.ne(addr) {
+        let leader_addr = leader_addr.as_str();
+        if leader_addr.ne(addr) {
             // TODO: Write this as function. DNRY
             tracing::info!(
                 "Connecting against leader meta {}, instead of follower meta {}",
