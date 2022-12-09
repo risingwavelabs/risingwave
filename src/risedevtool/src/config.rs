@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::env;
-use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
@@ -36,16 +34,24 @@ pub struct ConfigExpander;
 impl ConfigExpander {
     /// Transforms `risedev.yml` to a fully expanded yaml file.
     ///
+    /// # Arguments
+    ///
     /// * `config` is the full content of `risedev.yml`.
     /// * `profile` is the selected config profile called by `risedev dev <profile>`. It is one of
     ///   the keys in the `risedev` section.
+    ///
+    /// # Returns
+    ///
+    /// A pair of `config_path` and expanded steps (items in `{profile}.steps` section in YAML)
     pub fn expand(config: &str, profile: &str) -> Result<(Option<String>, Yaml)> {
         Self::expand_with_extra_info(config, profile, HashMap::new())
     }
 
-    /// * `extra_info` is additional variables for variable expansion by [`DollarExpander`].
-    ///
     /// See [`ConfigExpander::expand`] for other information.
+    ///
+    /// # Arguments
+    ///
+    /// - `extra_info` is additional variables for variable expansion by [`DollarExpander`].
     pub fn expand_with_extra_info(
         config: &str,
         profile: &str,
@@ -54,8 +60,6 @@ impl ConfigExpander {
         let [config]: [_; 1] = YamlLoader::load_from_str(config)?
             .try_into()
             .map_err(|_| anyhow!("expect yaml config to have only one section"))?;
-
-        let mut risingwave_config_path = None;
 
         let global_config = config
             .as_hash()
@@ -69,62 +73,36 @@ impl ConfigExpander {
         let template_section = global_config
             .get(&Yaml::String("template".to_string()))
             .ok_or_else(|| anyhow!("expect `risedev` section"))?;
-        // selected and expanded profile config.
-        let expanded_config: Vec<(Yaml, Yaml)> = risedev_section
-            .iter()
-            .filter(|(k, _)| k == &&Yaml::String(profile.to_string()))
-            .map(|(profile, v)| {
-                profile
-                    .as_str()
-                    .ok_or_else(|| anyhow!("expect `risedev` section to use string key"))?;
-                let map = v
-                    .as_hash()
-                    .ok_or_else(|| anyhow!("expect `risedev` section to be a hashmap"))?;
 
-                if let Some(config_path) = map.get(&Yaml::String("config-path".to_string())) {
-                    let config_path = config_path
-                        .as_str()
-                        .map(|s| s.to_string())
-                        .ok_or_else(|| anyhow!("expect `config-path` to be a string"))?;
-                    risingwave_config_path = Some(config_path.clone());
-                    update_config(config_path)?;
-                }
+        let profile_section = risedev_section
+            .get(&Yaml::String(profile.to_string()))
+            .ok_or_else(|| anyhow!("profile '{}' not found", profile))?;
+        let profile_map = profile_section
+            .as_hash()
+            .ok_or_else(|| anyhow!("expect `risedev` section to be a hashmap"))?;
 
-                let v = map
-                    .get(&Yaml::String("steps".to_string()))
-                    .ok_or_else(|| anyhow!("expect `steps` section"))?;
-                let mut use_expander = UseExpander::new(template_section)?;
-                let v = use_expander.visit(v.clone())?;
-                let mut dollar_expander = DollarExpander::new(extra_info.clone());
-                let v = dollar_expander.visit(v)?;
-                let mut id_expander = IdExpander::new(&v)?;
-                let v = id_expander.visit(v)?;
-                let mut provide_expander = ProvideExpander::new(&v)?;
-                let v = provide_expander.visit(v)?;
-                Ok::<_, anyhow::Error>((profile.clone(), v))
-            })
-            .try_collect()?;
+        let config_path = profile_map
+            .get(&Yaml::String("config-path".to_string()))
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string());
 
-        assert!(
-            expanded_config.len() == 1,
-            "`risedev` section key should be unique"
-        );
-        Ok((
-            risingwave_config_path,
-            Yaml::Hash(expanded_config.into_iter().collect()),
-        ))
+        let steps = profile_map
+            .get(&Yaml::String("steps".to_string()))
+            .ok_or_else(|| anyhow!("expect `steps` section"))?
+            .clone();
+
+        let steps = UseExpander::new(template_section)?.visit(steps)?;
+        let steps = DollarExpander::new(extra_info).visit(steps)?;
+        let steps = IdExpander::new(&steps)?.visit(steps)?;
+        let steps = ProvideExpander::new(&steps)?.visit(steps)?;
+
+        Ok((config_path, steps))
     }
 
     /// Parses the expanded yaml into [`ServiceConfig`]s.
     /// The order is the same as the original array's order.
-    pub fn deserialize(expanded_config: &Yaml, profile: &str) -> Result<Vec<ServiceConfig>> {
-        let risedev_section = expanded_config
-            .as_hash()
-            .ok_or_else(|| anyhow!("expect risedev section to be a hashmap"))?;
-        let scene = risedev_section
-            .get(&Yaml::String(profile.to_string()))
-            .ok_or_else(|| anyhow!("{} not found", profile))?;
-        let steps = scene
+    pub fn deserialize(expanded_config: &Yaml) -> Result<Vec<ServiceConfig>> {
+        let steps = expanded_config
             .as_vec()
             .ok_or_else(|| anyhow!("expect steps to be an array"))?;
         let config: Vec<ServiceConfig> = steps
@@ -176,106 +154,5 @@ impl ConfigExpander {
             }
         }
         Ok(config)
-    }
-}
-
-fn update_config(provided_path: impl AsRef<Path>) -> Result<()> {
-    let base_path = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
-
-    // Update the content in `base_path` with *additional* content in `provided_path`.
-    let mut config: toml::Value = toml::from_str(&std::fs::read_to_string(&base_path)?)?;
-    let provided_config: toml::Value = toml::from_str(&std::fs::read_to_string(&provided_path)?)?;
-    merge_toml(&mut config, &provided_config);
-
-    std::fs::write(base_path, config.to_string())?;
-
-    Ok(())
-}
-
-/// * For tables, we recursively update or insert new values for each key.
-/// * For other types, (including array/array of tables), we simply replace the old with the new
-///   one.
-fn merge_toml(base: &mut toml::Value, provided: &toml::Value) {
-    match (base, provided) {
-        (toml::Value::Table(base_table), toml::Value::Table(provided_table)) => {
-            for (k, v) in provided_table.iter() {
-                match base_table.get_mut(k) {
-                    Some(x) => merge_toml(x, v),
-                    None => {
-                        let _ = base_table.insert(k.clone(), v.clone());
-                    }
-                }
-            }
-        }
-        (base, provided) => *base = provided.clone(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_merge_toml() {
-        let mut base: toml::Value = toml::from_str(
-            r#"
-[foo]
-foo = 0
-a = 1
-b = [1, 2, 3]
-
-[bar]
-c = { c1 = "a", c2 = "b" }
-
-[foo.bar]
-d = 114514
-
-[[foobar]]
-e = 1919810
-
-[[foobar]]
-f = 810
-"#,
-        )
-        .unwrap();
-
-        let provided: toml::Value = toml::from_str(
-            r#"
-[foo]
-a = 2
-b = "3"
-
-[bar]
-c = { c1 = 0, c3 = 'd' }
-
-[foo.bar]
-e = "abc"
-
-[[foobar]]
-boom = 0
-"#,
-        )
-        .unwrap();
-
-        let expected: toml::Value = toml::from_str(
-            r#"
-[foo]
-foo = 0
-a = 2
-b = "3"
-
-[bar]
-c = { c1 = 0, c2 = "b", c3 = 'd' }
-
-[foo.bar]
-d = 114514
-e = "abc"
-
-[[foobar]]
-boom = 0
-"#,
-        )
-        .unwrap();
-
-        super::merge_toml(&mut base, &provided);
-        assert_eq!(base, expected);
     }
 }
