@@ -54,7 +54,7 @@ mod tests {
             Some(Decimal::NaN),
         ];
 
-        let array = DecimalArray::from_slice(&input);
+        let array = DecimalArray::from_iter(&input);
         let prost_array = array.to_protobuf();
 
         assert_eq!(prost_array.values.len(), 1);

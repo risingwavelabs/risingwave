@@ -26,6 +26,7 @@ use risingwave_common::hash::{AllVirtualNodeIter, VirtualNode};
 use risingwave_common::row::{CompactedRow, Row, Row2};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_storage::row_serde::row_serde_util::serialize_pk;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{prefix_range_to_memcomparable, StateTable};
@@ -251,6 +252,37 @@ impl<S: StateStore> RangeCache<S> {
         Ok(old_vnodes)
     }
 
+    pub fn shrink(&mut self, watermark: ScalarImpl) {
+        if let Some((range_lower, range_upper)) = self.range.as_mut() {
+            let delete_old = match range_upper.as_ref() {
+                Bound::Excluded(x) => *x <= watermark,
+                Bound::Included(x) => *x < watermark,
+                Bound::Unbounded => false,
+            };
+            if delete_old {
+                self.cache = HashMap::new();
+                self.range = None;
+            } else {
+                let need_cut = match range_lower.as_ref() {
+                    Bound::Excluded(x) | Bound::Included(x) => *x < watermark,
+                    Bound::Unbounded => true,
+                };
+                if need_cut {
+                    let watermark_pk = serialize_pk(
+                        [Some(watermark.as_scalar_ref_impl())],
+                        self.state_table.pk_serde().prefix(1).as_ref(),
+                    );
+                    for cache in self.cache.values_mut() {
+                        *cache = cache.split_off(&watermark_pk);
+                    }
+                    *range_lower = Bound::Included(watermark.clone());
+                }
+            }
+        }
+
+        self.state_table.update_watermark(watermark);
+    }
+
     /// Flush writes to the `StateTable` from the in-memory buffer.
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         // self.metrics.flush();
@@ -429,9 +461,88 @@ fn range_contains_lower_upper(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::Distribution;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_shrink() {
+        let fallback = Distribution::fallback();
+        let mem_state = MemoryStateStore::new();
+        let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
+        let state_table = StateTable::new_without_distribution(
+            mem_state.clone(),
+            TableId::new(0),
+            vec![column_descs.clone()],
+            vec![OrderType::Ascending],
+            vec![0],
+        )
+        .await;
+        let mut range_cache = RangeCache::new(state_table, usize::MAX, fallback.vnodes);
+        range_cache.init(EpochPair::new_test_epoch(1));
+        range_cache
+            .range(
+                (Bound::Unbounded, Bound::Excluded(ScalarImpl::Int64(7))),
+                false,
+            )
+            .await
+            .unwrap();
+        range_cache.shrink(ScalarImpl::Int64(7));
+        assert_eq!(range_cache.range, None);
+        range_cache
+            .range(
+                (Bound::Unbounded, Bound::Included(ScalarImpl::Int64(7))),
+                false,
+            )
+            .await
+            .unwrap();
+        range_cache.shrink(ScalarImpl::Int64(5));
+        assert_eq!(
+            range_cache.range,
+            Some((
+                Bound::Included(ScalarImpl::Int64(5)),
+                Bound::Included(ScalarImpl::Int64(7))
+            ))
+        );
+        range_cache.shrink(ScalarImpl::Int64(7));
+        assert_eq!(
+            range_cache.range,
+            Some((
+                Bound::Included(ScalarImpl::Int64(7)),
+                Bound::Included(ScalarImpl::Int64(7))
+            ))
+        );
+        range_cache.shrink(ScalarImpl::Int64(8));
+        assert_eq!(range_cache.range, None);
+        range_cache
+            .range((Bound::Unbounded, Bound::Unbounded), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            range_cache.range,
+            Some((Bound::Unbounded, Bound::Unbounded))
+        );
+        range_cache.shrink(ScalarImpl::Int64(5));
+        assert_eq!(
+            range_cache.range,
+            Some((Bound::Included(ScalarImpl::Int64(5)), Bound::Unbounded))
+        );
+        range_cache.shrink(ScalarImpl::Int64(4));
+        assert_eq!(
+            range_cache.range,
+            Some((Bound::Included(ScalarImpl::Int64(5)), Bound::Unbounded))
+        );
+        range_cache.shrink(ScalarImpl::Int64(6));
+        assert_eq!(
+            range_cache.range,
+            Some((Bound::Included(ScalarImpl::Int64(6)), Bound::Unbounded))
+        );
+    }
 
     #[test]
     fn test_get_missing_range() {
