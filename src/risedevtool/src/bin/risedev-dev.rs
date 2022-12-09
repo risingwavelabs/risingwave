@@ -357,8 +357,10 @@ fn main() -> Result<()> {
 
     let (config_path, risedev_config) = ConfigExpander::expand(&risedev_config, &task_name)?;
 
-    let config_file_target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
-    std::fs::copy(config_path, config_file_target).expect("failed to copy risingwave config file");
+    if let Some(config_path) = &config_path {
+        let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
+        std::fs::copy(config_path, target).expect("failed to copy risingwave config file");
+    }
 
     {
         let mut out_str = String::new();

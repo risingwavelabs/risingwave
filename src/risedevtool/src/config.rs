@@ -43,7 +43,7 @@ impl ConfigExpander {
     /// # Returns
     ///
     /// A pair of `config_path` and expanded steps (items in `{profile}.steps` section in YAML)
-    pub fn expand(config: &str, profile: &str) -> Result<(String, Yaml)> {
+    pub fn expand(config: &str, profile: &str) -> Result<(Option<String>, Yaml)> {
         Self::expand_with_extra_info(config, profile, HashMap::new())
     }
 
@@ -56,7 +56,7 @@ impl ConfigExpander {
         config: &str,
         profile: &str,
         extra_info: HashMap<String, String>,
-    ) -> Result<(String, Yaml)> {
+    ) -> Result<(Option<String>, Yaml)> {
         let [config]: [_; 1] = YamlLoader::load_from_str(config)?
             .try_into()
             .map_err(|_| anyhow!("expect yaml config to have only one section"))?;
@@ -84,8 +84,7 @@ impl ConfigExpander {
         let config_path = profile_map
             .get(&Yaml::String("config-path".to_string()))
             .and_then(|s| s.as_str())
-            .unwrap_or("src/config/risingwave.toml")
-            .to_string();
+            .map(|s| s.to_string());
 
         let steps = profile_map
             .get(&Yaml::String("steps".to_string()))

@@ -83,7 +83,7 @@ pub struct ComposeConfig {
     pub config_directory: String,
 
     /// The path of `risingwave.toml`
-    pub rw_config_path: String,
+    pub rw_config_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -159,15 +159,15 @@ impl Compose for ComputeNodeConfig {
             self,
             HummockInMemoryStrategy::Disallowed,
         )?;
-        command.arg("--config-path").arg("/risingwave.toml");
         if self.enable_tiered_cache {
             command.arg("--file-cache-dir").arg("/filecache");
         }
 
-        std::fs::copy(
-            Path::new(config.rw_config_path.as_str()),
-            Path::new(&config.config_directory).join("risingwave.toml"),
-        )?;
+        if let Some(c) = &config.rw_config_path {
+            let target = Path::new(&config.config_directory).join("risingwave.toml");
+            std::fs::copy(c, target)?;
+            command.arg("--config-path").arg("/risingwave.toml");
+        }
 
         let command = get_cmd_args(&command, true)?;
 
@@ -202,14 +202,14 @@ impl Compose for MetaNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("meta-node");
         MetaNodeService::apply_command_args(&mut command, self)?;
-        command.arg("--config-path").arg("/risingwave.toml");
+
+        if let Some(c) = &config.rw_config_path {
+            let target = Path::new(&config.config_directory).join("risingwave.toml");
+            std::fs::copy(c, target)?;
+            command.arg("--config-path").arg("/risingwave.toml");
+        }
+
         let command = get_cmd_args(&command, true)?;
-
-        std::fs::copy(
-            Path::new(config.rw_config_path.as_str()),
-            Path::new(&config.config_directory).join("risingwave.toml"),
-        )?;
-
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
             environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
@@ -234,10 +234,15 @@ impl Compose for FrontendConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("frontend-node");
         FrontendService::apply_command_args(&mut command, self)?;
-        command.arg("--config-path").arg("/risingwave.toml");
-        let command = get_cmd_args(&command, true)?;
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
 
+        if let Some(c) = &config.rw_config_path {
+            let target = Path::new(&config.config_directory).join("risingwave.toml");
+            std::fs::copy(c, target)?;
+            command.arg("--config-path").arg("/risingwave.toml");
+        }
+
+        let command = get_cmd_args(&command, true)?;
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
             environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
@@ -260,17 +265,17 @@ impl Compose for CompactorConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compactor-node");
         CompactorService::apply_command_args(&mut command, self)?;
-        command.arg("--config-path").arg("/risingwave.toml");
-        let command = get_cmd_args(&command, true)?;
 
-        std::fs::copy(
-            Path::new(config.rw_config_path.as_str()),
-            Path::new(&config.config_directory).join("risingwave.toml"),
-        )?;
+        if let Some(c) = &config.rw_config_path {
+            let target = Path::new(&config.config_directory).join("risingwave.toml");
+            std::fs::copy(c, target)?;
+            command.arg("--config-path").arg("/risingwave.toml");
+        }
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
         let provide_minio = self.provide_minio.as_ref().unwrap();
 
+        let command = get_cmd_args(&command, true)?;
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
             environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
