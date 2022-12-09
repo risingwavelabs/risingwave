@@ -12,9 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod agg;
-mod build_expr_from_prost;
-pub(crate) mod data_types;
+//! Expressions in RisingWave.
+//!
+//! All expressions are implemented under the [`Expression`] trait.
+//!
+//! ## Construction
+//!
+//! Expressions can be constructed by functions like [`new_binary_expr`],
+//! which returns a [`BoxedExpression`].
+//!
+//! They can also be transformed from the prost [`ExprNode`] using the [`build_from_prost`]
+//! function.
+//!
+//! ## Evaluation
+//!
+//! Expressions can be evaluated using the [`eval`] function.
+//!
+//! [`ExprNode`]: risingwave_pb::expr::ExprNode
+//! [`eval`]: Expression::eval
+
+// These modules define concrete expression structures.
 mod expr_array_concat;
 mod expr_binary_bytes;
 mod expr_binary_nonnull;
@@ -37,6 +54,10 @@ mod expr_to_timestamp_const_tmpl;
 mod expr_udf;
 mod expr_unary;
 mod expr_vnode;
+
+mod agg;
+mod build_expr_from_prost;
+pub(crate) mod data_types;
 mod template;
 mod template_fast;
 pub mod test_utils;
