@@ -529,7 +529,8 @@ mod default {
         }
 
         pub fn worker_node_parallelism() -> usize {
-            std::thread::available_parallelism().unwrap().get()
+            use crate::util::resource_util;
+            resource_util::cpu::total_cpu_available() as usize
         }
 
         #[cfg(madsim)]
