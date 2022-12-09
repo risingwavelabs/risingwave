@@ -127,9 +127,10 @@ impl KafkaSplitEnumerator {
             ))
         })?;
 
-        // here we are getting the start offset and end offset for each partition with the given timestamp
-        // if the timestamp is None, we will use the low watermark and high watermark as the start and end offset
-        // if the timestamp is provided, we will use the watermark to narrow down the range
+        // here we are getting the start offset and end offset for each partition with the given
+        // timestamp if the timestamp is None, we will use the low watermark and high
+        // watermark as the start and end offset if the timestamp is provided, we will use
+        // the watermark to narrow down the range
         let mut expect_start_offset = if let Some(ts) = expect_start_timestamp_millis {
             Some(
                 self.fetch_offset_for_time(topic_partitions.as_ref(), ts)
