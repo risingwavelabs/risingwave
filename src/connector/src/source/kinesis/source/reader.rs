@@ -122,6 +122,7 @@ impl KinesisSplitReader {
                         continue;
                     }
                     self.latest_offset = Some(chunk.last().unwrap().offset.clone());
+                    tracing::debug!("shard {:?} latest offset: {:?}", self.shard_id, self.latest_offset);
                     yield chunk;
                 }
                 Err(SdkError::ServiceError { err, .. }) if err.is_expired_iterator_exception() => {
