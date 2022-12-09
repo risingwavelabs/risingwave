@@ -297,6 +297,7 @@ async fn get_infos_obj<S: MetaStore>(
 }
 
 fn gen_rand_lease_id() -> u64 {
+    return 123;
     rand::thread_rng().gen_range(0..std::u64::MAX)
 }
 
