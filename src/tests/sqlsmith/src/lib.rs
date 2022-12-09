@@ -76,6 +76,50 @@ impl From<ColumnDef> for Column {
     }
 }
 
+#[derive(Copy, Clone)]
+struct SqlGeneratorContext {
+    can_agg: bool, // This is used to disable agg expr totally,
+                   // Used in top level, where we want to test queries
+                   // without aggregates.
+    inside_agg: bool, // TODO: Maybe we can get rid of this???
+    inside_explicit_cast: bool,
+}
+
+impl SqlGeneratorContext {
+    pub fn new() -> Self {
+        SqlGeneratorContext {
+            can_agg: true,
+            inside_agg: false,
+            inside_explicit_cast: false,
+        }
+    }
+    pub fn new_with_can_agg(can_agg: bool) -> Self {
+        Self {
+            can_agg,
+            inside_agg: false,
+            inside_explicit_cast: false,
+        }
+    }
+    pub fn set_inside_agg(self) -> Self {
+        Self {
+            inside_agg: true,
+            ..self
+        }
+    }
+    pub fn set_inside_explicit_cast(self) -> Self {
+        Self {
+            inside_explicit_cast: true,
+            ..self
+        }
+    }
+    pub fn can_implicit_cast(self) -> bool {
+        !self.inside_explicit_cast
+    }
+    pub fn can_gen_agg(self) -> bool {
+        self.can_agg && !self.inside_agg
+    }
+}
+
 struct SqlGenerator<'a, R: Rng> {
     tables: Vec<Table>,
     rng: &'a mut R,
@@ -319,12 +363,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_select_list(&mut self) -> (Vec<SelectItem>, Vec<Column>) {
         let items_num = self.rng.gen_range(1..=4);
         let can_agg = self.flip_coin();
+        let context = SqlGeneratorContext::new_with_can_agg(can_agg);
         (0..items_num)
-            .map(|i| self.gen_select_item(i, can_agg))
+            .map(|i| self.gen_select_item(i, context))
             .unzip()
     }
 
-    fn gen_select_item(&mut self, i: i32, can_agg: bool) -> (SelectItem, Column) {
+    fn gen_select_item(&mut self, i: i32, context: SqlGeneratorContext) -> (SelectItem, Column) {
         use DataTypeName as T;
         let ret_type = *[
             T::Boolean,
@@ -343,7 +388,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         ]
         .choose(&mut self.rng)
         .unwrap();
-        let expr = self.gen_expr(ret_type, can_agg, false);
+
+        let expr = self.gen_expr(ret_type, context);
 
         let alias = format!("col_{}", i);
         (
@@ -390,9 +436,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_where(&mut self) -> Option<Expr> {
         if self.flip_coin() {
-            let can_agg = false;
-            let inside_agg = false;
-            Some(self.gen_expr(DataTypeName::Boolean, can_agg, inside_agg))
+            let context = SqlGeneratorContext::new_with_can_agg(false);
+            Some(self.gen_expr(DataTypeName::Boolean, context))
         } else {
             None
         }
@@ -416,9 +461,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_having(&mut self, have_group_by: bool) -> Option<Expr> {
         if have_group_by & self.flip_coin() {
-            let can_agg = true;
-            let inside_agg = false;
-            Some(self.gen_expr(DataTypeName::Boolean, can_agg, inside_agg))
+            let context = SqlGeneratorContext::new();
+            Some(self.gen_expr(DataTypeName::Boolean, context))
         } else {
             None
         }
@@ -477,6 +521,15 @@ fn is_unimplemented_error(db_error: &str) -> bool {
     db_error.contains("Feature is not yet implemented")
 }
 
+/// This error occurs because we test `implicit` casts as well,
+/// generated expressions may be ambiguous as a result,
+/// if there are multiple candidates signatures.
+/// Additionally.
+fn not_unique_error(db_error: &str) -> bool {
+    db_error.contains("is not unique\
+    HINT:  Could not choose a best candidate function. You might need to add explicit type casts.")
+}
+
 /// Certain errors are permitted to occur. This is because:
 /// 1. It is more complex to generate queries without these errors.
 /// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
@@ -484,4 +537,5 @@ pub fn is_permissible_error(db_error: &str) -> bool {
     is_numeric_out_of_range_err(db_error)
         || is_division_by_zero_err(db_error)
         || is_unimplemented_error(db_error)
+        || not_unique_error(db_error)
 }
