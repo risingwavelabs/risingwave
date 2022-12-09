@@ -17,7 +17,7 @@ pub enum CgroupVersion {
     V2,
 }
 
-// Current controllers available in immplementation.
+// Current controllers available in implementation.
 pub enum Controller {
     Cpu,
     Memory,
