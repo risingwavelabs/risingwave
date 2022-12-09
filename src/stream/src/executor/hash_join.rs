@@ -619,6 +619,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 .with_label_values(&[&actor_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             match msg? {
+                AlignedMessage::WatermarkLeft(_) | AlignedMessage::WatermarkRight(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 AlignedMessage::Left(chunk) => {
                     #[for_await]
                     for chunk in Self::eq_join_oneside::<{ SideType::Left }>(

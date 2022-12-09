@@ -118,9 +118,11 @@ pub async fn handle_create_source(
     }
     let (columns, source_info) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            assert_eq!(columns.len(), 1);
-            assert_eq!(pk_column_ids, vec![0.into()]);
-            assert_eq!(row_id_index, Some(0));
+            if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
+                return Err(RwError::from(ProtocolError(
+                    "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/latest/sql-create-source/#protobuf for more information.".to_string(),
+                )));
+            }
 
             columns.extend(
                 extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
@@ -137,9 +139,11 @@ pub async fn handle_create_source(
             )
         }
         SourceSchema::Avro(avro_schema) => {
-            assert_eq!(columns.len(), 1);
-            assert_eq!(pk_column_ids, vec![0.into()]);
-            assert_eq!(row_id_index, Some(0));
+            if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
+                return Err(RwError::from(ProtocolError(
+                    "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/latest/sql-create-source/#avro for more information.".to_string(),
+                )));
+            }
             columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
             (
                 columns,
