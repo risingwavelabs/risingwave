@@ -39,6 +39,7 @@ use risingwave_pb::hummock::*;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::leader_service_client::LeaderServiceClient;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
@@ -109,7 +110,6 @@ impl MetaClient {
         addr: &HostAddr,
         worker_node_parallelism: usize,
     ) -> Result<Self> {
-        // FIXME: This may be multiple meta_addr like a,b,c
         let grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
@@ -840,12 +840,14 @@ impl GrpcMetaClient {
 
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
+        // TODO: Do I have to tell above that addr changed?
+
         let endpoint = Endpoint::from_shared(addr.to_string())?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
         let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
             .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
             .map(jitter);
-        let channel = tokio_retry::Retry::spawn(retry_strategy, || async {
+        let mut channel = tokio_retry::Retry::spawn(retry_strategy.clone(), || async {
             let endpoint = endpoint.clone();
             endpoint
                 .http2_keep_alive_interval(Duration::from_secs(
@@ -864,6 +866,51 @@ impl GrpcMetaClient {
                 })
         })
         .await?;
+
+        // TODO: We only want to do a ping. Request does not need fields
+        let mut leader_client = LeaderServiceClient::new(channel.clone());
+        let resp = leader_client
+            .leader(LeaderRequest {})
+            .await
+            .expect("Expect that leader service always knows who leader is")
+            .into_inner();
+        let leader_addr_ = resp
+            .leader_addr
+            .expect("Expect that leader service always knows who leader is");
+        let leader_addr_string = format!("{}:{}", leader_addr_.host, leader_addr_.port);
+        let leader_addr = leader_addr_string.as_str();
+        if leader_addr.ne(addr) {
+            // TODO: Write this as function. DNRY
+            tracing::info!(
+                "Connecting against leader meta {}, instead of follower meta {}",
+                leader_addr,
+                addr
+            );
+            let endpoint = Endpoint::from_shared(addr.to_string())?
+                .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
+            let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
+                .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
+                .map(jitter);
+            channel = tokio_retry::Retry::spawn(retry_strategy.clone(), || async {
+                let endpoint = endpoint.clone();
+                endpoint
+                    .http2_keep_alive_interval(Duration::from_secs(
+                        Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
+                    ))
+                    .keep_alive_timeout(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
+                    .connect_timeout(Duration::from_secs(5))
+                    .connect()
+                    .await
+                    .inspect_err(|e| {
+                        tracing::warn!(
+                            "Failed to connect to meta server {}, wait for online: {}",
+                            addr,
+                            e
+                        );
+                    })
+            })
+            .await?;
+        }
 
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());

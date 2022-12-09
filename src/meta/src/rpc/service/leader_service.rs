@@ -14,36 +14,37 @@
 
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::leader::leader_server::Leader;
-use risingwave_pb::meta::leader_service_server::LeaderService;
 use risingwave_pb::leader::{LeaderRequest, LeaderResponse};
+use tokio::sync::watch::Receiver;
 use tonic::{Request, Response, Status};
-use tokio::sync::watch::Receiver; 
-
 
 #[derive(Clone)]
-pub struct LeaderServiceImpl
-{
+pub struct LeaderServiceImpl {
     leader_rx: Receiver<(HostAddress, bool)>,
 }
 
-impl LeaderServiceImpl
-{
+impl LeaderServiceImpl {
     pub fn new(cluster_manager: Receiver<(HostAddress, bool)>) -> Self {
-        LeaderServiceImpl { leader_rx: cluster_manager }
+        LeaderServiceImpl {
+            leader_rx: cluster_manager,
+        }
     }
 }
 
 #[async_trait::async_trait]
-impl Leader for LeaderServiceImpl
-{
+impl Leader for LeaderServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
     async fn leader(
         &self,
-        request: Request<LeaderRequest>,
+        _request: Request<LeaderRequest>,
     ) -> Result<Response<LeaderResponse>, Status> {
+        // service never called
+
         // TODO: change request. Need only a simple ping
         // let req = request.into_inner();
         let leader_addr = self.leader_rx.borrow().0.clone();
-        Ok(Response::new(LeaderResponse { leader_addr: Some(leader_addr) }))
+        Ok(Response::new(LeaderResponse {
+            leader_addr: Some(leader_addr),
+        }))
     }
 }
