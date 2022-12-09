@@ -28,7 +28,7 @@
                             }
                         },
                         "config-path": {
-                            "description": "The path to a toml config file for this profile.\nIt will be merged together with the base config `src/config/risingwave.toml`.\nThe merged config will be put at `.risingwave/config/risingwave.toml` , which is the `config-path` arg passed to risingwave nodes by risedev.\n"
+                            "description": "The path to a toml config file for this profile.\nIt will be copied to `.risingwave/config/risingwave.toml` , which is the `config-path` arg passed to risingwave nodes by risedev.\n"
                         }
                     },
                     "additionalProperties": false,

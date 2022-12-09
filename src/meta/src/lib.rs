@@ -105,7 +105,7 @@ pub struct MetaNodeOpts {
     #[clap(long)]
     prometheus_endpoint: Option<String>,
 
-    /// Te path of `risingwave.toml` configuration file.
+    /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
     ///

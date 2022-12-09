@@ -30,16 +30,31 @@ impl BoolArray {
         Self { bitmap, data }
     }
 
-    pub fn from_slice(data: &[Option<bool>]) -> Self {
-        let mut builder = <Self as Array>::Builder::new(data.len());
-        for i in data {
-            builder.append(*i);
+    pub fn to_bitmap(&self) -> Bitmap {
+        &self.data & self.null_bitmap()
+    }
+}
+
+impl FromIterator<Option<bool>> for BoolArray {
+    fn from_iter<I: IntoIterator<Item = Option<bool>>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+        for i in iter {
+            builder.append(i);
         }
         builder.finish()
     }
+}
 
-    pub fn to_bitmap(&self) -> Bitmap {
-        &self.data & self.null_bitmap()
+impl<'a> FromIterator<&'a Option<bool>> for BoolArray {
+    fn from_iter<I: IntoIterator<Item = &'a Option<bool>>>(iter: I) -> Self {
+        iter.into_iter().cloned().collect()
+    }
+}
+
+impl FromIterator<bool> for BoolArray {
+    fn from_iter<I: IntoIterator<Item = bool>>(iter: I) -> Self {
+        iter.into_iter().map(Some).collect()
     }
 }
 
