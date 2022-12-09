@@ -8,7 +8,6 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-mockall = "0.11.3"
 anyhow = "1"
 arc-swap = "1"
 assert_matches = "1"
@@ -29,6 +28,7 @@ hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
 mime_guess = "2"
+mockall = "0.11.3"
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
