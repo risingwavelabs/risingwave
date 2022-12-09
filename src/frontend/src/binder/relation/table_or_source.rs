@@ -27,7 +27,7 @@ use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
-use crate::catalog::table_catalog::{TableCatalog, TableKind};
+use crate::catalog::table_catalog::{TableCatalog, TableType};
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{CatalogError, IndexCatalog, TableId};
 
@@ -218,10 +218,17 @@ impl Binder {
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let ast = Parser::parse_sql(&view_catalog.sql)
             .expect("a view's sql should be parsed successfully");
-        assert!(ast.len() == 1, "a view should contain only one statement");
-        let query = match ast.into_iter().next().unwrap() {
-            Statement::Query(q) => q,
-            _ => unreachable!("a view should contain a query statement"),
+        let ast = ast
+            .into_iter()
+            .exactly_one()
+            .expect("a view should contain only one statement");
+        let query = match ast {
+            Statement::CreateView {
+                materialized: false,
+                query,
+                ..
+            } => query,
+            _ => unreachable!("a view should contain a query statement, but got {ast:?}"),
         };
         let query = self.bind_query(*query).map_err(|e| {
             ErrorCode::BindError(format!(
@@ -298,17 +305,23 @@ impl Binder {
             self.catalog
                 .get_table_by_name(db_name, schema_path, table_name)?;
 
-        match table.kind() {
-            TableKind::Table => {}
-            TableKind::Index => {
+        match table.table_type() {
+            TableType::Table => {}
+            TableType::Index => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot manipulate data in index \"{table_name}\""
                 ))
                 .into())
             }
-            TableKind::MView => {
+            TableType::MaterializedView => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot manipulate data in materialized view \"{table_name}\""
+                ))
+                .into())
+            }
+            TableType::Internal => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "cannot manipulate data in internal table \"{table_name}\""
                 ))
                 .into())
             }

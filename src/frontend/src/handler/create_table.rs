@@ -31,11 +31,13 @@ use risingwave_sqlparser::ast::{
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{check_valid_column_name, ColumnId};
+use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::{PlanRef, PlanRoot};
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::Binder;
 
@@ -206,7 +208,7 @@ pub(crate) fn gen_create_table_plan(
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
-    let properties = context.inner().with_options.inner().clone();
+    let properties = context.with_options().inner().clone();
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -270,7 +272,7 @@ pub(crate) fn gen_create_table_plan(
         handle_pk_conflict,
         true,
         row_id_index,
-        false,
+        TableType::Table,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -324,7 +326,7 @@ pub(crate) fn gen_materialize_plan(
             handle_pk_conflict,
             false,
             None,
-            false,
+            TableType::Table,
         )?
     };
     let mut table = materialize
@@ -335,13 +337,13 @@ pub(crate) fn gen_materialize_plan(
 }
 
 pub async fn handle_create_table(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     if_not_exists: bool,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx.clone();
+    let session = handler_args.session.clone();
 
     if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
         if if_not_exists {
@@ -355,6 +357,7 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, table) = {
+        let context = OptimizerContext::new_with_handler_args(handler_args);
         let (plan, source, table) = gen_create_table_plan(
             &session,
             context.into(),

@@ -251,7 +251,7 @@
       | └─LogicalAgg { group_key: [part.p_partkey], aggs: [min(partsupp.ps_supplycost)] }
       |   └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(part.p_partkey, partsupp.ps_partkey), output: [part.p_partkey, partsupp.ps_supplycost] }
       |     ├─LogicalAgg { group_key: [part.p_partkey], aggs: [] }
-      |     | └─LogicalScan { table: part, columns: [part.p_partkey] }
+      |     | └─LogicalScan { table: part, output_columns: [part.p_partkey], required_columns: [p_partkey, p_type, p_size], predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
       |     └─LogicalJoin { type: Inner, on: (nation.n_regionkey = region.r_regionkey), output: [partsupp.ps_partkey, partsupp.ps_supplycost] }
       |       ├─LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey] }
       |       | ├─LogicalJoin { type: Inner, on: (supplier.s_suppkey = partsupp.ps_suppkey), output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey] }
@@ -287,7 +287,9 @@
           |     └─BatchHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM partsupp.ps_partkey, output: [part.p_partkey, partsupp.ps_supplycost] }
           |       ├─BatchExchange { order: [], dist: HashShard(part.p_partkey) }
           |       | └─BatchSortAgg { group_key: [part.p_partkey], aggs: [] }
-          |       |   └─BatchScan { table: part, columns: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+          |       |   └─BatchProject { exprs: [part.p_partkey] }
+          |       |     └─BatchFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
+          |       |       └─BatchScan { table: part, columns: [part.p_partkey, part.p_type, part.p_size], distribution: UpstreamHashShard(part.p_partkey) }
           |       └─BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
           |         └─BatchHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost] }
           |           ├─BatchExchange { order: [], dist: HashShard(nation.n_regionkey) }
@@ -341,7 +343,9 @@
                 |         ├─StreamExchange { dist: HashShard(part.p_partkey) }
                 |         | └─StreamProject { exprs: [part.p_partkey] }
                 |         |   └─StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
-                |         |     └─StreamTableScan { table: part, columns: [part.p_partkey], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
+                |         |     └─StreamProject { exprs: [part.p_partkey] }
+                |         |       └─StreamFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
+                |         |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
                 |         └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
                 |           └─StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey] }
                 |             ├─StreamExchange { dist: HashShard(nation.n_regionkey) }
@@ -437,9 +441,11 @@
       StreamProject { exprs: [part.p_partkey] }
         StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
             result table: 28, state tables: []
-          Chain { table: part, columns: [part.p_partkey], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
-            Upstream
-            BatchPlanNode
+          StreamProject { exprs: [part.p_partkey] }
+            StreamFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
+              Chain { table: part, columns: [part.p_partkey, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
+                Upstream
+                BatchPlanNode
 
     Fragment 11
       StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey] }
@@ -2376,31 +2382,29 @@
                 └─LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
   optimized_logical_plan: |
     LogicalAgg { group_key: [count(orders.o_orderkey)], aggs: [count] }
-    └─LogicalProject { exprs: [count(orders.o_orderkey)] }
-      └─LogicalAgg { group_key: [customer.c_custkey], aggs: [count(orders.o_orderkey)] }
-        └─LogicalJoin { type: LeftOuter, on: (customer.c_custkey = orders.o_custkey), output: [customer.c_custkey, orders.o_orderkey] }
-          ├─LogicalScan { table: customer, columns: [customer.c_custkey] }
-          └─LogicalScan { table: orders, output_columns: [orders.o_orderkey, orders.o_custkey], required_columns: [o_orderkey, o_custkey, o_comment], predicate: Not(Like(orders.o_comment, '%:1%:2%':Varchar)) }
+    └─LogicalAgg { group_key: [customer.c_custkey], aggs: [count(orders.o_orderkey)] }
+      └─LogicalJoin { type: LeftOuter, on: (customer.c_custkey = orders.o_custkey), output: [customer.c_custkey, orders.o_orderkey] }
+        ├─LogicalScan { table: customer, columns: [customer.c_custkey] }
+        └─LogicalScan { table: orders, output_columns: [orders.o_orderkey, orders.o_custkey], required_columns: [o_orderkey, o_custkey, o_comment], predicate: Not(Like(orders.o_comment, '%:1%:2%':Varchar)) }
   batch_plan: |
     BatchExchange { order: [count DESC, count(orders.o_orderkey) DESC], dist: Single }
     └─BatchSort { order: [count DESC, count(orders.o_orderkey) DESC] }
       └─BatchHashAgg { group_key: [count(orders.o_orderkey)], aggs: [count] }
         └─BatchExchange { order: [], dist: HashShard(count(orders.o_orderkey)) }
-          └─BatchProject { exprs: [count(orders.o_orderkey)] }
-            └─BatchHashAgg { group_key: [customer.c_custkey], aggs: [count(orders.o_orderkey)] }
-              └─BatchHashJoin { type: LeftOuter, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, orders.o_orderkey] }
-                ├─BatchExchange { order: [], dist: HashShard(customer.c_custkey) }
-                | └─BatchScan { table: customer, columns: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
-                └─BatchExchange { order: [], dist: HashShard(orders.o_custkey) }
-                  └─BatchProject { exprs: [orders.o_orderkey, orders.o_custkey] }
-                    └─BatchFilter { predicate: Not(Like(orders.o_comment, '%:1%:2%':Varchar)) }
-                      └─BatchScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], distribution: UpstreamHashShard(orders.o_orderkey) }
+          └─BatchHashAgg { group_key: [customer.c_custkey], aggs: [count(orders.o_orderkey)] }
+            └─BatchHashJoin { type: LeftOuter, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, orders.o_orderkey] }
+              ├─BatchExchange { order: [], dist: HashShard(customer.c_custkey) }
+              | └─BatchScan { table: customer, columns: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+              └─BatchExchange { order: [], dist: HashShard(orders.o_custkey) }
+                └─BatchProject { exprs: [orders.o_orderkey, orders.o_custkey] }
+                  └─BatchFilter { predicate: Not(Like(orders.o_comment, '%:1%:2%':Varchar)) }
+                    └─BatchScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], distribution: UpstreamHashShard(orders.o_orderkey) }
   stream_plan: |
     StreamMaterialize { columns: [c_count, custdist], pk_columns: [c_count], order_descs: [custdist, c_count] }
     └─StreamProject { exprs: [count(orders.o_orderkey), count] }
       └─StreamHashAgg { group_key: [count(orders.o_orderkey)], aggs: [count, count] }
         └─StreamExchange { dist: HashShard(count(orders.o_orderkey)) }
-          └─StreamProject { exprs: [count(orders.o_orderkey), customer.c_custkey] }
+          └─StreamProject { exprs: [customer.c_custkey, count(orders.o_orderkey)] }
             └─StreamHashAgg { group_key: [customer.c_custkey], aggs: [count, count(orders.o_orderkey)] }
               └─StreamHashJoin { type: LeftOuter, predicate: customer.c_custkey = orders.o_custkey, output: all }
                 ├─StreamExchange { dist: HashShard(customer.c_custkey) }
@@ -2416,10 +2420,10 @@
         StreamProject { exprs: [count(orders.o_orderkey), count] }
           StreamHashAgg { group_key: [count(orders.o_orderkey)], aggs: [count, count] }
               result table: 0, state tables: []
-            StreamExchange Hash([0]) from 1
+            StreamExchange Hash([1]) from 1
 
     Fragment 1
-      StreamProject { exprs: [count(orders.o_orderkey), customer.c_custkey] }
+      StreamProject { exprs: [customer.c_custkey, count(orders.o_orderkey)] }
         StreamHashAgg { group_key: [customer.c_custkey], aggs: [count, count(orders.o_orderkey)] }
             result table: 1, state tables: []
           StreamHashJoin { type: LeftOuter, predicate: customer.c_custkey = orders.o_custkey, output: all }
@@ -2602,10 +2606,9 @@
     |   └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
     |     └─LogicalScan { table: lineitem, output_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], required_columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate], predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons':Interval)) }
     └─LogicalAgg { aggs: [max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
-      └─LogicalProject { exprs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
-        └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
-          └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
-            └─LogicalScan { table: lineitem, output_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], required_columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate], predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons':Interval)) }
+      └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+        └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
+          └─LogicalScan { table: lineitem, output_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], required_columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate], predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons':Interval)) }
   batch_plan: |
     BatchExchange { order: [supplier.s_suppkey ASC], dist: Single }
     └─BatchSort { order: [supplier.s_suppkey ASC] }
@@ -2623,12 +2626,11 @@
           └─BatchSimpleAgg { aggs: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
             └─BatchExchange { order: [], dist: Single }
               └─BatchSimpleAgg { aggs: [max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
-                └─BatchProject { exprs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
-                  └─BatchHashAgg { group_key: [lineitem.l_suppkey], aggs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
-                    └─BatchExchange { order: [], dist: HashShard(lineitem.l_suppkey) }
-                      └─BatchProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
-                        └─BatchFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons':Interval)) }
-                          └─BatchScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], distribution: SomeShard }
+                └─BatchHashAgg { group_key: [lineitem.l_suppkey], aggs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+                  └─BatchExchange { order: [], dist: HashShard(lineitem.l_suppkey) }
+                    └─BatchProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
+                      └─BatchFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons':Interval)) }
+                        └─BatchScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey(hidden), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))(hidden)], pk_columns: [s_suppkey, lineitem.l_suppkey, total_revenue, max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
     └─StreamHashJoin { type: Inner, predicate: sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))) = max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))), output: all }
@@ -2647,8 +2649,8 @@
           └─StreamGlobalSimpleAgg { aggs: [sum0(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
             └─StreamExchange { dist: Single }
               └─StreamHashAgg { group_key: [Vnode(lineitem.l_suppkey)], aggs: [count, max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
-                └─StreamProject { exprs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey, Vnode(lineitem.l_suppkey)] }
-                  └─StreamProject { exprs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey] }
+                └─StreamProject { exprs: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), Vnode(lineitem.l_suppkey)] }
+                  └─StreamProject { exprs: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
                     └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
                       └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
                         └─StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem.l_orderkey, lineitem.l_linenumber] }
@@ -2693,8 +2695,8 @@
     Fragment 5
       StreamHashAgg { group_key: [Vnode(lineitem.l_suppkey)], aggs: [count, max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
           result table: 12, state tables: [11]
-        StreamProject { exprs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey, Vnode(lineitem.l_suppkey)] }
-          StreamProject { exprs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey] }
+        StreamProject { exprs: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), Vnode(lineitem.l_suppkey)] }
+          StreamProject { exprs: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
             StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
                 result table: 13, state tables: []
               StreamExchange Hash([0]) from 6
@@ -2911,7 +2913,7 @@
           └─LogicalAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
             └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(part.p_partkey, lineitem.l_partkey), output: [part.p_partkey, lineitem.l_quantity] }
               ├─LogicalAgg { group_key: [part.p_partkey], aggs: [] }
-              | └─LogicalScan { table: part, columns: [part.p_partkey] }
+              | └─LogicalScan { table: part, output_columns: [part.p_partkey], required_columns: [p_partkey, p_brand, p_container], predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
               └─LogicalScan { table: lineitem, output_columns: [lineitem.l_partkey, lineitem.l_quantity], required_columns: [l_partkey, l_quantity], predicate: IsNotNull(lineitem.l_partkey) }
   batch_plan: |
     BatchProject { exprs: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32)] }
@@ -2934,7 +2936,9 @@
                     └─BatchHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity] }
                       ├─BatchExchange { order: [], dist: HashShard(part.p_partkey) }
                       | └─BatchSortAgg { group_key: [part.p_partkey], aggs: [] }
-                      |   └─BatchScan { table: part, columns: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                      |   └─BatchProject { exprs: [part.p_partkey] }
+                      |     └─BatchFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
+                      |       └─BatchScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], distribution: UpstreamHashShard(part.p_partkey) }
                       └─BatchExchange { order: [], dist: HashShard(lineitem.l_partkey) }
                         └─BatchFilter { predicate: IsNotNull(lineitem.l_partkey) }
                           └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity], distribution: SomeShard }
@@ -2961,7 +2965,9 @@
                         ├─StreamExchange { dist: HashShard(part.p_partkey) }
                         | └─StreamProject { exprs: [part.p_partkey] }
                         |   └─StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
-                        |     └─StreamTableScan { table: part, columns: [part.p_partkey], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
+                        |     └─StreamProject { exprs: [part.p_partkey] }
+                        |       └─StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
+                        |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
                         └─StreamExchange { dist: HashShard(lineitem.l_partkey) }
                           └─StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }
                             └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
@@ -3011,9 +3017,11 @@
       StreamProject { exprs: [part.p_partkey] }
         StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
             result table: 14, state tables: []
-          Chain { table: part, columns: [part.p_partkey], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
-            Upstream
-            BatchPlanNode
+          StreamProject { exprs: [part.p_partkey] }
+            StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
+              Chain { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
+                Upstream
+                BatchPlanNode
 
     Fragment 6
       StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }

@@ -61,7 +61,11 @@ impl ComputeNodeService {
             .arg("--async-stack-trace")
             .arg(&config.async_stack_trace)
             .arg("--connector-rpc-endpoint")
-            .arg(&config.connector_rpc_endpoint);
+            .arg(&config.connector_rpc_endpoint)
+            .arg("--parallelism")
+            .arg(&config.parallelism.to_string())
+            .arg("--total-memory-bytes")
+            .arg(&config.total_memory_bytes.to_string());
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {

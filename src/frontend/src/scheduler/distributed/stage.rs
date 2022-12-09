@@ -432,7 +432,11 @@ impl StageRunner {
                          } else {
                             // After processing all stream status, we must have sent signal (Either Scheduled or
                             // Failed) to Query Runner. If this is not true, query runner will stuck cuz it do not receive any signals.
-                            assert!(sent_signal_to_next);
+                            if !sent_signal_to_next {
+                                // For now, this kind of situation may come from recovery test: CN may get killed before reporting status, so sent signal flag is not set yet.
+                                // In this case, batch query is expected to fail. Client in simulation test should retry this query (w/o kill nodes).
+                                return Err(TaskExecutionError("compute node lose connection before response".to_string()));
+                            }
                             break;
                     }
                 }

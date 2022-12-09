@@ -37,5 +37,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs"
 ] }
+toml = "0.5.9"
 workspace-hack = { path = "../workspace-hack" }
 yaml-rust = "0.4"

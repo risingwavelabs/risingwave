@@ -19,8 +19,8 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::Order;
-use crate::session::OptimizerContextRef;
 use crate::TableCatalog;
 /// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
@@ -45,7 +45,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         let columns_fields = schema.fields().to_vec();
         let field_order = &self.order.field_order;
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
         columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);

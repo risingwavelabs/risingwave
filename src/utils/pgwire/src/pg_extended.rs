@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::ops::Range;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 use std::vec::IntoIter;
@@ -244,11 +244,12 @@ pub struct PreparedStatement {
     raw_statement: String,
 
     /// Generic param information used for simplify replace_param().
+    /// Range is the start and end index of the param in raw_statement.
     ///
     /// e.g.
-    /// raw_statement : "select * from table where a = $1 and b = $2::INT"
-    /// param_tokens : {{1,"$1"},{2,"$2::INT"}}
-    param_tokens: HashMap<usize, String>,
+    /// raw_statement : "select $1,$2"
+    /// param_tokens : {{1,(7..9)},{2,(10..12)}}
+    param_tokens: Vec<(usize, Range<usize>)>,
 
     param_types: Vec<DataType>,
 }
@@ -279,24 +280,19 @@ impl PreparedStatement {
             .map(|x| DataType::from_oid(*x).map_err(|e| PsqlError::ParseError(Box::new(e))))
             .collect::<PsqlResult<Vec<_>>>()?;
 
-        // Match all generic param.
-        // e.g.
-        // raw_statement = "select * from table where a = $1 and b = $2::INT4"
-        // generic_params will be {"$1","$2::INT4"}
-        let generic_params: Vec<String> = PARAMETER_PATTERN
+        let generic_params: Vec<_> = PARAMETER_PATTERN
             .find_iter(raw_statement.as_str())
-            .map(|m| m.as_str().to_string())
             .collect();
 
         if generic_params.is_empty() {
             return Ok(PreparedStatement {
                 raw_statement,
                 param_types: provided_param_types,
-                param_tokens: HashMap::new(),
+                param_tokens: vec![],
             });
         }
 
-        let mut param_tokens = HashMap::new();
+        let mut param_tokens = Vec::with_capacity(generic_params.len());
         let mut param_records: Vec<Option<DataType>> = vec![None; 1];
 
         // Parse the implicit type information.
@@ -304,9 +300,9 @@ impl PreparedStatement {
         // generic_params = {"$1::VARCHAR","$2::INT4","$3"}
         // param_record will be {Some(Type::VARCHAR),Some(Type::INT4),None}
         // None means the type information isn't provided implicitly. Such as '$3' above.
-        for param in generic_params {
-            let token = param.clone();
-            let mut param = param.split("::");
+        for param_match in generic_params {
+            let range = param_match.range();
+            let mut param = param_match.as_str().split("::");
             let param_idx = param
                 .next()
                 .unwrap()
@@ -324,7 +320,7 @@ impl PreparedStatement {
                 param_records.resize(param_idx, None);
             }
             param_records[param_idx - 1] = param_type;
-            param_tokens.insert(param_idx, token);
+            param_tokens.push((param_idx, range));
         }
 
         // Integrate the param_records and provided_param_types.
@@ -397,8 +393,8 @@ impl PreparedStatement {
         let place_hodler = Type::ANY;
         for (type_oid, raw_param) in zip_eq(type_description.iter(), raw_params.iter()) {
             let str = match type_oid {
-                DataType::Varchar => {
-                    format!("'{}'", cstr_to_str(raw_param).unwrap())
+                DataType::Varchar | DataType::Bytea => {
+                    format!("'{}'", cstr_to_str(raw_param).unwrap().replace('\'', "''"))
                 }
                 DataType::Boolean => {
                     if param_format {
@@ -531,6 +527,7 @@ impl PreparedStatement {
                 DataType::Int32 => params.push("0::INT".to_string()),
                 DataType::Float32 => params.push("0::FLOAT4".to_string()),
                 DataType::Float64 => params.push("0::FLOAT8".to_string()),
+                DataType::Bytea => params.push("'\\x0'".to_string()),
                 DataType::Varchar => params.push("'0'".to_string()),
                 DataType::Date => params.push("'2021-01-01'::DATE".to_string()),
                 DataType::Time => params.push("'00:00:00'::TIME".to_string()),
@@ -551,15 +548,35 @@ impl PreparedStatement {
         Ok(params)
     }
 
+    // replace_params replaces the generic params in the raw statement with the given params.
+    // Our replace algorithm:
+    // param_tokens is a vec of (param_index, param_range) in the raw statement.
+    // We sort the param_tokens by param_range.start to get a vec of range sorted from left to
+    // right. Our purpose is to split the raw statement into several parts:
+    //   [normal part1] [generic param1] [normal part2] [generic param2] [generic param3]
+    // Then we create the result statement:
+    //   For normal part, we just copy it from the raw statement.
+    //   For generic param, we replace it with the given param.
     fn replace_params(&self, params: &[String]) -> String {
-        let mut tmp = self.raw_statement.clone();
+        let tmp = &self.raw_statement;
 
-        for (idx, generic_param) in &self.param_tokens {
+        let ranges: Vec<_> = self
+            .param_tokens
+            .iter()
+            .sorted_by(|a, b| a.1.start.cmp(&b.1.start))
+            .collect();
+
+        let mut start_offset = 0;
+        let mut res = String::new();
+        for (idx, range) in ranges {
             let param = &params[*idx - 1];
-            tmp = tmp.replace(generic_param, param);
+            res.push_str(&tmp[start_offset..range.start]);
+            res.push_str(param);
+            start_offset = range.end;
         }
+        res.push_str(&tmp[start_offset..]);
 
-        tmp
+        res
     }
 
     pub fn param_type_description(&self) -> Vec<DataType> {
@@ -726,6 +743,22 @@ mod tests {
             .instance(&["1".into(), "DATA".into()], false)
             .unwrap();
         assert!("UPDATE COFFEES SET SALES = 1 WHERE COF_NAME LIKE 'DATA'" == sql);
+
+        let raw_statement = "SELECT $1,$2;".to_string();
+        let prepared_statement = PreparedStatement::parse_statement(raw_statement, vec![]).unwrap();
+        let sql = prepared_statement
+            .instance(&["test$2".into(), "test$1".into()], false)
+            .unwrap();
+        assert!("SELECT 'test$2','test$1';" == sql);
+
+        let raw_statement = "SELECT $1,$1::INT,$2::VARCHAR,$2;".to_string();
+        let prepared_statement =
+            PreparedStatement::parse_statement(raw_statement, vec![DataType::INT32.to_oid()])
+                .unwrap();
+        let sql = prepared_statement
+            .instance(&["1".into(), "DATA".into()], false)
+            .unwrap();
+        assert!("SELECT 1,1,'DATA','DATA';" == sql);
     }
     #[test]
 

@@ -22,9 +22,11 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 use super::privilege::{check_privileges, resolve_relation_privileges};
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::optimizer::{PlanRef, PlanRoot};
+use crate::catalog::table_catalog::TableType;
+use crate::handler::HandlerArgs;
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::planner::Planner;
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
 pub(super) fn get_column_names(
@@ -108,8 +110,15 @@ pub fn gen_create_mv_plan(
     if let Some(col_names) = &col_names {
         check_column_names(col_names, &plan_root)?
     }
-    let materialize = plan_root
-        .gen_materialize_plan(table_name, definition, col_names, false, false, None, true)?;
+    let materialize = plan_root.gen_materialize_plan(
+        table_name,
+        definition,
+        col_names,
+        false,
+        false,
+        None,
+        TableType::MaterializedView,
+    )?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
@@ -131,16 +140,17 @@ pub fn gen_create_mv_plan(
 }
 
 pub async fn handle_create_mv(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     name: ObjectName,
     query: Query,
     columns: Vec<Ident>,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx.clone();
+    let session = handler_args.session.clone();
 
     session.check_relation_name_duplicated(name.clone())?;
 
     let (table, graph) = {
+        let context = OptimizerContext::new_with_handler_args(handler_args);
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
         let graph = build_graph(plan);
 

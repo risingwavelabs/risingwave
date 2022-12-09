@@ -306,20 +306,20 @@ impl<S: StateStore> LookupExecutor<S> {
                         &self.chunk_data_types,
                         stream_to_output.clone(),
                         arrange_to_output.clone(),
-                    )?;
+                    );
 
                     for (op, row) in ops.iter().zip_eq(chunk.rows()) {
                         for matched_row in self.lookup_one_row(&row).await? {
                             tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
-                            if let Some(chunk) = builder.append_row(*op, &row, &matched_row)? {
+                            if let Some(chunk) = builder.append_row(*op, &row, &matched_row) {
                                 yield Message::Chunk(chunk);
                             }
                         }
                         // TODO: support outer join (return null if no rows are matched)
                     }
 
-                    if let Some(chunk) = builder.take()? {
+                    if let Some(chunk) = builder.take() {
                         yield Message::Chunk(chunk);
                     }
                 }

@@ -551,7 +551,7 @@ impl Catalog {
                 relation_name.to_string(),
             ))
         } else if let Some(table) = schema.get_table_by_name(relation_name) {
-            if table.is_index {
+            if table.is_index() {
                 Err(CatalogError::Duplicated("index", relation_name.to_string()))
             } else {
                 Err(CatalogError::Duplicated(
