@@ -128,7 +128,7 @@ pub mod memory {
         if !super::runtime::is_linux_machine() || !super::runtime::is_running_in_container() {
             return get_system_memory();
         };
-        match get_memory_used_in_container(super::util::get_cgroup_version()) {
+        match get_container_memory_limit(super::util::get_cgroup_version()) {
             Some(mem_limit) => std::cmp::min(mem_limit, get_system_memory()),
             None => get_system_memory(),
         }
