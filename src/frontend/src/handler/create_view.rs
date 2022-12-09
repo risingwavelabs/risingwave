@@ -91,6 +91,7 @@ pub async fn handle_create_view(
         dependent_relations,
         // Here we save the original sql instead of the unparsed one from AST, in case there're
         // uncovered cases in the unparsing implementation.
+        // TODO: this includes the `CREATE VIEW` prefix, which can be removed if we have span info.
         sql: sql.to_string(),
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
     };
