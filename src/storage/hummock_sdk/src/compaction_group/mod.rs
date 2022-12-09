@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod hummock_version_ext;
+mod local_hummock_version;
 
 use parse_display::Display;
 
