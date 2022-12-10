@@ -294,6 +294,7 @@ impl Binder {
         &'a self,
         schema_name: Option<&str>,
         table_name: &str,
+        is_insert: bool,
     ) -> Result<&'a TableCatalog> {
         let db_name = &self.db_name;
         let schema_path = match schema_name {
@@ -327,9 +328,9 @@ impl Binder {
             }
         }
 
-        if table.append_only {
+        if table.append_only && !is_insert {
             return Err(ErrorCode::BindError(
-                "append-only table does not support update".to_string(),
+                "append-only table does not support update or delete".to_string(),
             )
             .into());
         }

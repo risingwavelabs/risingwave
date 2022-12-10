@@ -55,7 +55,7 @@ impl Binder {
         let (schema_name, table_name) =
             Self::resolve_schema_qualified_name(&self.db_name, name.clone())?;
 
-        let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name)?;
+        let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
 
