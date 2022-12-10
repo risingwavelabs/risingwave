@@ -8,7 +8,6 @@ statement ok
 create table t2 (v2 int);
 
 # Simple Agg
-
 statement ok
 create materialized view mv1 as with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;
 
@@ -20,7 +19,6 @@ statement ok
 insert into t1 values (1), (2), (3);
 
 # RHS is NULL means predicate is not true
-
 query I
 select * from mv1 order by v1;
 ----
@@ -71,7 +69,6 @@ select * from mv1 order by v1;
 # 3
 
 # Deletion of RHS results in predicate not TRUE
-
 statement ok
 delete from t2 where true;
 
@@ -79,8 +76,8 @@ query I
 select * from mv1 order by v1;
 ----
 
-# Insertion into RHS after deletion is still correct
 
+# Insertion into RHS after deletion is still correct
 statement ok
 insert into t2 values (1);
 
@@ -101,3 +98,5 @@ drop table t1;
 
 statement ok
 drop table t2;
+
+

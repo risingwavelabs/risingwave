@@ -1,5 +1,5 @@
 # Copied from https://github.com/duckdb/duckdb (MIT licensed).
-# Copyright 2018-2022 Stichting DuckDB Foundation
+# Copyright 2018-2022 Stichting DuckDB Foundation 
 
 # description: Test full outer join with caches
 
@@ -13,7 +13,6 @@ statement ok
 INSERT INTO smalltable VALUES (1);
 
 # values 1...1024 10x
-
 statement ok
 CREATE TABLE bigtable(a int);
 

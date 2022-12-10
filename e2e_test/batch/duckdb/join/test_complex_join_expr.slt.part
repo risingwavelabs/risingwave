@@ -1,5 +1,5 @@
 # Copied from https://github.com/duckdb/duckdb (MIT licensed).
-# Copyright 2018-2022 Stichting DuckDB Foundation
+# Copyright 2018-2022 Stichting DuckDB Foundation 
 
 # description: Test joins with comparisons involving both sides of the join
 
@@ -7,7 +7,6 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 # create tables
-
 statement ok
 CREATE TABLE test (a INTEGER, b INTEGER);
 
