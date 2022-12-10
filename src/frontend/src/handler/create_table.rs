@@ -337,7 +337,7 @@ pub(crate) fn gen_materialize_plan(
             None,
             handle_pk_conflict,
             false,
-            None,
+            row_id_index,
             TableType::Table,
         )?
     };
