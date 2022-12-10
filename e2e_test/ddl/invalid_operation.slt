@@ -277,23 +277,23 @@ statement ok
 delete from t;
 
 # 6.2 materialized view
-statement error cannot manipulate data in materialized view
+statement error cannot change materialized view
 insert into mv values (1);
 
-statement error cannot manipulate data in materialized view
+statement error cannot change materialized view
 update mv set v = 2;
 
-statement error cannot manipulate data in materialized view
+statement error cannot change materialized view
 delete from mv;
 
 # 6.3 index
-statement error cannot manipulate data in index
+statement error cannot change index
 insert into idx values (1);
 
-statement error cannot manipulate data in index
+statement error cannot change index
 update idx set v = 2;
 
-statement error cannot manipulate data in index
+statement error cannot change index
 delete from idx;
 
 # 6.4 materialized source
