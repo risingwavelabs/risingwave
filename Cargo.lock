@@ -5320,7 +5320,6 @@ name = "risingwave_connector"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
- "async-recursion",
  "async-stream",
  "async-trait",
  "aws-config",

@@ -15,14 +15,14 @@
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
-use async_recursion::async_recursion;
 use async_trait::async_trait;
-use aws_sdk_kinesis::error::GetRecordsError;
+use aws_sdk_kinesis::error::{GetRecordsError, GetShardIteratorError};
 use aws_sdk_kinesis::model::ShardIteratorType;
-use aws_sdk_kinesis::output::GetRecordsOutput;
+use aws_sdk_kinesis::output::{GetRecordsOutput, GetShardIteratorOutput};
 use aws_sdk_kinesis::types::SdkError;
 use aws_sdk_kinesis::Client as KinesisClient;
 use futures_async_stream::try_stream;
+use tokio_retry;
 
 use crate::source::kinesis::source::message::KinesisMessage;
 use crate::source::kinesis::split::KinesisOffset;
@@ -167,7 +167,6 @@ impl KinesisSplitReader {
         }
     }
 
-    #[async_recursion]
     async fn new_shard_iter(&mut self) -> Result<()> {
         let (starting_seq_num, iter_type) = if self.latest_offset.is_some() {
             (
@@ -183,50 +182,53 @@ impl KinesisSplitReader {
                 _ => unreachable!(),
             }
         };
+
+        async fn get_shard_iter_inner(
+            client: &KinesisClient,
+            stream_name: &str,
+            shard_id: &str,
+            starting_seq_num: Option<String>,
+            iter_type: ShardIteratorType,
+        ) -> Result<String> {
+            let resp = client
+                .get_shard_iterator()
+                .stream_name(stream_name)
+                .shard_id(shard_id)
+                .shard_iterator_type(iter_type)
+                .set_starting_sequence_number(starting_seq_num)
+                .send()
+                .await?;
+
+            if let Some(iter) = resp.shard_iterator() {
+                Ok(iter.to_owned())
+            } else {
+                Err(anyhow!("shard iterator is none"))
+            }
+        }
+
+        self.shard_iter = Some(
+            tokio_retry::Retry::spawn(
+                tokio_retry::strategy::ExponentialBackoff::from_millis(100).take(3),
+                || {
+                    get_shard_iter_inner(
+                        &self.client,
+                        &self.stream_name,
+                        &self.shard_id,
+                        starting_seq_num.clone(),
+                        iter_type.clone(),
+                    )
+                },
+            )
+            .await?,
+        );
+
         tracing::info!(
             "resetting kinesis to: stream {:?} shard {:?} starting from {:?}",
             self.stream_name,
             self.shard_id,
             starting_seq_num
         );
-
-        let resp = self
-            .client
-            .get_shard_iterator()
-            .stream_name(self.stream_name.clone())
-            .shard_id(self.shard_id.as_ref())
-            .shard_iterator_type(iter_type)
-            .set_starting_sequence_number(starting_seq_num)
-            .send()
-            .await;
-
-        match resp {
-            Ok(resp) => {
-                self.shard_iter = resp.shard_iterator().map(String::from);
-                Ok(())
-            }
-            Err(SdkError::ServiceError { err, .. }) if err.is_resource_not_found_exception() => {
-                tracing::warn!(
-                    "stream {:?} shard {:?} not found, retry",
-                    self.stream_name,
-                    self.shard_id
-                );
-                tokio::time::sleep(Duration::from_millis(200)).await;
-                self.new_shard_iter().await
-            }
-            Err(SdkError::ServiceError { err, .. })
-                if err.is_provisioned_throughput_exceeded_exception() =>
-            {
-                tracing::warn!(
-                    "stream {:?} shard {:?} throughput exceeded, retry",
-                    self.stream_name,
-                    self.shard_id
-                );
-                tokio::time::sleep(Duration::from_millis(200)).await;
-                self.new_shard_iter().await
-            }
-            Err(e) => Err(anyhow!(e)),
-        }
+        Ok(())
     }
 
     async fn get_records(

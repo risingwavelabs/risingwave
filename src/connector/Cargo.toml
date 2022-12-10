@@ -9,7 +9,6 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
-async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 aws-config = { workspace = true }
