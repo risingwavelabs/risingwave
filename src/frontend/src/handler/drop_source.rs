@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::PermissionDenied;
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::{self, PermissionDenied};
+use risingwave_common::error::{Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::privilege::check_super_user;
@@ -38,6 +38,22 @@ pub async fn handle_drop_source(
 
     let (source_id, table_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
+
+        // TODO(Yuanxin): This should be removed after unsupporting `CREATE MATERIALIZED SOURCE`.
+        let table_id = if let Some((table, _)) = catalog_reader
+            .get_table_by_name(db_name, schema_path, &source_name)
+            .ok()
+        {
+            if table.is_table() && table.associated_source_id().is_none() {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP TABLE` to drop a table.".to_owned(),
+                )));
+            }
+            Some(table.id)
+        } else {
+            None
+        };
+
         let (source, schema_name) =
             match catalog_reader.get_source_by_name(db_name, schema_path, &source_name) {
                 Ok((s, schema)) => (s.clone(), schema),
@@ -63,11 +79,6 @@ pub async fn handle_drop_source(
         {
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
-
-        let table_id = catalog_reader
-            .get_table_by_name(db_name, SchemaPath::Name(schema_name), &source_name)
-            .map(|(table, _)| table.id())
-            .ok();
 
         (source.id, table_id)
     };

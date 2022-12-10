@@ -310,19 +310,19 @@ impl Binder {
             TableType::Table => {}
             TableType::Index => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot manipulate data in index \"{table_name}\""
+                    "cannot change index \"{table_name}\""
                 ))
                 .into())
             }
             TableType::MaterializedView => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot manipulate data in materialized view \"{table_name}\""
+                    "cannot change materialized view \"{table_name}\""
                 ))
                 .into())
             }
             TableType::Internal => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot manipulate data in internal table \"{table_name}\""
+                    "cannot change internal table \"{table_name}\""
                 ))
                 .into())
             }
