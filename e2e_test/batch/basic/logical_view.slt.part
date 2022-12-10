@@ -37,7 +37,7 @@ SELECT * FROM v3;
 
 # v3 depends on t. We can't drop t.
 
-statement error 
+statement error
 DROP TABLE t;
 
 # Currently it is allowed to drop a view even it is depended by another view.
