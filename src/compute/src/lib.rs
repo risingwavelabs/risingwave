@@ -78,7 +78,7 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
-    /// Te path of `risingwave.toml` configuration file.
+    /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
     ///

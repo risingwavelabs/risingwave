@@ -398,7 +398,8 @@ mod tests {
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_pb::catalog::Table as ProstTable;
+    use risingwave_pb::catalog::table::TableType;
+    use risingwave_pb::catalog::{ColumnIndex, Table as ProstTable};
     use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
     use tokio::task;
 
@@ -425,11 +426,11 @@ mod tests {
 
     fn build_table_with_prefix_column_num() -> ProstTable {
         ProstTable {
-            is_index: false,
             id: 0,
             schema_id: 0,
             database_id: 0,
             name: "test".to_string(),
+            table_type: TableType::Table as i32,
             columns: vec![
                 ProstColumnCatalog {
                     column_desc: Some(
@@ -498,14 +499,15 @@ mod tests {
             dependent_relations: vec![],
             distribution_key: vec![3],
             optional_associated_source_id: None,
-            appendonly: false,
+            append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: HashMap::from([(
                 String::from(PROPERTIES_RETENTION_SECOND_KEY),
                 String::from("300"),
             )]),
             fragment_id: 0,
-            vnode_col_idx: None,
+            vnode_col_index: None,
+            row_id_index: Some(ColumnIndex { index: 0 }),
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,
