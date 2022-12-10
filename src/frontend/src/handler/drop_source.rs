@@ -40,9 +40,8 @@ pub async fn handle_drop_source(
         let catalog_reader = session.env().catalog_reader().read_guard();
 
         // TODO(Yuanxin): This should be removed after unsupporting `CREATE MATERIALIZED SOURCE`.
-        let table_id = if let Some((table, _)) = catalog_reader
-            .get_table_by_name(db_name, schema_path, &source_name)
-            .ok()
+        let table_id = if let Ok((table, _)) =
+            catalog_reader.get_table_by_name(db_name, schema_path, &source_name)
         {
             if table.is_table() && table.associated_source_id().is_none() {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
