@@ -22,7 +22,6 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
@@ -331,9 +330,9 @@ pub async fn get_from_sstable_info(
     };
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
-    let dist_key = &ukey.table_key[VirtualNode::SIZE..];
+    let pk_prefix = &ukey.table_key;
     if read_options.check_bloom_filter
-        && !hit_sstable_bloom_filter(sstable.value(), dist_key, local_stats)
+        && !hit_sstable_bloom_filter(sstable.value(), pk_prefix, local_stats)
     {
         if delete_epoch.is_some() {
             return Ok(Some(HummockValue::Delete));
@@ -379,11 +378,11 @@ pub async fn get_from_sstable_info(
 
 pub fn hit_sstable_bloom_filter(
     sstable_info_ref: &Sstable,
-    dist_key: &[u8],
+    pk_prefix: &[u8],
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
-    let surely_not_have = sstable_info_ref.surely_not_have_dist_key(dist_key);
+    let surely_not_have = sstable_info_ref.surely_not_have_dist_key(pk_prefix);
 
     if surely_not_have {
         local_stats.bloom_filter_true_negative_count += 1;

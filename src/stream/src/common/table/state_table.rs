@@ -26,9 +26,7 @@ use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{
-    get_dist_key_in_pk_indices, get_dist_key_start_index_in_pk, ColumnDesc, TableId, TableOption,
-};
+use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, CompactedRow, Row, Row2, RowDeserializer, RowExt};
 use risingwave_common::types::ScalarImpl;
@@ -91,7 +89,7 @@ pub struct StateTable<S: StateStore> {
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
 
-    distribution_key_start_index_in_pk: Option<usize>,
+    pk_prefix_len: usize,
 
     /// Virtual nodes that the table is partitioned into.
     ///
@@ -179,9 +177,6 @@ impl<S: StateStore> StateTable<S> {
             },
             None => Distribution::fallback(),
         };
-        let distribution_key_start_index_in_pk =
-            get_dist_key_start_index_in_pk(&dist_key_in_pk_indices);
-
         let vnode_col_idx_in_pk = table_catalog
             .vnode_col_idx
             .as_ref()
@@ -209,6 +204,7 @@ impl<S: StateStore> StateTable<S> {
             true => None,
             false => Some(input_value_indices),
         };
+        let pk_prefix_len = table_catalog.prefix_len as usize;
         Self {
             table_id,
             mem_table: MemTable::new(),
@@ -218,7 +214,7 @@ impl<S: StateStore> StateTable<S> {
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
             dist_key_in_pk_indices,
-            distribution_key_start_index_in_pk,
+            pk_prefix_len,
             vnodes,
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
             disable_sanity_check: false,
@@ -311,7 +307,7 @@ impl<S: StateStore> StateTable<S> {
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
-            distribution_key_start_index_in_pk: None,
+            pk_prefix_len: 0,
             vnodes,
             table_option: Default::default(),
             disable_sanity_check: false,
@@ -453,9 +449,9 @@ impl<S: StateStore> StateTable<S> {
                     .map(|index| self.pk_indices[index])
                     .collect_vec();
                 let read_options = ReadOptions {
-                    dist_key_hint: None,
-                    check_bloom_filter: !self.dist_key_indices.is_empty()
-                        && self.dist_key_indices == key_indices,
+                    prefix_hint: None,
+                    check_bloom_filter: !key_indices.is_empty()
+                        && self.pk_prefix_len <= key_indices.len(),
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,
@@ -759,7 +755,7 @@ impl<S: StateStore> StateTable<S> {
         epoch: u64,
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
-            dist_key_hint: None,
+            prefix_hint: None,
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
@@ -791,7 +787,7 @@ impl<S: StateStore> StateTable<S> {
         epoch: u64,
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
-            dist_key_hint: None,
+            prefix_hint: None,
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
@@ -825,7 +821,7 @@ impl<S: StateStore> StateTable<S> {
         epoch: u64,
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
-            dist_key_hint: None,
+            prefix_hint: None,
             ignore_range_tombstone: false,
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
@@ -991,56 +987,41 @@ impl<S: StateStore> StateTable<S> {
 
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
-        let dist_key_hint = {
-            if self.dist_key_indices.is_empty()
-                || self.distribution_key_start_index_in_pk.is_none()
-                || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk.unwrap()
-                    > pk_prefix.len()
-            {
+        let prefix_hint = {
+            if self.pk_prefix_len > pk_prefix.len() {
                 None
             } else {
-                let distribution_key_end_index_in_pk = self.dist_key_in_pk_indices.len()
-                    + self.distribution_key_start_index_in_pk.unwrap();
-                let (dist_key_start_position, dist_key_len) = self
+                let encoded_prefix_len = self
                     .pk_serde
-                    .deserialize_dist_key_position_with_column_indices(
-                        &encoded_prefix,
-                        (
-                            self.distribution_key_start_index_in_pk.unwrap(),
-                            distribution_key_end_index_in_pk,
-                        ),
-                    )?;
+                    .deserialize_prefix_len(&encoded_prefix, self.pk_prefix_len)?;
 
-                Some(
-                    encoded_prefix[dist_key_start_position..dist_key_len + dist_key_start_position]
-                        .to_vec(),
-                )
+                Some(encoded_prefix[..encoded_prefix_len].to_vec())
             }
         };
 
         trace!(
             table_id = ?self.table_id(),
-            ?dist_key_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
+            ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
             dist_key_indices = ?self.dist_key_indices, ?pk_prefix_indices,
             "storage_iter_with_prefix"
         );
 
-        self.iter_inner(encoded_key_range_with_vnode, dist_key_hint, epoch)
+        self.iter_inner(encoded_key_range_with_vnode, prefix_hint, epoch)
             .await
     }
 
     async fn iter_inner(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        dist_key_hint: Option<Vec<u8>>,
+        prefix_hint: Option<Vec<u8>>,
         epoch: u64,
     ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         // Mem table iterator.
         let mem_table_iter = self.mem_table.iter(key_range.clone());
 
-        let check_bloom_filter = dist_key_hint.is_some();
+        let check_bloom_filter = prefix_hint.is_some();
         let read_options = ReadOptions {
-            dist_key_hint,
+            prefix_hint,
             check_bloom_filter,
             ignore_range_tombstone: false,
             retention_seconds: self.table_option.retention_seconds,

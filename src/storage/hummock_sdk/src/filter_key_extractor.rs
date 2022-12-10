@@ -18,9 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::RwLock;
-use risingwave_common::catalog::{
-    get_dist_key_in_pk_indices, get_dist_key_start_index_in_pk, ColumnDesc,
-};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -46,23 +44,9 @@ pub enum FilterKeyExtractorImpl {
 
 impl FilterKeyExtractorImpl {
     pub fn from_table(table_catalog: &Table) -> Self {
-        let dist_key_indices: Vec<usize> = table_catalog
-            .distribution_key
-            .iter()
-            .map(|dist_index| *dist_index as usize)
-            .collect();
+        let pk_prefix_len = table_catalog.get_prefix_len() as usize;
 
-        let pk_indices: Vec<usize> = table_catalog
-            .pk
-            .iter()
-            .map(|col_order| col_order.index as usize)
-            .collect();
-
-        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
-
-        let match_read_pattern = !dist_key_in_pk_indices.is_empty()
-            && get_dist_key_start_index_in_pk(&dist_key_in_pk_indices).is_some();
-        if !match_read_pattern {
+        if pk_prefix_len == 0 {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
             FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor::default())
@@ -141,9 +125,7 @@ pub struct SchemaFilterKeyExtractor {
     /// Prefix key length can be decoded through its `DataType` and `OrderType` which obtained from
     /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
     /// from storage key.
-
-    /// distribution_key does not need to be the prefix of pk.
-    distribution_key_indices_pair_in_pk: Option<(usize, usize)>,
+    prefix_len: usize,
     deserializer: OrderedRowSerde,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
     // prefix_key)
@@ -160,22 +142,14 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
-        if let Some((distribution_key_start_index_in_pk, distribution_key_end_index_in_pk)) =
-            self.distribution_key_indices_pair_in_pk
-        {
-            let (dist_key_start_position, dist_key_len) = self
+        if self.prefix_len <= pk.len() {
+            let bloom_filter_key_len = self
                 .deserializer
-                .deserialize_dist_key_position_with_column_indices(
-                    pk,
-                    (
-                        distribution_key_start_index_in_pk,
-                        distribution_key_end_index_in_pk,
-                    ),
-                )
+                .deserialize_prefix_len(pk, self.prefix_len)
                 .unwrap();
 
-            let start_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + dist_key_start_position;
-            &full_key[start_position..start_position + dist_key_len]
+            let end_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + bloom_filter_key_len;
+            &full_key[TABLE_PREFIX_LEN + VirtualNode::SIZE..end_position]
         } else {
             &[]
         }
@@ -184,28 +158,13 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
 impl SchemaFilterKeyExtractor {
     pub fn new(table_catalog: &Table) -> Self {
-        let dist_key_indices: Vec<usize> = table_catalog
-            .distribution_key
-            .iter()
-            .map(|idx| *idx as usize)
-            .collect();
         let pk_indices: Vec<usize> = table_catalog
             .pk
             .iter()
             .map(|col_order| col_order.index as usize)
             .collect();
 
-        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
-
-        let distribution_key_start_index_in_pk =
-            get_dist_key_start_index_in_pk(&dist_key_in_pk_indices);
-        let distribution_key_indices_pair_in_pk =
-            distribution_key_start_index_in_pk.map(|distribution_key_start_index_in_pk| {
-                (
-                    distribution_key_start_index_in_pk,
-                    dist_key_in_pk_indices.len() + distribution_key_start_index_in_pk,
-                )
-            });
+        let prefix_len = table_catalog.prefix_len as usize;
 
         let data_types = pk_indices
             .iter()
@@ -224,7 +183,7 @@ impl SchemaFilterKeyExtractor {
             .collect();
 
         Self {
-            distribution_key_indices_pair_in_pk,
+            prefix_len,
             deserializer: OrderedRowSerde::new(data_types, order_types),
         }
     }
@@ -390,6 +349,7 @@ mod tests {
     use std::time::Duration;
 
     use bytes::{BufMut, BytesMut};
+    use itertools::Itertools;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::hash::VirtualNode;
@@ -423,7 +383,7 @@ mod tests {
         assert_eq!(full_key, output_key);
     }
 
-    fn build_table_with_prefix_column_num() -> ProstTable {
+    fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
         ProstTable {
             is_index: false,
             id: 0,
@@ -447,11 +407,11 @@ mod tests {
                 ProstColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc {
-                            data_type: DataType::Varchar,
+                            data_type: DataType::Int64,
                             column_id: ColumnId::new(0),
                             name: "col_1".to_string(),
                             field_descs: vec![],
-                            type_name: "Varchar".to_string(),
+                            type_name: "Int64".to_string(),
                         })
                             .into(),
                     ),
@@ -473,11 +433,11 @@ mod tests {
                 ProstColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc {
-                            data_type: DataType::Int64,
+                            data_type: DataType::Varchar,
                             column_id: ColumnId::new(0),
                             name: "col_3".to_string(),
                             field_descs: vec![],
-                            type_name: "Int64".to_string(),
+                            type_name: "Varchar".to_string(),
                         })
                             .into(),
                     ),
@@ -496,7 +456,7 @@ mod tests {
             ],
             stream_key: vec![0],
             dependent_relations: vec![],
-            distribution_key: vec![3],
+            distribution_key: (0..column_count as i32).collect_vec(),
             optional_associated_source_id: None,
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
@@ -509,21 +469,21 @@ mod tests {
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,
-            prefix_len: 0,
+            prefix_len: 1,
         }
     }
 
     #[test]
     fn test_schema_filter_key_extractor() {
-        let prost_table = build_table_with_prefix_column_num();
+        let prost_table = build_table_with_prefix_column_num(1);
         let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
 
         let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
-        let schema = vec![DataType::Varchar, DataType::Int64];
+        let schema = vec![DataType::Int64, DataType::Varchar];
         let serializer = OrderedRowSerde::new(schema, order_types);
         let row = Row::new(vec![
-            Some(ScalarImpl::Utf8("abc".to_string().into())),
             Some(ScalarImpl::Int64(100)),
+            Some(ScalarImpl::Utf8("abc".into())),
         ]);
         let mut row_bytes = vec![];
         serializer.serialize(&row, &mut row_bytes);
@@ -539,7 +499,7 @@ mod tests {
 
         let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
         let output_key = schema_filter_key_extractor.extract(&full_key);
-        assert_eq!(mem::size_of::<i64>() + 1, output_key.len());
+        assert_eq!(1 + mem::size_of::<i64>(), output_key.len());
     }
 
     #[test]
@@ -547,44 +507,45 @@ mod tests {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         {
             // test table_id 1
-            let prost_table = build_table_with_prefix_column_num();
+            let prost_table = build_table_with_prefix_column_num(1);
             let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
             multi_filter_key_extractor.register(
                 1,
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
-            let schema = vec![DataType::Varchar, DataType::Int64];
+            let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
             let row = Row::new(vec![
-                Some(ScalarImpl::Utf8("abc".to_string().into())),
                 Some(ScalarImpl::Int64(100)),
+                Some(ScalarImpl::Utf8("abc".into())),
             ]);
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+            let mut row_bytes = vec![];
+            serializer.serialize(&row, &mut row_bytes);
 
             let table_prefix = {
                 let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
                 buf.put_u32(1);
                 buf.to_vec()
             };
-            let mut row_bytes = vec![];
-            serializer.serialize(&row, &mut row_bytes);
+
+            let vnode_prefix = "v".as_bytes();
+            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
-            let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
-            let schema = vec![DataType::Varchar, DataType::Int64];
-            let deserializer = OrderedRowSerde::new(schema, order_types);
 
-            let (_, dist_key_len) = deserializer
-                .deserialize_dist_key_position_with_column_indices(&row_bytes, (1, 2))
-                .unwrap();
-            assert_eq!(dist_key_len, output_key.len());
+            let data_types = vec![DataType::Int64];
+            let order_types = vec![OrderType::Ascending];
+            let deserializer = OrderedRowSerde::new(data_types, order_types);
+
+            let pk_prefix_len = deserializer.deserialize_prefix_len(&row_bytes, 1).unwrap();
+            assert_eq!(pk_prefix_len, output_key.len());
         }
 
         {
-            // test table_id 2
-            let prost_table = build_table_with_prefix_column_num();
+            // test table_id 1
+            let prost_table = build_table_with_prefix_column_num(2);
             let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
             multi_filter_key_extractor.register(
                 2,
@@ -594,11 +555,10 @@ mod tests {
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
             let row = Row::new(vec![
-                Some(ScalarImpl::Utf8("abc".to_string().into())),
                 Some(ScalarImpl::Int64(100)),
+                Some(ScalarImpl::Utf8("abc".into())),
             ]);
             let mut row_bytes = vec![];
-            serializer.serialize(&row, &mut row_bytes);
             serializer.serialize(&row, &mut row_bytes);
 
             let table_prefix = {
@@ -613,41 +573,13 @@ mod tests {
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
 
-            let data_types = vec![DataType::Varchar, DataType::Int64];
+            let data_types = vec![DataType::Int64, DataType::Varchar];
             let order_types = vec![OrderType::Ascending, OrderType::Ascending];
             let deserializer = OrderedRowSerde::new(data_types, order_types);
 
-            let (_dist_key_start_position, dist_key_len) = deserializer
-                .deserialize_dist_key_position_with_column_indices(&row_bytes, (1, 2))
-                .unwrap();
+            let pk_prefix_len = deserializer.deserialize_prefix_len(&row_bytes, 1).unwrap();
 
-            assert_eq!(dist_key_len, output_key.len());
-        }
-
-        {
-            // test table_id 3
-            let full_key_filter_key_extractor = FullKeyFilterKeyExtractor::default();
-            multi_filter_key_extractor.register(
-                3,
-                Arc::new(FilterKeyExtractorImpl::FullKey(
-                    full_key_filter_key_extractor,
-                )),
-            );
-
-            let table_prefix = {
-                let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-                buf.put_u32(3);
-                buf.to_vec()
-            };
-
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
-
-            let row_bytes = "full_key".as_bytes();
-
-            let full_key = [&table_prefix, vnode_prefix, row_bytes].concat();
-            let output_key = multi_filter_key_extractor.extract(&full_key);
-            assert_eq!(full_key.len(), output_key.len());
+            assert_eq!(pk_prefix_len, output_key.len());
         }
     }
 

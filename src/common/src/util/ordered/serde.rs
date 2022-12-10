@@ -105,6 +105,26 @@ impl OrderedRowSerde {
         Ok(len)
     }
 
+    pub fn deserialize_prefix_len(
+        &self,
+        key: &[u8],
+        prefix_len: usize,
+    ) -> memcomparable::Result<usize> {
+        use crate::types::ScalarImpl;
+        let mut len: usize = 0;
+        for index in 0..prefix_len {
+            let data_type = &self.schema[index];
+            let order_type = &self.order_types[index];
+            let data = &key[len..];
+            let mut deserializer = memcomparable::Deserializer::new(data);
+            deserializer.set_reverse(*order_type == OrderType::Descending);
+
+            len += ScalarImpl::encoding_data_size(data_type, &mut deserializer)?;
+        }
+
+        Ok(len)
+    }
+
     /// return the distribution key start position in serialized key and the distribution key
     /// length.
     pub fn deserialize_dist_key_position_with_column_indices(

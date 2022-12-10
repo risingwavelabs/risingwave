@@ -24,8 +24,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
-    get_dist_key_in_pk_indices, get_dist_key_start_index_in_pk, ColumnDesc, ColumnId, Schema,
-    TableId, TableOption,
+    get_dist_key_in_pk_indices, ColumnDesc, ColumnId, Schema, TableId, TableOption,
 };
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, Row, Row2, RowDeserializer, RowExt};
@@ -81,7 +80,6 @@ pub struct StorageTable<S: StateStore> {
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
-    distribution_key_start_index_in_pk: Option<usize>,
 
     /// Virtual nodes that the table is partitioned into.
     ///
@@ -188,8 +186,6 @@ impl<S: StateStore> StorageTable<S> {
         let row_deserializer = RowDeserializer::new(all_data_types);
 
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
-        let distribution_key_start_index_in_pk =
-            get_dist_key_start_index_in_pk(&dist_key_in_pk_indices);
         Self {
             table_id,
             store,
@@ -200,7 +196,6 @@ impl<S: StateStore> StorageTable<S> {
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
-            distribution_key_start_index_in_pk,
             vnodes,
             table_option,
         }
@@ -248,9 +243,8 @@ impl<S: StateStore> StorageTable<S> {
             .collect_vec();
 
         let read_options = ReadOptions {
-            dist_key_hint: None,
-            check_bloom_filter: !self.dist_key_indices.is_empty()
-                && self.dist_key_indices == key_indices,
+            prefix_hint: None,
+            check_bloom_filter: !key_indices.is_empty(),
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
@@ -287,7 +281,7 @@ impl<S: StateStore> StorageTable<S> {
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
-        dist_key_hint: Option<Vec<u8>>,
+        prefix_hint: Option<Vec<u8>>,
         encoded_key_range: R,
         wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
@@ -312,12 +306,12 @@ impl<S: StateStore> StorageTable<S> {
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
 
-            let dist_key_hint = dist_key_hint.clone();
+            let prefix_hint = prefix_hint.clone();
             let wait_epoch = wait_epoch.clone();
             async move {
-                let check_bloom_filter = dist_key_hint.is_some();
+                let check_bloom_filter = prefix_hint.is_some();
                 let read_options = ReadOptions {
-                    dist_key_hint,
+                    prefix_hint,
                     check_bloom_filter,
                     ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
@@ -428,32 +422,17 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
 
-        let dist_key_hint = if let Some(distribution_key_start_index_in_pk) =
-            self.distribution_key_start_index_in_pk &&
-            self.dist_key_indices.len() + distribution_key_start_index_in_pk
-                <= pk_prefix.len()
-        {
+        let prefix_hint = if !pk_prefix.is_empty() {
             let encoded_prefix = if let Bound::Included(start_key) = start_key.as_ref() {
                 start_key
             } else {
                 unreachable!()
             };
-            let distribution_key_end_index_in_pk =
-                self.dist_key_in_pk_indices.len() + distribution_key_start_index_in_pk;
-            let (dist_key_start_position, dist_key_len) = self
+            let prefix_len = self
                 .pk_serializer
-                .deserialize_dist_key_position_with_column_indices(
-                    encoded_prefix,
-                    (
-                        distribution_key_start_index_in_pk,
-                        distribution_key_end_index_in_pk,
-                    ),
-                )
+                .deserialize_prefix_len(encoded_prefix, pk_prefix.len())
                 .unwrap();
-            Some(
-                encoded_prefix[dist_key_start_position..dist_key_len + dist_key_start_position]
-                    .to_vec(),
-            )
+            Some(encoded_prefix[..prefix_len].to_vec())
         } else {
             trace!(
                     "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
@@ -466,9 +445,9 @@ impl<S: StateStore> StorageTable<S> {
         };
 
         trace!(
-            "iter_with_pk_bounds table_id {} dist_key_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
+            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
             self.table_id,
-            dist_key_hint,
+            prefix_hint,
             start_key,
             end_key,
             pk_prefix,
@@ -477,7 +456,7 @@ impl<S: StateStore> StorageTable<S> {
         );
 
         self.iter_with_encoded_key_range(
-            dist_key_hint,
+            prefix_hint,
             (start_key, end_key),
             epoch,
             self.try_compute_vnode_by_pk_prefix(pk_prefix),
