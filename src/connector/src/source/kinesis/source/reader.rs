@@ -16,9 +16,9 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use aws_sdk_kinesis::error::{GetRecordsError};
+use aws_sdk_kinesis::error::GetRecordsError;
 use aws_sdk_kinesis::model::ShardIteratorType;
-use aws_sdk_kinesis::output::{GetRecordsOutput};
+use aws_sdk_kinesis::output::GetRecordsOutput;
 use aws_sdk_kinesis::types::SdkError;
 use aws_sdk_kinesis::Client as KinesisClient;
 use futures_async_stream::try_stream;
