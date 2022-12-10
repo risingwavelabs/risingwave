@@ -33,6 +33,7 @@ pub struct TableCatalogBuilder {
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
     column_names: HashMap<String, i32>,
+    prefix_len: usize,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -74,6 +75,10 @@ impl TableCatalogBuilder {
                 OrderType::Descending => Direction::Desc,
             },
         });
+    }
+
+    pub fn set_pk_prefix_len(&mut self, prefix_len: usize) {
+        self.prefix_len = prefix_len;
     }
 
     pub fn set_vnode_col_idx(&mut self, vnode_col_idx: usize) {
@@ -124,6 +129,7 @@ impl TableCatalogBuilder {
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
             handle_pk_conflict: false,
+            prefix_len: self.prefix_len,
         }
     }
 

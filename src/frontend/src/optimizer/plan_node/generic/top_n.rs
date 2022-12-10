@@ -79,6 +79,8 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         if let Some(vnode_col_idx) = vnode_col_idx {
             internal_table_catalog_builder.set_vnode_col_idx(vnode_col_idx);
         }
+
+        internal_table_catalog_builder.set_pk_prefix_len(self.group_key.len());
         internal_table_catalog_builder
             .build(self.input.distribution().dist_column_indices().to_vec())
     }

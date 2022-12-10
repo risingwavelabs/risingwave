@@ -170,6 +170,7 @@ impl StreamMaterialize {
             value_indices,
             definition,
             handle_pk_conflict,
+            prefix_len: 0,
         };
 
         Ok(Self { base, input, table })
