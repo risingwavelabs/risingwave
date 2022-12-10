@@ -165,12 +165,8 @@ where
         &self,
         ssts_to_delete: &mut Vec<HummockSstableId>,
     ) -> MetaResult<()> {
-        let reject: HashSet<HummockSstableId> = self
-            .backup_manager
-            .list_pinned_ssts()
-            .await?
-            .into_iter()
-            .collect();
+        let reject: HashSet<HummockSstableId> =
+            self.backup_manager.list_pinned_ssts().into_iter().collect();
         // Ack these pinned SSTs directly. Otherwise delta log containing them cannot be GCed.
         // These SSTs will be GCed during full GC when they are no longer pinned.
         let to_ack = ssts_to_delete

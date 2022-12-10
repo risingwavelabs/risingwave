@@ -31,10 +31,12 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
+use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
 use risingwave_storage::error::StorageResult;
+use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::event_handler::HummockEvent;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
@@ -106,6 +108,7 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
         let meta_snapshot = MetaSnapshot {
             hummock_version: Some(hummock_version),
             version: Some(Default::default()),
+            meta_backup_manifest_id: Some(MetaBackupManifestId { id: 0 }),
             ..Default::default()
         };
 
@@ -140,9 +143,14 @@ pub async fn prepare_first_valid_version(
     let (tx, mut rx) = unbounded_channel();
     let notification_client =
         get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone());
+    let backup_manager = BackupReader::unused();
     let observer_manager = ObserverManager::new(
         notification_client,
-        HummockObserverNode::new(Arc::new(FilterKeyExtractorManager::default()), tx.clone()),
+        HummockObserverNode::new(
+            Arc::new(FilterKeyExtractorManager::default()),
+            backup_manager,
+            tx.clone(),
+        ),
     )
     .await;
     let _ = observer_manager.start().await;

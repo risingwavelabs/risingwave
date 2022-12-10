@@ -8,6 +8,7 @@ import "hummock.proto";
 import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
+import "backup_service.proto";
 
 option optimize_for = SPEED;
 
@@ -205,6 +206,7 @@ message MetaSnapshot {
   hummock.HummockVersion hummock_version = 12;
 
   SnapshotVersion version = 13;
+  backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
 }
 
 message SubscribeResponse {
@@ -232,6 +234,7 @@ message SubscribeResponse {
     hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
     MetaSnapshot snapshot = 16;
+    backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
   }
 }
 

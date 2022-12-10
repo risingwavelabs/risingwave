@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
-use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_pb::hummock::HummockSnapshot;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{channel as once_channel, Sender as Callback};
@@ -32,7 +32,27 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 const UNPIN_INTERVAL_SECS: u64 = 10;
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
-pub type PinnedHummockSnapshot = HummockSnapshotGuard;
+pub enum QueryHummockSnapshot {
+    FrontendPinned(HummockSnapshotGuard),
+    /// Other arbitrary epoch, e.g. user specified.
+    /// Availability and consistency of underlying data should be guaranteed accordingly.
+    Other(Epoch),
+}
+
+impl QueryHummockSnapshot {
+    pub fn get_committed_epoch(&self) -> u64 {
+        match self {
+            QueryHummockSnapshot::FrontendPinned(s) => s.snapshot.committed_epoch,
+            QueryHummockSnapshot::Other(s) => s.0,
+        }
+    }
+}
+
+impl From<HummockSnapshotGuard> for QueryHummockSnapshot {
+    fn from(s: HummockSnapshotGuard) -> Self {
+        QueryHummockSnapshot::FrontendPinned(s)
+    }
+}
 
 type SnapshotRef = Arc<ArcSwap<HummockSnapshot>>;
 
@@ -165,7 +185,7 @@ impl HummockSnapshotManager {
         }
     }
 
-    pub async fn acquire(&self, query_id: &QueryId) -> SchedulerResult<PinnedHummockSnapshot> {
+    pub async fn acquire(&self, query_id: &QueryId) -> SchedulerResult<HummockSnapshotGuard> {
         let (sender, rc) = once_channel();
         let msg = EpochOperation::RequestEpoch {
             query_id: query_id.clone(),

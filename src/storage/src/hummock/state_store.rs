@@ -61,8 +61,9 @@ impl HummockStorage {
             Bound::Included(TableKey(key.to_vec())),
         );
 
-        let read_version_tuple =
-            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?;
+        let read_version_tuple = self
+            .build_read_version_tuple(epoch, read_options.table_id, &key_range)
+            .await?;
 
         self.hummock_version_reader
             .get(TableKey(key), epoch, read_options, read_version_tuple)
@@ -75,28 +76,37 @@ impl HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
-        let read_version_tuple =
-            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?;
+        let read_version_tuple = self
+            .build_read_version_tuple(epoch, read_options.table_id, &key_range)
+            .await?;
 
         self.hummock_version_reader
             .iter(key_range, epoch, read_options, read_version_tuple)
             .await
     }
 
-    fn build_read_version_tuple(
+    async fn build_read_version_tuple(
         &self,
         epoch: u64,
         table_id: TableId,
         key_range: &TableKeyRange,
     ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
         let pinned_version = self.pinned_version.load();
-        validate_epoch(pinned_version.safe_epoch(), epoch)?;
+        let mut committed_version = (**pinned_version).clone();
+        if let Err(e) = validate_epoch(pinned_version.safe_epoch(), epoch) {
+            if e.is_expired_epoch() && let Some(backup_version) = self.backup_reader.try_get_hummock_version(epoch).await? {
+                committed_version = backup_version;
+                assert!(epoch <= committed_version.max_committed_epoch() && epoch >= committed_version.safe_epoch());
+            } else {
+                return Err(e.into());
+            }
+        }
 
         // check epoch if lower mce
         let read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion) =
-            if epoch <= pinned_version.max_committed_epoch() {
+            if epoch <= committed_version.max_committed_epoch() {
                 // read committed_version directly without build snapshot
-                (Vec::default(), Vec::default(), (**pinned_version).clone())
+                (Vec::default(), Vec::default(), committed_version)
             } else {
                 let read_version_vec = {
                     let read_guard = self.read_version_mapping.read();
@@ -111,7 +121,7 @@ impl HummockStorage {
                 // When the system has just started and no state has been created, the memory state
                 // may be empty
                 if read_version_vec.is_empty() {
-                    (Vec::default(), Vec::default(), (**pinned_version).clone())
+                    (Vec::default(), Vec::default(), committed_version)
                 } else {
                     read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
                 }

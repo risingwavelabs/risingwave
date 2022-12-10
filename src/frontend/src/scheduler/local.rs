@@ -39,11 +39,10 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
-use super::HummockSnapshotGuard;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::SchedulerResult;
+use crate::scheduler::{QueryHummockSnapshot, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
 pub struct LocalQueryStream {
@@ -72,7 +71,7 @@ pub struct LocalQueryExecution {
     query: Query,
     front_env: FrontendEnv,
     // The snapshot will be released when LocalQueryExecution is dropped.
-    snapshot: HummockSnapshotGuard,
+    snapshot: QueryHummockSnapshot,
     auth_context: Arc<AuthContext>,
 }
 
@@ -81,7 +80,7 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        snapshot: HummockSnapshotGuard,
+        snapshot: QueryHummockSnapshot,
         auth_context: Arc<AuthContext>,
     ) -> Self {
         Self {

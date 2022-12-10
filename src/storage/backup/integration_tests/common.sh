@@ -75,6 +75,42 @@ function restore() {
   --storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
 }
 
+function execute_sql() {
+  local sql
+  sql=$1
+  echo "execute sql ${sql}"
+  echo "${sql}" | psql -h localhost -p 4566 -d dev -U root 2>&1
+}
+
+function get_max_committed_epoch() {
+  mce=$(cargo make ctl hummock list-version | grep max_committed_epoch | sed -n 's/max_committed_epoch: \(.*\),/\1/p')
+  echo "${mce}"
+}
+
+function get_safe_epoch() {
+  safe_epoch=$(cargo make ctl hummock list-version | grep safe_epoch | sed -n 's/safe_epoch: \(.*\),/\1/p')
+  echo "${safe_epoch}"
+}
+
 function get_total_sst_count() {
-  find "${BACKUP_TEST_PREFIX_DATA}/minio/hummock001" -type f -name "*.data" |wc -l
+  find "${BACKUP_TEST_PREFIX_DATA}/minio/hummock001/hummock_001" -type f -name "*.data" |wc -l
+}
+
+function get_max_committed_epoch_in_backup() {
+  local id
+  id=$1
+  sed_str="s/.*{\"id\":${id},\"hummock_version_id\":.*,\"ssts\":\[.*\],\"max_committed_epoch\":\([[:digit:]]*\),\"safe_epoch\":.*}.*/\1/p"
+  cat "${BACKUP_TEST_PREFIX_DATA}/minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
+}
+
+function get_safe_epoch_in_backup() {
+  local id
+  id=$1
+  sed_str="s/.*{\"id\":${id},\"hummock_version_id\":.*,\"ssts\":\[.*\],\"max_committed_epoch\":.*,\"safe_epoch\":\([[:digit:]]*\)}.*/\1/p"
+  cat "${BACKUP_TEST_PREFIX_DATA}/minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
+}
+
+function get_min_pinned_snapshot() {
+  s=$(cargo make ctl hummock list-pinned-snapshots | grep "min_pinned_snapshot" | sed -n 's/.*min_pinned_snapshot \(.*\)/\1/p' | sort -n | head -1)
+  echo "${s}"
 }

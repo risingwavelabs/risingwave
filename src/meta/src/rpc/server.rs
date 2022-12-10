@@ -479,6 +479,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         cluster_manager.clone(),
         hummock_manager.clone(),
         fragment_manager.clone(),
+        backup_manager.clone(),
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);

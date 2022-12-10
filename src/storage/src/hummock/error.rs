@@ -117,6 +117,10 @@ impl HummockError {
         HummockErrorInner::ExpiredEpoch { safe_epoch, epoch }.into()
     }
 
+    pub fn is_expired_epoch(&self) -> bool {
+        matches!(self.inner, HummockErrorInner::ExpiredEpoch { .. })
+    }
+
     pub fn compaction_executor(error: impl ToString) -> HummockError {
         HummockErrorInner::CompactionExecutor(error.to_string()).into()
     }

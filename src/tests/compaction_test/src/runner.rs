@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
-use std::ops::Bound;
+use std::ops::{Bound, Deref};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -26,7 +26,7 @@ use clap::Parser;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, StorageConfig};
+use risingwave_common::config::{load_config, RwConfig, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
@@ -657,11 +657,15 @@ pub async fn create_hummock_store_with_metrics(
         state_store_metrics: Arc::new(StateStoreMetrics::unused()),
         object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
     };
+    let rw_config = RwConfig {
+        storage: storage_config.deref().clone(),
+        ..Default::default()
+    };
 
     let state_store_impl = StateStoreImpl::new(
         &opts.state_store,
         "",
-        storage_config,
+        &rw_config,
         Arc::new(MonitoredHummockMetaClient::new(
             meta_client.clone(),
             metrics.hummock_metrics.clone(),

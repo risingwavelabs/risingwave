@@ -30,7 +30,6 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![cfg_attr(coverage, feature(no_coverage))]
-#![allow(dead_code)]
 
 pub mod error;
 pub mod meta_snapshot;
@@ -54,6 +53,8 @@ pub struct MetaSnapshotMetadata {
     pub id: MetaSnapshotId,
     pub hummock_version_id: HummockVersionId,
     pub ssts: Vec<HummockSstableId>,
+    pub max_committed_epoch: u64,
+    pub safe_epoch: u64,
 }
 
 impl MetaSnapshotMetadata {
@@ -62,8 +63,17 @@ impl MetaSnapshotMetadata {
             id,
             hummock_version_id: v.id,
             ssts: v.get_sst_ids(),
+            max_committed_epoch: v.max_committed_epoch,
+            safe_epoch: v.safe_epoch,
         }
     }
+}
+
+/// `MetaSnapshotManifest` is the source of truth for valid `MetaSnapshot`.
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct MetaSnapshotManifest {
+    pub manifest_id: u64,
+    pub snapshot_metadata: Vec<MetaSnapshotMetadata>,
 }
 
 // Code is copied from storage crate. TODO #6482: extract method.

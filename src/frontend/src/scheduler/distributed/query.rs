@@ -36,8 +36,7 @@ use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    ExecutionContextRef, HummockSnapshotGuard, PinnedHummockSnapshot, SchedulerError,
-    SchedulerResult,
+    ExecutionContextRef, QueryHummockSnapshot, SchedulerError, SchedulerResult,
 };
 
 /// Message sent to a `QueryRunner` to control its execution.
@@ -115,7 +114,7 @@ impl QueryExecution {
         &self,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeManagerRef,
-        pinned_snapshot: HummockSnapshotGuard,
+        pinned_snapshot: QueryHummockSnapshot,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
@@ -189,7 +188,7 @@ impl QueryExecution {
 
     fn gen_stage_executions(
         &self,
-        pinned_snapshot: &PinnedHummockSnapshot,
+        pinned_snapshot: &QueryHummockSnapshot,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeManagerRef,
         compute_client_pool: ComputeClientPoolRef,
@@ -225,7 +224,7 @@ impl QueryExecution {
 }
 
 impl QueryRunner {
-    async fn run(mut self, pinned_snapshot: PinnedHummockSnapshot) {
+    async fn run(mut self, pinned_snapshot: QueryHummockSnapshot) {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -424,7 +423,7 @@ pub(crate) mod tests {
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
                 worker_node_manager,
-                pinned_snapshot,
+                pinned_snapshot.into(),
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,
