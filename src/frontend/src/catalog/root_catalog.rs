@@ -553,11 +553,13 @@ impl Catalog {
         } else if let Some(table) = schema.get_table_by_name(relation_name) {
             if table.is_index() {
                 Err(CatalogError::Duplicated("index", relation_name.to_string()))
-            } else {
+            } else if table.is_mview() {
                 Err(CatalogError::Duplicated(
                     "materialized view",
                     relation_name.to_string(),
                 ))
+            } else {
+                Err(CatalogError::Duplicated("table", relation_name.to_string()))
             }
         } else if schema.get_sink_by_name(relation_name).is_some() {
             Err(CatalogError::Duplicated("sink", relation_name.to_string()))

@@ -79,6 +79,12 @@ pub async fn handle_drop_mv(
         match table.table_type() {
             TableType::MaterializedView => {}
             TableType::Table => {
+                // TODO(Yuanxin): Remove this after unsupporting `CREATE MATERIALIZED SOURCE`.
+                if table.associated_source_id().is_some() {
+                    return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                        "Use `DROP SOURCE` to drop a source.".to_owned(),
+                    )));
+                }
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP TABLE` to drop a table.".to_owned(),
                 )));

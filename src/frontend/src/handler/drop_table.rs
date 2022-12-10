@@ -81,7 +81,14 @@ pub async fn handle_drop_table(
                     "Internal tables cannot be dropped.".to_owned(),
                 )));
             }
-            _ => {}
+            TableType::Table => {
+                // TODO(Yuanxin): Remove this after unsupporting `CREATE MATERIALIZED SOURCE`.
+                if table.associated_source_id().is_some() {
+                    return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                        "Use `DROP SOURCE` to drop a source.".to_owned(),
+                    )));
+                }
+            }
         }
 
         (table.associated_source_id(), table.id())
