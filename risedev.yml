@@ -535,6 +535,22 @@ risedev:
       - use: frontend
       - use: compactor
 
+  meta-backup-test:
+    config-path: src/config/meta-backup-test.toml
+    steps:
+      - use: etcd
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
+  meta-backup-test-restore:
+    config-path: src/config/meta-backup-test.toml
+    steps:
+      - use: etcd
+      - use: minio
+
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"

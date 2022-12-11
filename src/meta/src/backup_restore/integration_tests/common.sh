@@ -4,19 +4,19 @@ set -eo pipefail
 [ -n "${PREFIX_DATA}" ]
 
 function stop_cluster() {
-  ./risedev k || true
+  cargo make k || true
 }
 
 function clean_all_data {
-  ./risedev clean-data
+  cargo make clean-data
 }
 
 function clean_etcd_data() {
-  ./risedev clean-etcd-data
+  cargo make clean-etcd-data
 }
 
 function start_cluster() {
-  ./risedev d meta-backup-test
+  cargo make d meta-backup-test
 }
 
 function wait_cluster_ready() {
@@ -25,31 +25,31 @@ function wait_cluster_ready() {
 }
 
 function full_gc_sst() {
-  ./risedev ctl hummock trigger-full-gc -s 0
+  cargo make ctl hummock trigger-full-gc -s 0
   # TODO #6482: wait full gc finish deterministically.
   # Currently have to wait long enough.
-  sleep 60
+  sleep 30
 }
 
 function start_etcd_minio() {
-  ./risedev d meta-backup-test-restore
+  cargo make d meta-backup-test-restore
 }
 
 function create_mvs() {
-  ./risedev slt -p 4566 -d dev "e2e_test/backup_restore/tpch_snapshot_create.slt"
+  cargo make slt -p 4566 -d dev "e2e_test/backup_restore/tpch_snapshot_create.slt"
 }
 
 function query_mvs() {
-  ./risedev slt -p 4566 -d dev "e2e_test/backup_restore/tpch_snapshot_query.slt"
+  cargo make slt -p 4566 -d dev "e2e_test/backup_restore/tpch_snapshot_query.slt"
 }
 
 function drop_mvs() {
-  ./risedev slt -p 4566 -d dev "e2e_test/backup_restore/tpch_snapshot_drop.slt"
+  cargo make slt -p 4566 -d dev "e2e_test/backup_restore/tpch_snapshot_drop.slt"
 }
 
 function backup() {
   local job_id
-  job_id=$(./risedev ctl meta backup-meta | grep "backup job succeeded" | awk '{print $(NF)}')
+  job_id=$(cargo make ctl meta backup-meta | grep "backup job succeeded" | awk '{print $(NF)}')
   [ -n "${job_id}" ]
   echo "${job_id}"
 }
@@ -57,7 +57,7 @@ function backup() {
 function delete_snapshot() {
   local snapshot_id
   snapshot_id=$1
-  ./risedev ctl meta delete-meta-snapshots "${snapshot_id}"
+  cargo make ctl meta delete-meta-snapshots "${snapshot_id}"
 }
 
 function restore() {
