@@ -51,7 +51,7 @@ impl ProtobufParser {
 
         let schema_bytes = if use_schema_registry {
             let kafka_topic = get_kafka_topic(&props)?;
-            let client = Client::new(url)?;
+            let client = Client::new(url, &props)?;
             compile_file_descriptor_from_schema_registry(
                 format!("{}-value", kafka_topic).as_str(),
                 &client,
