@@ -882,7 +882,8 @@ impl GrpcMetaClient {
             .leader_addr
             .expect("Expect that leader service always knows who leader is");
 
-        let leader_addr = format!("http://{}:{}", leader_addr.host, leader_addr.port);
+        // let leader_addr = format!("http://{}:{}", leader_addr.host, leader_addr.port);
+        let leader_addr = format!("{}:{}", leader_addr.host, leader_addr.port);
         // TODO: the http here may be incorrect
         // error in sim test
         // FIXME
