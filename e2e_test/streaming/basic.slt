@@ -117,10 +117,10 @@ drop table t5
 statement ok
 create table t (v1 int, v2 int);
 
-statement error 
+statement error
 create materialized view mv(a) as select * from t;
 
-statement error 
+statement error
 create materialized view mv(a,b,c) as select * from t;
 
 statement ok
