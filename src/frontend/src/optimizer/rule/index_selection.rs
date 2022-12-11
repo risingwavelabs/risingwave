@@ -64,11 +64,11 @@ use crate::expr::{
     to_conjunctions, to_disjunctions, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor,
     FunctionCall, InputRef,
 };
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary, PredicatePushdown,
 };
 use crate::optimizer::PlanRef;
-use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
 
 const INDEX_MAX_LEN: usize = 5;

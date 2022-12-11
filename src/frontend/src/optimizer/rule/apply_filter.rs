@@ -21,9 +21,29 @@ use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, PlanTreeNodeUnary
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// Push `LogicalFilter` down `LogicalApply`
-pub struct ApplyFilterRule {}
-impl Rule for ApplyFilterRule {
+/// Transpose `LogicalApply` and `LogicalFilter`.
+///
+/// Before:
+///
+/// ```text
+///     LogicalApply
+///    /            \
+///  Domain      LogicalFilter
+///                  |
+///                Input
+/// ```
+///
+/// After:
+///
+/// ```text
+///    LogicalFilter
+///          |
+///     LogicalApply
+///    /            \
+///  Domain        Input
+/// ```
+pub struct ApplyFilterTransposeRule {}
+impl Rule for ApplyFilterTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
@@ -90,9 +110,9 @@ impl Rule for ApplyFilterRule {
     }
 }
 
-impl ApplyFilterRule {
+impl ApplyFilterTransposeRule {
     pub fn create() -> BoxedRule {
-        Box::new(ApplyFilterRule {})
+        Box::new(ApplyFilterTransposeRule {})
     }
 }
 

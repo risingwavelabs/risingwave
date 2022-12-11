@@ -277,7 +277,7 @@ impl LogicalJoin {
     /// Returns the pushed predicates. The pushed part will be removed from the original predicate.
     ///
     /// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
-    fn push_down(
+    pub fn push_down(
         predicate: &mut Condition,
         left_col_num: usize,
         right_col_num: usize,
@@ -320,35 +320,35 @@ impl LogicalJoin {
         (left, right, on)
     }
 
-    fn can_push_left_from_filter(ty: JoinType) -> bool {
+    pub fn can_push_left_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
         )
     }
 
-    fn can_push_right_from_filter(ty: JoinType) -> bool {
+    pub fn can_push_right_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
         )
     }
 
-    fn can_push_on_from_filter(ty: JoinType) -> bool {
+    pub fn can_push_on_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftSemi | JoinType::RightSemi
         )
     }
 
-    fn can_push_left_from_on(ty: JoinType) -> bool {
+    pub fn can_push_left_from_on(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
         )
     }
 
-    fn can_push_right_from_on(ty: JoinType) -> bool {
+    pub fn can_push_right_from_on(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
@@ -1090,7 +1090,7 @@ impl ToBatch for LogicalJoin {
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
 
-        let config = self.base.ctx.inner().session_ctx.config();
+        let config = self.base.ctx.session_ctx().config();
 
         if predicate.has_eq() {
             if config.get_batch_enable_lookup_join() {
@@ -1212,9 +1212,9 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
 
     /// Pruning
     /// ```text

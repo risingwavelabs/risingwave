@@ -172,7 +172,7 @@ mod tests {
             lhs.push(Some(i));
         }
 
-        let col1 = I32Array::from_slice(&lhs).into();
+        let col1 = I32Array::from_iter(&lhs).into();
         DataChunk::new(vec![col1], size)
     }
 

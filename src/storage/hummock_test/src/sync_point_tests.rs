@@ -329,8 +329,8 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     storage.wait_version(version).await;
     let read_options = ReadOptions {
         ignore_range_tombstone: false,
-        check_bloom_filter: true,
-        prefix_hint: None,
+        check_bloom_filter: false,
+        dist_key_hint: None,
         table_id: TableId::from(existing_table_id),
         retention_seconds: None,
     };

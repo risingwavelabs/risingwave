@@ -29,7 +29,7 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore, StateStoreIter,
+    define_state_store_write_associated_type,
 };
 
 pub type BytesFullKey = FullKey<Bytes>;
@@ -540,7 +540,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
-    type Iter = RangeKvStateStoreIter<R>;
+    type IterStream = StreamTypeOfIter<RangeKvStateStoreIter<R>>;
 
     define_state_store_read_associated_type!();
 
@@ -576,7 +576,8 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
                     to_full_key_range(read_options.table_id, key_range),
                 ),
                 epoch,
-            ))
+            )
+            .into_stream())
         }
     }
 }
@@ -666,9 +667,9 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
 }
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
-    type Item = (FullKey<Vec<u8>>, Bytes);
+    type Item = StateStoreIterItem;
 
-    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
+    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
@@ -690,7 +691,7 @@ impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
-    fn next_inner(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Bytes)>> {
+    fn next_inner(&mut self) -> StorageResult<Option<StateStoreIterItem>> {
         while let Some((key, value)) = self.inner.next()? {
             if key.epoch > self.epoch {
                 continue;

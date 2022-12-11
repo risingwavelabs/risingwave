@@ -600,7 +600,15 @@ impl BatchPlanFragmenter {
                 source_node.logical().source_catalog().properties.clone(),
             )?;
             let mut enumerator = block_on(SplitEnumeratorImpl::create(property))?;
-            let split_info = block_on(enumerator.list_splits())?;
+            let kafka_enumerator = match enumerator {
+                SplitEnumeratorImpl::Kafka(ref mut kafka_enumerator) => kafka_enumerator,
+                _ => todo!(),
+            };
+            let split_info = block_on(kafka_enumerator.list_splits_batch(None, None))?
+                .into_iter()
+                .map(SplitImpl::Kafka)
+                .collect_vec();
+
             Ok(Some(SourceScanInfo::new(split_info)))
         } else {
             node.inputs()

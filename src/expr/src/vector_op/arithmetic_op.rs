@@ -120,10 +120,10 @@ where
     // TODO: We need to improve the error message
     let l: T3 = l
         .try_into()
-        .map_err(|_| ExprError::Cast(type_name::<T1>(), type_name::<T3>()))?;
+        .map_err(|_| ExprError::CastOutOfRange(type_name::<T3>()))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| ExprError::Cast(type_name::<T2>(), type_name::<T3>()))?;
+        .map_err(|_| ExprError::CastOutOfRange(type_name::<T3>()))?;
     atm(l, r)
 }
 

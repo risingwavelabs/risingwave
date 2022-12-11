@@ -35,5 +35,3 @@ query I
 show RW_IMPLICIT_FLUSH;
 ----
 true
-
-
