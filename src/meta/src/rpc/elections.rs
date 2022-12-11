@@ -297,6 +297,13 @@ async fn get_infos_obj<S: MetaStore>(
 }
 
 fn gen_rand_lease_id() -> u64 {
+    return 123;
+    // FIXME: We are unable to use a random lease at the moment
+    // During testing, meta gets killed, new meta starts
+    // meta detects that lease is still there, with same addr, but diff ID
+    // meta believes that leader is out there and becomes follower
+    // IMHO we can only use random lease id, if we have at least 2 meta nodes
+    // https://github.com/risingwavelabs/risingwave/issues/6844
     rand::thread_rng().gen_range(0..std::u64::MAX)
 }
 
