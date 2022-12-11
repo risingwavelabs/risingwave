@@ -19,9 +19,8 @@ use itertools::Itertools;
 use risingwave_object_store::object::{ObjectError, ObjectStoreRef};
 use serde::{Deserialize, Serialize};
 
-use crate::backup_restore::error::{BackupError, BackupResult};
-use crate::backup_restore::meta_snapshot::MetaSnapshot;
-use crate::backup_restore::{MetaSnapshotId, MetaSnapshotMetadata};
+use crate::meta_snapshot::MetaSnapshot;
+use crate::{BackupError, BackupResult, MetaSnapshotId, MetaSnapshotMetadata};
 
 pub type BackupStorageRef = Arc<dyn MetaSnapshotStorage>;
 

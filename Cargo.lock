@@ -4976,6 +4976,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_backup"
+version = "0.2.0-alpha"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "itertools",
+ "parking_lot 0.12.1",
+ "prost 0.11.2",
+ "risingwave_common",
+ "risingwave_hummock_sdk",
+ "risingwave_object_store",
+ "risingwave_pb",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "thiserror",
+ "twox-hash",
+]
+
+[[package]]
 name = "risingwave_batch"
 version = "0.2.0-alpha"
 dependencies = [
@@ -5081,6 +5102,7 @@ dependencies = [
  "global_stats_alloc",
  "log",
  "madsim-tokio",
+ "risingwave_backup",
  "risingwave_compaction_test",
  "risingwave_compactor",
  "risingwave_compute",
@@ -5595,6 +5617,7 @@ dependencies = [
  "prost 0.11.2",
  "rand 0.8.5",
  "reqwest",
+ "risingwave_backup",
  "risingwave_common",
  "risingwave_common_service",
  "risingwave_connector",
@@ -5618,7 +5641,6 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
- "twox-hash",
  "url",
  "uuid",
  "workspace-hack",

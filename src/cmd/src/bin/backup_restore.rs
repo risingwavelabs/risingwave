@@ -14,7 +14,7 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
-use risingwave_meta::backup_restore::error::BackupResult;
+use risingwave_backup::error::BackupResult;
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() -> BackupResult<()> {

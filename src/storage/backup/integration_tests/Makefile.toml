@@ -7,7 +7,7 @@ script = """
 set -e
 rm -f "${PREFIX_BIN}/backup-restore"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/backup-restore" "${PREFIX_BIN}/backup-restore"
-test_root="src/meta/src/backup_restore/integration_tests"
+test_root="src/storage/backup/integration_tests"
 bash "${test_root}/test_basic.sh"
 # test_pin_sst is nondeterministic due to SST full gc.
 bash "${test_root}/test_pin_sst.sh"

@@ -15,15 +15,15 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_backup::error::BackupError;
+use risingwave_backup::storage::BackupStorageRef;
+use risingwave_backup::{MetaBackupJobId, MetaSnapshotId};
 use risingwave_common::bail;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::backup_service::BackupJobStatus;
 use tokio::task::JoinHandle;
 
-use crate::backup_restore::error::BackupError;
-use crate::backup_restore::meta_snapshot::MetaSnapshotBuilder;
-use crate::backup_restore::storage::BackupStorageRef;
-use crate::backup_restore::{MetaBackupJobId, MetaSnapshotId};
+use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
 use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::storage::MetaStore;
@@ -79,7 +79,7 @@ impl<S: MetaStore> BackupManager<S> {
         Self {
             env,
             hummock_manager,
-            backup_store: Arc::new(crate::backup_restore::DummyBackupStorage {}),
+            backup_store: Arc::new(risingwave_backup::storage::DummyBackupStorage {}),
             running_backup_job: Default::default(),
         }
     }

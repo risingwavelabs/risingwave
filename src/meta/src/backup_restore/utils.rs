@@ -12,36 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::Hasher;
 use std::sync::Arc;
 use std::time::Duration;
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
+use risingwave_backup::error::BackupResult;
+use risingwave_backup::storage::{BackupStorageRef, ObjectStoreMetaSnapshotStorage};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 
-use crate::backup_restore::error::{BackupError, BackupResult};
-use crate::backup_restore::{BackupStorageRef, ObjectStoreMetaSnapshotStorage, RestoreOpts};
+use crate::backup_restore::RestoreOpts;
 use crate::storage::{EtcdMetaStore, MemStore};
 use crate::{Backend, MetaStoreBackend};
-
-// Code is copied from storage crate. TODO #6482: extract method.
-pub fn xxhash64_checksum(data: &[u8]) -> u64 {
-    let mut hasher = twox_hash::XxHash64::with_seed(0);
-    hasher.write(data);
-    hasher.finish()
-}
-
-pub fn xxhash64_verify(data: &[u8], checksum: u64) -> BackupResult<()> {
-    let data_checksum = xxhash64_checksum(data);
-    if data_checksum != checksum {
-        return Err(BackupError::ChecksumMismatch {
-            expected: checksum,
-            found: data_checksum,
-        });
-    }
-    Ok(())
-}
 
 #[derive(Clone)]
 pub enum MetaStoreBackendImpl {

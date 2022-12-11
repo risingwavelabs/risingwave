@@ -14,11 +14,11 @@
 
 use clap::Parser;
 use itertools::Itertools;
+use risingwave_backup::error::{BackupError, BackupResult};
+use risingwave_backup::meta_snapshot::MetaSnapshot;
+use risingwave_backup::storage::BackupStorageRef;
 
-use crate::backup_restore::error::{BackupError, BackupResult};
-use crate::backup_restore::meta_snapshot::MetaSnapshot;
 use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBackendImpl};
-use crate::backup_restore::BackupStorageRef;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::model::{MetadataModel, TableFragments};
 use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
@@ -186,9 +186,9 @@ mod tests {
     use std::collections::HashMap;
 
     use clap::Parser;
+    use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
     use risingwave_pb::hummock::HummockVersion;
 
-    use crate::backup_restore::meta_snapshot::{ClusterMetadata, MetaSnapshot};
     use crate::backup_restore::restore::restore_impl;
     use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBackendImpl};
     use crate::backup_restore::RestoreOpts;
