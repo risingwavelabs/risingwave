@@ -24,3 +24,9 @@ DROP SOURCE stock;
 
 statement ok
 DROP SOURCE warehouse;
+
+statement ok
+DROP SOURCE region;
+
+statement ok
+DROP SOURCE nation;

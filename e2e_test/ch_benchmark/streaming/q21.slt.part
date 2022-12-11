@@ -1,4 +1,4 @@
 query TT rowsort
 select * from ch_benchmark_q21;
 ----
-Supplier#000000011       10
+ 'Supplier#000000044       5
