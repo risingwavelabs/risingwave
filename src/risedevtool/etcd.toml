@@ -35,3 +35,13 @@ mv "${PREFIX_TMP}/${ETCD_RELEASE}" "${PREFIX_BIN}/etcd"
 "${PREFIX_BIN}/etcd/etcdctl" version
 "${PREFIX_BIN}/etcd/etcdutl" version
 '''
+
+[tasks.clean-etcd-data]
+category = "RiseDev - Components"
+description = "Clean etcd data"
+condition = { env_set = [ "PREFIX_DATA" ] }
+script = '''
+#!/bin/bash
+set -e
+rm -rf ${PREFIX_DATA}/etcd-*
+'''
