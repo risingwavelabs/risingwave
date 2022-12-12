@@ -22,5 +22,4 @@ where	 ol_supply_w_id = s_w_id
 	    (n2.n_name = 'UNITED STATES')
 	     )
 	 and ol_delivery_d between '2007-01-02 00:00:00.000000' and '2199-01-02 00:00:00.000000'
-group by su_nationkey, substr(c_state,1,1), extract(year from o_entry_d::timestamp)
-order by su_nationkey, cust_nation, extract(year from o_entry_d::timestamp);
+group by su_nationkey, substr(c_state,1,1), extract(year from o_entry_d::timestamp);

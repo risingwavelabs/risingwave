@@ -14,5 +14,4 @@ where	 su_suppkey in
                 group by s_i_id, s_w_id, s_quantity
                 having   2*s_quantity > sum(ol_quantity))
          and su_nationkey = n_nationkey
-         and n_name = 'GERMANY'
-order by su_name;
+         and n_name = 'GERMANY';

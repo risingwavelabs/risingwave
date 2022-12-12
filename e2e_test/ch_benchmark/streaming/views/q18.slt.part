@@ -9,5 +9,4 @@ where	 c_id = o_c_id
     	 and ol_d_id = o_d_id
     	 and ol_o_id = o_id
 group by o_id, o_w_id, o_d_id, c_id, c_last, o_entry_d, o_ol_cnt
-having	 sum(ol_amount) > 52000
-order by sum(ol_amount) desc, o_entry_d;
+having	 sum(ol_amount) > 52000;

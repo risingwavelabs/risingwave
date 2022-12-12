@@ -1,5 +1,6 @@
 query II
-select * from ch_benchmark_q7;
+select * from ch_benchmark_q7
+order by supp_nation, cust_nation, l_year;
 ----
  49 O                2022    1487
  50 O                2022    6287

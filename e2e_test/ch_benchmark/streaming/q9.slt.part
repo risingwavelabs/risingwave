@@ -1,5 +1,6 @@
 query TTR rowsort
-select * from ch_benchmark_q9;
+select * from ch_benchmark_q9
+order by n_name, l_year desc;
 ----
 BELGIUM          2022      53358
 BRAZIL           2022      37962

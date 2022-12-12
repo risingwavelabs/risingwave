@@ -1,5 +1,6 @@
 query TIITIR
-select * from ch_benchmark_q18;
+select * from ch_benchmark_q18
+order by revenue desc, o_entry_d;
 ----
 BARABLEPRES     25 2022-12-12 19:29:02       13 87678
 BAROUGHTBAR     11 2022-12-12 19:29:02       15 85951

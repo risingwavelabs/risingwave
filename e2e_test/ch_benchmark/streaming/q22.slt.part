@@ -1,5 +1,6 @@
 query TIR
-select * from ch_benchmark_q22;
+select * from ch_benchmark_q22
+order by country;
 ----
 2             1      70777
 7             1      84631

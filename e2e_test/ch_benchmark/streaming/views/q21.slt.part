@@ -17,5 +17,4 @@ where	 ol_o_id = o_id
                                 and l2.ol_delivery_d > l1.ol_delivery_d)
     	 and su_nationkey = n_nationkey
     	 and n_name = 'GERMANY'
-group by su_name
-order by numwait desc, su_name;
+group by su_name;

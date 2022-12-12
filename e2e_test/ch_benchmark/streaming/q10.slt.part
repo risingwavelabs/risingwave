@@ -1,5 +1,6 @@
 query ITRTTT
-select * from ch_benchmark_q10;
+select * from ch_benchmark_q10
+order by revenue desc;
 ----
 11 BAROUGHTBAR     85951 'IS6er8GXNN@S0qjKD'    9582373478797248 ROMANIA
  4 BARBARPRI       79291 'xZxVv701amGJIy'       0382815910971298 PERU

@@ -12,5 +12,4 @@ where	 c_id = o_c_id
     	 and o_entry_d <= ol_delivery_d
     	 and n_nationkey = ascii(substr(c_state,1,1)) - 48
 group by c_id, c_last, c_city, c_phone, n_name
-having round(sum(ol_amount)::decimal, 0) > 0
-order by revenue desc;
+having round(sum(ol_amount)::decimal, 0) > 0;

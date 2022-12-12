@@ -1,5 +1,6 @@
 query III rowsort
-select * from ch_benchmark_q12;
+select * from ch_benchmark_q12
+order by o_ol_cnt;
 ----
         5              25            155
         6              30            144

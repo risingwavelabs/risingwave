@@ -1,4 +1,5 @@
 query II rowsort
-select * from ch_benchmark_q11;
+select * from ch_benchmark_q11
+order by ordercount desc;
 ----
      44       5500

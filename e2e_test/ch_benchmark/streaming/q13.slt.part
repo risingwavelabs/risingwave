@@ -1,5 +1,6 @@
 query II rowsort
-select * from ch_benchmark_q13;
+select * from ch_benchmark_q13
+order by custdist desc, c_count desc;
 ----
        1        8
        2        7

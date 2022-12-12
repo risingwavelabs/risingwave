@@ -1,5 +1,6 @@
 query IIIIT
-select * from ch_benchmark_q3;
+select * from ch_benchmark_q3
+order by revenue desc, o_entry_d;
 ----
 23       1       6   81327 2022-12-12 19:29:02
 24       1       9   78537 2022-12-12 19:29:02

@@ -22,5 +22,4 @@ where	 i_id = s_i_id
 	 and o_entry_d between '2007-01-02 00:00:00.000000' and '2199-01-02 00:00:00.000000'
 	 -- and i_data like '%b%'
 	 and i_id = ol_i_id
-group by extract(year from o_entry_d::timestamp)
-order by l_year;
+group by extract(year from o_entry_d::timestamp);
