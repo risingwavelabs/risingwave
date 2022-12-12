@@ -24,23 +24,22 @@ import { Fragment, useCallback, useEffect, useState } from "react"
 import { StreamGraph } from "../components/StreamGraph"
 import Title from "../components/Title"
 import { ActorPoint } from "../lib/layout"
-import { Table as RwTable } from "../proto/gen/catalog"
-import { getMaterializedViews } from "./api/streaming"
+import { getRelations, Relation } from "./api/streaming"
 
 const SIDEBAR_WIDTH = "200px"
 
-function buildMvDependencyAsEdges(mvList: RwTable[]): ActorPoint[] {
+function buildDependencyAsEdges(list: Relation[]): ActorPoint[] {
   const edges = []
-  const mvSet = new Set(mvList.map((mv) => mv.id))
-  for (const mv of reverse(sortBy(mvList, "id"))) {
-    if (!mv.name.startsWith("__")) {
+  const relationSet = new Set(list.map((r) => r.id))
+  for (const r of reverse(sortBy(list, "id"))) {
+    if (!r.name.startsWith("__")) {
       edges.push({
-        id: mv.id.toString(),
-        name: mv.name,
-        parentIds: mv.dependentRelations
-          .filter((r) => mvSet.has(r))
+        id: r.id.toString(),
+        name: r.name,
+        parentIds: r.dependentRelations
+          .filter((r) => relationSet.has(r))
           .map((r) => r.toString()),
-        order: mv.id,
+        order: r.id,
       })
     }
   }
@@ -49,13 +48,13 @@ function buildMvDependencyAsEdges(mvList: RwTable[]): ActorPoint[] {
 
 export default function StreamingGraph() {
   const toast = useToast()
-  const [mvList, setMvList] = useState<RwTable[]>()
+  const [relationList, setRelationList] = useState<Relation[]>()
 
   useEffect(() => {
     async function doFetch() {
       try {
-        setMvList(
-          (await getMaterializedViews()).filter((x) => !x.name.startsWith("__"))
+        setRelationList(
+          (await getRelations()).filter((x) => !x.name.startsWith("__"))
         )
       } catch (e: any) {
         toast({
@@ -73,12 +72,12 @@ export default function StreamingGraph() {
   }, [toast])
 
   const mvDependencyCallback = useCallback(() => {
-    if (mvList) {
-      return buildMvDependencyAsEdges(mvList)
+    if (relationList) {
+      return buildDependencyAsEdges(relationList)
     } else {
       return undefined
     }
-  }, [mvList])
+  }, [relationList])
 
   const mvDependency = mvDependencyCallback()
 
@@ -101,10 +100,10 @@ export default function StreamingGraph() {
           </Text>
           <Box flex={1} overflowY="scroll">
             <VStack width="full" spacing={1}>
-              {mvList?.map((mv) => {
-                const match = router.query.id === mv.id.toString()
+              {relationList?.map((r) => {
+                const match = router.query.id === r.id.toString()
                 return (
-                  <Link href={`?id=${mv.id}`} key={mv.id}>
+                  <Link href={`?id=${r.id}`} key={r.id}>
                     <Button
                       colorScheme={match ? "teal" : "gray"}
                       color={match ? "teal.600" : "gray.500"}
@@ -114,7 +113,7 @@ export default function StreamingGraph() {
                       height={8}
                       justifyContent="flex-start"
                     >
-                      {mv.name}
+                      {r.name}
                     </Button>
                   </Link>
                 )
