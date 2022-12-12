@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Provides E2E Test runner functionality.
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use tokio_postgres::error::Error as PgError;
 
-use crate::{
-    create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
-};
+use crate::validation::is_permissible_error;
+use crate::{create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table};
 
 /// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {

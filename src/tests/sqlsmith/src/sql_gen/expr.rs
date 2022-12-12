@@ -28,8 +28,8 @@ use risingwave_sqlparser::ast::{
     TrimWhereField, UnaryOperator, Value,
 };
 
-use crate::utils::data_type_name_to_ast_data_type;
-use crate::{SqlGenerator, SqlGeneratorContext};
+use crate::sql_gen::utils::data_type_name_to_ast_data_type;
+use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
 static FUNC_TABLE: LazyLock<HashMap<DataTypeName, Vec<FuncSign>>> = LazyLock::new(|| {
     let mut funcs = HashMap::<DataTypeName, Vec<FuncSign>>::new();
@@ -127,11 +127,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Generate casts from a cast map.
     /// TODO: Assign casts have to be tested via `INSERT`.
-    fn gen_cast_inner(
-        &mut self,
-        ret: DataTypeName,
-        context: SqlGeneratorContext,
-    ) -> Option<Expr> {
+    fn gen_cast_inner(&mut self, ret: DataTypeName, context: SqlGeneratorContext) -> Option<Expr> {
         let casts = CAST_TABLE.get(&ret)?;
         let cast_sig = casts.choose(&mut self.rng).unwrap();
 
@@ -143,9 +139,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             ///    cast to, ignore such expressions.
             /// 2. Implicit cast resolution may not resolve, if it is
             ///    part of a cast expression, do not generate such an expression.
-            T::Implicit if context.can_implicit_cast() => self
-                .gen_expr(cast_sig.from_type, context)
-                .into(),
+            T::Implicit if context.can_implicit_cast() => {
+                self.gen_expr(cast_sig.from_type, context).into()
+            }
             T::Explicit => {
                 let expr = self
                     .gen_expr(cast_sig.from_type, context.set_inside_explicit_cast())
@@ -204,10 +200,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_concat(&mut self, context: SqlGeneratorContext) -> Expr {
-        Expr::Function(make_simple_func(
-            "concat",
-            &self.gen_concat_args(context),
-        ))
+        Expr::Function(make_simple_func("concat", &self.gen_concat_args(context)))
     }
 
     fn gen_concat_ws(&mut self, context: SqlGeneratorContext) -> Expr {
@@ -231,9 +224,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         ret: DataTypeName,
         context: SqlGeneratorContext,
     ) -> Vec<Expr> {
-        (0..n)
-            .map(|_| self.gen_expr(ret, context))
-            .collect()
+        (0..n).map(|_| self.gen_expr(ret, context)).collect()
     }
 
     fn gen_fixed_func(&mut self, ret: DataTypeName, context: SqlGeneratorContext) -> Expr {
