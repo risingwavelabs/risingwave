@@ -1,20 +1,16 @@
-## `risingwave.toml`
+# Configurations (`risingwave.toml`)
 
-`risingwave.toml` is the configuration file for risingwave. It can be provided to risingwave nodes via command line argument `--config-path` .
+`risingwave.toml` is the configuration file for risingwave. It can be provided to risingwave nodes via command line argument `--config-path`.
 
-The related code is located at `src/common/src/config.rs` . 
+If no configuration file specified, default values in `src/common/src/config.rs` will be used.
+Otherwise, items present in `risingwave.toml` will override the default values in the source code.
 
-## Use `risingwave.toml` in `RiseDev`
+See `src/common/src/config.rs` for the definition as well as the default values.
 
-The config files defined here are mainly used for testing and development purposes. 
+## Use `risingwave.toml` in RiseDev
 
-`./risingwave.toml` is the default config used by `risedev` .
-
-> **Note**
->
-> Its value is different from the default values defined in `src/common/src/config.rs` , which is used when the configuration file is not present.
-
-Other toml files define configurations for different scenes. It can be used in `risedev.yml` like:
+To specify configurations for `risedev dev <profile>`, put the path of configuration file in `config-path` under your profile.
+RiseDev will copy this file to the working directory (`.risingwave/` by default) and rename it to `risingwave.toml` on start-up.
 
 ```yaml
 risedev:
@@ -24,4 +20,4 @@ risedev:
       - use: ...
 ```
 
-It will be *merged together* with the base config `./risingwave.toml` . The merged config will be put at `.risingwave/config/risingwave.toml` , which is the `config-path` arg passed to risingwave nodes by risedev.
+The configuration files defined under `config/` are mainly used for testing and development purposes.

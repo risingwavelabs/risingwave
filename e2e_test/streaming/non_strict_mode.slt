@@ -22,7 +22,6 @@ NULL
 NULL
 
 # result for 0 is NULL, instead of true
-
 query B rowsort
 select * from mv_proj_is_null;
 ----
@@ -44,7 +43,6 @@ select * from mv_filter;
 2
 
 # result for 0 is not included
-
 query I rowsort
 select * from mv_filter_is_null;
 ----

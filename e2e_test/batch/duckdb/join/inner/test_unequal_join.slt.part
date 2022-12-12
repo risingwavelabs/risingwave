@@ -7,7 +7,6 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 # create tables
-
 statement ok
 CREATE TABLE test (a INTEGER, b INTEGER);
 
@@ -21,7 +20,6 @@ statement ok
 INSERT INTO test2 VALUES (1, 10), (1, 20), (2, 30);
 
 # inequality join
-
 query II
 SELECT test.b, test2.b FROM test, test2 WHERE test.b <> test2.b ORDER BY test.b, test2.b;
 ----
@@ -33,7 +31,6 @@ SELECT test.b, test2.b FROM test, test2 WHERE test.b <> test2.b ORDER BY test.b,
 3	2
 
 # inequality join with filter
-
 query II
 SELECT test.b, test2.b FROM test, test2 WHERE test.b <> test2.b AND test.b <> 1 AND test2.b <> 2 ORDER BY test.b, test2.b;
 ----
@@ -49,7 +46,6 @@ statement ok
 INSERT INTO test2 VALUES (NULL, NULL);
 
 # inequality join with NULL values
-
 query II
 SELECT test.b, test2.b FROM test, test2 WHERE test.b <> test2.b ORDER BY test.b, test2.b;
 ----
@@ -61,7 +57,6 @@ SELECT test.b, test2.b FROM test, test2 WHERE test.b <> test2.b ORDER BY test.b,
 3	2
 
 # inequality join with filter and NULL values
-
 query II
 SELECT test.b, test2.b FROM test, test2 WHERE test.b <> test2.b AND test.b <> 1 AND test2.b <> 2 ORDER BY test.b, test2.b;
 ----
