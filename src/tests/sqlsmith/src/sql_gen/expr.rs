@@ -133,12 +133,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         use CastContext as T;
         match cast_sig.context {
-            // For implicit casts, there are several cases to take care of:
-            // 1. Implicit casts elide the return type.
-            //    Hence, there could be multiple signatures it could be
-            //    cast to, ignore if such expressions fail on evaluation.
-            // 2. Implicit cast resolution may not resolve, if it is
-            //    already part of an explicit cast expression, do not generate such an expression.
+            // For implicit casts, there are 2 edge cases:
+            // 1. If the resulting expression's signature is ambiguous,
+            //    ignore evaluation result.
+            // 2. If Expression is part of explicit cast expression,
+            //    implicit cast won't be applied,
+            //    so do not generate implicit cast.
             T::Implicit if context.can_implicit_cast() => {
                 self.gen_expr(cast_sig.from_type, context).into()
             }
