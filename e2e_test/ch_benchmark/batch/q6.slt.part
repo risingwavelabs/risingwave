@@ -1,4 +1,4 @@
-query R rowsort
+query R
 select sum(ol_amount) as revenue
 from orderline
 where ol_delivery_d >= '1999-01-01 00:00:00.000000'

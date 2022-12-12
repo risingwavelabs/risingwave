@@ -1,4 +1,4 @@
-query R rowsort
+query R
 select	sum(ol_amount) / 2.0 as avg_yearly
 from    orderline, (select   i_id, avg(ol_quantity) as a
 		            from     item, orderline

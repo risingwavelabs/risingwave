@@ -1,4 +1,4 @@
-query ITTTR rowsort
+query ITTTR
 with	 revenue (supplier_no, total_revenue) as (
          select	(st_w_id * st_i_id) % 10000 as supplier_no,
                 sum(ol_amount) as total_revenue

@@ -37,11 +37,11 @@ async fn test_dynamic_filter() -> Result<()> {
     sleep(Duration::from_secs(5)).await;
 
     let dynamic_filter_fragment = cluster
-        .locate_one_fragment(vec![identity_contains("dynamicFilter")])
+        .locate_one_fragment([identity_contains("dynamicFilter")])
         .await?;
 
     let materialize_fragments = cluster
-        .locate_fragments(vec![identity_contains("materialize")])
+        .locate_fragments([identity_contains("materialize")])
         .await?;
 
     let upstream_fragment_ids: HashSet<_> = dynamic_filter_fragment
