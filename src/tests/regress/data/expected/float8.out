@@ -65,31 +65,31 @@ ERROR:  invalid input syntax for type double precision: "123           5"
 LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('123           5');
                                            ^
 -- special inputs
-SELECT 'NaN'::float8;
+SELECT 'NaN'::float8 AS float8;
  float8 
 --------
     NaN
 (1 row)
 
-SELECT 'nan'::float8;
+SELECT 'nan'::float8 AS float8;
  float8 
 --------
     NaN
 (1 row)
 
-SELECT '   NAN  '::float8;
+SELECT '   NAN  '::float8 AS float8;
  float8 
 --------
     NaN
 (1 row)
 
-SELECT 'infinity'::float8;
+SELECT 'infinity'::float8 AS float8;
   float8  
 ----------
  Infinity
 (1 row)
 
-SELECT '          -INFINiTY   '::float8;
+SELECT '          -INFINiTY   '::float8 AS float8;
   float8   
 -----------
  -Infinity
@@ -138,7 +138,7 @@ SELECT 'nan'::float8 / '0'::float8;
       NaN
 (1 row)
 
-SELECT 'nan'::numeric::float8;
+SELECT 'nan'::numeric::float8 AS float8;
  float8 
 --------
     NaN
@@ -798,7 +798,7 @@ SELECT * FROM FLOAT8_TBL;
 (5 rows)
 
 -- test edge-case coercions to integer
-SELECT '32767.4'::float8::int2;
+SELECT '32767.4'::float8::int2 AS int2;
  int2  
 -------
  32767
@@ -806,7 +806,7 @@ SELECT '32767.4'::float8::int2;
 
 SELECT '32767.6'::float8::int2;
 ERROR:  smallint out of range
-SELECT '-32768.4'::float8::int2;
+SELECT '-32768.4'::float8::int2 AS int2;
   int2  
 --------
  -32768
@@ -814,7 +814,7 @@ SELECT '-32768.4'::float8::int2;
 
 SELECT '-32768.6'::float8::int2;
 ERROR:  smallint out of range
-SELECT '2147483647.4'::float8::int4;
+SELECT '2147483647.4'::float8::int4 AS int4;
     int4    
 ------------
  2147483647
@@ -822,7 +822,7 @@ SELECT '2147483647.4'::float8::int4;
 
 SELECT '2147483647.6'::float8::int4;
 ERROR:  integer out of range
-SELECT '-2147483648.4'::float8::int4;
+SELECT '-2147483648.4'::float8::int4 AS int4;
     int4     
 -------------
  -2147483648
@@ -830,7 +830,7 @@ SELECT '-2147483648.4'::float8::int4;
 
 SELECT '-2147483648.6'::float8::int4;
 ERROR:  integer out of range
-SELECT '9223372036854773760'::float8::int8;
+SELECT '9223372036854773760'::float8::int8 AS int8;
         int8         
 ---------------------
  9223372036854773760
@@ -838,7 +838,7 @@ SELECT '9223372036854773760'::float8::int8;
 
 SELECT '9223372036854775807'::float8::int8;
 ERROR:  bigint out of range
-SELECT '-9223372036854775808.5'::float8::int8;
+SELECT '-9223372036854775808.5'::float8::int8 AS int8;
          int8         
 ----------------------
  -9223372036854775808
