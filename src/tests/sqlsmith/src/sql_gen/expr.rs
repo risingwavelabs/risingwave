@@ -44,7 +44,6 @@ static AGG_FUNC_TABLE: LazyLock<HashMap<DataTypeName, Vec<AggFuncSig>>> = LazyLo
 });
 
 /// Build a cast map from return types to viable cast-signatures.
-/// TODO: Generate implicit casts.
 /// NOTE: We avoid cast from varchar to other datatypes apart from itself.
 /// This is because arbitrary strings may not be able to cast,
 /// creating large number of invalid queries.
@@ -210,8 +209,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Expr::Function(make_simple_func("concat_ws", &args))
     }
 
-    // TODO: Gen implicit cast here.
-    // Tracked by: https://github.com/risingwavelabs/risingwave/issues/3896.
     fn gen_concat_args(&mut self, context: SqlGeneratorContext) -> Vec<Expr> {
         let n = self.rng.gen_range(1..10);
         self.gen_n_exprs_with_type(n, DataTypeName::Varchar, context)
