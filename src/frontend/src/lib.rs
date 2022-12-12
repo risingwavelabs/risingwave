@@ -94,7 +94,7 @@ pub struct FrontendOpts {
     #[clap(long, default_value = "0")]
     pub metrics_level: u32,
 
-    /// Te path of `risingwave.toml` configuration file.
+    /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
     ///

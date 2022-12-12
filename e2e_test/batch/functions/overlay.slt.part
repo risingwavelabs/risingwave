@@ -18,14 +18,14 @@ SELECT OVERLAY('babosa' PLACING 'ubb' FROM 2 FOR 4);
 ----
 bubba
 
-statement error 
+statement error
 SELECT OVERLAY('abc', 'xyz');
 
-statement error 
+statement error
 SELECT OVERLAY('abc' PLACING 'xyz');
 
-statement error 
+statement error
 SELECT OVERLAY('abc' PLACING 'xyz' FOR 2)
 
-statement error 
+statement error
 SELECT OVERLAY('abc' PLACING 'xyz' FOR 2 FROM 1)

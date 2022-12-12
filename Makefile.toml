@@ -11,6 +11,7 @@ extend = [
   { path = "src/risedevtool/risedev-components.toml" },
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
+  { path = "src/storage/backup/integration_tests/Makefile.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -348,7 +349,7 @@ script = '''
 
 set -e
 
-cp "src/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
+echo > "${PREFIX_CONFIG}/risingwave.toml"
 cp "src/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''

@@ -235,7 +235,7 @@ pub async fn distribute_execute(
 }
 
 #[expect(clippy::unused_async)]
-async fn local_execute(
+pub async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
     pinned_snapshot: HummockSnapshotGuard,
@@ -254,7 +254,7 @@ async fn local_execute(
     Ok(execution.stream_rows())
 }
 
-async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
+pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             let client = session.env().meta_client();

@@ -13,7 +13,6 @@ statement ok
 INSERT INTO test VALUES (11, 22), (12, 21), (13, 22);
 
 # constant limit
-
 query I
 SELECT a FROM test order by 1 LIMIT 1;
 ----
@@ -33,27 +32,22 @@ SELECT a FROM test order by 1 LIMIT 1;
 # 11
 
 # LIMIT with non-scalar should fail
-
-statement error 
+statement error
 SELECT a FROM test LIMIT a;
 
 # LIMIT with non-scalar operation should also fail
-
-statement error 
+statement error
 SELECT a FROM test LIMIT a+1;
 
 # aggregate in limit
-
-statement error 
+statement error
 SELECT a FROM test LIMIT SUM(42);
 
 # window function in limit
-
-statement error 
+statement error
 SELECT a FROM test LIMIT row_number() OVER ();
 
 # LIMIT Bug #321 Crazy Result
-
 statement ok
 CREATE TABLE test2 (a VARCHAR);
 
@@ -66,12 +60,10 @@ SELECT * FROM test2 LIMIT 3;
 Hello World
 
 # can only limit by integers
-
-statement error 
+statement error
 select 1 limit date '1992-01-01';
 
 # Test limits with no constants
-
 statement ok
 CREATE TABLE integers(i INTEGER);
 
@@ -98,6 +90,7 @@ INSERT INTO integers VALUES (1), (2), (3), (4), (5);
 # 2
 # 3
 # 4
+
 
 # non-foldable expression in limit
 # statement ok
@@ -179,14 +172,13 @@ INSERT INTO integers VALUES (1), (2), (3), (4), (5);
 # 4
 # 5
 
-# Subqueries that return negative values
 
-statement error 
+# Subqueries that return negative values
+statement error
 SELECT * FROM integers as int LIMIT (SELECT -1);
 
 #Subqueries that return strings that can't be converted to integers
-
-statement error 
+statement error
 SELECT * FROM integers as int LIMIT (SELECT 'ab');
 
 statement ok

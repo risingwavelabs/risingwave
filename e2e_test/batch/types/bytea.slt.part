@@ -45,7 +45,7 @@ SELECT '\x De Ad Be Ef '::bytea;
 ----
 \xdeadbeef
 
-statement error 
+statement error
 SELECT '\xDeAdBeEx'::bytea;
 
 query T
