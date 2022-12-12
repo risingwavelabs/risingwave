@@ -16,20 +16,20 @@
 
 use std::vec;
 
-use itertools::Itertools;
-use rand::prelude::SliceRandom;
+
+
 use rand::Rng;
 use risingwave_common::types::DataTypeName;
 use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, ColumnDef, Cte, Distinct, Expr, Ident, Join, JoinConstraint, JoinOperator,
-    ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr, Statement, TableWithJoins, With,
+    ColumnDef, Expr, Ident,
+    ObjectName, Statement,
 };
-use risingwave_sqlparser::parser::Parser;
+
 
 mod expr;
 pub use expr::print_function_table;
-use risingwave_expr::ExprError;
+
 
 mod query;
 mod relation;

@@ -15,17 +15,16 @@
 #![feature(let_chains)]
 #![feature(once_cell)]
 
-use std::vec;
 
-use itertools::Itertools;
-use rand::prelude::SliceRandom;
+
+
+
 use rand::Rng;
 use risingwave_common::row::Row2;
-use risingwave_common::types::DataTypeName;
-use risingwave_frontend::bind_data_type;
+
+
 use risingwave_sqlparser::ast::{
-    BinaryOperator, ColumnDef, Cte, Distinct, Expr, Ident, Join, JoinConstraint, JoinOperator,
-    ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr, Statement, TableWithJoins, With,
+    BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
 

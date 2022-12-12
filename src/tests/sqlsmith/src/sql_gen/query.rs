@@ -20,12 +20,11 @@ use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataTypeName;
-use risingwave_frontend::bind_data_type;
+
 use risingwave_sqlparser::ast::{
-    BinaryOperator, ColumnDef, Cte, Distinct, Expr, Ident, Join, JoinConstraint, JoinOperator,
-    ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr, Statement, TableWithJoins, With,
+    Cte, Distinct, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, TableWithJoins, With,
 };
-use risingwave_sqlparser::parser::Parser;
+
 
 use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
