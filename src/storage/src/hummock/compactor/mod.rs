@@ -738,7 +738,7 @@ impl Compactor {
             let tracker_cloned = task_progress.clone();
             let context_cloned = self.context.clone();
             upload_join_handles.push(async move {
-                let _ = upload_join_handle
+                upload_join_handle
                     .await
                     .map_err(HummockError::sstable_upload_error)??;
                 if let Some(tracker) = tracker_cloned {
