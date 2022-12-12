@@ -25,6 +25,7 @@ const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 6;
 const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
 const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
 const MAX_LEVEL: u64 = 6;
+const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
 
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
@@ -35,7 +36,7 @@ impl CompactionConfigBuilder {
         Self {
             config: CompactionConfig {
                 max_bytes_for_level_base: DEFAULT_MAX_BYTES_FOR_LEVEL_BASE,
-                max_bytes_for_level_multiplier: 5,
+                max_bytes_for_level_multiplier: DEFAULT_LEVEL_MULTIPLIER,
                 max_level: MAX_LEVEL,
                 max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
                 sub_level_max_compaction_bytes: DEFAULT_MIN_COMPACTION_BYTES,
