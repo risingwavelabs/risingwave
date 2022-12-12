@@ -210,8 +210,8 @@ CREATE MATERIALIZED SOURCE region (
      topic = 'region',
      properties.bootstrap.server = '127.0.0.1:29092',
      scan.startup.mode = 'earliest'
- ) ROW FORMAT DEBEZIUM_JSON;
- 
+) ROW FORMAT DEBEZIUM_JSON;
+
 statement ok
 CREATE MATERIALIZED SOURCE nation (
     N_NATIONKEY INTEGER,
@@ -224,4 +224,4 @@ CREATE MATERIALIZED SOURCE nation (
      topic = 'nation',
      properties.bootstrap.server = '127.0.0.1:29092',
      scan.startup.mode = 'earliest'
- ) ROW FORMAT DEBEZIUM_JSON;
+) ROW FORMAT DEBEZIUM_JSON;
