@@ -333,13 +333,13 @@ message CompactorWorkload {
   uint32 cpu = 1;
 }
 
-message ReportCompactionTaskProgressRequest {
+message CompactorHeartbeatRequest {
   uint32 context_id = 1;
   repeated CompactTaskProgress progress = 2;
   CompactorWorkload workload = 3;
 }
 
-message ReportCompactionTaskProgressResponse {
+message CompactorHeartbeatResponse {
   common.Status status = 1;
 }
 
@@ -535,7 +535,7 @@ service HummockManagerService {
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
-  rpc ReportCompactionTaskProgress(ReportCompactionTaskProgressRequest) returns (ReportCompactionTaskProgressResponse);
+  rpc CompactorHeartbeat(CompactorHeartbeatRequest) returns (CompactorHeartbeatResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc PinSpecificSnapshot(PinSpecificSnapshotRequest) returns (PinSnapshotResponse);
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);

@@ -39,7 +39,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         compact_task: CompactTask,
         table_stats_change: TableStatsMap,
     ) -> Result<()>;
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
         progress: Vec<CompactTaskProgress>,
         workload: CompactorWorkload,

@@ -17,7 +17,8 @@ use std::io::{Error, ErrorKind, Result};
 use prometheus::core::{Collector, Desc};
 use prometheus::{proto, IntCounter, IntGauge, Opts, Registry};
 
-use super::{PAGESIZE, CLOCK_TICK};
+#[cfg(target_os = "linux")]
+use super::{CLOCK_TICK, PAGESIZE};
 
 /// Monitors current process.
 pub fn monitor_process(registry: &Registry) -> Result<()> {

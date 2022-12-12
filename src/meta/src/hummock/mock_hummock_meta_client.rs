@@ -155,7 +155,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         unimplemented!()
     }
 
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
         _progress: Vec<CompactTaskProgress>,
         _workload: CompactorWorkload,

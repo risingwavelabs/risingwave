@@ -767,17 +767,17 @@ impl HummockMetaClient for MetaClient {
         self.inner.subscribe_compact_tasks(req).await
     }
 
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
         progress: Vec<CompactTaskProgress>,
         workload: CompactorWorkload,
     ) -> Result<()> {
-        let req = ReportCompactionTaskProgressRequest {
+        let req = CompactorHeartbeatRequest {
             context_id: self.worker_id(),
             progress,
             workload: Some(workload),
         };
-        self.inner.report_compaction_task_progress(req).await?;
+        self.inner.compactor_heartbeat(req).await?;
         Ok(())
     }
 
@@ -963,7 +963,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
-            ,{ hummock_client, report_compaction_task_progress, ReportCompactionTaskProgressRequest, ReportCompactionTaskProgressResponse }
+            ,{ hummock_client, compactor_heartbeat, CompactorHeartbeatRequest, CompactorHeartbeatResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }

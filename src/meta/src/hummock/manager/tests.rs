@@ -1220,7 +1220,7 @@ async fn test_version_stats() {
     hummock_manager
         .compactor_manager_ref_for_test()
         .add_compactor(worker_node.id, u64::MAX);
-    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+    let compactor = hummock_manager.get_idle_compactor().unwrap();
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await

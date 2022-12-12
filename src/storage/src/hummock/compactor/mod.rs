@@ -36,7 +36,6 @@ use futures::future::try_join_all;
 use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
-use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
 use risingwave_common::monitor::process_local::LocalProcessCollector;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
@@ -450,7 +449,7 @@ impl Compactor {
                             let workload = CompactorWorkload {
                                 cpu,
                             };
-                            if let Err(e) = hummock_meta_client.report_compaction_task_progress(progress_list, workload).await {
+                            if let Err(e) = hummock_meta_client.compactor_heartbeat(progress_list, workload).await {
                                 // ignore any errors while trying to report task progress
                                 tracing::warn!("Failed to report task progress. {e:?}");
                             }

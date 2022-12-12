@@ -129,13 +129,13 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .await
     }
 
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
         progress: Vec<CompactTaskProgress>,
         workload: CompactorWorkload,
     ) -> Result<()> {
         self.meta_client
-            .report_compaction_task_progress(progress, workload)
+            .compactor_heartbeat(progress, workload)
             .await
     }
 

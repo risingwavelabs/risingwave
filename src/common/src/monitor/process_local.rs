@@ -15,6 +15,7 @@
 use std::io::{Error, ErrorKind, Result};
 use std::time::Instant;
 
+#[cfg(target_os = "linux")]
 use super::CLOCK_TICK;
 
 pub struct LocalProcessCollector {
@@ -25,12 +26,47 @@ pub struct LocalProcessCollector {
 
 #[cfg(target_os = "linux")]
 impl LocalProcessCollector {
+    fn sched_time() -> Result<f64> {
+        let p = procfs::process::Process::myself()
+            .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
+        Ok(((p.stat.utime + p.stat.stime) as f64) / (*CLOCK_TICK as f64))
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl LocalProcessCollector {
+    fn sched_time() -> Result<f64> {
+        let pid = unsafe { libc::getpid() };
+        let clock_tick = unsafe {
+            let mut info = mach::mach_time::mach_timebase_info::default();
+            let errno = mach::mach_time::mach_timebase_info(&mut info as *mut _);
+            if errno != 0 {
+                1_f64
+            } else {
+                (info.numer / info.denom) as f64
+            }
+        };
+        let proc_info = darwin_libproc::task_info(pid)
+            .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
+
+        let total =
+            (proc_info.pti_total_user + proc_info.pti_total_system) as f64 * clock_tick / 1e9;
+
+        Ok(total)
+    }
+}
+
+impl LocalProcessCollector {
     pub fn new() -> Result<Self> {
         Ok(Self {
             sched_time: Self::sched_time()?,
             num_cpus: num_cpus::get(),
             last_cpu_collect_time: Instant::now(),
         })
+    }
+
+    pub fn cpu_avg(&mut self) -> Result<f64> {
+        self.cpu_total().map(|v| v / self.num_cpus as f64)
     }
 
     pub fn cpu_total(&mut self) -> Result<f64> {
@@ -46,15 +82,5 @@ impl LocalProcessCollector {
         self.last_cpu_collect_time = now;
 
         Ok(sched_time_delta / elapsed.as_secs_f64())
-    }
-
-    pub fn cpu_avg(&mut self) -> Result<f64> {
-        self.cpu_total().map(|v| v / self.num_cpus as f64)
-    }
-
-    fn sched_time() -> Result<f64> {
-        let p = procfs::process::Process::myself()
-            .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-        Ok(((p.stat.utime + p.stat.stime) as f64) / (*CLOCK_TICK as f64))
     }
 }
