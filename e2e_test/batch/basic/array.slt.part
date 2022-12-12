@@ -95,7 +95,6 @@ drop table t;
 ## Test single quote style array syntax.
 
 # Test assign cast.
-
 statement ok
 create table t(arr int[]);
 
@@ -112,7 +111,6 @@ statement ok
 drop table t;
 
 # Test explicit and implicit cast
-
 query T
 select pg_typeof(arr) from (values ('{1, 2, 3}'::integer[]), ('{4, 5, 6}')) as t(arr);
 ----
@@ -126,7 +124,6 @@ integer[]
 integer[]
 
 # Test explicit cast to float array
-
 query T
 select pg_typeof(arr::float[]) from (values ('{1, 2, 3}'), ('{4, 5, 6}')) as t(arr);
 ----
@@ -134,7 +131,6 @@ double precision[]
 double precision[]
 
 # Test explicit cast to varchar array
-
 query T
 select pg_typeof(arr::varchar[]) from (values ('{1, 2, 3}'), ('{4, 5, 6}')) as t(arr);
 ----
@@ -142,7 +138,6 @@ varchar[]
 varchar[]
 
 # Test explicit cast to nested integer array
-
 query T
 select pg_typeof(arr::integer[][]) from (values ('{{1}, {2}, {3}}'), ('{{4}, {5}, {6}}')) as t(arr);
 ----
@@ -150,7 +145,6 @@ integer[][]
 integer[][]
 
 # Test explicit cast to varchar array. Varchar values should be trimmed
-
 query T
 select (arr::varchar[])[1] from (values ('{  1   b  ?, 2, 3}'), ('{  4   a , 5, 6}')) as t(arr);
 ----
@@ -163,7 +157,6 @@ select pg_typeof((v1::integer[][])[2][1]), (v1::integer[][])[2][1] from (values 
 integer 2
 
 # Test multiple castings of the same input.
-
 query TTI
 select 
     (arr::varchar[][])[1][2] as double_varchar,
@@ -174,14 +167,12 @@ from (values ('{{{1, 2, 3}, {44, 55, 66}}}')) as t(arr);
 {44, 55, 66} 66 66
 
 # Test cast from array to string
-
 query T
 select array['a', 'b']::varchar;
 ----
 {a,b}
 
 # Test array display with quoting
-
 query T
 select array['hello', '', null, 'nULl', 'nULlx', 'aa"bb', 'mm\nn', 'uu,vv', 'yy zz'];
 ----

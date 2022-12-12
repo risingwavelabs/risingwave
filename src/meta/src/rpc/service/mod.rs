@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod backup_service;
 pub mod cluster_service;
 pub mod ddl_service;
 pub mod health_service;

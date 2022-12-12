@@ -17,10 +17,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
+use prost::Message;
+use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
+use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -45,13 +49,14 @@ use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
-use crate::backup_restore::{BackupManager, ObjectStoreMetaSnapshotStorage};
+use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
 };
 use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
@@ -328,26 +333,24 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // leader services defined below
         tracing::info!("Starting leader services");
 
+        // TODO: put leader service definition in separate function or maybe even separate file
         let prometheus_endpoint = opts.prometheus_endpoint.clone();
         let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
         let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
         let meta_metrics = Arc::new(MetaMetrics::new());
         let registry = meta_metrics.registry();
         monitor_process(registry).unwrap();
-
-        let cluster_manager = Arc::new(
-            ClusterManager::new(env.clone(), max_heartbeat_interval)
-                .await
-                .unwrap(),
-        );
-        let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
-
         let compactor_manager = Arc::new(
             hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
                 .await
                 .unwrap(),
         );
 
+        let cluster_manager = Arc::new(
+            ClusterManager::new(env.clone(), max_heartbeat_interval)
+                .await
+                .unwrap(),
+        );
         let hummock_manager = hummock::HummockManager::new(
             env.clone(),
             cluster_manager.clone(),
@@ -438,15 +441,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             )
             .await,
         );
-        let backup_storage = Box::new(
+        let backup_storage = Arc::new(
             ObjectStoreMetaSnapshotStorage::new(
                 &env.opts.backup_storage_directory,
                 backup_object_store,
             )
             .await
             .unwrap(),
-            // TODO: How do I handle this panic here?
-            // How can I pass this to the caller of rpc_serve_with_store?
+            // FIXME: Do not use unwrap here
         );
         let backup_manager = Arc::new(BackupManager::new(
             env.clone(),
@@ -456,10 +458,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let vacuum_manager = Arc::new(hummock::VacuumManager::new(
             env.clone(),
             hummock_manager.clone(),
-            backup_manager,
+            backup_manager.clone(),
             compactor_manager.clone(),
         ));
 
+        let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
         let ddl_srv = DdlServiceImpl::<S>::new(
             env.clone(),
             catalog_manager.clone(),
@@ -501,6 +504,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             fragment_manager.clone(),
         );
         let health_srv = HealthServiceImpl::new();
+        let backup_srv = BackupServiceImpl::new(backup_manager);
 
         if let Some(prometheus_addr) = address_info.prometheus_addr {
             MetricsManager::boot_metrics_service(
@@ -535,7 +539,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
         }
 
-        let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
+        let (idle_send, mut idle_recv) = tokio::sync::oneshot::channel();
         sub_tasks.push(
             IdleManager::start_idle_checker(
                 env.idle_manager_ref(),
@@ -556,6 +560,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 }
             }
         };
+
         let leader_srv = LeaderServiceImpl::new(l_leader_svc_leader_rx);
 
         // leader services defined above
@@ -597,6 +602,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             ))
             .add_service(HealthServer::with_interceptor(
                 health_srv,
+                intercept.clone(),
+            ))
+            .add_service(BackupServiceServer::with_interceptor(
+                backup_srv,
                 intercept.clone(),
             ))
             .serve_with_shutdown(address_info.listen_addr, async move {
