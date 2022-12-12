@@ -143,7 +143,8 @@ async fn create_tables(
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         setup_sql.push_str(&format!("{};", &create_sql));
         tracing::info!("Executing MView Setup: {}", &create_sql);
-        client.execute(&create_sql, &[]).await.unwrap();
+        let response = client.execute(&create_sql, &[]).await; // TODO: handle this... in frontend too.
+        validate_response(&setup_sql, &format!("{};", create_sql), response);
         tables.push(table.clone());
         mviews.push(table);
     }
