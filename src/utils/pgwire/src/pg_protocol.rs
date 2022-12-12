@@ -24,6 +24,7 @@ use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
 use futures::Stream;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
+use risingwave_sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
 use tracing::log::trace;
@@ -317,30 +318,38 @@ where
             "(simple query)receive query: {}", sql);
 
         let session = self.session.clone().unwrap();
-        // execute query
-        let mut res = session
-            .run_statement(sql, false)
-            .await
-            .map_err(|err| PsqlError::QueryError(err))?;
 
-        if let Some(notice) = res.get_notice() {
-            self.stream
-                .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
-        }
+        // Parse sql.
+        let stmts = Parser::parse_sql(sql)
+            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
+            .map_err(|err| PsqlError::ParseError(err.into()))?;
 
-        if res.is_query() {
-            self.stream
-                .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
+        // Execute multiple statements in simple query. KISS later.
+        for stmt in stmts {
+            let session = session.clone();
+            let mut res = session
+                .run_one_query(stmt, false)
+                .await
+                .map_err(|err| PsqlError::QueryError(err))?;
 
-            let mut rows_cnt = 0;
-
-            while let Some(row_set) = res.values_stream().next().await {
-                let row_set = row_set.map_err(|err| PsqlError::QueryError(err))?;
-                for row in row_set {
-                    self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
-                    rows_cnt += 1;
-                }
+            if let Some(notice) = res.get_notice() {
+                self.stream
+                    .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
             }
+
+            if res.is_query() {
+                self.stream
+                    .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
+
+                let mut rows_cnt = 0;
+
+                while let Some(row_set) = res.values_stream().next().await {
+                    let row_set = row_set.map_err(|err| PsqlError::QueryError(err))?;
+                    for row in row_set {
+                        self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
+                        rows_cnt += 1;
+                    }
+                }
 
             // Run the callback before sending the `CommandComplete` message.
             res.run_callback().await?;
@@ -362,8 +371,7 @@ where
                         .expect("row count should be set"),
                 }))?;
         }
-
-        self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
+        self.stream.write(&BeMessage::ReadyForQuery).await?;
         Ok(())
     }
 

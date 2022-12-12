@@ -696,6 +696,36 @@ impl Session<PgResponseStream> for SessionImpl {
         Ok(rsp)
     }
 
+    /// A copy of run_statement but exclude the parser part so each run must be at most one
+    /// statement. The str sql use the to_string of AST. Consider Reuse later.
+    async fn run_one_query(
+        self: Arc<Self>,
+        stmt: Statement,
+        format: bool,
+    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
+        let sql = stmt.to_string();
+        let rsp = {
+            let mut handle_fut = Box::pin(handle(self, stmt, &sql, format));
+            if cfg!(debug_assertions) {
+                // Report the SQL in the log periodically if the query is slow.
+                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
+                loop {
+                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
+                        Ok(result) => break result,
+                        Err(_) => tracing::warn!(
+                            sql,
+                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
+                        ),
+                    }
+                }
+            } else {
+                handle_fut.await
+            }
+        }
+        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
+        Ok(rsp)
+    }
+
     async fn infer_return_type(
         self: Arc<Self>,
         sql: &str,
