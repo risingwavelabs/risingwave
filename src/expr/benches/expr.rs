@@ -12,7 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(iterator_try_collect)]
+// std try_collect is slower than itertools
+// #![feature(iterator_try_collect)]
+
+// allow using `zip`.
+// `zip_eq` is a source of poor performance.
+#![allow(clippy::disallowed_methods)]
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::{DataChunk, I32Array};
@@ -75,7 +80,7 @@ fn bench_raw(c: &mut Criterion) {
         let a = (0..CHUNK_SIZE as i32).collect::<Vec<_>>();
         bencher.iter(|| a.iter().sum::<i32>())
     });
-    // ~80ns
+    // ~90ns
     c.bench_function("raw/add/i32", |bencher| {
         let a = (0..CHUNK_SIZE as i32).collect::<Vec<_>>();
         let b = (0..CHUNK_SIZE as i32).collect::<Vec<_>>();
@@ -86,13 +91,22 @@ fn bench_raw(c: &mut Criterion) {
                 .collect::<Vec<_>>()
         })
     });
-    // ~200ns
-    c.bench_function("raw/add/Option<i32>", |bencher| {
+    // ~600ns
+    c.bench_function("raw/add/i32/zip_eq", |bencher| {
+        let a = (0..CHUNK_SIZE as i32).collect::<Vec<_>>();
+        let b = (0..CHUNK_SIZE as i32).collect::<Vec<_>>();
+        bencher.iter(|| {
+            itertools::Itertools::zip_eq(a.iter(), b.iter())
+                .map(|(a, b)| a + b)
+                .collect::<Vec<_>>()
+        })
+    });
+    // ~950ns
+    c.bench_function("raw/add/Option<i32>/zip_eq", |bencher| {
         let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         bencher.iter(|| {
-            a.iter()
-                .zip(b.iter())
+            itertools::Itertools::zip_eq(a.iter(), b.iter())
                 .map(|(a, b)| match (a, b) {
                     (Some(a), Some(b)) => Some(a + b),
                     _ => None,
@@ -100,42 +114,45 @@ fn bench_raw(c: &mut Criterion) {
                 .collect::<Vec<_>>()
         })
     });
-    // ~1300ns
-    c.bench_function("raw/add/Option<i32> (checked)", |bencher| {
+    // ~2100ns
+    c.bench_function("raw/add/Option<i32>/zip_eq,checked", |bencher| {
         let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         struct Overflow;
         bencher.iter(|| {
+            use itertools::Itertools;
             a.iter()
                 .zip(b.iter())
                 .map(|(a, b)| match (a, b) {
-                    (Some(a), Some(b)) => Some(a.checked_add(*b).ok_or(Overflow)),
-                    _ => None,
+                    (Some(a), Some(b)) => a.checked_add(*b).ok_or(Overflow).map(Some),
+                    _ => Ok(None),
                 })
-                .try_collect::<Vec<_>>()
+                .try_collect::<_, Vec<_>, Overflow>()
         })
     });
-    // ~2600ns
-    c.bench_function("raw/add/Option<i32> (cast,checked)", |bencher| {
+    // ~2400ns
+    c.bench_function("raw/add/Option<i32>/zip_eq,checked,cast", |bencher| {
         let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         enum Error {
             Overflow,
             Cast,
         }
+        #[allow(clippy::useless_conversion)]
         fn checked_add(a: i32, b: i32) -> Result<i32, Error> {
             let a: i32 = a.try_into().map_err(|_| Error::Cast)?;
             let b: i32 = b.try_into().map_err(|_| Error::Cast)?;
             a.checked_add(b).ok_or(Error::Overflow)
         }
         bencher.iter(|| {
+            use itertools::Itertools;
             a.iter()
                 .zip(b.iter())
                 .map(|(a, b)| match (a, b) {
-                    (Some(a), Some(b)) => Some(checked_add(*a, *b)),
-                    _ => None,
+                    (Some(a), Some(b)) => checked_add(*a, *b).map(Some),
+                    _ => Ok(None),
                 })
-                .try_collect::<Vec<_>>()
+                .try_collect::<_, Vec<_>, Error>()
         })
     });
 }
