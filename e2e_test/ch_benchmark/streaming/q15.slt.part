@@ -1,4 +1,4 @@
-query ITTTR rowsort
+query ITTTR
 select * from ch_benchmark_q15
 order by su_suppkey;
 ----

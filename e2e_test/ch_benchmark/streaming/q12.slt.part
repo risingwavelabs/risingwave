@@ -1,4 +1,4 @@
-query III rowsort
+query III
 select * from ch_benchmark_q12
 order by o_ol_cnt;
 ----
