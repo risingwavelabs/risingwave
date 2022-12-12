@@ -153,7 +153,7 @@ async fn create_tables(
 /// Drops mview tables.
 async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
     client
-        .execute(&format!("DROP MATERIALIZED VIEW {}", mview.name), &[])
+        .execute(&format!("DROP MATERIALIZED VIEW IF EXISTS {}", mview.name), &[])
         .await
         .unwrap();
 }
