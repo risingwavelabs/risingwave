@@ -35,7 +35,7 @@ fn is_unimplemented_error(db_error: &str) -> bool {
 fn not_unique_error(db_error: &str) -> bool {
     db_error.contains(
         "is not unique
-    HINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
+HINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
     )
 }
 
