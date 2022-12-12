@@ -18,6 +18,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::{DataChunk, I32Array};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::*;
+use risingwave_expr::vector_op::agg::create_agg_state_unary;
 use risingwave_pb::expr::expr_node::Type;
 
 criterion_group!(benches, bench_expr, bench_raw);
@@ -35,10 +36,14 @@ fn bench_expr(c: &mut Criterion) {
     );
 
     let i0 = || InputRefExpression::new(DataType::Int32, 0).boxed();
-    let i1 = || InputRefExpression::new(DataType::Int32, 0).boxed();
+    let i1 = || InputRefExpression::new(DataType::Int32, 1).boxed();
     c.bench_function("expr/inputref", |bencher| {
         let inputref = i0();
         bencher.iter(|| inputref.eval(&input).unwrap())
+    });
+    c.bench_function("expr/constant", |bencher| {
+        let constant = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
+        bencher.iter(|| constant.eval(&input).unwrap())
     });
     c.bench_function("expr/add/i32", |bencher| {
         let add = new_binary_expr(Type::Add, DataType::Int32, i0(), i1()).unwrap();
@@ -48,12 +53,27 @@ fn bench_expr(c: &mut Criterion) {
         let mul = new_binary_expr(Type::Multiply, DataType::Int32, i0(), i1()).unwrap();
         bencher.iter(|| mul.eval(&input).unwrap())
     });
+    c.bench_function("expr/eq/i32", |bencher| {
+        let mul = new_binary_expr(Type::Equal, DataType::Int32, i0(), i1()).unwrap();
+        bencher.iter(|| mul.eval(&input).unwrap())
+    });
+    c.bench_function("expr/sum/i32", |bencher| {
+        let mut sum =
+            create_agg_state_unary(DataType::Int32, 0, AggKind::Sum, DataType::Int64, false)
+                .unwrap();
+        bencher.iter(|| sum.update_multi(&input, 0, 1024).unwrap())
+    });
 }
 
 /// Evaluate on raw Rust array.
 ///
 /// This could be used as a baseline to compare and tune our expressions.
 fn bench_raw(c: &mut Criterion) {
+    // ~55ns
+    c.bench_function("raw/sum/i32", |bencher| {
+        let a = (0..CHUNK_SIZE as i32).collect::<Vec<_>>();
+        bencher.iter(|| a.iter().sum::<i32>())
+    });
     // ~80ns
     c.bench_function("raw/add/i32", |bencher| {
         let a = (0..CHUNK_SIZE as i32).collect::<Vec<_>>();
