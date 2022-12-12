@@ -111,8 +111,9 @@ impl TierCompactionPicker {
             let is_write_amp_large =
                 max_level_size * self.config.level0_tier_compact_file_number / 2 > compaction_bytes;
 
-            // do not pick a compact task with large write amplification. But if the total bytes is too large,
-            //  we can not check write amplification because it may cause compact task never be trigger.
+            // do not pick a compact task with large write amplification. But if the total bytes is
+            // too large,  we can not check write amplification because it may cause
+            // compact task never be trigger.
             if level.level_type == non_overlapping_type
                 && is_write_amp_large
                 && (select_level_inputs.len() == 1 || compaction_bytes < max_compaction_bytes)
