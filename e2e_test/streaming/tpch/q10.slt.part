@@ -1,5 +1,4 @@
 # scan MV with ORDER BY isn't guaranteed to be ordered
-
 query ITRRTTT rowsort
 select * from tpch_q10;
 ----

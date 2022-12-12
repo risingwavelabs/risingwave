@@ -29,6 +29,9 @@ use crate::optimizer::plan_node::{
 };
 use crate::planner::Planner;
 
+const ERROR_WINDOW_SIZE_ARG: &str =
+    "The size arg of window table function should be an interval literal.";
+
 impl Planner {
     pub fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
         match relation {
@@ -171,10 +174,7 @@ impl Planner {
                 let project = LogicalProject::create(base, exprs);
                 Ok(project)
             }
-            _ => Err(ErrorCode::BindError(
-                "Invalid arguments for TUMBLE window function".to_string(),
-            )
-            .into()),
+            _ => Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
         }
     }
 
@@ -187,13 +187,13 @@ impl Planner {
         let input = self.plan_relation(input)?;
         let mut args = args.into_iter();
         let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) = args.next_tuple() else {
-            return Err(ErrorCode::BindError("Invalid arguments for HOP window function".to_string()).into());
+            return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
         let Some(ScalarImpl::Interval(window_slide)) = *window_slide.get_data() else {
-            return Err(ErrorCode::BindError("Invalid arguments for HOP window function".to_string()).into());
+            return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
         let Some(ScalarImpl::Interval(window_size)) = *window_size.get_data() else {
-            return Err(ErrorCode::BindError("Invalid arguments for HOP window function".to_string()).into());
+            return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
 
         if !window_size.is_positive() || !window_slide.is_positive() {
