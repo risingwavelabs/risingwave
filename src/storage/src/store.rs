@@ -17,12 +17,14 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::{Stream, StreamExt, TryStreamExt};
+use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
-use crate::error::StorageResult;
+use crate::error::{StorageError, StorageResult};
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
@@ -37,66 +39,26 @@ pub trait StateStoreIter: StaticSendSync {
     fn next(&mut self) -> Self::NextFuture<'_>;
 }
 
+pub trait StateStoreIterStreamTrait<Item> = Stream<Item = StorageResult<Item>> + Send + 'static;
 pub trait StateStoreIterExt: StateStoreIter {
-    type CollectFuture<'a>: Future<Output = StorageResult<Vec<<Self as StateStoreIter>::Item>>>
-        + Send
-        + 'a;
+    type ItemStream: StateStoreIterStreamTrait<<Self as StateStoreIter>::Item>;
 
-    fn map<B, F>(self, f: F) -> StateStoreMapIter<Self, F>
-    where
-        Self: Sized,
-        B: Send,
-        F: FnMut(Self::Item) -> B;
-
-    fn collect(&mut self, limit: Option<usize>) -> Self::CollectFuture<'_>;
+    fn into_stream(self) -> Self::ItemStream;
 }
 
+#[try_stream(ok = I::Item, error = StorageError)]
+async fn into_stream_inner<I: StateStoreIter>(mut iter: I) {
+    while let Some(item) = iter.next().await? {
+        yield item;
+    }
+}
+
+pub type StreamTypeOfIter<I> = <I as StateStoreIterExt>::ItemStream;
 impl<I: StateStoreIter> StateStoreIterExt for I {
-    type CollectFuture<'a> =
-        impl Future<Output = StorageResult<Vec<<Self as StateStoreIter>::Item>>> + Send + 'a;
+    type ItemStream = impl Stream<Item = StorageResult<<Self as StateStoreIter>::Item>>;
 
-    fn map<B, F>(self, f: F) -> StateStoreMapIter<Self, F>
-    where
-        Self: Sized,
-        B: Send,
-        F: FnMut(Self::Item) -> B,
-    {
-        StateStoreMapIter { iter: self, f }
-    }
-
-    fn collect(&mut self, limit: Option<usize>) -> Self::CollectFuture<'_> {
-        async move {
-            let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
-
-            for _ in 0..limit.unwrap_or(usize::MAX) {
-                match self.next().await? {
-                    Some(kv) => kvs.push(kv),
-                    None => break,
-                }
-            }
-
-            Ok(kvs)
-        }
-    }
-}
-
-pub struct StateStoreMapIter<I, F> {
-    iter: I,
-    f: F,
-}
-
-impl<B, I, F> StateStoreIter for StateStoreMapIter<I, F>
-where
-    B: Send,
-    I: StateStoreIter,
-    F: FnMut(I::Item) -> B + StaticSendSync,
-{
-    type Item = B;
-
-    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async move { Ok(self.iter.next().await?.map(&mut self.f)) }
+    fn into_stream(self) -> Self::ItemStream {
+        into_stream_inner(self)
     }
 }
 
@@ -104,18 +66,24 @@ where
 macro_rules! define_state_store_read_associated_type {
     () => {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
-        type IterFuture<'a> = impl IterFutureTrait<'a, Self::Iter>;
+        type IterFuture<'a> = impl IterFutureTrait<'a, Self::IterStream>;
     };
 }
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
-pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> =
+// TODO: directly return `&[u8]` or `Bytes` to user instead of `Vec<u8>`.
+pub type StateStoreIterItem = (FullKey<Vec<u8>>, Bytes);
+pub trait StateStoreIterNextFutureTrait<'a> = NextFutureTrait<'a, StateStoreIterItem>;
+pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
+pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
+
+pub trait IterFutureTrait<'a, I: StateStoreReadIterStream> =
     Future<Output = StorageResult<I>> + Send + 'a;
 pub trait StateStoreRead: StaticSendSync {
-    type Iter: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + 'static;
+    type IterStream: StateStoreReadIterStream;
 
     type GetFuture<'a>: GetFutureTrait<'a>;
-    type IterFuture<'a>: IterFutureTrait<'a, Self::Iter>;
+    type IterFuture<'a>: IterFutureTrait<'a, Self::IterStream>;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -126,11 +94,11 @@ pub trait StateStoreRead: StaticSendSync {
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_>;
 
-    /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
-    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included in
-    /// `key_range`) The returned iterator will iterate data based on a snapshot corresponding to
-    /// the given `epoch`.
+    /// Opens and returns an iterator for given `dist_key_hint` and `full_key_range`
+    /// Internally, `dist_key_hint` will be used to for checking `bloom_filter` and
+    /// `full_key_range` used for iter. (if the `dist_key_hint` not None, it should be be included
+    /// in `key_range`) The returned iterator will iterate data based on a snapshot
+    /// corresponding to the given `epoch`.
     fn iter(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
@@ -139,14 +107,13 @@ pub trait StateStoreRead: StaticSendSync {
     ) -> Self::IterFuture<'_>;
 }
 
-pub trait ScanFutureTrait<'a> =
-    Future<Output = StorageResult<Vec<(FullKey<Vec<u8>>, Bytes)>>> + Send + 'a;
+pub trait ScanFutureTrait<'a> = Future<Output = StorageResult<Vec<StateStoreIterItem>>> + Send + 'a;
 
 pub trait StateStoreReadExt: StaticSendSync {
     type ScanFuture<'a>: ScanFutureTrait<'a>;
 
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// Internally, `dist_key_hint` will be used to for checking `bloom_filter` and
     /// `full_key_range` used for iter.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     ///
@@ -171,10 +138,12 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> Self::ScanFuture<'_> {
+        let limit = limit.unwrap_or(usize::MAX);
         async move {
             self.iter(key_range, epoch, read_options)
                 .await?
-                .collect(limit)
+                .take(limit)
+                .try_collect()
                 .await
         }
     }
@@ -305,9 +274,9 @@ pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
 #[derive(Default, Clone)]
 pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.
-    /// If the `prefix_hint` is not None, it should be included in
+    /// If the `dist_key_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
-    pub prefix_hint: Option<Vec<u8>>,
+    pub dist_key_hint: Option<Vec<u8>>,
     pub ignore_range_tombstone: bool,
     pub check_bloom_filter: bool,
 

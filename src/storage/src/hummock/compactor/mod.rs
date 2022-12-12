@@ -93,8 +93,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
         let tracker = self
             .limiter
             .require_memory((self.options.capacity + self.options.block_capacity) as u64)
-            .await
-            .unwrap();
+            .await;
         let timer = Instant::now();
         let table_id = self.sstable_id_manager.get_new_sst_id().await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
@@ -221,7 +220,7 @@ impl Compactor {
             need_quota
         );
 
-        let multi_filter = build_multi_compaction_filter(&compact_task);
+        let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
         let multi_filter_key_extractor = context
             .filter_key_extractor_manager
@@ -242,6 +241,7 @@ impl Compactor {
         let delete_range_agg = match CompactorRunner::build_delete_range_iter(
             &compact_task,
             &compactor_context.sstable_store,
+            &mut multi_filter,
         )
         .await
         {

@@ -23,19 +23,19 @@ INSERT INTO t VALUES
 query T rowsort
 SELECT field, date_trunc(field, TIMESTAMP '2202-02-16 20:38:40.123456') FROM t;
 ----
-microseconds    2202-02-16 20:38:40.123456
-milliseconds    2202-02-16 20:38:40.123
-second          2202-02-16 20:38:40
-minute          2202-02-16 20:38:00
-hour            2202-02-16 20:00:00
-day             2202-02-16 00:00:00
-week            2202-02-15 00:00:00
-month           2202-02-01 00:00:00
-quarter         2202-01-01 00:00:00
-year            2202-01-01 00:00:00
-decade          2200-01-01 00:00:00
-century         2201-01-01 00:00:00
-millennium      2001-01-01 00:00:00
+century	2201-01-01 00:00:00
+day	2202-02-16 00:00:00
+decade	2200-01-01 00:00:00
+hour	2202-02-16 20:00:00
+microseconds	2202-02-16 20:38:40.123456
+millennium	2001-01-01 00:00:00
+milliseconds	2202-02-16 20:38:40.123
+minute	2202-02-16 20:38:00
+month	2202-02-01 00:00:00
+quarter	2202-01-01 00:00:00
+second	2202-02-16 20:38:40
+week	2202-02-15 00:00:00
+year	2202-01-01 00:00:00
 
 # invalid field
 statement error
@@ -44,19 +44,19 @@ SELECT date_trunc('s', TIMESTAMP '2202-02-16 20:38:40.123456');
 query T rowsort
 SELECT field, date_trunc(field, TIMESTAMP WITH TIME ZONE '2202-02-16 20:38:40.123456Z', 'Australia/Sydney') FROM t;
 ----
-microseconds    2202-02-16 20:38:40.123456+00:00
-milliseconds    2202-02-16 20:38:40.123+00:00
-second          2202-02-16 20:38:40+00:00
-minute          2202-02-16 20:38:00+00:00
-hour            2202-02-16 20:00:00+00:00
-day             2202-02-16 13:00:00+00:00
-week            2202-02-14 13:00:00+00:00
-month           2202-01-31 13:00:00+00:00
-quarter         2201-12-31 13:00:00+00:00
-year            2201-12-31 13:00:00+00:00
-decade          2199-12-31 13:00:00+00:00
-century         2200-12-31 13:00:00+00:00
-millennium      2000-12-31 13:00:00+00:00
+century	2200-12-31 13:00:00+00:00
+day	2202-02-16 13:00:00+00:00
+decade	2199-12-31 13:00:00+00:00
+hour	2202-02-16 20:00:00+00:00
+microseconds	2202-02-16 20:38:40.123456+00:00
+millennium	2000-12-31 13:00:00+00:00
+milliseconds	2202-02-16 20:38:40.123+00:00
+minute	2202-02-16 20:38:00+00:00
+month	2202-01-31 13:00:00+00:00
+quarter	2201-12-31 13:00:00+00:00
+second	2202-02-16 20:38:40+00:00
+week	2202-02-14 13:00:00+00:00
+year	2201-12-31 13:00:00+00:00
 
 statement ok
 DELETE FROM t WHERE field = 'week';
@@ -65,18 +65,18 @@ DELETE FROM t WHERE field = 'week';
 query T rowsort
 SELECT field, date_trunc(field, INTERVAL '2333 year 4 months 5 days 02:47:33.123') FROM t;
 ----
-microseconds    2333 years 4 mons 5 days 02:47:33.123
-milliseconds    2333 years 4 mons 5 days 02:47:33.123
-second          2333 years 4 mons 5 days 02:47:33
-minute          2333 years 4 mons 5 days 02:47:00
-hour            2333 years 4 mons 5 days 02:00:00
-day             2333 years 4 mons 5 days
-month           2333 years 4 mons
-quarter         2333 years 3 mons
-year            2333 years
-decade          2330 years
-century         2300 years
-millennium      2000 years
+century	2300 years
+day	2333 years 4 mons 5 days
+decade	2330 years
+hour	2333 years 4 mons 5 days 02:00:00
+microseconds	2333 years 4 mons 5 days 02:47:33.123
+millennium	2000 years
+milliseconds	2333 years 4 mons 5 days 02:47:33.123
+minute	2333 years 4 mons 5 days 02:47:00
+month	2333 years 4 mons
+quarter	2333 years 3 mons
+second	2333 years 4 mons 5 days 02:47:33
+year	2333 years
 
 # truncate 'week' is not supported for interval
 statement error

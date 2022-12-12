@@ -22,17 +22,17 @@ use super::privilege::check_super_user;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::table_catalog::TableKind;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::CatalogError;
 use crate::handler::drop_table::check_source;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_mv(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     table_name: ObjectName,
     if_exists: bool,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().get_search_path();
@@ -77,19 +77,24 @@ pub async fn handle_drop_mv(
         }
 
         // If associated source is `Some`, then it is actually a materialized source / table v2.
-        match table.kind() {
-            TableKind::TableOrSource => {
+        match table.table_type() {
+            TableType::MaterializedView => {}
+            TableType::Table => {
                 check_source(&reader, db_name, schema_name, &table_name)?;
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP TABLE` to drop a table.".to_owned(),
                 )));
             }
-            TableKind::Index => {
+            TableType::Index => {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP INDEX` to drop an index.".to_owned(),
                 )));
             }
-            TableKind::MView => {}
+            TableType::Internal => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Internal tables cannot be dropped.".to_owned(),
+                )));
+            }
         }
 
         // If the name is not valid, then it is actually an internal table.
