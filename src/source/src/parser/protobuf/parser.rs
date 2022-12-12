@@ -333,7 +333,7 @@ mod test {
         let dir = PathBuf::from("src/test_data");
         format!(
             "file://{}",
-            std::fs::canonicalize(&dir).unwrap().to_str().unwrap()
+            std::fs::canonicalize(dir).unwrap().to_str().unwrap()
         )
     }
 

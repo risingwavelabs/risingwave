@@ -138,8 +138,8 @@ impl Scheduler {
                 .push(p);
         }
         let mut parallel_units: LinkedList<_> = parallel_units_map
-            .into_iter()
-            .map(|(_k, v)| v.into_iter())
+            .into_values()
+            .map(|v| v.into_iter())
             .collect();
 
         // Visit the parallel units in a round-robin manner on each worker.
