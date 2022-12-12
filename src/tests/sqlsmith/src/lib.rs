@@ -15,12 +15,7 @@
 #![feature(let_chains)]
 #![feature(once_cell)]
 
-
-
-
-
 use rand::Rng;
-
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Statement,
 };
