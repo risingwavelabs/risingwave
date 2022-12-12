@@ -32,8 +32,8 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColPrunableRef,
-    EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownRef, StreamDynamicFilter,
-    StreamFilter,
+    EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownCtx, PredicatePushdownRef,
+    StreamDynamicFilter, StreamFilter,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
@@ -799,7 +799,11 @@ impl PredicatePushdownImpl for LogicalJoin {
     /// |--------------------------|---------------------|----------------------|
     /// | Join predicate (on)      | Not Pushed          | Pushed               |
     /// | Where predicate (filter) | Pushed              | Not Pushed           |
-    fn predicate_pushdown_impl(&self, mut predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        mut predicate: Condition,
+        ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         let left_col_num = self.left().schema().len();
         let right_col_num = self.right().schema().len();
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
@@ -835,8 +839,8 @@ impl PredicatePushdownImpl for LogicalJoin {
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);
 
-        let new_left = self.left().predicate_pushdown(left_predicate);
-        let new_right = self.right().predicate_pushdown(right_predicate);
+        let new_left = self.left().predicate_pushdown(left_predicate, ctx);
+        let new_right = self.right().predicate_pushdown(right_predicate, ctx);
         let new_join = LogicalJoin::with_output_indices(
             new_left,
             new_right,

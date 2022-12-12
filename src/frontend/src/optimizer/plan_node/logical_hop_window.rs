@@ -26,7 +26,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdownImpl, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::InputRef;
-use crate::optimizer::plan_node::ColPrunableRef;
+use crate::optimizer::plan_node::{ColPrunableRef, PredicatePushdownCtx};
 use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -317,9 +317,13 @@ impl ColPrunableImpl for LogicalHopWindow {
 }
 
 impl PredicatePushdownImpl for LogicalHopWindow {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         // TODO: hop's predicate pushdown https://github.com/risingwavelabs/risingwave/issues/6606
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
 

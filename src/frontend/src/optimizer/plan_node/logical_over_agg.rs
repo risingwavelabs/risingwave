@@ -26,6 +26,7 @@ use super::{
     PredicatePushdownImpl, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
+use crate::optimizer::plan_node::PredicatePushdownCtx;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
@@ -262,11 +263,15 @@ impl ColPrunableImpl for LogicalOverAgg {
 }
 
 impl PredicatePushdownImpl for LogicalOverAgg {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         let mut window_col = FixedBitSet::with_capacity(self.schema().len());
         window_col.insert(self.schema().len() - 1);
         let (window_pred, other_pred) = predicate.split_disjoint(&window_col);
-        gen_filter_and_pushdown(self, window_pred, other_pred)
+        gen_filter_and_pushdown(self, window_pred, other_pred, ctx)
     }
 }
 

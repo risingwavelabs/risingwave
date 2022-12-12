@@ -23,6 +23,7 @@ use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunableImpl, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdownImpl, StreamExpand, ToBatch, ToStream,
 };
+use crate::optimizer::plan_node::PredicatePushdownCtx;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -155,13 +156,17 @@ impl ColPrunableImpl for LogicalExpand {
 }
 
 impl PredicatePushdownImpl for LogicalExpand {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         // TODO: how to do predicate pushdown for Expand?
         //
         // let new_input = self.input.predicate_pushdown(predicate);
         // self.clone_with_input(new_input).into()
 
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
 

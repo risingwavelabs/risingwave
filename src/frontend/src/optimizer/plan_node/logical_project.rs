@@ -24,7 +24,7 @@ use super::{
     PredicatePushdownImpl, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
-use crate::optimizer::plan_node::{ColPrunableRef, CollectInputRef};
+use crate::optimizer::plan_node::{ColPrunableRef, CollectInputRef, PredicatePushdownCtx};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
@@ -202,14 +202,18 @@ impl ColPrunableImpl for LogicalProject {
 }
 
 impl PredicatePushdownImpl for LogicalProject {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         // convert the predicate to one that references the child of the project
         let mut subst = Substitute {
             mapping: self.exprs().clone(),
         };
         let predicate = predicate.rewrite_expr(&mut subst);
 
-        gen_filter_and_pushdown(self, Condition::true_cond(), predicate)
+        gen_filter_and_pushdown(self, Condition::true_cond(), predicate, ctx)
     }
 }
 

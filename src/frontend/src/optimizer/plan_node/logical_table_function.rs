@@ -22,7 +22,7 @@ use super::{
 };
 use crate::expr::{Expr, TableFunction};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::BatchTableFunction;
+use crate::optimizer::plan_node::{BatchTableFunction, PredicatePushdownCtx};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
@@ -68,7 +68,11 @@ impl ColPrunableImpl for LogicalTableFunction {
 }
 
 impl PredicatePushdownImpl for LogicalTableFunction {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }

@@ -24,6 +24,7 @@ use super::{
 };
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::PredicatePushdownCtx;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
@@ -89,7 +90,11 @@ impl ColPrunableImpl for LogicalValues {
 }
 
 impl PredicatePushdownImpl for LogicalValues {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }

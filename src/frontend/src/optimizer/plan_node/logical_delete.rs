@@ -23,7 +23,7 @@ use super::{
     PredicatePushdownImpl, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::optimizer::plan_node::ColPrunableRef;
+use crate::optimizer::plan_node::{ColPrunableRef, PredicatePushdownCtx};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
@@ -119,8 +119,12 @@ impl ColPrunableImpl for LogicalDelete {
 }
 
 impl PredicatePushdownImpl for LogicalDelete {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
 

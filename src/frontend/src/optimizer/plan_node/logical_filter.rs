@@ -25,7 +25,7 @@ use super::{
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{
-    BatchFilter, ColPrunableRef, PredicatePushdownRef, StreamFilter,
+    BatchFilter, ColPrunableRef, PredicatePushdownCtx, PredicatePushdownRef, StreamFilter,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -173,9 +173,13 @@ impl ColPrunableImpl for LogicalFilter {
 }
 
 impl PredicatePushdownImpl for LogicalFilter {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         let predicate = predicate.and(self.predicate().clone());
-        self.input().predicate_pushdown(predicate)
+        self.input().predicate_pushdown(predicate, ctx)
     }
 }
 

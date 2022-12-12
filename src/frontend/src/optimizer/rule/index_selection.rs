@@ -67,7 +67,7 @@ use crate::expr::{
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColPrunableRef, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary,
-    PredicatePushdownImpl,
+    PredicatePushdownCtx, PredicatePushdownImpl,
 };
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -223,7 +223,9 @@ impl IndexSelectionRule {
         );
 
         // 2. push down predicate, so we can calculate the cost of index lookup
-        let join_ref = join.predicate_pushdown_impl(Condition::true_cond());
+        let mut predicate_pushdown_ctx = PredicatePushdownCtx::default();
+        let join_ref =
+            join.predicate_pushdown_impl(Condition::true_cond(), &mut predicate_pushdown_ctx);
 
         let join_with_predicate_push_down =
             join_ref.as_logical_join().expect("must be a logical join");
@@ -308,7 +310,9 @@ impl IndexSelectionRule {
         let join = LogicalJoin::new(index_access, primary_table_scan.into(), JoinType::Inner, on);
 
         // 3 push down predicate
-        let join_ref = join.predicate_pushdown_impl(Condition::true_cond());
+        let mut predicate_pushdown_ctx = PredicatePushdownCtx::default();
+        let join_ref =
+            join.predicate_pushdown_impl(Condition::true_cond(), &mut predicate_pushdown_ctx);
 
         // 4. keep the same schema with original logical_scan
         let scan_output_col_idx = logical_scan.output_col_idx();

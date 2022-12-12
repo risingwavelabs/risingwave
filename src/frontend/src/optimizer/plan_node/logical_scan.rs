@@ -32,7 +32,9 @@ use crate::expr::{
     CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
+use crate::optimizer::plan_node::{
+    BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues, PredicatePushdownCtx,
+};
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
@@ -434,7 +436,11 @@ impl ColPrunableImpl for LogicalScan {
 }
 
 impl PredicatePushdownImpl for LogicalScan {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         // If the predicate contains `CorrelatedInputRef`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}

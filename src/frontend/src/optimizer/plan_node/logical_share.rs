@@ -22,7 +22,7 @@ use super::{
     ColPrunableImpl, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdownImpl, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::StreamShare;
+use crate::optimizer::plan_node::{PredicatePushdownCtx, StreamShare};
 use crate::utils::{ColIndexMapping, Condition};
 
 #[derive(Debug, Clone)]
@@ -36,6 +36,7 @@ impl LogicalShare {
         let ctx = input.ctx();
         let functional_dependency = input.functional_dependency().clone();
         let core = generic::Share {
+            parent_num: RefCell::new(1),
             input: RefCell::new(input),
         };
         let schema = core.schema();
@@ -83,6 +84,18 @@ impl LogicalShare {
     pub fn replace_input(&self, plan: PlanRef) {
         *self.core.input.borrow_mut() = plan;
     }
+
+    pub fn parent_num(&self) -> usize {
+        *self.core.parent_num.borrow()
+    }
+
+    pub fn inc_parent_num(&self) {
+        *self.core.parent_num.borrow_mut() += 1;
+    }
+
+    pub fn dec_parent_num(&self) {
+        *self.core.parent_num.borrow_mut() -= 1;
+    }
 }
 
 impl fmt::Display for LogicalShare {
@@ -98,7 +111,11 @@ impl ColPrunableImpl for LogicalShare {
 }
 
 impl PredicatePushdownImpl for LogicalShare {
-    fn predicate_pushdown_impl(&self, _predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        _predicate: Condition,
+        _ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         unimplemented!()
     }
 }

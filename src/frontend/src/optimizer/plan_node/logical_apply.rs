@@ -24,7 +24,7 @@ use super::{
     PredicatePushdownImpl, ToBatch, ToStream,
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{LogicalFilter, PredicatePushdownRef};
+use crate::optimizer::plan_node::{LogicalFilter, PredicatePushdownCtx, PredicatePushdownRef};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -293,7 +293,11 @@ impl ColPrunableImpl for LogicalApply {
 }
 
 impl PredicatePushdownImpl for LogicalApply {
-    fn predicate_pushdown_impl(&self, mut predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        mut predicate: Condition,
+        ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         let left_col_num = self.left().schema().len();
         let right_col_num = self.right().schema().len();
         let join_type = self.join_type();
@@ -324,8 +328,8 @@ impl PredicatePushdownImpl for LogicalApply {
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);
 
-        let new_left = self.left().predicate_pushdown(left_predicate);
-        let new_right = self.right().predicate_pushdown(right_predicate);
+        let new_left = self.left().predicate_pushdown(left_predicate, ctx);
+        let new_right = self.right().predicate_pushdown(right_predicate, ctx);
 
         let new_apply = LogicalApply::create(
             new_left,

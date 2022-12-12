@@ -24,7 +24,9 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdownImpl, StreamGroupTopN, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::{BatchTopN, ColPrunableRef, LogicalProject, StreamTopN};
+use crate::optimizer::plan_node::{
+    BatchTopN, ColPrunableRef, LogicalProject, PredicatePushdownCtx, StreamTopN,
+};
 use crate::optimizer::property::{Distribution, FieldOrder, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, Condition};
@@ -351,9 +353,13 @@ impl ColPrunableImpl for LogicalTopN {
 }
 
 impl PredicatePushdownImpl for LogicalTopN {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         // filter can not transpose topN
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
 

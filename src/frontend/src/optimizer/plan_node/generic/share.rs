@@ -21,6 +21,7 @@ use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone)]
 pub struct Share<PlanRef> {
+    pub parent_num: RefCell<usize>,
     pub input: RefCell<PlanRef>,
 }
 

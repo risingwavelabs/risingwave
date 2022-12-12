@@ -22,6 +22,7 @@ use super::{
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
+use crate::optimizer::plan_node::PredicatePushdownCtx;
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -255,7 +256,11 @@ impl ColPrunableImpl for LogicalProjectSet {
 }
 
 impl PredicatePushdownImpl for LogicalProjectSet {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         // TODO: predicate pushdown for ProjectSet
         LogicalFilter::create(self.clone().into(), predicate)
     }

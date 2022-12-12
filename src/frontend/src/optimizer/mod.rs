@@ -46,7 +46,7 @@ use self::rule::*;
 use crate::catalog::table_catalog::TableType;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{
-    BatchExchange, ColPrunableRef, PlanNodeType, PredicatePushdownRef,
+    BatchExchange, ColPrunableRef, PlanNodeType, PredicatePushdownCtx, PredicatePushdownRef,
 };
 use crate::optimizer::plan_visitor::has_batch_source;
 use crate::optimizer::property::Distribution;
@@ -209,7 +209,8 @@ impl PlanRoot {
 
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
-        plan = plan.predicate_pushdown(Condition::true_cond());
+        let mut predicate_pushdown_ctx = PredicatePushdownCtx::default();
+        plan = plan.predicate_pushdown(Condition::true_cond(), &mut predicate_pushdown_ctx);
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
@@ -241,7 +242,8 @@ impl PlanRoot {
         }
 
         // Predicate Push-down
-        plan = plan.predicate_pushdown(Condition::true_cond());
+        let mut predicate_pushdown_ctx = PredicatePushdownCtx::default();
+        plan = plan.predicate_pushdown(Condition::true_cond(), &mut predicate_pushdown_ctx);
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
@@ -267,7 +269,8 @@ impl PlanRoot {
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
-        plan = plan.predicate_pushdown(Condition::true_cond());
+        let mut predicate_pushdown_ctx = PredicatePushdownCtx::default();
+        plan = plan.predicate_pushdown(Condition::true_cond(), &mut predicate_pushdown_ctx);
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
@@ -294,7 +297,8 @@ impl PlanRoot {
             ctx.trace("Prune Columns:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
-        plan = plan.predicate_pushdown(Condition::true_cond());
+        let mut predicate_pushdown_ctx = PredicatePushdownCtx::default();
+        plan = plan.predicate_pushdown(Condition::true_cond(), &mut predicate_pushdown_ctx);
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());

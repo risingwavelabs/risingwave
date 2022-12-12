@@ -97,15 +97,27 @@ impl ColPrunableRef for PlanRef {
 }
 
 pub trait PredicatePushdownRef {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef;
+    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef;
 }
 
 impl PredicatePushdownRef for PlanRef {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        if let Some(_logical_share) = self.as_logical_share() {
+    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
+        if let Some(logical_share) = self.as_logical_share() {
+            let parent_has_pushed = ctx.add_predicate(self.id(), predicate.clone());
+            if parent_has_pushed == logical_share.parent_num() {
+                let merge_predicate = ctx
+                    .take_predicate(self.id())
+                    .expect("must have predicate")
+                    .into_iter()
+                    .reduce(|a, b| a.or(b))
+                    .unwrap();
+                let input: PlanRef = logical_share.input();
+                let input = input.predicate_pushdown(merge_predicate, ctx);
+                logical_share.replace_input(input);
+            }
             LogicalFilter::create(self.clone(), predicate)
         } else {
-            self.predicate_pushdown_impl(predicate)
+            self.predicate_pushdown_impl(predicate, ctx)
         }
     }
 }

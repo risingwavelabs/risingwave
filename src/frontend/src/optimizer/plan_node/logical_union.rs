@@ -24,7 +24,7 @@ use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
     generic, BatchHashAgg, BatchUnion, ColPrunableRef, LogicalAgg, LogicalProject, PlanTreeNode,
-    PredicatePushdownRef,
+    PredicatePushdownCtx, PredicatePushdownRef,
 };
 use crate::optimizer::property::{FunctionalDependencySet, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
@@ -110,11 +110,15 @@ impl ColPrunableImpl for LogicalUnion {
 }
 
 impl PredicatePushdownImpl for LogicalUnion {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         let new_inputs = self
             .inputs()
             .iter()
-            .map(|input| input.predicate_pushdown(predicate.clone()))
+            .map(|input| input.predicate_pushdown(predicate.clone(), ctx))
             .collect_vec();
         self.clone_with_inputs(&new_inputs)
     }

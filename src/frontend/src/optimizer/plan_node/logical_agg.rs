@@ -34,7 +34,7 @@ use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
 };
 use crate::optimizer::plan_node::{
-    gen_filter_and_pushdown, BatchSortAgg, ColPrunableRef, LogicalProject,
+    gen_filter_and_pushdown, BatchSortAgg, ColPrunableRef, LogicalProject, PredicatePushdownCtx,
 };
 use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
@@ -828,7 +828,11 @@ impl ColPrunableImpl for LogicalAgg {
 }
 
 impl PredicatePushdownImpl for LogicalAgg {
-    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownCtx,
+    ) -> PlanRef {
         let num_group_key = self.group_key().len();
         let num_agg_calls = self.agg_calls().len();
         assert!(num_group_key + num_agg_calls == self.schema().len());
@@ -841,7 +845,7 @@ impl PredicatePushdownImpl for LogicalAgg {
         // When it is constantly false, pushing is wrong - the old plan returns 0 rows but new one
         // returns 1 row.
         if num_group_key == 0 {
-            return gen_filter_and_pushdown(self, predicate, Condition::true_cond());
+            return gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx);
         }
 
         // If the filter references agg_calls, we can not push it.
@@ -862,7 +866,7 @@ impl PredicatePushdownImpl for LogicalAgg {
         };
         let pushed_predicate = pushed_predicate.rewrite_expr(&mut subst);
 
-        gen_filter_and_pushdown(self, agg_call_pred, pushed_predicate)
+        gen_filter_and_pushdown(self, agg_call_pred, pushed_predicate, ctx)
     }
 }
 

@@ -24,6 +24,8 @@ impl Rule for DagToTreeRule {
         for i in 0..inputs.len() {
             if let Some(logical_share) = inputs[i].as_logical_share() {
                 let logical_share: &LogicalShare = logical_share;
+                // Decrease parent number.
+                logical_share.dec_parent_num();
                 inputs[i] = logical_share.input();
                 has_share = true;
             }
