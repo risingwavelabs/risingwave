@@ -41,7 +41,7 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(let_chains)]
-#![expect(clippy::result_large_err, reason = "FIXME: HummockError is large")]
+// #![expect(clippy::result_large_err, reason = "FIXME: HummockError is large")]
 #![feature(associated_type_bounds)]
 
 pub mod hummock;
