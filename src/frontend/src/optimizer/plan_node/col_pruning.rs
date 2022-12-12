@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use paste::paste;
 
 use super::*;
@@ -31,7 +33,7 @@ pub trait ColPrunableImpl {
     /// When implementing this method for a node, it may require its children to produce additional
     /// columns besides `required_cols`. In this case, it may need to insert a
     /// [`LogicalProject`](super::LogicalProject) above to have a correct schema.
-    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef;
+    fn prune_col_impl(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef;
 }
 
 /// Implements [`ColPrunable`] for batch and streaming node.
@@ -39,7 +41,7 @@ macro_rules! impl_prune_col_impl {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ColPrunableImpl for [<$convention $name>] {
-                fn prune_col_impl(&self, _required_cols: &[usize]) -> PlanRef {
+                fn prune_col_impl(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
                     panic!("column pruning is only allowed on logical plan")
                 }
             })*
@@ -48,3 +50,26 @@ macro_rules! impl_prune_col_impl {
 }
 for_batch_plan_nodes! { impl_prune_col_impl }
 for_stream_plan_nodes! { impl_prune_col_impl }
+
+#[derive(Debug, Clone, Default)]
+pub struct ColumnPruningCtx {
+    share_required_cols_map: HashMap<i32, Vec<Vec<usize>>>,
+}
+
+impl ColumnPruningCtx {
+    pub fn add_required_cols(
+        &mut self,
+        plan_node_id: PlanNodeId,
+        required_cols: Vec<usize>,
+    ) -> usize {
+        self.share_required_cols_map
+            .entry(plan_node_id.0)
+            .and_modify(|e| e.push(required_cols.clone()))
+            .or_insert_with(|| vec![required_cols])
+            .len()
+    }
+
+    pub fn take_required_cols(&mut self, plan_node_id: PlanNodeId) -> Option<Vec<Vec<usize>>> {
+        self.share_required_cols_map.remove(&plan_node_id.0)
+    }
+}

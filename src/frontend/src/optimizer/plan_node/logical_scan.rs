@@ -33,7 +33,8 @@ use crate::expr::{
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
-    BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues, PredicatePushdownCtx,
+    BatchSeqScan, ColumnPruningCtx, LogicalFilter, LogicalProject, LogicalValues,
+    PredicatePushdownCtx,
 };
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
@@ -422,7 +423,7 @@ impl fmt::Display for LogicalScan {
 }
 
 impl ColPrunableImpl for LogicalScan {
-    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
         let output_col_idx: Vec<usize> = required_cols
             .iter()
             .map(|i| self.required_col_idx()[*i])

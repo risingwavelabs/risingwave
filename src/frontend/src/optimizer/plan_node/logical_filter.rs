@@ -25,7 +25,8 @@ use super::{
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{
-    BatchFilter, ColPrunableRef, PredicatePushdownCtx, PredicatePushdownRef, StreamFilter,
+    BatchFilter, ColPrunableRef, ColumnPruningCtx, PredicatePushdownCtx, PredicatePushdownRef,
+    StreamFilter,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -132,7 +133,7 @@ impl fmt::Display for LogicalFilter {
 }
 
 impl ColPrunableImpl for LogicalFilter {
-    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
         let required_cols_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
 
         let mut visitor = CollectInputRef::with_capacity(self.input().schema().len());
@@ -151,7 +152,8 @@ impl ColPrunableImpl for LogicalFilter {
         );
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let filter = LogicalFilter::new(self.input().prune_col(&input_required_cols), predicate);
+        let filter =
+            LogicalFilter::new(self.input().prune_col(&input_required_cols, ctx), predicate);
         if input_required_cols == required_cols {
             filter.into()
         } else {
@@ -261,7 +263,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![2];
-        let plan = filter.prune_col_impl(&required_cols);
+        let plan = filter.prune_col_impl(&required_cols, &mut Default::default());
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
@@ -326,7 +328,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![1, 0];
-        let plan = filter.prune_col_impl(&required_cols);
+        let plan = filter.prune_col_impl(&required_cols, &mut Default::default());
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
@@ -391,7 +393,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = filter.prune_col_impl(&required_cols);
+        let plan = filter.prune_col_impl(&required_cols, &mut Default::default());
 
         // Check the result
         let filter = plan.as_logical_filter().unwrap();

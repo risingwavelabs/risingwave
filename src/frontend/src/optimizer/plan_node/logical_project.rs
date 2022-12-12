@@ -24,7 +24,9 @@ use super::{
     PredicatePushdownImpl, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
-use crate::optimizer::plan_node::{ColPrunableRef, CollectInputRef, PredicatePushdownCtx};
+use crate::optimizer::plan_node::{
+    ColPrunableRef, CollectInputRef, ColumnPruningCtx, PredicatePushdownCtx,
+};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
@@ -164,7 +166,7 @@ impl fmt::Display for LogicalProject {
 }
 
 impl ColPrunableImpl for LogicalProject {
-    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
         let input_col_num = self.input().schema().len();
         let mut input_required_appeared = FixedBitSet::with_capacity(input_col_num);
 
@@ -185,7 +187,7 @@ impl ColPrunableImpl for LogicalProject {
         };
 
         let input_required_cols = input_required_cols.ones().collect_vec();
-        let new_input = self.input().prune_col(&input_required_cols);
+        let new_input = self.input().prune_col(&input_required_cols, ctx);
         let mut mapping = ColIndexMapping::with_remaining_columns(
             &input_required_cols,
             self.input().schema().len(),
@@ -376,7 +378,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = project.prune_col_impl(&required_cols);
+        let plan = project.prune_col_impl(&required_cols, &mut Default::default());
 
         // Check the result
         let project = plan.as_logical_project().unwrap();

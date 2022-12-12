@@ -20,7 +20,7 @@ use super::{
     gen_filter_and_pushdown, BatchLimit, ColPrunableImpl, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdownImpl, ToBatch, ToStream,
 };
-use crate::optimizer::plan_node::{ColPrunableRef, PredicatePushdownCtx};
+use crate::optimizer::plan_node::{ColPrunableRef, ColumnPruningCtx, PredicatePushdownCtx};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
@@ -91,8 +91,8 @@ impl fmt::Display for LogicalLimit {
 }
 
 impl ColPrunableImpl for LogicalLimit {
-    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
-        let new_input = self.input.prune_col(required_cols);
+    fn prune_col_impl(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+        let new_input = self.input.prune_col(required_cols, ctx);
         self.clone_with_input(new_input).into()
     }
 }

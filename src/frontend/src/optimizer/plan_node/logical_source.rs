@@ -24,7 +24,7 @@ use super::{
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::PredicatePushdownCtx;
+use crate::optimizer::plan_node::{ColumnPruningCtx, PredicatePushdownCtx};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 use crate::TableCatalog;
@@ -89,7 +89,7 @@ impl fmt::Display for LogicalSource {
 }
 
 impl ColPrunableImpl for LogicalSource {
-    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }

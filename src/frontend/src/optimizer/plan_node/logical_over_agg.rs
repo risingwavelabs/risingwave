@@ -26,7 +26,7 @@ use super::{
     PredicatePushdownImpl, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
-use crate::optimizer::plan_node::PredicatePushdownCtx;
+use crate::optimizer::plan_node::{ColumnPruningCtx, PredicatePushdownCtx};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
@@ -256,7 +256,7 @@ impl fmt::Display for LogicalOverAgg {
 }
 
 impl ColPrunableImpl for LogicalOverAgg {
-    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }

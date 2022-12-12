@@ -23,7 +23,7 @@ use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunableImpl, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdownImpl, StreamExpand, ToBatch, ToStream,
 };
-use crate::optimizer::plan_node::PredicatePushdownCtx;
+use crate::optimizer::plan_node::{ColumnPruningCtx, PredicatePushdownCtx};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -150,7 +150,7 @@ impl fmt::Display for LogicalExpand {
 }
 
 impl ColPrunableImpl for LogicalExpand {
-    fn prune_col_impl(&self, _required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
         todo!("prune_col of LogicalExpand is not implemented yet.");
     }
 }

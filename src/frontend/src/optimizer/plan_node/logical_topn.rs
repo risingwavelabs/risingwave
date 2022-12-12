@@ -25,7 +25,7 @@ use super::{
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
-    BatchTopN, ColPrunableRef, LogicalProject, PredicatePushdownCtx, StreamTopN,
+    BatchTopN, ColPrunableRef, ColumnPruningCtx, LogicalProject, PredicatePushdownCtx, StreamTopN,
 };
 use crate::optimizer::property::{Distribution, FieldOrder, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
@@ -280,7 +280,7 @@ impl fmt::Display for LogicalTopN {
 }
 
 impl ColPrunableImpl for LogicalTopN {
-    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
         let input_required_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
         let order_required_cols = {
             let mut order_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
@@ -324,7 +324,7 @@ impl ColPrunableImpl for LogicalTopN {
             .iter()
             .map(|group_key| mapping.map(*group_key))
             .collect();
-        let new_input = self.input().prune_col(&input_required_cols);
+        let new_input = self.input().prune_col(&input_required_cols, ctx);
         let top_n = Self::with_group(
             new_input,
             self.limit(),
@@ -433,7 +433,7 @@ mod tests {
             LogicalTopN::with_group(input, 1, 0, false, Order::default(), vec![1]);
         assert_eq!(original_logical.group_key(), &[1]);
 
-        let pruned_node = original_logical.prune_col_impl(&[0, 1, 2]);
+        let pruned_node = original_logical.prune_col_impl(&[0, 1, 2], &mut Default::default());
 
         let pruned_logical = pruned_node.as_logical_top_n().unwrap();
         assert_eq!(pruned_logical.group_key(), &[1]);

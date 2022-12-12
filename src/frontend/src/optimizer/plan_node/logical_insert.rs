@@ -23,7 +23,7 @@ use super::{
     PredicatePushdownImpl, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::optimizer::plan_node::{ColPrunableRef, PredicatePushdownCtx};
+use crate::optimizer::plan_node::{ColPrunableRef, ColumnPruningCtx, PredicatePushdownCtx};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
@@ -128,9 +128,9 @@ impl fmt::Display for LogicalInsert {
 }
 
 impl ColPrunableImpl for LogicalInsert {
-    fn prune_col_impl(&self, _required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, _required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
         let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
-        self.clone_with_input(self.input.prune_col(&required_cols))
+        self.clone_with_input(self.input.prune_col(&required_cols, ctx))
             .into()
     }
 }

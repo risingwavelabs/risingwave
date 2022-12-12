@@ -22,7 +22,7 @@ use super::{
     ColPrunableImpl, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdownImpl, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{PredicatePushdownCtx, StreamShare};
+use crate::optimizer::plan_node::{ColumnPruningCtx, PredicatePushdownCtx, StreamShare};
 use crate::utils::{ColIndexMapping, Condition};
 
 #[derive(Debug, Clone)]
@@ -105,7 +105,7 @@ impl fmt::Display for LogicalShare {
 }
 
 impl ColPrunableImpl for LogicalShare {
-    fn prune_col_impl(&self, _required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
         unimplemented!()
     }
 }

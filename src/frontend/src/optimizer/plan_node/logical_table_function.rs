@@ -22,7 +22,7 @@ use super::{
 };
 use crate::expr::{Expr, TableFunction};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::{BatchTableFunction, PredicatePushdownCtx};
+use crate::optimizer::plan_node::{BatchTableFunction, ColumnPruningCtx, PredicatePushdownCtx};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
@@ -61,7 +61,7 @@ impl fmt::Display for LogicalTableFunction {
 
 // the leaf node don't need colprunable
 impl ColPrunableImpl for LogicalTableFunction {
-    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
         let _ = required_cols;
         self.clone().into()
     }

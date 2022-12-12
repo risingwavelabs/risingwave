@@ -24,7 +24,7 @@ use super::{
 };
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::PredicatePushdownCtx;
+use crate::optimizer::plan_node::{ColumnPruningCtx, PredicatePushdownCtx};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
@@ -75,7 +75,7 @@ impl fmt::Display for LogicalValues {
 }
 
 impl ColPrunableImpl for LogicalValues {
-    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
         let rows = self
             .rows
             .iter()
@@ -162,7 +162,7 @@ mod tests {
         );
 
         let required_cols = vec![0, 2];
-        let pruned = values.prune_col_impl(&required_cols);
+        let pruned = values.prune_col_impl(&required_cols, &mut Default::default());
 
         let values = pruned.as_logical_values().unwrap();
         let rows: &[Vec<ExprImpl>] = values.rows();

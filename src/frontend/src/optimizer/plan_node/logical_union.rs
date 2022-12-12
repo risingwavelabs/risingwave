@@ -23,8 +23,8 @@ use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
-    generic, BatchHashAgg, BatchUnion, ColPrunableRef, LogicalAgg, LogicalProject, PlanTreeNode,
-    PredicatePushdownCtx, PredicatePushdownRef,
+    generic, BatchHashAgg, BatchUnion, ColPrunableRef, ColumnPruningCtx, LogicalAgg,
+    LogicalProject, PlanTreeNode, PredicatePushdownCtx, PredicatePushdownRef,
 };
 use crate::optimizer::property::{FunctionalDependencySet, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
@@ -99,11 +99,11 @@ impl fmt::Display for LogicalUnion {
 }
 
 impl ColPrunableImpl for LogicalUnion {
-    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
         let new_inputs = self
             .inputs()
             .iter()
-            .map(|input| input.prune_col(required_cols))
+            .map(|input| input.prune_col(required_cols, ctx))
             .collect_vec();
         self.clone_with_inputs(&new_inputs)
     }
@@ -320,7 +320,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = union.prune_col_impl(&required_cols);
+        let plan = union.prune_col_impl(&required_cols, &mut Default::default());
 
         // Check the result
         let union = plan.as_logical_union().unwrap();

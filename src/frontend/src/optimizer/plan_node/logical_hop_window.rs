@@ -26,7 +26,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdownImpl, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::InputRef;
-use crate::optimizer::plan_node::{ColPrunableRef, PredicatePushdownCtx};
+use crate::optimizer::plan_node::{ColPrunableRef, ColumnPruningCtx, PredicatePushdownCtx};
 use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -260,7 +260,7 @@ impl fmt::Display for LogicalHopWindow {
 }
 
 impl ColPrunableImpl for LogicalHopWindow {
-    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col_impl(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
         let o2i = self.o2i_col_mapping();
         let input_required_cols = {
             let mut tmp = FixedBitSet::with_capacity(self.schema().len());
@@ -271,7 +271,7 @@ impl ColPrunableImpl for LogicalHopWindow {
             tmp.put(self.core.time_col.index());
             tmp.ones().collect_vec()
         };
-        let input = self.input().prune_col(&input_required_cols);
+        let input = self.input().prune_col(&input_required_cols, ctx);
         let input_change = ColIndexMapping::with_remaining_columns(
             &input_required_cols,
             self.input().schema().len(),
@@ -419,7 +419,7 @@ mod test {
         .into();
         // Perform the prune
         let required_cols = vec![4, 2, 3];
-        let plan = hop_window.prune_col_impl(&required_cols);
+        let plan = hop_window.prune_col_impl(&required_cols, &mut Default::default());
         println!(
             "{}\n{}",
             hop_window.explain_to_string().unwrap(),

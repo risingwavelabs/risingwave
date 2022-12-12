@@ -33,6 +33,7 @@ use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
+use itertools::Itertools;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -81,17 +82,50 @@ pub enum Convention {
 }
 
 pub trait ColPrunableRef {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef;
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef;
 }
 
 impl ColPrunableRef for PlanRef {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        if let Some(_logical_share) = self.as_logical_share() {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+        if let Some(logical_share) = self.as_logical_share() {
+            let parent_has_pushed = ctx.add_required_cols(self.id(), required_cols.into());
+            if parent_has_pushed == logical_share.parent_num() {
+                let merge_require_cols = ctx
+                    .take_required_cols(self.id())
+                    .expect("must have required columns")
+                    .into_iter()
+                    .flat_map(|x| x.into_iter())
+                    .sorted()
+                    .dedup()
+                    .collect_vec();
+                let input: PlanRef = logical_share.input();
+                let input = input.prune_col_impl(&merge_require_cols, ctx);
+                let logical_share: &LogicalShare = logical_share;
+                let exprs = logical_share
+                    .base
+                    .schema()
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, field)| {
+                        if let Some(pos) = merge_require_cols.iter().position(|x| *x == i) {
+                            ExprImpl::InputRef(Box::new(InputRef::new(
+                                pos,
+                                field.data_type.clone(),
+                            )))
+                        } else {
+                            ExprImpl::Literal(Box::new(Literal::new(None, field.data_type.clone())))
+                        }
+                    })
+                    .collect_vec();
+                let project = LogicalProject::create(input, exprs);
+                logical_share.replace_input(project);
+            }
             let mapping =
                 ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
             LogicalProject::with_mapping(self.clone(), mapping).into()
         } else {
-            self.prune_col_impl(required_cols)
+            self.prune_col_impl(required_cols, ctx)
         }
     }
 }
@@ -444,6 +478,7 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 
+use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition};
