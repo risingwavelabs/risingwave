@@ -10,8 +10,7 @@ where	 c_id = o_c_id
     	 and o_entry_d >= '2007-01-02 00:00:00.000000'
     	 and o_entry_d <= ol_delivery_d
     	 and n_nationkey = ascii(substr(c_state,1,1)) - 48
-group by c_id, c_last, c_city, c_phone, n_name
-order by revenue desc;
+group by c_id, c_last, c_city, c_phone, n_name;
 ----
 10	BARBAREING	0	26PP6i0y20yiP4PLmNyP	897-842-8196	PERU
 10	BARBAREING	0	yLk444 LB Rk 222BL	910-889-6085	EGYPT
