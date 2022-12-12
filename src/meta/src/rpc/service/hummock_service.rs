@@ -28,6 +28,7 @@ use crate::hummock::{
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
+use crate::MetaError;
 
 pub struct HummockServiceImpl<S>
 where
@@ -407,7 +408,8 @@ where
             .start_full_gc(Duration::from_secs(
                 request.into_inner().sst_retention_time_sec,
             ))
-            .await?;
+            .await
+            .map_err(MetaError::from)?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 
@@ -518,5 +520,16 @@ where
         self.compactor_manager
             .set_compactor_config(request.context_id, request.config.unwrap().into());
         Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
+    }
+
+    async fn get_scale_compactor(
+        &self,
+        _: Request<GetScaleCompactorRequest>,
+    ) -> Result<Response<GetScaleCompactorResponse>, Status> {
+        let info = self.hummock_manager.get_scale_compactor_info().await;
+        let scale_cores = self.hummock_manager.suggest_compactor_cores(&info);
+        let mut resp: GetScaleCompactorResponse = info.into();
+        resp.suggest_cores = scale_cores;
+        Ok(Response::new(resp))
     }
 }

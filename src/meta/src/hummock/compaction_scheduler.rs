@@ -166,12 +166,14 @@ where
                     break compactor;
                 } else {
                     tracing::debug!("No available compactor, pausing compaction.");
+                    self.hummock_manager.report_scale_compactor_info().await;
                     tokio::select! {
                         _ = self.compaction_resume_notifier.notified() => {},
                         _ = &mut shutdown_rx => {
                             return;
                         }
                     }
+                    self.hummock_manager.report_scale_compactor_info().await;
                 }
             };
 
@@ -196,7 +198,10 @@ where
 
         let cancel_state = match &schedule_status {
             ScheduleStatus::Ok => None,
-            ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
+            ScheduleStatus::NoTask | ScheduleStatus::PickFailure => {
+                self.hummock_manager.report_scale_compactor_info().await;
+                None
+            }
             ScheduleStatus::AssignFailure(task) => {
                 Some((task.clone(), TaskStatus::AssignFailCanceled))
             }

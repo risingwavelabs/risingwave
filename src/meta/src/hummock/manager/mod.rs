@@ -52,8 +52,11 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
-use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCompactionOption};
+use crate::hummock::compaction::{
+    CompactStatus, LocalSelectorStatistic, ManualCompactionOption, ScaleCompactorInfo,
+};
 use crate::hummock::compaction_group::CompactionGroup;
+use crate::hummock::compaction_schedule_policy::ScalePolicy;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
@@ -75,7 +78,6 @@ mod gc;
 #[cfg(test)]
 mod tests;
 mod versioning;
-pub use versioning::HummockVersionSafePoint;
 use versioning::*;
 mod compaction;
 mod worker;
@@ -2157,6 +2159,59 @@ where
 
     pub fn cluster_manager(&self) -> &ClusterManagerRef<S> {
         &self.cluster_manager
+    }
+
+    pub fn suggest_compactor_cores(&self, info: &ScaleCompactorInfo) -> u64 {
+        let mut suggest_core = info.scale_out_cores() + info.total_cores;
+        match self.compactor_manager.suggest_scale_policy() {
+            ScalePolicy::ScaleIn(core) => {
+                if core + info.running_cores < info.total_cores {
+                    suggest_core = info.total_cores - core;
+                } else {
+                    suggest_core = info.total_cores;
+                }
+            }
+            ScalePolicy::NoChange => suggest_core = info.total_cores,
+            ScalePolicy::ScaleOut => (),
+        }
+        suggest_core
+    }
+
+    pub async fn report_scale_compactor_info(&self) {
+        let info = self.get_scale_compactor_info().await;
+        let suggest_core = self.suggest_compactor_cores(&info);
+        self.metrics
+            .scale_compactor_core_num
+            .set(suggest_core as i64);
+        self.metrics
+            .waiting_compaction_bytes
+            .set((info.waiting_compaction_bytes as i64) / 1024);
+    }
+
+    #[named]
+    pub async fn get_scale_compactor_info(&self) -> ScaleCompactorInfo {
+        let total_score_count = self.compactor_manager.max_concurrent_task_number();
+        // TODO: avoid hold compaction lock too long.
+        let compaction = read_lock!(self, compaction).await;
+        let pending_task_count = compaction.compact_task_assignment.len();
+        let version = {
+            let guard = read_lock!(self, versioning).await;
+            guard.current_version.clone()
+        };
+        let mut global_info = ScaleCompactorInfo {
+            total_cores: total_score_count as u64,
+            running_cores: pending_task_count as u64,
+            ..Default::default()
+        };
+        for (group_id, status) in &compaction.compaction_statuses {
+            if let Some(levels) = version.levels.get(group_id) {
+                if let Some(config) = self.compaction_config(*group_id).await {
+                    let info = status.get_compaction_info(levels, config);
+                    global_info.add(&info);
+                }
+            }
+        }
+        global_info
     }
 }
 

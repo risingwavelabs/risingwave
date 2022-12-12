@@ -548,6 +548,7 @@ service HummockManagerService {
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc SetCompactorRuntimeConfig(SetCompactorRuntimeConfigRequest) returns (SetCompactorRuntimeConfigResponse);
+  rpc GetScaleCompactor(GetScaleCompactorRequest) returns (GetScaleCompactorResponse);
 }
 
 message CompactionConfig {
@@ -577,4 +578,14 @@ message TableStats {
 message HummockVersionStats {
   uint64 hummock_version_id = 1;
   map<uint32, TableStats> table_stats = 2;
+}
+
+message GetScaleCompactorRequest {}
+
+message GetScaleCompactorResponse {
+  uint64 suggest_cores = 1;
+  uint64 running_cores = 2;
+  uint64 total_cores = 3;
+  uint64 waiting_compaction_bytes = 4;
+  uint64 pending_compaction_bytes = 5;
 }

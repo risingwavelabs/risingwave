@@ -31,6 +31,7 @@ use risingwave_pb::hummock::{
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use super::compaction_schedule_policy::{CompactionSchedulePolicy, RoundRobinPolicy, ScoredPolicy};
+use crate::hummock::compaction_schedule_policy::ScalePolicy;
 use crate::hummock::error::Result;
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
@@ -178,7 +179,7 @@ impl CompactorManager {
         &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
-        let policy = self.policy.read();
+        let mut policy = self.policy.write();
         policy.next_idle_compactor(compactor_assigned_task_num)
     }
 
@@ -386,6 +387,10 @@ impl CompactorManager {
     /// Return the maximum number of tasks that can be assigned to all compactors.
     pub fn max_concurrent_task_number(&self) -> usize {
         self.policy.read().max_concurrent_task_num()
+    }
+
+    pub fn suggest_scale_policy(&self) -> ScalePolicy {
+        self.policy.read().suggest_scale_policy()
     }
 }
 

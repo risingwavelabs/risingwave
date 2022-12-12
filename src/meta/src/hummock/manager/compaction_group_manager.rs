@@ -106,6 +106,15 @@ impl<S: MetaStore> HummockManager<S> {
             .cloned()
     }
 
+    pub async fn compaction_config(&self, id: CompactionGroupId) -> Option<CompactionConfig> {
+        self.compaction_group_manager
+            .read()
+            .await
+            .compaction_groups
+            .get(&id)
+            .map(|group| group.compaction_config.clone())
+    }
+
     /// Registers `table_fragments` to compaction groups.
     pub async fn register_table_fragments(
         &self,
@@ -722,7 +731,7 @@ mod tests {
     use std::ops::Deref;
 
     use risingwave_common::catalog::{TableId, TableOption};
-    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::meta::table_fragments::Fragment;
 
