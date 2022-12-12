@@ -499,8 +499,9 @@ impl<S: StateStore> StateTable<S> {
 }
 // write
 impl<S: StateStore> StateTable<S> {
-    fn handle_mem_table_error(&self, e: MemTableError) {
-        match e {
+    #[expect(clippy::boxed_local)]
+    fn handle_mem_table_error(&self, e: Box<MemTableError>) {
+        match *e {
             MemTableError::Conflict { key, prev, new } => {
                 let (vnode, key) = deserialize_pk_with_vnode(&key, &self.pk_serde).unwrap();
                 panic!(
