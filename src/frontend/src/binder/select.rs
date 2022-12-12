@@ -314,50 +314,6 @@ impl Binder {
         })
     }
 
-    /// `bind_regclass` binds a select statement that returns a single oid from `pg_class`
-    /// e.g. SELECT oid FROM `pg_class` WHERE relname = 'xxx';
-    pub fn bind_regclass(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
-        let select_items = vec![InputRef::new(PG_CLASS_OID_INDEX, DataType::Int32).into()];
-        let schema = Schema {
-            fields: vec![Field::with_name(
-                DataType::Int32,
-                UNNAMED_COLUMN.to_string(),
-            )],
-        };
-        let input = match input {
-            ExprImpl::Literal(literal) if literal.return_type() == DataType::Varchar => {
-                input.clone()
-            }
-            _ => return Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
-        };
-        let from = Some(self.bind_relation_by_name_inner(
-            Some(PG_CATALOG_SCHEMA_NAME),
-            PG_CLASS_TABLE_NAME,
-            None,
-        )?);
-        let where_clause = Some(
-            FunctionCall::new(
-                ExprType::Equal,
-                vec![
-                    input,
-                    InputRef::new(PG_CLASS_RELNAME_INDEX, DataType::Varchar).into(),
-                ],
-            )?
-            .into(),
-        );
-
-        Ok(BoundSelect {
-            distinct: BoundDistinct::All,
-            select_items,
-            aliases: vec![None],
-            from,
-            where_clause,
-            group_by: vec![],
-            having: None,
-            schema,
-        })
-    }
-
     pub fn iter_bound_columns<'a>(
         column_binding: impl Iterator<Item = &'a ColumnBinding>,
     ) -> (Vec<ExprImpl>, Vec<Option<String>>) {
