@@ -33,10 +33,7 @@ fn is_unimplemented_error(db_error: &str) -> bool {
 /// if there are multiple candidates signatures.
 /// Additionally.
 fn not_unique_error(db_error: &str) -> bool {
-    db_error.contains(
-        "is not unique
-HINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
-    )
+    db_error.contains("Bind error") && db_error.contains("is not unique")
 }
 
 /// Certain errors are permitted to occur. This is because:
