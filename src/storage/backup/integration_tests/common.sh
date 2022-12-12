@@ -68,7 +68,7 @@ function restore() {
   clean_etcd_data
   start_etcd_minio
   "${BACKUP_TEST_PREFIX_BIN}"/backup-restore \
-  --backend etcd \
+  --meta-store-type etcd \
   --meta-snapshot-id "${job_id}" \
   --etcd-endpoints 127.0.0.1:2388 \
   --storage-directory backup \

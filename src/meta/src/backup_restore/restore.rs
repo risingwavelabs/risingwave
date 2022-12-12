@@ -210,7 +210,7 @@ mod tests {
             "restore",
             "--meta-snapshot-id",
             "1",
-            "--backend",
+            "--meta-store-type",
             "mem",
             "--storage-url",
             "memory",
