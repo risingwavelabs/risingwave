@@ -55,6 +55,10 @@ export function backupJobStatusToJSON(object: BackupJobStatus): string {
   }
 }
 
+export interface MetaBackupManifestId {
+  id: number;
+}
+
 export interface BackupMetaRequest {
 }
 
@@ -77,6 +81,28 @@ export interface DeleteMetaSnapshotRequest {
 
 export interface DeleteMetaSnapshotResponse {
 }
+
+function createBaseMetaBackupManifestId(): MetaBackupManifestId {
+  return { id: 0 };
+}
+
+export const MetaBackupManifestId = {
+  fromJSON(object: any): MetaBackupManifestId {
+    return { id: isSet(object.id) ? Number(object.id) : 0 };
+  },
+
+  toJSON(message: MetaBackupManifestId): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MetaBackupManifestId>, I>>(object: I): MetaBackupManifestId {
+    const message = createBaseMetaBackupManifestId();
+    message.id = object.id ?? 0;
+    return message;
+  },
+};
 
 function createBaseBackupMetaRequest(): BackupMetaRequest {
   return {};

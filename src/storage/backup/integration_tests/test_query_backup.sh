@@ -69,7 +69,7 @@ do
 done
 echo "safe epoch after compaction: ${safe_epoch}"
 
-# query with safe_epoch
+echo "query with safe_epoch"
 result=$(
 execute_sql "
 SET QUERY_EPOCH TO ${safe_epoch};
@@ -78,7 +78,7 @@ select * from t1;
 )
 [ -n "${result}" ]
 
-# query with safe_epoch - 1
+echo "query with safe_epoch - 1"
 result=$(
 execute_sql "
 SET QUERY_EPOCH TO $(( safe_epoch - 1 ));
@@ -87,7 +87,7 @@ select * from t1;
 )
 [ -n "${result}" ]
 
-# query with QUERY_EPOCH=0 means use latest epoch
+echo "query with QUERY_EPOCH=0 aka use latest epoch"
 result=$(
 execute_sql "
 SET QUERY_EPOCH TO 0;
@@ -97,7 +97,6 @@ select * from t1;
 [ -n "${result}" ]
 
 echo "query with backup_safe_epoch + 1 < safe_epoch but covered by backup"
-# query with backup_safe_epoch < safe_epoch but covered by backup
 [ $((backup_safe_epoch + 1)) -eq 1 ]
 result=$(
 execute_sql "
@@ -108,7 +107,6 @@ select * from t1;
 [ -n "${result}" ]
 
 echo "query with backup_mce < safe_epoch but covered by backup"
-# query with backup_mce < safe_epoch but covered by backup
 result=$(
 execute_sql "
 SET QUERY_EPOCH TO $((backup_mce));
@@ -118,7 +116,6 @@ select * from t1;
 [ -n "${result}" ]
 
 echo "query with future epoch"
-# query with future epoch
 result=$(
 execute_sql "
 SET QUERY_EPOCH TO 18446744073709551615;

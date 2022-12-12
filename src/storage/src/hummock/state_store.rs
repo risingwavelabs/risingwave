@@ -93,15 +93,17 @@ impl HummockStorage {
     ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
         let pinned_version = self.pinned_version.load();
         let mut committed_version = (**pinned_version).clone();
-        if let Err(e) = validate_epoch(pinned_version.safe_epoch(), epoch) {
-            if e.is_expired_epoch() && let Some(backup_version) = self.backup_reader.try_get_hummock_version(epoch).await? {
+        if epoch < pinned_version.safe_epoch() {
+            // try to query hummock version from backup
+            if let Some(backup_version) = self.backup_reader.try_get_hummock_version(epoch).await {
+                assert!(
+                    epoch <= backup_version.max_committed_epoch()
+                        && epoch >= backup_version.safe_epoch()
+                );
                 committed_version = backup_version;
-                assert!(epoch <= committed_version.max_committed_epoch() && epoch >= committed_version.safe_epoch());
-            } else {
-                return Err(e.into());
             }
         }
-
+        validate_epoch(committed_version.safe_epoch(), epoch)?;
         // check epoch if lower mce
         let read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion) =
             if epoch <= committed_version.max_committed_epoch() {

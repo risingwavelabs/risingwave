@@ -138,27 +138,26 @@ impl BackupReader {
     pub async fn try_get_hummock_version(
         self: &BackupReaderRef,
         epoch: u64,
-    ) -> StorageResult<Option<PinnedVersion>> {
+    ) -> Option<PinnedVersion> {
         // 1. check manifest to locate snapshot, if any.
-        let snapshot = self
+        let snapshot_id = self
             .store
             .manifest()
             .snapshot_metadata
             .iter()
             .find(|v| epoch >= v.safe_epoch && epoch <= v.max_committed_epoch)
-            .cloned();
-        let snapshot_meta = match snapshot {
+            .map(|s| s.id);
+        let snapshot_id = match snapshot_id {
             None => {
-                return Ok(None);
+                return None;
             }
             Some(s) => s,
         };
-        let snapshot_id = snapshot_meta.id;
         // 2. load hummock version of chosen snapshot.
         let future = {
             let mut req_guard = self.inflight_request.lock();
-            if let Some((v, _)) = self.versions.read().get(&snapshot_meta.id) {
-                return Ok(Some(v.clone()));
+            if let Some((v, _)) = self.versions.read().get(&snapshot_id) {
+                return Some(v.clone());
             }
             if let Some(f) = req_guard.get(&snapshot_id) {
                 f.clone()
@@ -181,12 +180,19 @@ impl BackupReader {
                 f
             }
         };
-        let result = future
-            .await
-            .map(Some)
-            .map_err(|e| HummockError::other(e).into());
+        let result = future.await;
         self.inflight_request.lock().remove(&snapshot_id);
-        result
+        match result {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::warn!(
+                    "hummock version from backup {} is not available yet. {}",
+                    snapshot_id,
+                    e
+                );
+                None
+            }
+        }
     }
 }
 

@@ -4,11 +4,11 @@ set -eo pipefail
 [ -n "${BACKUP_TEST_PREFIX_DATA}" ]
 
 function stop_cluster() {
-  cargo make k || true
+  cargo make k 1>/dev/null 2>&1 || true
 }
 
 function clean_all_data {
-  cargo make clean-data
+  cargo make clean-data 1>/dev/null 2>&1
 }
 
 function clean_etcd_data() {
