@@ -20,8 +20,6 @@
 
 
 use rand::Rng;
-use risingwave_common::row::Row2;
-
 
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Statement,
