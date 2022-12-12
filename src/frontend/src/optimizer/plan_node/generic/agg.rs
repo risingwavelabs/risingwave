@@ -27,8 +27,8 @@ use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePro
 use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::Direction;
-use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, IndexRewriter};
 use crate::TableCatalog;
@@ -148,7 +148,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                             include_keys: Vec<usize>|
          -> MaterializedInputState {
             let mut internal_table_catalog_builder =
-                TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
+                TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
             let mut included_upstream_indices = vec![]; // all upstream indices that are included in the state table
             let mut column_mapping = BTreeMap::new(); // key: upstream col idx, value: table col idx
@@ -202,7 +202,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 
         let gen_table_state = |agg_kind: AggKind| -> TableState {
             let mut internal_table_catalog_builder =
-                TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
+                TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
             let mut included_upstream_indices = vec![];
             for &idx in &self.group_key {
@@ -325,7 +325,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         let out_fields = me.schema().fields();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
         for field in out_fields.iter() {
             let tb_column_idx = internal_table_catalog_builder.add_column(field);
             if tb_column_idx < self.group_key.len() {

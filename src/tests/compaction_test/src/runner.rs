@@ -131,6 +131,11 @@ async fn start_meta_node(listen_addr: String, config_path: String) {
         "--config-path",
         &config_path,
     ]);
+    let config = load_config(&opts.config_path);
+    assert!(
+        config.meta.enable_compaction_deterministic,
+        "enable_compaction_deterministic should be set"
+    );
     risingwave_meta::start(opts).await
 }
 
@@ -586,7 +591,7 @@ async fn open_hummock_iters(
                 range.clone(),
                 epoch,
                 ReadOptions {
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     table_id: TableId { table_id },
                     retention_seconds: None,
                     check_bloom_filter: false,

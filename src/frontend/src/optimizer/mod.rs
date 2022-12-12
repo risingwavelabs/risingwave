@@ -23,10 +23,11 @@ mod plan_correlated_id_finder;
 mod plan_rewriter;
 mod plan_visitor;
 pub use plan_visitor::PlanVisitor;
+mod optimizer_context;
 mod rule;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
+pub use optimizer_context::*;
 use property::Order;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -42,6 +43,7 @@ use self::plan_visitor::{
 };
 use self::property::RequiredDist;
 use self::rule::*;
+use crate::catalog::table_catalog::TableType;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
 use crate::optimizer::plan_visitor::has_batch_source;
@@ -203,6 +205,14 @@ impl PlanRoot {
             .into());
         }
 
+        // Predicate push down before translate apply, because we need to calculate the domain
+        // and predicate push down can reduce the size of domain.
+        plan = plan.predicate_pushdown(Condition::true_cond());
+        if explain_trace {
+            ctx.trace("Predicate Push Down:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
         // join.
@@ -216,10 +226,10 @@ impl PlanRoot {
             plan,
             "General Unnesting(Push Down Apply)".to_string(),
             vec![
-                ApplyAggRule::create(),
-                ApplyFilterRule::create(),
-                ApplyProjRule::create(),
-                ApplyJoinRule::create(),
+                ApplyAggTransposeRule::create(),
+                ApplyFilterTransposeRule::create(),
+                ApplyProjectTransposeRule::create(),
+                ApplyJoinTransposeRule::create(),
                 ApplyScanRule::create(),
             ],
             ApplyOrder::TopDown,
@@ -485,6 +495,7 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a create materialize view plan.
+    #[allow(clippy::too_many_arguments)]
     pub fn gen_materialize_plan(
         &mut self,
         mv_name: String,
@@ -493,6 +504,7 @@ impl PlanRoot {
         handle_pk_conflict: bool,
         enable_dml: bool,
         row_id_index: Option<usize>,
+        table_type: TableType,
     ) -> Result<StreamMaterialize> {
         let out_names = if let Some(col_names) = col_names {
             col_names
@@ -529,6 +541,8 @@ impl PlanRoot {
             false,
             definition,
             handle_pk_conflict,
+            row_id_index,
+            table_type,
         )
     }
 
@@ -545,6 +559,8 @@ impl PlanRoot {
             true,
             "".into(),
             false,
+            None,
+            TableType::Index,
         )
     }
 
@@ -567,6 +583,10 @@ impl PlanRoot {
             false,
             definition,
             false,
+            None,
+            // NOTE(Yuanxin): We set the table type as default here because this is irrelevant to
+            // sink's plan generating.
+            TableType::default(),
         )
         .map(|plan| plan.rewrite_into_sink(properties))
     }
@@ -583,8 +603,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_as_subplan() {

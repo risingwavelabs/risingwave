@@ -25,9 +25,9 @@ use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2;
 use crate::optimizer::property::{Distribution, FieldOrder};
-use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -245,7 +245,7 @@ impl HashJoin {
 
         // Build internal table
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
         let internal_columns_fields = schema.fields().to_vec();
 
         internal_columns_fields.iter().for_each(|field| {
@@ -258,7 +258,7 @@ impl HashJoin {
 
         // Build degree table.
         let mut degree_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
 
         let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
