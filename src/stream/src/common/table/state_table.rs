@@ -451,7 +451,7 @@ impl<S: StateStore> StateTable<S> {
                 let read_options = ReadOptions {
                     prefix_hint: None,
                     check_bloom_filter: !key_indices.is_empty()
-                        && self.pk_prefix_len <= key_indices.len(),
+                        && self.pk_prefix_len == key_indices.len(),
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,
@@ -988,7 +988,7 @@ impl<S: StateStore> StateTable<S> {
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
         let prefix_hint = {
-            if self.pk_prefix_len > pk_prefix.len() {
+            if self.pk_prefix_len > pk_prefix.len() || pk_prefix.is_empty(){
                 None
             } else {
                 let encoded_prefix_len = self
