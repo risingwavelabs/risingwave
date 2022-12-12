@@ -1,5 +1,6 @@
-query IIIIII rowsort
-select * from ch_benchmark_q1;
+query IIIIII
+select * from ch_benchmark_q1
+order by ol_number;
 ----
          1    1500     403719 5       1346         300
          2    1500     454030 5       1513         300

@@ -1,5 +1,6 @@
-query ITTITTTT rowsort
-select * from ch_benchmark_q2;
+query ITTITTTT
+select * from ch_benchmark_q2
+order by n_name, su_name, i_id;
 ----
     89 'Supplier#000000089 BELGIUM 89 'gPn6AxPJ5@8e7g' 'aUp9ybcZNZjsZ6' 99-605-832-1401 nic epitaphs need to detect always inside the blithely silent sauternes ? daringly final warthogs
     44 'Supplier#000000044 GERMANY 44 '@E?0iafYnGEtp2AyfX' 'xdbOUNuXJI' 54-723-607-1939 ldly final tithes should have to snooze regularly instead of the idly fu

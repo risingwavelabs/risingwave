@@ -16,5 +16,4 @@ where c_id = o_c_id
 	 and n_regionkey = r_regionkey
 	 and r_name = 'EUROPE'
 	 and o_entry_d >= '2007-01-02 00:00:00.000000'
-group by n_name
-order by revenue desc;
+group by n_name;

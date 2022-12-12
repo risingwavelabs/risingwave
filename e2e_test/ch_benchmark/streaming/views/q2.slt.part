@@ -20,5 +20,4 @@ where 	 i_id = s_i_id
 	 and i_data like '%s%'
 	 and r_name like 'EUROP%'
 	 and i_id=m_i_id
-	 and s_quantity = m_s_quantity
-order by n_name, su_name, i_id;
+	 and s_quantity = m_s_quantity;

@@ -1,5 +1,6 @@
-query II rowsort
-select * from ch_benchmark_q5;
+query II
+select * from ch_benchmark_q5
+order by revenue desc;
 ----
 ITALY           281346
 UNITED KINGDOM  187124

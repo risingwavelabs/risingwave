@@ -1,5 +1,6 @@
-query II rowsort
-select * from ch_benchmark_q4;
+query II
+select * from ch_benchmark_q4
+order by o_ol_cnt;
 ----
         5          36
         6          29
