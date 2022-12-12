@@ -13,7 +13,8 @@
 // limitations under the License.
 
 pub mod my_stats;
-pub mod process_linux;
+pub mod process_local;
+pub mod process_prometheus;
 pub mod rwlock;
 
 use prometheus::core::{
@@ -22,6 +23,14 @@ use prometheus::core::{
 use prometheus::{Histogram, HistogramVec};
 
 use crate::monitor::my_stats::MyHistogram;
+
+#[cfg(target_os = "linux")]
+static PAGESIZE: std::sync::LazyLock<i64> =
+    std::sync::LazyLock::new(|| unsafe { libc::sysconf(libc::_SC_PAGESIZE) });
+
+#[cfg(target_os = "linux")]
+static CLOCK_TICK: std::sync::LazyLock<u64> =
+    std::sync::LazyLock::new(|| unsafe { libc::sysconf(libc::_SC_CLK_TCK) as u64 });
 
 /// Define extension method `print` used in `print_statistics`.
 pub trait Print {
