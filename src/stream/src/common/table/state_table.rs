@@ -499,7 +499,7 @@ impl<S: StateStore> StateTable<S> {
 }
 // write
 impl<S: StateStore> StateTable<S> {
-    #[expect(boxed_local)]
+    #[expect(clippy::boxed_local)]
     fn handle_mem_table_error(&self, e: Box<MemTableError>) {
         match *e {
             MemTableError::Conflict { key, prev, new } => {

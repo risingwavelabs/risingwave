@@ -110,7 +110,6 @@ async fn nexmark_q4_materialize_agg() -> Result<()> {
 }
 
 #[madsim::test]
-#[ignore = "there's some problem for scaling nexmark source"]
 async fn nexmark_q4_source() -> Result<()> {
     nexmark_q4_common(vec![identity_contains("source: \"bid\"")]).await
 }
