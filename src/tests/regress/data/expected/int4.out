@@ -318,13 +318,13 @@ SELECT (2 + 2) / 2 AS two;
 (1 row)
 
 -- corner case
-SELECT (-1::int4<<31)::text;
+SELECT (-1::int4<<31)::text AS text;
     text     
 -------------
  -2147483648
 (1 row)
 
-SELECT ((-1::int4<<31)+1)::text;
+SELECT ((-1::int4<<31)+1)::text AS text;
     text     
 -------------
  -2147483647

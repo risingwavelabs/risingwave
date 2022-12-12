@@ -332,3 +332,12 @@
                 | └─LogicalScan { table: a, columns: [a.a1] }
                 └─LogicalProject { exprs: [b.b1, b.b1] }
                   └─LogicalScan { table: b, output_columns: [b.b1], required_columns: [b1], predicate: IsNotNull(b.b1) }
+- name: test subquery in join on condition
+  sql: |
+    create table a (v1 int, v2 int);
+    create table b (v1 int, v2 int);
+    create table c (v1 int, v2 int);
+    select * from a left outer join b on a.v1 = b.v1 and a.v2 = (select v2 from c where v1 = 1 limit 1);
+  planner_error: |-
+    Feature is not yet implemented: Subquery in join on condition is unsupported
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
