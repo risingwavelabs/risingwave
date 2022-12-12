@@ -44,9 +44,9 @@ pub enum FilterKeyExtractorImpl {
 
 impl FilterKeyExtractorImpl {
     pub fn from_table(table_catalog: &Table) -> Self {
-        let pk_prefix_len = table_catalog.get_prefix_len() as usize;
+        let pk_prefix_len = table_catalog.get_pk_prefix_len_hint() as usize;
 
-        if pk_prefix_len == 0 {
+        if pk_prefix_len == 0 || pk_prefix_len > table_catalog.get_pk().len() {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
             FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor::default())
@@ -125,7 +125,7 @@ pub struct SchemaFilterKeyExtractor {
     /// Prefix key length can be decoded through its `DataType` and `OrderType` which obtained from
     /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
     /// from storage key.
-    prefix_len: usize,
+    prefix_hint_len: usize,
     deserializer: OrderedRowSerde,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
     // prefix_key)
@@ -142,17 +142,15 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
-        if self.prefix_len <= pk.len() {
-            let bloom_filter_key_len = self
-                .deserializer
-                .deserialize_prefix_len(pk, self.prefix_len)
-                .unwrap();
+        // todo(wcy-fdu): fix
 
-            let end_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + bloom_filter_key_len;
-            &full_key[TABLE_PREFIX_LEN + VirtualNode::SIZE..end_position]
-        } else {
-            &[]
-        }
+        let bloom_filter_key_len = self
+            .deserializer
+            .deserialize_prefix_len(pk, self.prefix_hint_len)
+            .unwrap();
+
+        let end_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + bloom_filter_key_len;
+        &full_key[TABLE_PREFIX_LEN + VirtualNode::SIZE..end_position]
     }
 }
 
@@ -164,7 +162,7 @@ impl SchemaFilterKeyExtractor {
             .map(|col_order| col_order.index as usize)
             .collect();
 
-        let prefix_len = table_catalog.prefix_len as usize;
+        let prefix_hint_len = table_catalog.pk_prefix_len_hint as usize;
 
         let data_types = pk_indices
             .iter()
@@ -183,7 +181,7 @@ impl SchemaFilterKeyExtractor {
             .collect();
 
         Self {
-            prefix_len,
+            prefix_hint_len,
             deserializer: OrderedRowSerde::new(data_types, order_types),
         }
     }
@@ -358,7 +356,8 @@ mod tests {
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_pb::catalog::Table as ProstTable;
+    use risingwave_pb::catalog::table::TableType;
+    use risingwave_pb::catalog::{ColumnIndex, Table as ProstTable};
     use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
     use tokio::task;
 
@@ -385,11 +384,11 @@ mod tests {
 
     fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
         ProstTable {
-            is_index: false,
             id: 0,
             schema_id: 0,
             database_id: 0,
             name: "test".to_string(),
+            table_type: TableType::Table as i32,
             columns: vec![
                 ProstColumnCatalog {
                     column_desc: Some(
@@ -458,18 +457,19 @@ mod tests {
             dependent_relations: vec![],
             distribution_key: (0..column_count as i32).collect_vec(),
             optional_associated_source_id: None,
-            appendonly: false,
+            append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: HashMap::from([(
                 String::from(PROPERTIES_RETENTION_SECOND_KEY),
                 String::from("300"),
             )]),
             fragment_id: 0,
-            vnode_col_idx: None,
+            vnode_col_index: None,
+            row_id_index: Some(ColumnIndex { index: 0 }),
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,
-            prefix_len: 1,
+            pk_prefix_len_hint: 1,
         }
     }
 

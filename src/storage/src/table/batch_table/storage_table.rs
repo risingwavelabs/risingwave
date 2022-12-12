@@ -90,6 +90,8 @@ pub struct StorageTable<S: StateStore> {
 
     /// Used for catalog table_properties
     table_option: TableOption,
+
+    prefix_hint_len: usize,
 }
 
 impl<S: StateStore> std::fmt::Debug for StorageTable<S> {
@@ -114,6 +116,7 @@ impl<S: StateStore> StorageTable<S> {
         distribution: Distribution,
         table_options: TableOption,
         value_indices: Vec<usize>,
+        prefix_hint_len: usize,
     ) -> Self {
         Self::new_inner(
             store,
@@ -125,6 +128,7 @@ impl<S: StateStore> StorageTable<S> {
             distribution,
             table_options,
             value_indices,
+            prefix_hint_len,
         )
     }
 
@@ -147,6 +151,7 @@ impl<S: StateStore> StorageTable<S> {
             Distribution::fallback(),
             Default::default(),
             value_indices,
+            0,
         )
     }
 }
@@ -166,6 +171,7 @@ impl<S: StateStore> StorageTable<S> {
         }: Distribution,
         table_option: TableOption,
         value_indices: Vec<usize>,
+        prefix_hint_len: usize,
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
 
@@ -198,6 +204,7 @@ impl<S: StateStore> StorageTable<S> {
             dist_key_in_pk_indices,
             vnodes,
             table_option,
+            prefix_hint_len,
         }
     }
 
@@ -237,14 +244,10 @@ impl<S: StateStore> StorageTable<S> {
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         assert!(pk.len() <= self.pk_indices.len());
-        let key_indices = (0..pk.len())
-            .into_iter()
-            .map(|index| self.pk_indices[index])
-            .collect_vec();
 
         let read_options = ReadOptions {
             prefix_hint: None,
-            check_bloom_filter: false,
+            check_bloom_filter: !pk.is_empty() && self.prefix_hint_len <= pk.len(),
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
@@ -309,7 +312,7 @@ impl<S: StateStore> StorageTable<S> {
             let prefix_hint = prefix_hint.clone();
             let wait_epoch = wait_epoch.clone();
             async move {
-                let check_bloom_filter = false;
+                let check_bloom_filter = prefix_hint.is_some();
                 let read_options = ReadOptions {
                     prefix_hint,
                     check_bloom_filter,
@@ -422,7 +425,7 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
 
-        let prefix_hint = if !pk_prefix.is_empty() {
+        let prefix_hint = if !pk_prefix.is_empty() && self.prefix_hint_len <= pk_prefix.len() {
             let encoded_prefix = if let Bound::Included(start_key) = start_key.as_ref() {
                 start_key
             } else {

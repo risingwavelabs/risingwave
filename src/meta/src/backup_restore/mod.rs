@@ -17,31 +17,8 @@
 mod backup_manager;
 pub use backup_manager::*;
 mod error;
-mod meta_snapshot;
-mod storage;
-pub use storage::*;
+mod meta_snapshot_builder;
+mod restore;
 mod utils;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::{HummockSstableId, HummockVersionId};
-use risingwave_pb::hummock::HummockVersion;
-use serde::{Deserialize, Serialize};
 
-pub type MetaSnapshotId = u64;
-
-/// `MetaSnapshotMetadata` is metadata of `MetaSnapshot`.
-#[derive(Serialize, Deserialize, Clone)]
-pub struct MetaSnapshotMetadata {
-    pub id: MetaSnapshotId,
-    pub hummock_version_id: HummockVersionId,
-    pub ssts: Vec<HummockSstableId>,
-}
-
-impl MetaSnapshotMetadata {
-    pub fn new(id: MetaSnapshotId, v: &HummockVersion) -> Self {
-        Self {
-            id,
-            hummock_version_id: v.id,
-            ssts: v.get_sst_ids(),
-        }
-    }
-}
+pub use restore::*;

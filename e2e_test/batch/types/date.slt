@@ -7,63 +7,53 @@ SET RW_IMPLICIT_FLUSH TO true;
 statement ok
 CREATE TABLE dates(i DATE);
 
-statement error 
+statement error
 INSERT INTO dates VALUES ('blabla');
 
 # month out of range
-
-statement error 
+statement error
 INSERT INTO dates VALUES ('1993-20-14');
 
 # day out of range
-
-statement error 
+statement error
 INSERT INTO dates VALUES ('1993-08-99');
 
 # day out of range because not a leapyear
-
-statement error 
+statement error
 INSERT INTO dates VALUES ('1993-02-29');
 
 # day out of range because not a leapyear
-
-statement error 
+statement error
 INSERT INTO dates VALUES ('1900-02-29');
 
 # day in range because of leapyear
-
 statement ok
 INSERT INTO dates VALUES ('1992-02-29');
 
 # day in range because of leapyear
-
 statement ok
 INSERT INTO dates VALUES ('2000-02-29');
 
 # test incorrect date formats
 # dd-mm-YYYY
-
-statement error 
+statement error
 INSERT INTO dates VALUES ('02-02-1992');
 
 # different separators are not supported
-
-statement error 
+statement error
 INSERT INTO dates VALUES ('1900a01a01');
 
 # this works in postgres but we don't support it for now
 # for reasons of performance and maintainability in datetime parsing libraries.
 # in particular, the use of speedate. see https://github.com/risingwavelabs/risingwave/pull/5367
-
-statement error 
+statement error
 INSERT INTO dates VALUES ('1900-1-1');
 
 # out of range dates
-
-statement error 
+statement error
 INSERT INTO dates VALUES ('-100000000-01-01');
 
-statement error 
+statement error
 INSERT INTO dates VALUES ('1000000000-01-01');
 
 statement ok

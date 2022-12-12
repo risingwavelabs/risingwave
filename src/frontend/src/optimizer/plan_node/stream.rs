@@ -271,8 +271,8 @@ impl HashJoin {
         degree_table_catalog_builder
             .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
 
-        internal_table_catalog_builder.set_pk_prefix_len(join_key_len);
-        degree_table_catalog_builder.set_pk_prefix_len(join_key_len);
+        internal_table_catalog_builder.set_pk_prefix_len_hint(join_key_len);
+        degree_table_catalog_builder.set_pk_prefix_len_hint(join_key_len);
 
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),

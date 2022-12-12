@@ -38,11 +38,12 @@ pub struct TableDesc {
     pub stream_key: Vec<usize>,
 
     /// Whether the table source is append-only
-    pub appendonly: bool,
+    pub append_only: bool,
 
     pub retention_seconds: u32,
 
     pub value_indices: Vec<usize>,
+    pub prefix_hint_len: usize,
 }
 
 impl TableDesc {
@@ -70,6 +71,7 @@ impl TableDesc {
             dist_key_indices: self.distribution_key.iter().map(|&k| k as u32).collect(),
             retention_seconds: self.retention_seconds,
             value_indices: self.value_indices.iter().map(|&v| v as u32).collect(),
+            prefix_hint_len_hint: self.prefix_hint_len as u32,
         }
     }
 

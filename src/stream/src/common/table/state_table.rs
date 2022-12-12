@@ -89,7 +89,7 @@ pub struct StateTable<S: StateStore> {
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
 
-    pk_prefix_len: usize,
+    prefix_hint_len: usize,
 
     /// Virtual nodes that the table is partitioned into.
     ///
@@ -177,13 +177,14 @@ impl<S: StateStore> StateTable<S> {
             },
             None => Distribution::fallback(),
         };
-        let vnode_col_idx_in_pk = table_catalog
-            .vnode_col_idx
-            .as_ref()
-            .and_then(|vnode_col_idx| {
-                let vnode_col_idx = vnode_col_idx.index as usize;
-                pk_indices.iter().position(|&i| vnode_col_idx == i)
-            });
+        let vnode_col_idx_in_pk =
+            table_catalog
+                .vnode_col_index
+                .as_ref()
+                .and_then(|vnode_col_idx| {
+                    let vnode_col_idx = vnode_col_idx.index as usize;
+                    pk_indices.iter().position(|&i| vnode_col_idx == i)
+                });
         let input_value_indices = table_catalog
             .value_indices
             .iter()
@@ -204,7 +205,7 @@ impl<S: StateStore> StateTable<S> {
             true => None,
             false => Some(input_value_indices),
         };
-        let pk_prefix_len = table_catalog.prefix_len as usize;
+        let prefix_hint_len = table_catalog.pk_prefix_len_hint as usize;
         Self {
             table_id,
             mem_table: MemTable::new(),
@@ -214,7 +215,7 @@ impl<S: StateStore> StateTable<S> {
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
             dist_key_in_pk_indices,
-            pk_prefix_len,
+            prefix_hint_len,
             vnodes,
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
             disable_sanity_check: false,
@@ -307,7 +308,7 @@ impl<S: StateStore> StateTable<S> {
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
-            pk_prefix_len: 0,
+            prefix_hint_len: 0,
             vnodes,
             table_option: Default::default(),
             disable_sanity_check: false,
@@ -451,7 +452,7 @@ impl<S: StateStore> StateTable<S> {
                 let read_options = ReadOptions {
                     prefix_hint: None,
                     check_bloom_filter: !key_indices.is_empty()
-                        && self.pk_prefix_len == key_indices.len(),
+                        && self.prefix_hint_len <= key_indices.len(),
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,
@@ -988,12 +989,12 @@ impl<S: StateStore> StateTable<S> {
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
         let prefix_hint = {
-            if self.pk_prefix_len > pk_prefix.len() || pk_prefix.is_empty() {
+            if self.prefix_hint_len > pk_prefix.len() || pk_prefix.is_empty() {
                 None
             } else {
                 let encoded_prefix_len = self
                     .pk_serde
-                    .deserialize_prefix_len(&encoded_prefix, self.pk_prefix_len)?;
+                    .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
 
                 Some(encoded_prefix[..encoded_prefix_len].to_vec())
             }

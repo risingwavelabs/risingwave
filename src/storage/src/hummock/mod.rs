@@ -20,8 +20,9 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use risingwave_common::{catalog::TableId, hash::VirtualNode};
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
