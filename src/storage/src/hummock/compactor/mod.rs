@@ -220,7 +220,7 @@ impl Compactor {
             need_quota
         );
 
-        let multi_filter = build_multi_compaction_filter(&compact_task);
+        let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
         let multi_filter_key_extractor = context
             .filter_key_extractor_manager
@@ -241,6 +241,7 @@ impl Compactor {
         let delete_range_agg = match CompactorRunner::build_delete_range_iter(
             &compact_task,
             &compactor_context.sstable_store,
+            &mut multi_filter,
         )
         .await
         {

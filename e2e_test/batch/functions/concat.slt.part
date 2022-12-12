@@ -31,7 +31,7 @@ select concat(1, 1.01, 'A', true, NULL);
 ----
 11.01At
 
-statement error 
+statement error
 select concat();
 
 statement ok
