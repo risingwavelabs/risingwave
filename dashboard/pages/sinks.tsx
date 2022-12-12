@@ -15,9 +15,18 @@
  *
  */
 
-import { Relations } from "../components/Relations"
-import { getMaterializedViews } from "./api/streaming"
+import { Column, Relations } from "../components/Relations"
+import { Sink } from "../proto/gen/catalog"
+import { getSinks } from "./api/streaming"
 
-export default function MaterializedViews() {
-  return Relations("Materialized Views", getMaterializedViews)
+export default function Sinks() {
+  const columns: Column<Sink>[] = [
+    {
+      name: "Connector",
+      width: 3,
+      content: (r) => r.properties.connector ?? "unknown",
+    },
+  ]
+
+  return Relations("Sinks", getSinks, columns)
 }

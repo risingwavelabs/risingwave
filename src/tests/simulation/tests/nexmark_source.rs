@@ -41,7 +41,7 @@ async fn nexmark_source() -> Result<()> {
     macro_rules! reschedule {
         () => {
             let fragments = cluster
-                .locate_fragments(vec![identity_contains("StreamSource")])
+                .locate_fragments([identity_contains("StreamSource")])
                 .await?;
             assert_eq!(fragments.len(), 3);
             for fragment in fragments {

@@ -421,17 +421,17 @@ impl Compose for GrafanaConfig {
         let config_root = Path::new(&config.config_directory);
         std::fs::write(
             config_root.join("grafana.ini"),
-            &GrafanaGen.gen_custom_ini(self),
+            GrafanaGen.gen_custom_ini(self),
         )?;
 
         std::fs::write(
             config_root.join("grafana-risedev-datasource.yml"),
-            &GrafanaGen.gen_datasource_yml(self)?,
+            GrafanaGen.gen_datasource_yml(self)?,
         )?;
 
         std::fs::write(
             config_root.join("grafana-risedev-dashboard.yml"),
-            &GrafanaGen.gen_dashboard_yml(self, config_root, "/")?,
+            GrafanaGen.gen_dashboard_yml(self, config_root, "/")?,
         )?;
 
         let service = ComposeService {
