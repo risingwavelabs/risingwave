@@ -270,6 +270,19 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         }
     }
 
+    fn append_n(&mut self, n: usize, value: Option<T>) {
+        match value {
+            Some(x) => {
+                self.bitmap.append_n(n, true);
+                self.data.extend(std::iter::repeat(x).take(n));
+            }
+            None => {
+                self.bitmap.append_n(n, false);
+                self.data.extend(std::iter::repeat(T::default()).take(n));
+            }
+        }
+    }
+
     fn append_array(&mut self, other: &PrimitiveArray<T>) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);

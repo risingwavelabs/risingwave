@@ -112,6 +112,19 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
         self.append(None)
     }
 
+    /// Append a value multiple times.
+    ///
+    /// This may be more efficient than calling `append` multiple times.
+    fn append_n(
+        &mut self,
+        n: usize,
+        value: Option<<<Self as ArrayBuilder>::ArrayType as Array>::RefItem<'_>>,
+    ) {
+        for _ in 0..n {
+            self.append(value);
+        }
+    }
+
     /// Append an array to builder.
     fn append_array(&mut self, other: &Self::ArrayType);
 

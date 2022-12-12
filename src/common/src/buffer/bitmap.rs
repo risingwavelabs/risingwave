@@ -47,9 +47,6 @@ pub struct BitmapBuilder {
     len: usize,
     data: Vec<u8>,
     num_high_bits: usize,
-
-    /// `head` is 'dirty' bitmap data and will be flushed to `self.data` when `self.len % 8 != 0`.
-    head: u8,
 }
 
 impl BitmapBuilder {
@@ -58,23 +55,21 @@ impl BitmapBuilder {
             len: 0,
             data: Vec::with_capacity((capacity + 7) / 8),
             num_high_bits: 0,
-            head: 0,
         }
     }
 
     pub fn zeroed(len: usize) -> BitmapBuilder {
         BitmapBuilder {
             len,
-            data: vec![0; len / 8],
+            data: vec![0; (len + 7) / 8],
             num_high_bits: 0,
-            head: 0,
         }
     }
 
     pub fn set(&mut self, n: usize, val: bool) {
         assert!(n < self.len);
 
-        let byte = self.data.get_mut(n / 8).unwrap_or(&mut self.head);
+        let byte = &mut self.data[n / 8];
         let mask = 1 << (n % 8);
         match (*byte & mask > 0, val) {
             (true, false) => {
@@ -91,19 +86,31 @@ impl BitmapBuilder {
 
     pub fn is_set(&self, n: usize) -> bool {
         assert!(n < self.len);
-
-        let byte = self.data.get(n / 8).unwrap_or(&self.head);
+        let byte = &self.data[n / 8];
         let mask = 1 << (n % 8);
         *byte & mask != 0
     }
 
     pub fn append(&mut self, bit_set: bool) -> &mut Self {
-        self.head |= (bit_set as u8) << (self.len % 8);
+        if self.len % 8 == 0 {
+            self.data.push(0);
+        }
+        self.data[self.len / 8] |= (bit_set as u8) << (self.len % 8);
         self.num_high_bits += bit_set as usize;
         self.len += 1;
-        if self.len % 8 == 0 {
-            self.data.push(self.head);
-            self.head = 0;
+        self
+    }
+
+    pub fn append_n(&mut self, mut n: usize, bit_set: bool) -> &mut Self {
+        while self.len % 8 != 0 {
+            self.append(bit_set);
+            n -= 1;
+        }
+        self.len += n;
+        self.data
+            .resize((self.len + 7) / 8, if bit_set { 0xFF } else { 0x00 });
+        if bit_set {
+            self.num_high_bits += n;
         }
         self
     }
@@ -112,33 +119,30 @@ impl BitmapBuilder {
         if self.len == 0 {
             return None;
         }
-        let mut rem = self.len % 8;
-        if rem == 0 {
-            self.head = self.data.pop().unwrap();
-            rem = 8;
-        }
-        self.head &= !(1 << (rem - 1));
         self.len -= 1;
+        self.data.truncate((self.len + 7) / 8);
         Some(())
     }
 
     pub fn append_bitmap(&mut self, other: &Bitmap) -> &mut Self {
-        for bit in other.iter() {
-            self.append(bit);
+        if self.len % 8 == 0 {
+            // self is aligned, so just append the bytes
+            self.len += other.len();
+            self.data.extend_from_slice(&other.bits);
+            self.num_high_bits += other.num_high_bits;
+        } else {
+            for bit in other.iter() {
+                self.append(bit);
+            }
         }
         self
     }
 
-    pub fn finish(mut self) -> Bitmap {
-        if self.len % 8 != 0 {
-            self.data.push(self.head);
-        }
-        let num_high_bits = self.num_high_bits;
-
+    pub fn finish(self) -> Bitmap {
         Bitmap {
             num_bits: self.len(),
             bits: self.data.into(),
-            num_high_bits,
+            num_high_bits: self.num_high_bits,
         }
     }
 
