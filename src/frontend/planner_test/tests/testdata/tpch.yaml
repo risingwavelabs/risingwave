@@ -1128,21 +1128,22 @@
     BatchExchange { order: [nation.n_name ASC, nation.n_name ASC, Extract('YEAR':Varchar, lineitem.l_shipdate) ASC], dist: Single }
     └─BatchSort { order: [nation.n_name ASC, nation.n_name ASC, Extract('YEAR':Varchar, lineitem.l_shipdate) ASC] }
       └─BatchHashAgg { group_key: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate)], aggs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
-        └─BatchProject { exprs: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
-          └─BatchLookupJoin { type: Inner, predicate: customer.c_nationkey = nation.n_nationkey AND (((nation.n_name = 'ROMANIA':Varchar) AND (nation.n_name = 'IRAN':Varchar)) OR ((nation.n_name = 'IRAN':Varchar) AND (nation.n_name = 'ROMANIA':Varchar))), output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, nation.n_name] }
-            └─BatchExchange { order: [], dist: UpstreamHashShard(customer.c_nationkey) }
-              └─BatchLookupJoin { type: Inner, predicate: orders.o_custkey = customer.c_custkey, output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, customer.c_nationkey] }
-                └─BatchExchange { order: [], dist: UpstreamHashShard(orders.o_custkey) }
-                  └─BatchLookupJoin { type: Inner, predicate: lineitem.l_orderkey = orders.o_orderkey, output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, orders.o_custkey] }
-                    └─BatchExchange { order: [], dist: UpstreamHashShard(lineitem.l_orderkey) }
-                      └─BatchLookupJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name] }
-                        └─BatchExchange { order: [], dist: UpstreamHashShard(supplier.s_nationkey) }
-                          └─BatchHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate] }
-                            ├─BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
-                            | └─BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
-                            └─BatchExchange { order: [], dist: HashShard(lineitem.l_suppkey) }
-                              └─BatchFilter { predicate: (lineitem.l_shipdate >= '1983-01-01':Varchar::Date) AND (lineitem.l_shipdate <= '2000-12-31':Varchar::Date) }
-                                └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: HashShard(nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate)) }
+          └─BatchProject { exprs: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
+            └─BatchLookupJoin { type: Inner, predicate: customer.c_nationkey = nation.n_nationkey AND (((nation.n_name = 'ROMANIA':Varchar) AND (nation.n_name = 'IRAN':Varchar)) OR ((nation.n_name = 'IRAN':Varchar) AND (nation.n_name = 'ROMANIA':Varchar))), output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, nation.n_name] }
+              └─BatchExchange { order: [], dist: UpstreamHashShard(customer.c_nationkey) }
+                └─BatchLookupJoin { type: Inner, predicate: orders.o_custkey = customer.c_custkey, output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, customer.c_nationkey] }
+                  └─BatchExchange { order: [], dist: UpstreamHashShard(orders.o_custkey) }
+                    └─BatchLookupJoin { type: Inner, predicate: lineitem.l_orderkey = orders.o_orderkey, output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, orders.o_custkey] }
+                      └─BatchExchange { order: [], dist: UpstreamHashShard(lineitem.l_orderkey) }
+                        └─BatchLookupJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name] }
+                          └─BatchExchange { order: [], dist: UpstreamHashShard(supplier.s_nationkey) }
+                            └─BatchHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate] }
+                              ├─BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
+                              | └─BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+                              └─BatchExchange { order: [], dist: HashShard(lineitem.l_suppkey) }
+                                └─BatchFilter { predicate: (lineitem.l_shipdate >= '1983-01-01':Varchar::Date) AND (lineitem.l_shipdate <= '2000-12-31':Varchar::Date) }
+                                  └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], pk_columns: [supp_nation, cust_nation, l_year] }
     └─StreamProject { exprs: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
@@ -2710,12 +2711,13 @@
     BatchExchange { order: [count(partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], dist: Single }
     └─BatchSort { order: [count(partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC] }
       └─BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(partsupp.ps_suppkey)] }
-        └─BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [] }
-          └─BatchLookupJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey AND Like(supplier.s_comment, '%Customer%Complaints%':Varchar), output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
-            └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_suppkey) }
-              └─BatchLookupJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey AND (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32), output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size] }
-                └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_partkey) }
-                  └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+        └─BatchExchange { order: [], dist: HashShard(part.p_brand, part.p_type, part.p_size) }
+          └─BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [] }
+            └─BatchLookupJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey AND Like(supplier.s_comment, '%Customer%Complaints%':Varchar), output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
+              └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_suppkey) }
+                └─BatchLookupJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey AND (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32), output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size] }
+                  └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_partkey) }
+                    └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
   stream_plan: |
     StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], pk_columns: [p_brand, p_type, p_size], order_descs: [supplier_cnt, p_brand, p_type, p_size] }
     └─StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey)] }
