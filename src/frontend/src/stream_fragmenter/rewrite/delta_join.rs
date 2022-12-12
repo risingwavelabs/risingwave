@@ -330,5 +330,6 @@ fn infer_internal_table_catalog(
     }
     internal_table_catalog_builder.set_pk_prefix_len_hint(distribution_key.len());
 
+    // TODO: give the real look-up keys
     internal_table_catalog_builder.build(distribution_key)
 }
