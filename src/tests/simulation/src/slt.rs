@@ -58,6 +58,30 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                     (false, false, false)
                 };
             // we won't kill during insert/update/delete/flush since the atomicity is not guaranteed
+            if is_write {
+                if !kill {
+                    if let Err(e) = tester.run_async(record).await {
+                        panic!("{}", e);
+                    }
+                } else {
+                    for i in 0usize.. {
+                        let delay = Duration::from_secs(1 << i);
+                        match tester.run_async(record.clone()).await {
+                            Ok(_) => break,
+                            // cluster could be still under recovering if killed before, retry if
+                            // meets `Get source table id not exists`.
+                            Err(e) if !e.to_string().contains("not exists") || i >= 5 => {
+                                panic!("failed to run test after retry {i} times: {e}")
+                            }
+                            Err(e) => {
+                                tracing::error!("failed to run test: {e}\nretry after {delay:?}")
+                            }
+                        }
+                        tokio::time::sleep(delay).await;
+                    }
+                }
+                continue;
+            }
             if !kill || is_write {
                 match tester.run_async(record).await {
                     Ok(_) => continue,
