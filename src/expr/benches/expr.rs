@@ -155,4 +155,32 @@ fn bench_raw(c: &mut Criterion) {
                 .try_collect::<_, Vec<_>, Error>()
         })
     });
+    // ~3100ns
+    c.bench_function(
+        "raw/add/Option<i32>/zip_eq,checked,cast,collect_array",
+        |bencher| {
+            let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
+            let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
+            enum Error {
+                Overflow,
+                Cast,
+            }
+            #[allow(clippy::useless_conversion)]
+            fn checked_add(a: i32, b: i32) -> Result<i32, Error> {
+                let a: i32 = a.try_into().map_err(|_| Error::Cast)?;
+                let b: i32 = b.try_into().map_err(|_| Error::Cast)?;
+                a.checked_add(b).ok_or(Error::Overflow)
+            }
+            bencher.iter(|| {
+                use itertools::Itertools;
+                a.iter()
+                    .zip(b.iter())
+                    .map(|(a, b)| match (a, b) {
+                        (Some(a), Some(b)) => checked_add(*a, *b).map(Some),
+                        _ => Ok(None),
+                    })
+                    .try_collect::<_, I32Array, Error>()
+            })
+        },
+    );
 }
