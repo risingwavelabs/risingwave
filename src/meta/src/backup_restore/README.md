@@ -17,5 +17,5 @@ backup-restore <options, see -h for detail>
 
 ### Caveat
 The meta service backup/recovery procedure **doesn't** replicate SSTs in object store. 
-So always make sure the underlying SST object store is writable to at most one cluster.
+So always make sure the underlying SST object store is writable to at most one running cluster at any time.
 Otherwise, the SST object store will face the risk of data corruption.
