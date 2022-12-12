@@ -93,14 +93,13 @@ impl RowIdGenExecutor {
         #[for_await]
         for msg in upstream {
             let msg = msg?;
-            if let Message::Chunk(chunk0) = msg {
+            if let Message::Chunk(chunk) = msg {
                 // For chunk message, we fill the row id column and then yield it.
-                let (ops, mut columns, bitmap) = chunk0.into_inner();
+                let (ops, mut columns, bitmap) = chunk.into_inner();
                 columns[self.row_id_index] = self
                     .gen_row_id_column_by_op(&columns[self.row_id_index], &ops)
                     .await;
-                let chunk1 = StreamChunk::new(ops, columns, bitmap);
-                yield Message::Chunk(chunk1);
+                yield Message::Chunk(StreamChunk::new(ops, columns, bitmap));
             } else {
                 // For barrier message or watermark message, we just yield it.
                 yield msg;
