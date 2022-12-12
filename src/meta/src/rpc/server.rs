@@ -58,8 +58,8 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
 use crate::storage::{
-    EtcdMetaStore, EtcdRefreshClient as EtcdClient, MemStore, MetaStore, MetaStoreError,
-    Transaction,
+    EtcdMetaStore, MemStore, MetaStore, MetaStoreError, Transaction,
+    WrappedEtcdClient as EtcdClient,
 };
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::{hummock, MetaResult};
@@ -108,10 +108,10 @@ pub async fn rpc_serve(
         } => {
             let mut options = ConnectOptions::default()
                 .with_keep_alive(Duration::from_secs(3), Duration::from_secs(5));
-            if let Some((username, password)) = credentials {
+            if let Some((username, password)) = &credentials {
                 options = options.with_user(username, password)
             }
-            let client = EtcdClient::connect(endpoints, Some(options))
+            let client = EtcdClient::connect(endpoints, Some(options), credentials.is_some())
                 .await
                 .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));

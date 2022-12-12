@@ -21,7 +21,7 @@ use etcd_client::{
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
-use crate::storage::EtcdRefreshClient;
+use crate::storage::WrappedEtcdClient;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -31,11 +31,11 @@ const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 10;
 
 #[derive(Clone)]
 pub struct EtcdRetryClient {
-    client: EtcdRefreshClient,
+    client: WrappedEtcdClient,
 }
 
 impl EtcdRetryClient {
-    pub fn new(client: EtcdRefreshClient) -> Self {
+    pub fn new(client: WrappedEtcdClient) -> Self {
         Self { client }
     }
 

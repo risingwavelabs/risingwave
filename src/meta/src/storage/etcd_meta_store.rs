@@ -23,7 +23,7 @@ use tokio::sync::Mutex;
 
 use super::{Key, MetaStore, MetaStoreError, MetaStoreResult, Snapshot, Transaction, Value};
 use crate::storage::etcd_retry_client::EtcdRetryClient as KvClient;
-use crate::storage::EtcdRefreshClient;
+use crate::storage::WrappedEtcdClient;
 
 impl From<EtcdError> for MetaStoreError {
     fn from(err: EtcdError) -> Self {
@@ -176,7 +176,7 @@ impl Snapshot for EtcdSnapshot {
 }
 
 impl EtcdMetaStore {
-    pub fn new(client: EtcdRefreshClient) -> Self {
+    pub fn new(client: WrappedEtcdClient) -> Self {
         Self {
             client: KvClient::new(client),
         }

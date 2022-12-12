@@ -20,6 +20,73 @@ use etcd_client::{
 };
 use tokio::sync::RwLock;
 
+/// `WrappedEtcdClient` is a wrapper around `etcd_client::Client` that used by meta store.
+#[derive(Clone)]
+pub enum WrappedEtcdClient {
+    Raw(etcd_client::Client),
+    EnableRefresh(EtcdRefreshClient),
+}
+
+impl WrappedEtcdClient {
+    pub async fn connect(
+        endpoints: Vec<String>,
+        options: Option<ConnectOptions>,
+        auth_enabled: bool,
+    ) -> Result<Self> {
+        let client = etcd_client::Client::connect(&endpoints, options.clone()).await?;
+        if auth_enabled {
+            Ok(Self::EnableRefresh(EtcdRefreshClient {
+                inner: Arc::new(RwLock::new(ClientWithVersion::new(client, 0))),
+                endpoints,
+                options,
+            }))
+        } else {
+            Ok(Self::Raw(client))
+        }
+    }
+
+    pub async fn get(
+        &self,
+        key: impl Into<Vec<u8>> + Clone,
+        opts: Option<GetOptions>,
+    ) -> Result<GetResponse> {
+        match self {
+            Self::Raw(client) => client.kv_client().get(key, opts).await,
+            Self::EnableRefresh(client) => client.get(key, opts).await,
+        }
+    }
+
+    pub async fn put(
+        &self,
+        key: impl Into<Vec<u8>> + Clone,
+        value: impl Into<Vec<u8>> + Clone,
+        opts: Option<PutOptions>,
+    ) -> Result<PutResponse> {
+        match self {
+            Self::Raw(client) => client.kv_client().put(key, value, opts).await,
+            Self::EnableRefresh(client) => client.put(key, value, opts).await,
+        }
+    }
+
+    pub async fn delete(
+        &self,
+        key: impl Into<Vec<u8>> + Clone,
+        opts: Option<DeleteOptions>,
+    ) -> Result<DeleteResponse> {
+        match self {
+            Self::Raw(client) => client.kv_client().delete(key, opts).await,
+            Self::EnableRefresh(client) => client.delete(key, opts).await,
+        }
+    }
+
+    pub async fn txn(&self, txn: Txn) -> Result<TxnResponse> {
+        match self {
+            Self::Raw(client) => client.kv_client().txn(txn).await,
+            Self::EnableRefresh(client) => client.txn(txn).await,
+        }
+    }
+}
+
 struct ClientWithVersion {
     client: etcd_client::Client,
     // to avoid duplicate update.
@@ -34,7 +101,7 @@ impl ClientWithVersion {
 
 /// Asynchronous `etcd` client using v3 API, wrapped with a refresh logic. Since the `etcd` client
 /// doesn't provide any token refresh apis like golang library, we have to implement it ourselves:
-/// https://github.com/etcdv3/etcd-client/issues/45.
+/// (support token refresh for long-live clients)[https://github.com/etcdv3/etcd-client/issues/45].
 ///
 /// The client will re-connect to etcd when An `Unauthenticated` error is encountered with message
 /// "invalid auth token". The token used for authentication will be refreshed.
@@ -92,7 +159,7 @@ impl EtcdRefreshClient {
             (
                 inner
                     .client
-                    .to_owned()
+                    .kv_client()
                     .get(key.clone(), options.clone())
                     .await,
                 inner.version,
@@ -100,8 +167,8 @@ impl EtcdRefreshClient {
         };
         if let Err(err) = &resp && Self::should_refresh(err) {
             self.try_refresh_conn(version).await?;
-            let inner = self.inner.read().await;
-            inner.client.to_owned().get(key, options).await
+            let mut client = self.inner.read().await.client.kv_client();
+            client.get(key, options).await
         } else {
             resp
         }
@@ -119,7 +186,7 @@ impl EtcdRefreshClient {
             (
                 inner
                     .client
-                    .to_owned()
+                    .kv_client()
                     .put(key.clone(), value.clone(), options.clone())
                     .await,
                 inner.version,
@@ -127,8 +194,8 @@ impl EtcdRefreshClient {
         };
         if let Err(err) = &resp && Self::should_refresh(err) {
             self.try_refresh_conn(version).await?;
-            let inner = self.inner.read().await;
-            inner.client.to_owned().put(key, value, options).await
+            let mut client = self.inner.read().await.client.kv_client();
+            client.put(key, value, options).await
         } else {
             resp
         }
@@ -145,7 +212,7 @@ impl EtcdRefreshClient {
             (
                 inner
                     .client
-                    .to_owned()
+                    .kv_client()
                     .delete(key.clone(), options.clone())
                     .await,
                 inner.version,
@@ -153,8 +220,7 @@ impl EtcdRefreshClient {
         };
         if let Err(err) = &resp && Self::should_refresh(err) {
             self.try_refresh_conn(version).await?;
-            let inner = self.inner.read().await;
-            inner.client.to_owned().delete(key, options).await
+            self.inner.read().await.client.kv_client().delete(key, options).await
         } else {
             resp
         }
@@ -165,14 +231,13 @@ impl EtcdRefreshClient {
         let (resp, version) = {
             let inner = self.inner.read().await;
             (
-                inner.client.to_owned().txn(txn.clone()).await,
+                inner.client.kv_client().txn(txn.clone()).await,
                 inner.version,
             )
         };
         if let Err(err) = &resp && Self::should_refresh(err) {
             self.try_refresh_conn(version).await?;
-            let inner = self.inner.read().await;
-            inner.client.to_owned().txn(txn).await
+            self.inner.read().await.client.kv_client().txn(txn).await
         } else {
             resp
         }
