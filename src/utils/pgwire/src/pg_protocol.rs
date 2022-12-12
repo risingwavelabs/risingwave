@@ -24,7 +24,6 @@ use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
 use futures::Stream;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
-use risingwave_sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
 use tracing::log::trace;
@@ -317,18 +316,18 @@ where
             target: "pgwire_query_log",
             "(simple query)receive query: {}", sql);
 
+        // Split statements into one statement.
+        let stmts: Vec<&str> = sql.split(';').collect();
         let session = self.session.clone().unwrap();
-
-        // Parse sql.
-        let stmts = Parser::parse_sql(sql)
-            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
-            .map_err(|err| PsqlError::ParseError(err.into()))?;
 
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
+            if stmt.is_empty() {
+                continue;
+            }
             let session = session.clone();
             let mut res = session
-                .run_one_query(stmt, false)
+                .run_statement(stmt, false)
                 .await
                 .map_err(|err| PsqlError::QueryError(err))?;
 

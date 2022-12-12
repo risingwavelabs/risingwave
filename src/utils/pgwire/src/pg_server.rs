@@ -18,7 +18,6 @@ use std::result::Result;
 use std::sync::Arc;
 
 use futures::Stream;
-use risingwave_sqlparser::ast::Statement;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tracing::debug;
@@ -58,12 +57,6 @@ where
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
-        format: bool,
-    ) -> Result<PgResponse<VS>, BoxedError>;
-
-    async fn run_one_query(
-        self: Arc<Self>,
-        sql: Statement,
         format: bool,
     ) -> Result<PgResponse<VS>, BoxedError>;
 
@@ -173,9 +166,7 @@ mod tests {
 
     use crate::pg_field_descriptor::PgFieldDescriptor;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
-    use crate::pg_server::{
-        pg_serve, BoxedError, Session, SessionId, SessionManager, UserAuthenticator,
-    };
+    use crate::pg_server::{pg_serve, Session, SessionId, SessionManager, UserAuthenticator};
     use crate::types::Row;
 
     struct MockSessionManager {}
@@ -236,14 +227,6 @@ mod tests {
                     len
                 ],
             ))
-        }
-
-        async fn run_one_query(
-            self: Arc<Self>,
-            _sql: Statement,
-            _format: bool,
-        ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
-            unreachable!()
         }
 
         fn user_authenticator(&self) -> &UserAuthenticator {
