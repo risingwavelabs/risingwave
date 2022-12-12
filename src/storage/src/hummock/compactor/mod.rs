@@ -33,7 +33,7 @@ pub use compaction_filter::{
 };
 pub use context::{CompactorContext, Context};
 use futures::future::try_join_all;
-use futures::{stream, StreamExt, TryFutureExt};
+use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
@@ -737,25 +737,23 @@ impl Compactor {
 
             let tracker_cloned = task_progress.clone();
             let context_cloned = self.context.clone();
-            upload_join_handles.push(
-                upload_join_handle
-                    .map_err(HummockError::sstable_upload_error)
-                    .and_then(move |upload_result| async move {
-                        upload_result?;
-                        if let Some(tracker) = tracker_cloned {
-                            tracker.inc_ssts_uploaded();
-                        }
-                        if context_cloned.is_share_buffer_compact {
-                            context_cloned
-                                .stats
-                                .shared_buffer_to_sstable_size
-                                .observe(sst_size as _);
-                        } else {
-                            context_cloned.stats.compaction_upload_sst_counts.inc();
-                        }
-                        Ok(())
-                    }),
-            );
+            upload_join_handles.push(async move {
+                let _ = upload_join_handle
+                    .await
+                    .map_err(HummockError::sstable_upload_error)??;
+                if let Some(tracker) = tracker_cloned {
+                    tracker.inc_ssts_uploaded();
+                }
+                if context_cloned.is_share_buffer_compact {
+                    context_cloned
+                        .stats
+                        .shared_buffer_to_sstable_size
+                        .observe(sst_size as _);
+                } else {
+                    context_cloned.stats.compaction_upload_sst_counts.inc();
+                }
+                Ok::<_, HummockError>(())
+            });
         }
 
         // Check if there are any failed uploads. Report all of those SSTs.
