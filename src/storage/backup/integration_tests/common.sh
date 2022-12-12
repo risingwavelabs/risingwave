@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eo pipefail
-[ -n "${PREFIX_BIN}" ]
-[ -n "${PREFIX_DATA}" ]
+[ -n "${BACKUP_TEST_PREFIX_BIN}" ]
+[ -n "${BACKUP_TEST_PREFIX_DATA}" ]
 
 function stop_cluster() {
   cargo make k || true
@@ -16,7 +16,7 @@ function clean_etcd_data() {
 }
 
 function start_cluster() {
-  cargo make d meta-backup-test
+  cargo make d ci-meta-backup-test
 }
 
 function wait_cluster_ready() {
@@ -32,7 +32,7 @@ function full_gc_sst() {
 }
 
 function start_etcd_minio() {
-  cargo make d meta-backup-test-restore
+  cargo make d ci-meta-backup-test-restore
 }
 
 function create_mvs() {
@@ -67,7 +67,7 @@ function restore() {
   stop_cluster
   clean_etcd_data
   start_etcd_minio
-  "${PREFIX_BIN}"/backup-restore \
+  "${BACKUP_TEST_PREFIX_BIN}"/backup-restore \
   --backend etcd \
   --meta-snapshot-id "${job_id}" \
   --etcd-endpoints 127.0.0.1:2388 \
@@ -76,5 +76,5 @@ function restore() {
 }
 
 function get_total_sst_count() {
-  find "${PREFIX_DATA}/minio/hummock001" -type f -name "*.data" |wc -l
+  find "${BACKUP_TEST_PREFIX_DATA}/minio/hummock001" -type f -name "*.data" |wc -l
 }

@@ -535,8 +535,8 @@ risedev:
       - use: frontend
       - use: compactor
 
-  meta-backup-test:
-    config-path: src/config/meta-backup-test.toml
+  ci-meta-backup-test:
+    config-path: src/config/ci-meta-backup-test.toml
     steps:
       - use: etcd
       - use: minio
@@ -545,8 +545,8 @@ risedev:
       - use: frontend
       - use: compactor
 
-  meta-backup-test-restore:
-    config-path: src/config/meta-backup-test.toml
+  ci-meta-backup-test-restore:
+    config-path: src/config/ci-meta-backup-test.toml
     steps:
       - use: etcd
       - use: minio
