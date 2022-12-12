@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod etcd_meta_store;
+mod etcd_refresh_client;
 mod etcd_retry_client;
 mod mem_meta_store;
 pub mod meta_store;
@@ -25,6 +26,7 @@ pub type Key = Vec<u8>;
 pub type Value = Vec<u8>;
 
 pub use etcd_meta_store::*;
+pub use etcd_refresh_client::*;
 pub use mem_meta_store::*;
 pub use meta_store::*;
 pub use transaction::*;

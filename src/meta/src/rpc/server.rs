@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use etcd_client::{Client as EtcdClient, ConnectOptions};
+use etcd_client::ConnectOptions;
 use prost::Message;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::bail;
@@ -57,7 +57,10 @@ use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
-use crate::storage::{EtcdMetaStore, MemStore, MetaStore, MetaStoreError, Transaction};
+use crate::storage::{
+    EtcdMetaStore, EtcdRefreshClient as EtcdClient, MemStore, MetaStore, MetaStoreError,
+    Transaction,
+};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::{hummock, MetaResult};
 

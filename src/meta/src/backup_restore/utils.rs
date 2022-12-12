@@ -15,14 +15,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use etcd_client::{Client as EtcdClient, ConnectOptions};
+use etcd_client::ConnectOptions;
 use risingwave_backup::error::BackupResult;
 use risingwave_backup::storage::{BackupStorageRef, ObjectStoreMetaSnapshotStorage};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::backup_restore::RestoreOpts;
-use crate::storage::{EtcdMetaStore, MemStore};
+use crate::storage::{EtcdMetaStore, EtcdRefreshClient as EtcdClient, MemStore};
 use crate::{Backend, MetaStoreBackend};
 
 #[derive(Clone)]

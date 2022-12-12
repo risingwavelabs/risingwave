@@ -16,10 +16,12 @@ use std::iter::{Map, Take};
 use std::time::Duration;
 
 use etcd_client::{
-    DeleteOptions, DeleteResponse, Error, GetOptions, GetResponse, KvClient, PutOptions,
-    PutResponse, Txn, TxnResponse,
+    DeleteOptions, DeleteResponse, Error, GetOptions, GetResponse, PutOptions, PutResponse, Txn,
+    TxnResponse,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
+
+use crate::storage::EtcdRefreshClient;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -29,11 +31,11 @@ const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 10;
 
 #[derive(Clone)]
 pub struct EtcdRetryClient {
-    client: KvClient,
+    client: EtcdRefreshClient,
 }
 
 impl EtcdRetryClient {
-    pub fn new(client: KvClient) -> Self {
+    pub fn new(client: EtcdRefreshClient) -> Self {
         Self { client }
     }
 
@@ -60,14 +62,14 @@ impl EtcdRetryClient {
 impl EtcdRetryClient {
     #[inline]
     pub async fn get(
-        &mut self,
+        &self,
         key: impl Into<Vec<u8>> + Clone,
         options: Option<GetOptions>,
     ) -> Result<GetResponse> {
         tokio_retry::RetryIf::spawn(
             Self::get_retry_strategy(),
             || async {
-                let mut client = self.client.clone();
+                let client = &self.client;
                 client.get(key.clone(), options.clone()).await
             },
             Self::should_retry,
@@ -85,7 +87,7 @@ impl EtcdRetryClient {
         tokio_retry::RetryIf::spawn(
             Self::get_retry_strategy(),
             || async {
-                let mut client = self.client.clone();
+                let client = &self.client;
                 client
                     .put(key.clone(), value.clone(), options.clone())
                     .await
@@ -104,7 +106,7 @@ impl EtcdRetryClient {
         tokio_retry::RetryIf::spawn(
             Self::get_retry_strategy(),
             || async {
-                let mut client = self.client.clone();
+                let client = &self.client;
                 client.delete(key.clone(), options.clone()).await
             },
             Self::should_retry,
@@ -117,7 +119,7 @@ impl EtcdRetryClient {
         tokio_retry::RetryIf::spawn(
             Self::get_retry_strategy(),
             || async {
-                let mut client = self.client.clone();
+                let client = &self.client;
                 client.txn(txn.clone()).await
             },
             Self::should_retry,
