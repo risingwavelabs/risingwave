@@ -121,8 +121,7 @@ fn bench_raw(c: &mut Criterion) {
         struct Overflow;
         bencher.iter(|| {
             use itertools::Itertools;
-            a.iter()
-                .zip(b.iter())
+            itertools::Itertools::zip_eq(a.iter(), b.iter())
                 .map(|(a, b)| match (a, b) {
                     (Some(a), Some(b)) => a.checked_add(*b).ok_or(Overflow).map(Some),
                     _ => Ok(None),
@@ -146,8 +145,7 @@ fn bench_raw(c: &mut Criterion) {
         }
         bencher.iter(|| {
             use itertools::Itertools;
-            a.iter()
-                .zip(b.iter())
+            itertools::Itertools::zip_eq(a.iter(), b.iter())
                 .map(|(a, b)| match (a, b) {
                     (Some(a), Some(b)) => checked_add(*a, *b).map(Some),
                     _ => Ok(None),
@@ -173,8 +171,7 @@ fn bench_raw(c: &mut Criterion) {
             }
             bencher.iter(|| {
                 use itertools::Itertools;
-                a.iter()
-                    .zip(b.iter())
+                itertools::Itertools::zip_eq(a.iter(), b.iter())
                     .map(|(a, b)| match (a, b) {
                         (Some(a), Some(b)) => checked_add(*a, *b).map(Some),
                         _ => Ok(None),
