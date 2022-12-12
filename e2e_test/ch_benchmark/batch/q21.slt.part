@@ -1,4 +1,4 @@
-query TT rowsort
+query TT
 select	 su_name, count(*) as numwait
 from	 supplier, orderline l1, orders, stock, nation
 where	 ol_o_id = o_id

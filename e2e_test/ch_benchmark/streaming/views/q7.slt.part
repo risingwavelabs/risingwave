@@ -2,7 +2,7 @@ statement ok
 create materialized view ch_benchmark_q7 as
 select	 su_nationkey as supp_nation,
 	 substr(c_state,1,1) as cust_nation,
-	 extract(year from o_entry_d::timestamp),
+	 extract(year from o_entry_d::timestamp) as l_year,
 	 round(sum(ol_amount)::decimal, 0) as revenue
 from	 supplier, stock, orderline, orders, customer, nation n1, nation n2
 where	 ol_supply_w_id = s_w_id

@@ -1,4 +1,4 @@
-query ITRTTT rowsort
+query ITRTTT
 select * from ch_benchmark_q10;
 ----
 11 BAROUGHTBAR     85951 'IS6er8GXNN@S0qjKD'    9582373478797248 ROMANIA

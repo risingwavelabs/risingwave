@@ -1,4 +1,4 @@
-query TT rowsort
+query TT
 select	 su_name, su_address
 from	 supplier, nation
 where	 su_suppkey in

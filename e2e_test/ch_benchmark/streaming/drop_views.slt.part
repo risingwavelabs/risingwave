@@ -19,8 +19,8 @@ drop materialized view ch_benchmark_q6;
 statement ok
 drop materialized view ch_benchmark_q7;
 
-statement ok
-drop materialized view ch_benchmark_q8;
+#statement ok
+#drop materialized view ch_benchmark_q8;
 
 statement ok
 drop materialized view ch_benchmark_q9;

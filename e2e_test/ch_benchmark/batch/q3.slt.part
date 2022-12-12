@@ -1,4 +1,4 @@
-query IIIIT rowsort
+query IIIIT
 select ol_o_id, ol_w_id, ol_d_id, round(sum(ol_amount)::decimal, 0) as revenue, o_entry_d 
 from customer, neworder, orders, orderline 
 where 
@@ -13,7 +13,8 @@ where
     and ol_o_id = o_id 
     and o_entry_d > '2007-01-02 00:00:00.000000' 
     -- and c_state like '%a%' 
-group by ol_o_id, ol_w_id, ol_d_id, o_entry_d order by revenue desc, o_entry_d;
+group by ol_o_id, ol_w_id, ol_d_id, o_entry_d 
+order by revenue desc, o_entry_d;
 ----
 23       1       6   81327 2022-12-12 19:29:02
 24       1       9   78537 2022-12-12 19:29:02

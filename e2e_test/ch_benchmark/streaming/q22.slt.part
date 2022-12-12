@@ -1,4 +1,4 @@
-query TIR rowsort
+query TIR
 select * from ch_benchmark_q22;
 ----
 2             1      70777

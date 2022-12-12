@@ -1,4 +1,4 @@
-query ITTR rowsort
+query ITTR
 select	 su_nationkey as supp_nation,
 	 substr(c_state,1,1) as cust_nation,
 	 extract(year from o_entry_d::timestamp),
@@ -39,25 +39,25 @@ order by su_nationkey, cust_nation, extract(year from o_entry_d::timestamp);
  76 O                2022       0
  79 7                2022    9943
  79 8                2022       0
- 79 b                2022    3141
  79 B                2022       0
+ 79 F                2022       0
+ 79 H                2022       0
+ 79 K                2022       0
+ 79 N                2022       0
+ 79 Q                2022       0
+ 79 R                2022    3563
+ 79 U                2022       0
+ 79 V                2022       0
+ 79 b                2022    3141
  79 c                2022       0
  79 e                2022       0
  79 f                2022       0
- 79 F                2022       0
  79 g                2022    5956
- 79 H                2022       0
  79 i                2022       0
- 79 K                2022       0
  79 l                2022       0
- 79 N                2022       0
  79 q                2022       0
- 79 Q                2022       0
- 79 R                2022    3563
  79 t                2022       0
  79 u                2022       0
- 79 U                2022       0
- 79 V                2022       0
  79 x                2022       0
  81 O                2022       0
  82 O                2022       0

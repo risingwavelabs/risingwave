@@ -1,4 +1,4 @@
-query ITRTTT rowsort
+query ITRTTT
 select	 c_id, c_last, round(sum(ol_amount)::decimal, 0) as revenue, c_city, c_phone, n_name
 from	 customer, orders, orderline, nation
 where	 c_id = o_c_id
