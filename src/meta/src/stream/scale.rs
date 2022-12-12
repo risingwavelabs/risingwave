@@ -24,7 +24,6 @@ use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ParallelUnitId, VirtualNode};
-use risingwave_common::util::prost::is_stream_source;
 use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -466,7 +465,7 @@ where
             if fragment.get_fragment_type()? == FragmentType::Source {
                 let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
                 let source_node = TableFragments::find_source_node(stream_node).unwrap();
-                if is_stream_source(source_node) {
+                if source_node.source_inner.is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
                 }
             }
