@@ -10,7 +10,8 @@ where	 i_id = st_i_id
                 (select s_suppkey
                 from supplier
                 where s_comment like '%bad%'))
-group by i_name, substr(i_data, 1, 3), i_price;
+group by i_name, substr(i_data, 1, 3), i_price
+order by supplier_cnt desc;
 ----
 01uXuK6OZMODiUhZYqZ	HpH	75.52	1
 07aYp3TpS3pCsDM	BIc	75.23	1
