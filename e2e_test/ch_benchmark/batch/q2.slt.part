@@ -1,4 +1,4 @@
-query ITTITTTT rowsort
+query ITTITTTT
 select 	 s_suppkey, s_name, n_name, i_id, i_name, s_address, s_phone, s_comment
 from	 item, supplier, stock, nation, region,
 	     (select st_i_id as m_i_id,

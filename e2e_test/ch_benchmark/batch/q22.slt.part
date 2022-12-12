@@ -1,4 +1,4 @@
-query TIR rowsort
+query TIR
 select	 substr(c_state,1,1) as country,
     	 count(*) as numcust,
     	 sum(c_balance) as totacctbal
