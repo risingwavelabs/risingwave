@@ -30,7 +30,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use crate::source::cdc::{
-    CdcProperties, CdcSplit, CdcSplitEnumerator, CdcSplitReader, CDC_CONNECTOR,
+    CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, CDC_CONNECTOR,
 };
 use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
@@ -119,7 +119,7 @@ pub enum SplitEnumeratorImpl {
     Kinesis(KinesisSplitEnumerator),
     Nexmark(NexmarkSplitEnumerator),
     Datagen(DatagenSplitEnumerator),
-    Cdc(CdcSplitEnumerator),
+    Cdc(DebeziumSplitEnumerator),
     GooglePubsub(PubsubSplitEnumerator),
 }
 
@@ -153,7 +153,7 @@ impl_split_enumerator! {
     { Kinesis, KinesisSplitEnumerator },
     { Nexmark, NexmarkSplitEnumerator },
     { Datagen, DatagenSplitEnumerator },
-    { Cdc, CdcSplitEnumerator },
+    { Cdc, DebeziumSplitEnumerator },
     { GooglePubsub, PubsubSplitEnumerator}
 }
 
@@ -259,6 +259,19 @@ mod tests {
     }
 
     #[test]
+    fn test_cdc_split_state() -> Result<()> {
+        let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
+        let split_impl = SplitImpl::Cdc(CdcSplit::new(1001, offset_str.to_string()));
+        let encoded_split = split_impl.encode_to_bytes();
+        let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
+        assert_eq!(
+            split_impl.encode_to_bytes(),
+            restored_split_impl.encode_to_bytes()
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_extract_nexmark_config() {
         let props: HashMap<String, String> = convert_args!(hashmap!(
             "connector" => "nexmark",
@@ -269,7 +282,7 @@ mod tests {
         let props = ConnectorProperties::extract(props).unwrap();
 
         if let ConnectorProperties::Nexmark(props) = props {
-            assert_eq!(props.table_type, EventType::Person);
+            assert_eq!(props.table_type, Some(EventType::Person));
             assert_eq!(props.split_num, 1);
         } else {
             panic!("extract nexmark config failed");

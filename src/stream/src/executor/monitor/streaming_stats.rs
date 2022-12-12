@@ -16,8 +16,9 @@ use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, Gener
 use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Histogram,
-    HistogramVec, Registry,
+    register_int_counter_vec_with_registry, register_int_counter_with_registry,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
+    HistogramVec, IntCounter, IntGauge, Registry,
 };
 
 pub struct StreamingMetrics {
@@ -66,6 +67,14 @@ pub struct StreamingMetrics {
     pub barrier_sync_latency: Histogram,
 
     pub sink_commit_duration: HistogramVec,
+
+    // Memory management
+    // FIXME(yuhao): use u64 here
+    pub lru_current_watermark_time_ms: IntGauge,
+    pub lru_physical_now_ms: IntGauge,
+    pub lru_runtime_loop_count: IntCounter,
+    pub lru_watermark_step: IntGauge,
+    pub jemalloc_allocated_bytes: IntGauge,
 }
 
 impl StreamingMetrics {
@@ -340,6 +349,41 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let lru_current_watermark_time_ms = register_int_gauge_with_registry!(
+            "lru_current_watermark_time_ms",
+            "Current LRU manager watermark time(ms)",
+            registry
+        )
+        .unwrap();
+
+        let lru_physical_now_ms = register_int_gauge_with_registry!(
+            "lru_physical_now_ms",
+            "Current physical time in Risingwave(ms)",
+            registry
+        )
+        .unwrap();
+
+        let lru_runtime_loop_count = register_int_counter_with_registry!(
+            "lru_runtime_loop_count",
+            "The counts of the eviction loop in LRU manager per second",
+            registry
+        )
+        .unwrap();
+
+        let lru_watermark_step = register_int_gauge_with_registry!(
+            "lru_watermark_step",
+            "The steps increase in 1 loop",
+            registry
+        )
+        .unwrap();
+
+        let jemalloc_allocated_bytes = register_int_gauge_with_registry!(
+            "jemalloc_allocated_bytes",
+            "The memory jemalloc allocated, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             executor_row_count,
@@ -376,6 +420,11 @@ impl StreamingMetrics {
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,
+            lru_current_watermark_time_ms,
+            lru_physical_now_ms,
+            lru_runtime_loop_count,
+            lru_watermark_step,
+            jemalloc_allocated_bytes,
         }
     }
 

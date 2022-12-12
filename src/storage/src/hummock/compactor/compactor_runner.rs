@@ -18,6 +18,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
@@ -117,9 +118,10 @@ impl CompactorRunner {
         Ok((self.split_index, ssts, table_stats_map))
     }
 
-    pub async fn build_delete_range_iter(
+    pub async fn build_delete_range_iter<F: CompactionFilter>(
         compact_task: &CompactTask,
         sstable_store: &CompactorSstableStoreRef,
+        filter: &mut F,
     ) -> HummockResult<Arc<RangeTombstonesCollector>> {
         let mut builder = DeleteRangeAggregatorBuilder::default();
         let mut local_stats = StoreLocalStatistic::default();
@@ -130,7 +132,20 @@ impl CompactorRunner {
 
             for table_info in &level.table_infos {
                 let table = sstable_store.sstable(table_info, &mut local_stats).await?;
-                builder.add_tombstone(table.value().meta.range_tombstone_list.clone());
+                let range_tombstone_list = table
+                    .value()
+                    .meta
+                    .range_tombstone_list
+                    .iter()
+                    .filter(|tombstone| {
+                        !filter.should_delete(FullKey::from_user_key(
+                            tombstone.start_user_key.as_ref(),
+                            tombstone.sequence,
+                        ))
+                    })
+                    .cloned()
+                    .collect_vec();
+                builder.add_tombstone(range_tombstone_list);
             }
         }
         let aggregator = builder.build(compact_task.watermark, compact_task.gc_delete_keys);
@@ -148,7 +163,7 @@ impl CompactorRunner {
 
             // Do not need to filter the table because manager has done it.
             if level.level_type == LevelType::Nonoverlapping as i32 {
-                debug_assert!(can_concat(&level.table_infos.iter().collect_vec()));
+                debug_assert!(can_concat(&level.table_infos));
                 let tables = level
                     .table_infos
                     .iter()
@@ -178,5 +193,67 @@ impl CompactorRunner {
             }
         }
         Ok(UnorderedMergeIteratorInner::for_compactor(table_iters))
+    }
+}
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::UserKey;
+    use risingwave_pb::hummock::InputLevel;
+
+    use super::*;
+    use crate::hummock::compactor::StateCleanUpCompactionFilter;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_test_sstable_with_range_tombstone,
+    };
+    use crate::hummock::{CompactorSstableStore, DeleteRangeTombstone, MemoryLimiter};
+
+    #[tokio::test]
+    async fn test_delete_range_aggregator_with_filter() {
+        let sstable_store = mock_sstable_store();
+        let kv_pairs = vec![];
+        let range_tombstones = vec![
+            DeleteRangeTombstone::new(TableId::new(1), b"abc".to_vec(), b"cde".to_vec(), 1),
+            DeleteRangeTombstone::new(TableId::new(2), b"abc".to_vec(), b"def".to_vec(), 1),
+        ];
+        let sstable_info = gen_test_sstable_with_range_tombstone(
+            default_builder_opt_for_test(),
+            1,
+            kv_pairs.into_iter(),
+            range_tombstones.clone(),
+            sstable_store.clone(),
+        )
+        .await
+        .get_sstable_info();
+        let compact_store = Arc::new(CompactorSstableStore::new(
+            sstable_store,
+            MemoryLimiter::unlimit(),
+        ));
+        let compact_task = CompactTask {
+            input_ssts: vec![InputLevel {
+                level_idx: 0,
+                level_type: 0,
+                table_infos: vec![sstable_info],
+            }],
+            existing_table_ids: vec![2],
+            ..Default::default()
+        };
+        let mut state_clean_up_filter = StateCleanUpCompactionFilter::new(HashSet::from_iter(
+            compact_task.existing_table_ids.clone(),
+        ));
+        let collector = CompactorRunner::build_delete_range_iter(
+            &compact_task,
+            &compact_store,
+            &mut state_clean_up_filter,
+        )
+        .await
+        .unwrap();
+        let ret = collector
+            .get_tombstone_between(&UserKey::default().as_ref(), &UserKey::default().as_ref());
+        assert_eq!(ret.len(), 1);
+        assert_eq!(ret[0], range_tombstones[1]);
     }
 }

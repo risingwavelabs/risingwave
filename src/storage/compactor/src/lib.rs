@@ -17,8 +17,6 @@ mod rpc;
 mod server;
 
 use clap::Parser;
-use risingwave_common::config::{ServerConfig, StorageConfig};
-use serde::{Deserialize, Serialize};
 
 use crate::server::compactor_serve;
 
@@ -49,27 +47,21 @@ pub struct CompactorOpts {
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
-    /// No given `config_path` means to use default config.
-    #[clap(long, default_value = "")]
-    pub config_path: String,
-
     /// It's a hint used by meta node.
     #[clap(long, default_value = "16")]
     pub max_concurrent_task_number: u64,
 
     #[clap(long)]
     pub compaction_worker_threads_number: Option<usize>,
-}
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct CompactorConfig {
-    // For connection
-    #[serde(default)]
-    pub server: ServerConfig,
-
-    // Below for Hummock.
-    #[serde(default)]
-    pub storage: StorageConfig,
+    /// The path of `risingwave.toml` configuration file.
+    ///
+    /// If empty, default configuration values will be used.
+    ///
+    /// Note that internal system parameters should be defined in the configuration file at
+    /// [`risingwave_common::config`] instead of command line arguments.
+    #[clap(long, default_value = "")]
+    pub config_path: String,
 }
 
 use std::future::Future;

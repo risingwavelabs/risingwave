@@ -60,7 +60,7 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::{AsyncStackTraceOption, ComputeNodeConfig, ComputeNodeOpts};
+use crate::{AsyncStackTraceOption, ComputeNodeOpts};
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
@@ -69,7 +69,7 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config: ComputeNodeConfig = load_config(&opts.config_path).unwrap();
+    let config = load_config(&opts.config_path);
     info!(
         "Starting compute node with config {:?} with debug assertions {}",
         config,
@@ -85,7 +85,7 @@ pub async fn compute_node_serve(
         &opts.meta_address,
         WorkerType::ComputeNode,
         &client_addr,
-        config.streaming.worker_node_parallelism,
+        opts.parallelism,
     )
     .await
     .unwrap();
@@ -212,7 +212,7 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
         async_stack_trace_config,
-        config.streaming.developer.stream_enable_managed_cache,
+        opts.total_memory_bytes,
     ));
     let source_mgr = Arc::new(TableSourceManager::new(
         source_metrics,
