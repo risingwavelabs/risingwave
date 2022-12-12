@@ -17,6 +17,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::{DataChunk, I32Array};
 use risingwave_common::types::DataType;
+use risingwave_expr::expr::expr_binary_nonnull::*;
 use risingwave_expr::expr::*;
 use risingwave_expr::vector_op::agg::create_agg_state_unary;
 use risingwave_pb::expr::expr_node::Type;
