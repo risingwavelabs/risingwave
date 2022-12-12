@@ -11,14 +11,3 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#![allow(dead_code)]
-
-mod backup_manager;
-pub use backup_manager::*;
-mod error;
-mod meta_snapshot_builder;
-mod restore;
-mod utils;
-
-pub use restore::*;

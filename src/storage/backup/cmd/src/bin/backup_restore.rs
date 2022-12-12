@@ -12,13 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
+#![cfg_attr(coverage, feature(no_coverage))]
 
-mod backup_manager;
-pub use backup_manager::*;
-mod error;
-mod meta_snapshot_builder;
-mod restore;
-mod utils;
+use risingwave_backup::error::BackupResult;
 
-pub use restore::*;
+#[cfg_attr(coverage, no_coverage)]
+fn main() -> BackupResult<()> {
+    use clap::StructOpt;
+    let opts = risingwave_meta::backup_restore::RestoreOpts::parse();
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(risingwave_meta::backup_restore::restore(opts))
+}
