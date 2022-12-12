@@ -29,8 +29,6 @@ use crate::pg_response::{PgResponse, RowSetResult};
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 pub type SessionId = (i32, i32);
-// pub type StatementsStream<'a> = BoxStream<'a, Item=Result<PgResponse<impl Stream<StreamItem =
-// RowSetResult> + Unpin + Send>, BoxedError>>;
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
 pub trait SessionManager<VS>: Send + Sync + 'static
@@ -416,37 +414,5 @@ mod tests {
             let value: &str = rows[0].get(1);
             assert_eq!(value, "BB");
         }
-    }
-
-    use risingwave_sqlparser::ast::Statement;
-    use tracing::log;
-
-    #[tokio::test]
-    async fn test_mutiple() {
-        let host = "localhost";
-        let port = 4566;
-        let db = "dev";
-        let user = "root";
-        let pass = "";
-
-        let (client, connection) = tokio_postgres::Config::new()
-            .host(host)
-            .port(port)
-            .dbname(db)
-            .user(user)
-            .password(pass)
-            .connect(tokio_postgres::NoTls)
-            .await
-            .unwrap();
-
-        let _ = tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                log::error!("Postgres connection error: {:?}", e);
-            }
-        });
-
-        let sql = "select 1;select 2;";
-        let rows = client.simple_query(sql).await.unwrap();
-        println!("{}", rows.len());
     }
 }
