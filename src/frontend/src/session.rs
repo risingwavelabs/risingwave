@@ -13,10 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
-use std::marker::Sync;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 // use tokio::sync::Mutex;
 use std::time::Duration;
@@ -40,10 +38,11 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
-use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
+use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -53,14 +52,14 @@ use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::{Catalog, SchemaPath};
 use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
-use crate::expr::CorrelatedId;
 use crate::handler::handle;
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
+use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
 use crate::observer::FrontendObserverNode;
-use crate::optimizer::plan_node::PlanNodeId;
+use crate::optimizer::OptimizerContext;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
@@ -69,121 +68,7 @@ use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
 use crate::utils::WithOptions;
-use crate::{FrontendConfig, FrontendOpts, PgResponseStream, TableCatalog};
-pub struct OptimizerContext {
-    pub session_ctx: Arc<SessionImpl>,
-    // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
-    pub next_id: AtomicI32,
-    /// For debugging purposes, store the SQL string in Context
-    pub sql: Arc<str>,
-
-    /// it indicates whether the explain mode is verbose for explain statement
-    pub explain_verbose: AtomicBool,
-
-    /// it indicates whether the explain mode is trace for explain statement
-    pub explain_trace: AtomicBool,
-    /// Store the trace of optimizer
-    pub optimizer_trace: Arc<Mutex<Vec<String>>>,
-    /// Store correlated id
-    pub next_correlated_id: AtomicU32,
-    /// Store options or properties from the `with` clause
-    pub with_options: WithOptions,
-}
-
-#[derive(Clone, Debug)]
-pub struct OptimizerContextRef {
-    inner: Arc<OptimizerContext>,
-}
-
-impl !Sync for OptimizerContextRef {}
-
-impl From<OptimizerContext> for OptimizerContextRef {
-    fn from(inner: OptimizerContext) -> Self {
-        Self {
-            inner: Arc::new(inner),
-        }
-    }
-}
-
-impl OptimizerContextRef {
-    pub fn inner(&self) -> &OptimizerContext {
-        &self.inner
-    }
-
-    pub fn next_plan_node_id(&self) -> PlanNodeId {
-        // It's safe to use `fetch_add` and `Relaxed` ordering since we have marked
-        // `QueryContextRef` not `Sync`.
-        let next_id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
-        PlanNodeId(next_id)
-    }
-
-    pub fn next_correlated_id(&self) -> CorrelatedId {
-        self.inner
-            .next_correlated_id
-            .fetch_add(1, Ordering::Relaxed)
-    }
-
-    pub fn is_explain_verbose(&self) -> bool {
-        self.inner.explain_verbose.load(Ordering::Acquire)
-    }
-
-    pub fn is_explain_trace(&self) -> bool {
-        self.inner.explain_trace.load(Ordering::Acquire)
-    }
-
-    pub fn trace(&self, str: impl Into<String>) {
-        let mut guard = self.inner.optimizer_trace.lock().unwrap();
-        guard.push(str.into());
-        guard.push("\n".to_string());
-    }
-
-    pub fn take_trace(&self) -> Vec<String> {
-        let mut guard = self.inner.optimizer_trace.lock().unwrap();
-        guard.drain(..).collect()
-    }
-}
-
-impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>, with_options: WithOptions) -> Self {
-        Self {
-            session_ctx,
-            next_id: AtomicI32::new(0),
-            sql,
-            explain_verbose: AtomicBool::new(false),
-            explain_trace: AtomicBool::new(false),
-            optimizer_trace: Arc::new(Mutex::new(vec![])),
-            next_correlated_id: AtomicU32::new(1),
-            with_options,
-        }
-    }
-
-    // TODO(TaoWu): Remove the async.
-    #[cfg(test)]
-    #[expect(clippy::unused_async)]
-    pub async fn mock() -> OptimizerContextRef {
-        Self {
-            session_ctx: Arc::new(SessionImpl::mock()),
-            next_id: AtomicI32::new(0),
-            sql: Arc::from(""),
-            explain_verbose: AtomicBool::new(false),
-            explain_trace: AtomicBool::new(false),
-            optimizer_trace: Arc::new(Mutex::new(vec![])),
-            next_correlated_id: AtomicU32::new(1),
-            with_options: Default::default(),
-        }
-        .into()
-    }
-}
-
-impl std::fmt::Debug for OptimizerContext {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "QueryContext {{ current id = {} }}",
-            self.next_id.load(Ordering::Relaxed)
-        )
-    }
-}
+use crate::{FrontendOpts, PgResponseStream, TableCatalog};
 
 /// The global environment for the frontend server.
 #[derive(Clone)]
@@ -255,13 +140,12 @@ impl FrontendEnv {
     pub async fn init(
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let frontend_config: FrontendConfig = load_config(&opts.config_path).unwrap();
-        let batch_config: BatchConfig = load_config(&opts.config_path).unwrap();
+        let config = load_config(&opts.config_path);
         tracing::info!(
-            "Starting frontend node with\nfrontend config {:?}\nbatch config {:?}",
-            frontend_config,
-            batch_config
+            "Starting frontend node with\nfrontend config {:?}",
+            config.server
         );
+        let batch_config = config.batch;
 
         let frontend_address: HostAddr = opts
             .client_address
@@ -285,8 +169,8 @@ impl FrontendEnv {
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(frontend_config.server.heartbeat_interval_ms as u64),
-            Duration::from_secs(frontend_config.server.max_heartbeat_interval_secs as u64),
+            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
             vec![],
         );
 
@@ -303,9 +187,8 @@ impl FrontendEnv {
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
-        let compute_client_pool = Arc::new(ComputeClientPool::new(
-            frontend_config.server.connection_pool_size,
-        ));
+        let compute_client_pool =
+            Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
@@ -332,13 +215,11 @@ impl FrontendEnv {
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
                 .await;
-        let observer_join_handle = observer_manager.start().await?;
+        let observer_join_handle = observer_manager.start().await;
 
         meta_client.activate(&frontend_address).await?;
 
-        let client_pool = Arc::new(ComputeClientPool::new(
-            frontend_config.server.connection_pool_size,
-        ));
+        let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
 
         let registry = prometheus::Registry::new();
         monitor_process(&registry).unwrap();
@@ -347,6 +228,20 @@ impl FrontendEnv {
         if opts.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
+
+        let health_srv = HealthServiceImpl::new();
+        let host = opts.health_check_listener_addr.clone();
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(HealthServer::new(health_srv))
+                .serve(host.parse().unwrap())
+                .await
+                .unwrap();
+        });
+        tracing::info!(
+            "Health Check RPC Listener is set up on {}",
+            opts.health_check_listener_addr.clone()
+        );
 
         Ok((
             Self {
@@ -752,10 +647,8 @@ impl Session<PgResponseStream> for SessionImpl {
         format: bool,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
-            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
-            e
-        })?;
+        let mut stmts = Parser::parse_sql(sql)
+            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
         if stmts.is_empty() {
             return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
@@ -768,10 +661,25 @@ impl Session<PgResponseStream> for SessionImpl {
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql, format).await.map_err(|e| {
-            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
-            e
-        })?;
+        let rsp = {
+            let mut handle_fut = Box::pin(handle(self, stmt, sql, format));
+            if cfg!(debug_assertions) {
+                // Report the SQL in the log periodically if the query is slow.
+                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
+                loop {
+                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
+                        Ok(result) => break result,
+                        Err(_) => tracing::warn!(
+                            sql,
+                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
+                        ),
+                    }
+                }
+            } else {
+                handle_fut.await
+            }
+        }
+        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
         Ok(rsp)
     }
 
@@ -780,10 +688,8 @@ impl Session<PgResponseStream> for SessionImpl {
         sql: &str,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
-            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
-            e
-        })?;
+        let mut stmts = Parser::parse_sql(sql)
+            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
         if stmts.is_empty() {
             return Ok(vec![]);
         }
@@ -797,10 +703,8 @@ impl Session<PgResponseStream> for SessionImpl {
         // This part refers from src/frontend/handler/ so the Vec<PgFieldDescriptor> is same as
         // result of run_statement().
         let rsp = match stmt {
-            Statement::Query(_) => infer(self, stmt, sql).map_err(|e| {
-                tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
-                e
-            })?,
+            Statement::Query(_) => infer(self, stmt, sql)
+                .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?,
             Statement::ShowObjects(show_object) => match show_object {
                 ShowObject::Columns { table: _ } => {
                     vec![
@@ -825,7 +729,7 @@ impl Session<PgResponseStream> for SessionImpl {
                 }
             },
             Statement::ShowVariable { variable } => {
-                let name = &variable[0].value.to_lowercase();
+                let name = &variable[0].real_value().to_lowercase();
                 if name.eq_ignore_ascii_case("ALL") {
                     vec![
                         PgFieldDescriptor::new(
@@ -891,8 +795,13 @@ impl Session<PgResponseStream> for SessionImpl {
 
 /// Returns row description of the statement
 fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(session, Arc::from(sql), WithOptions::try_from(&stmt)?);
-    let session = context.session_ctx.clone();
+    let context = OptimizerContext::new(
+        session,
+        Arc::from(sql),
+        WithOptions::try_from(&stmt)?,
+        ExplainOptions::default(),
+    );
+    let session = context.session_ctx().clone();
 
     let bound = {
         let mut binder = Binder::new(&session);
@@ -909,17 +818,4 @@ fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<Pg
         .collect::<Vec<PgFieldDescriptor>>();
 
     Ok(pg_descs)
-}
-
-#[cfg(test)]
-mod tests {
-    use assert_impl::assert_impl;
-
-    use crate::session::OptimizerContextRef;
-
-    #[test]
-    fn check_query_context_ref() {
-        assert_impl!(Send: OptimizerContextRef);
-        assert_impl!(!Sync: OptimizerContextRef);
-    }
 }

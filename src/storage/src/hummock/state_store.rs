@@ -13,24 +13,27 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::Bound::{Excluded, Included};
-use std::ops::{Bound, RangeBounds};
+use std::ops::Bound;
 use std::sync::atomic::Ordering as MemOrdering;
 use std::time::Duration;
 
 use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::key::{map_table_key_range, next_key, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::oneshot;
 use tracing::log::warn;
 
 use super::store::state_store::HummockStorageIterator;
+use super::store::version::CommittedVersion;
 use super::utils::validate_epoch;
 use super::HummockStorage;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::{HummockEpoch, HummockError};
@@ -53,23 +56,13 @@ impl HummockStorage {
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
-        let pinned_version = self.pinned_version.load();
-        let table_id = read_options.table_id;
-        validate_epoch(pinned_version.safe_epoch(), epoch)?;
+        let key_range = (
+            Bound::Included(TableKey(key.to_vec())),
+            Bound::Included(TableKey(key.to_vec())),
+        );
 
-        // check epoch if lower mce
-        let read_version_tuple = if epoch <= pinned_version.max_committed_epoch() {
-            // read committed_version directly without build snapshot
-            (Vec::default(), Vec::default(), (**pinned_version).clone())
-        } else {
-            // TODO: use read_version_mapping for batch query
-            let read_version_vec = vec![self.read_version.clone()];
-            let key_range = (
-                Bound::Included(TableKey(key.to_vec())),
-                Bound::Included(TableKey(key.to_vec())),
-            );
-            read_filter_for_batch(epoch, table_id, &key_range, read_version_vec)?
-        };
+        let read_version_tuple =
+            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?;
 
         self.hummock_version_reader
             .get(TableKey(key), epoch, read_options, read_version_tuple)
@@ -81,29 +74,55 @@ impl HummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<HummockStorageIterator> {
-        let pinned_version = self.pinned_version.load();
-        let table_id = read_options.table_id;
-        validate_epoch(pinned_version.safe_epoch(), epoch)?;
-
-        // check epoch if lower mce
-        let read_version_tuple = if epoch <= pinned_version.max_committed_epoch() {
-            // read committed_version directly without build snapshot
-            (Vec::default(), Vec::default(), (**pinned_version).clone())
-        } else {
-            // TODO: use read_version_mapping for batch query
-            let read_version_vec = vec![self.read_version.clone()];
-            read_filter_for_batch(epoch, table_id, &key_range, read_version_vec)?
-        };
+    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+        let read_version_tuple =
+            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?;
 
         self.hummock_version_reader
             .iter(key_range, epoch, read_options, read_version_tuple)
             .await
     }
+
+    fn build_read_version_tuple(
+        &self,
+        epoch: u64,
+        table_id: TableId,
+        key_range: &TableKeyRange,
+    ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+        let pinned_version = self.pinned_version.load();
+        validate_epoch(pinned_version.safe_epoch(), epoch)?;
+
+        // check epoch if lower mce
+        let read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion) =
+            if epoch <= pinned_version.max_committed_epoch() {
+                // read committed_version directly without build snapshot
+                (Vec::default(), Vec::default(), (**pinned_version).clone())
+            } else {
+                let read_version_vec = {
+                    let read_guard = self.read_version_mapping.read();
+                    read_guard
+                        .get(&table_id)
+                        .unwrap()
+                        .values()
+                        .cloned()
+                        .collect_vec()
+                };
+
+                // When the system has just started and no state has been created, the memory state
+                // may be empty
+                if read_version_vec.is_empty() {
+                    (Vec::default(), Vec::default(), (**pinned_version).clone())
+                } else {
+                    read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
+                }
+            };
+
+        Ok(read_version_tuple)
+    }
 }
 
 impl StateStoreRead for HummockStorage {
-    type Iter = HummockStorageIterator;
+    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
 
     define_state_store_read_associated_type!();
 
@@ -122,55 +141,6 @@ impl StateStoreRead for HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        if let Some(prefix_hint) = read_options.prefix_hint.as_ref() {
-            let next_key = next_key(prefix_hint);
-
-            // learn more detail about start_bound with storage_table.rs.
-            match key_range.start_bound() {
-                // it guarantees that the start bound must be included (some different case)
-                // 1. Include(pk + col_bound) => prefix_hint <= start_bound <
-                // next_key(prefix_hint)
-                //
-                // for case2, frontend need to reject this, avoid excluded start_bound and
-                // transform it to included(next_key), without this case we can just guarantee
-                // that start_bound < next_key
-                //
-                // 2. Include(next_key(pk +
-                // col_bound)) => prefix_hint <= start_bound <= next_key(prefix_hint)
-                //
-                // 3. Include(pk) => prefix_hint <= start_bound < next_key(prefix_hint)
-                Included(range_start) | Excluded(range_start) => {
-                    assert!(range_start.as_slice() >= prefix_hint.as_slice());
-                    assert!(range_start.as_slice() < next_key.as_slice() || next_key.is_empty());
-                }
-
-                _ => unreachable!(),
-            }
-
-            match key_range.end_bound() {
-                Included(range_end) => {
-                    assert!(range_end.as_slice() >= prefix_hint.as_slice());
-                    assert!(range_end.as_slice() < next_key.as_slice() || next_key.is_empty());
-                }
-
-                // 1. Excluded(end_bound_of_prefix(pk + col)) => prefix_hint < end_bound <=
-                // next_key(prefix_hint)
-                //
-                // 2. Excluded(pk + bound) => prefix_hint < end_bound <=
-                // next_key(prefix_hint)
-                Excluded(range_end) => {
-                    assert!(range_end.as_slice() > prefix_hint.as_slice());
-                    assert!(range_end.as_slice() <= next_key.as_slice() || next_key.is_empty());
-                }
-
-                std::ops::Bound::Unbounded => {
-                    assert!(next_key.is_empty());
-                }
-            }
-        } else {
-            // not check
-        }
-
         self.iter_inner(map_table_key_range(key_range), epoch, read_options)
     }
 }
@@ -260,7 +230,7 @@ impl StateStore for HummockStorage {
             }
             let (tx, rx) = oneshot::channel();
             self.hummock_event_sender
-                .send(HummockEvent::SyncEpoch {
+                .send(HummockEvent::AwaitSyncEpoch {
                     new_sync_epoch: epoch,
                     sync_result_sender: tx,
                 })
@@ -293,17 +263,8 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move {
-            LocalHummockStorage::new(
-                self.read_version.clone(),
-                self.hummock_version_reader.clone(),
-                self.hummock_event_sender.clone(),
-                self.buffer_tracker.get_memory_limiter().clone(),
-                #[cfg(not(madsim))]
-                self.tracing.clone(),
-            )
-        }
+    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
+        async move { self.new_local_inner(table_id).await }
     }
 }
 

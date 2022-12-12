@@ -18,9 +18,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use prost::Message;
+use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
@@ -39,12 +43,14 @@ use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
+use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
 };
 use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
@@ -295,7 +301,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
 
 pub async fn rpc_serve_with_store<S: MetaStore>(
     meta_store: Arc<S>,
-    mut address_info: AddressInfo,
+    address_info: AddressInfo,
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
@@ -307,6 +313,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         lease_interval_secs,
     )
     .await?;
+    let prometheus_endpoint = opts.prometheus_endpoint.clone();
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
@@ -323,24 +330,27 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .await
             .unwrap(),
     );
-    let hummock_manager = Arc::new(
-        hummock::HummockManager::new(
-            env.clone(),
-            cluster_manager.clone(),
-            meta_metrics.clone(),
-            compactor_manager.clone(),
-        )
-        .await
-        .unwrap(),
-    );
+    let hummock_manager = hummock::HummockManager::new(
+        env.clone(),
+        cluster_manager.clone(),
+        meta_metrics.clone(),
+        compactor_manager.clone(),
+    )
+    .await
+    .unwrap();
 
     #[cfg(not(madsim))]
-    if let Some(dashboard_addr) = address_info.dashboard_addr.take() {
+    if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
-            dashboard_addr,
+            dashboard_addr: *dashboard_addr,
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
             meta_store: env.meta_store_ref(),
+            prometheus_endpoint: prometheus_endpoint.clone(),
+            prometheus_client: prometheus_endpoint.as_ref().map(|x| {
+                use std::str::FromStr;
+                prometheus_http_query::Client::from_str(x).unwrap()
+            }),
         };
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
@@ -402,9 +412,30 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .unwrap();
 
     // Initialize services.
-    let vacuum_trigger = Arc::new(hummock::VacuumManager::new(
+    let backup_object_store = Arc::new(
+        parse_remote_object_store(
+            &env.opts.backup_storage_url,
+            Arc::new(ObjectStoreMetrics::unused()),
+            true,
+        )
+        .await,
+    );
+    let backup_storage = Arc::new(
+        ObjectStoreMetaSnapshotStorage::new(
+            &env.opts.backup_storage_directory,
+            backup_object_store,
+        )
+        .await?,
+    );
+    let backup_manager = Arc::new(BackupManager::new(
         env.clone(),
         hummock_manager.clone(),
+        backup_storage,
+    ));
+    let vacuum_manager = Arc::new(hummock::VacuumManager::new(
+        env.clone(),
+        hummock_manager.clone(),
+        backup_manager.clone(),
         compactor_manager.clone(),
     ));
 
@@ -416,6 +447,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         source_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
+        barrier_manager.clone(),
     );
 
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
@@ -438,10 +470,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
-        vacuum_trigger.clone(),
+        vacuum_manager.clone(),
         fragment_manager.clone(),
     );
-    let notification_manager = env.notification_manager_ref();
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
         catalog_manager,
@@ -450,6 +481,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         fragment_manager.clone(),
     );
     let health_srv = HealthServiceImpl::new();
+    let backup_srv = BackupServiceImpl::new(backup_manager);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -464,15 +496,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
-    let mut sub_tasks = hummock::start_hummock_workers(
-        hummock_manager.clone(),
-        compactor_manager,
-        vacuum_trigger,
-        notification_manager,
-        compaction_scheduler,
-        &env.opts,
-    )
-    .await;
+    let mut sub_tasks =
+        hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
     sub_tasks.push(
         ClusterManager::start_worker_num_monitor(
             cluster_manager.clone(),
@@ -521,6 +546,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(UserServiceServer::new(user_srv))
             .add_service(ScaleServiceServer::new(scale_srv))
             .add_service(HealthServer::new(health_srv))
+            .add_service(BackupServiceServer::new(backup_srv))
             .serve(address_info.listen_addr)
             .await
             .unwrap();
@@ -562,7 +588,7 @@ mod tests {
             info,
             Duration::from_secs(10),
             2,
-            MetaOpts::default(),
+            MetaOpts::test(false),
         )
         .await
         .unwrap();
@@ -576,7 +602,7 @@ mod tests {
             info2.clone(),
             Duration::from_secs(10),
             2,
-            MetaOpts::default(),
+            MetaOpts::test(false),
         )
         .await;
         assert!(ret.is_err());
@@ -588,7 +614,7 @@ mod tests {
             info2,
             Duration::from_secs(10),
             2,
-            MetaOpts::default(),
+            MetaOpts::test(false),
         )
         .await
         .unwrap();

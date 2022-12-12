@@ -15,14 +15,14 @@
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
-use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::row::{self, Row, Row2, RowExt};
+use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
@@ -122,81 +122,70 @@ impl<S: StateStore> SortExecutor<S> {
         #[for_await]
         for msg in input {
             match msg? {
-                Message::Watermark(watermark) => {
-                    let Watermark { col_idx, val } = watermark.clone();
-
-                    // Sort executor only sends a stream chunk to downstream when
-                    // `self.sort_column_index` matches the watermark's column index. Otherwise, it
-                    // just forwards the watermark message to downstream without sending a stream
-                    // chunk message.
-                    if col_idx == self.sort_column_index {
-                        let watermark_value = val.clone();
-
-                        // Find out the records to send to downstream.
-                        while let Some(entry) = self.buffer.first_entry() {
-                            // Only when a record's timestamp is prior to the watermark should it be
-                            // sent to downstream.
-                            if entry.key().0 < watermark_value {
-                                // Remove the record from memory.
-                                let (row, persisted) = entry.remove();
-                                // Remove the record from state store. It is possible that a record
-                                // is not present in state store because this watermark arrives
-                                // before a barrier since last watermark.
-                                // TODO: Use range delete instead.
-                                if persisted {
-                                    self.state_table.delete(row.clone());
-                                }
-                                // Add the record to stream chunk data. Note that we retrieve the
-                                // record from a BTreeMap, so data in this chunk should be ordered
-                                // by timestamp and pk.
-                                if let Some(data_chunk) =
-                                    data_chunk_builder.append_one_row_from_datums(row.values())
-                                {
-                                    // When the chunk size reaches its maximum, we construct a
-                                    // stream chunk and send it to downstream.
-                                    let ops = vec![Op::Insert; data_chunk.capacity()];
-                                    let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-                                    yield Message::Chunk(stream_chunk);
-                                }
-                            } else {
-                                // We have collected all data below watermark.
-                                break;
+                // Sort executor only sends a stream chunk to downstream when
+                // `self.sort_column_index` matches the watermark's column index.
+                Message::Watermark(watermark @ Watermark { col_idx, .. })
+                    if col_idx == self.sort_column_index =>
+                {
+                    let watermark_value = watermark.val.clone();
+                    // Find out the records to send to downstream.
+                    while let Some(entry) = self.buffer.first_entry() {
+                        // Only when a record's timestamp is prior to the watermark should it be
+                        // sent to downstream.
+                        if entry.key().0 < watermark_value {
+                            // Remove the record from memory.
+                            let (row, persisted) = entry.remove();
+                            // Remove the record from state store. It is possible that a record
+                            // is not present in state store because this watermark arrives
+                            // before a barrier since last watermark.
+                            // TODO: Use range delete instead.
+                            if persisted {
+                                self.state_table.delete(&row);
                             }
+                            // Add the record to stream chunk data. Note that we retrieve the
+                            // record from a BTreeMap, so data in this chunk should be ordered
+                            // by timestamp and pk.
+                            if let Some(data_chunk) = data_chunk_builder.append_one_row(row) {
+                                // When the chunk size reaches its maximum, we construct a
+                                // stream chunk and send it to downstream.
+                                let ops = vec![Op::Insert; data_chunk.capacity()];
+                                let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+                                yield Message::Chunk(stream_chunk);
+                            }
+                        } else {
+                            // We have collected all data below watermark.
+                            break;
                         }
-
-                        // Construct and send a stream chunk message. Rows in this message are
-                        // always ordered by timestamp.
-                        if let Some(data_chunk) = data_chunk_builder.consume_all() {
-                            let ops = vec![Op::Insert; data_chunk.capacity()];
-                            let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-                            yield Message::Chunk(stream_chunk);
-                        }
-
-                        // Update previous watermark, which is used for range delete.
-                        self._prev_watermark = Some(val);
                     }
+
+                    // Construct and send a stream chunk message. Rows in this message are
+                    // always ordered by timestamp.
+                    if let Some(data_chunk) = data_chunk_builder.consume_all() {
+                        let ops = vec![Op::Insert; data_chunk.capacity()];
+                        let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+                        yield Message::Chunk(stream_chunk);
+                    }
+
+                    // Update previous watermark, which is used for range delete.
+                    self._prev_watermark = Some(watermark_value);
 
                     // Forward the watermark message.
                     yield Message::Watermark(watermark);
                 }
-
+                // Otherwise, it just forwards the watermark message to downstream without sending a
+                // stream chunk message.
+                Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     for (op, row_ref) in chunk.rows() {
                         match op {
                             Op::Insert => {
                                 // For insert operation, we buffer the record in memory.
-                                let row = row_ref.to_owned_row();
-                                let timestamp_datum = row.0.get(self.sort_column_index).ok_or_else(|| {
-                                    anyhow!(
-                                        "column index {} out of range in row {:?}",
-                                        self.sort_column_index,
-                                        row
-                                    )
-                                })?;
-                                let pk = row.by_indices(&self.pk_indices);
+                                let timestamp_datum = row_ref.datum_at(self.sort_column_index).to_owned_datum().unwrap();
+                                let pk = row_ref.project(&self.pk_indices).into_owned_row();
+                                let row = row_ref.into_owned_row();
                                 // Null event time should not exist in the row since the `WatermarkFilter`
                                 // before the `Sort` will filter out the Null event time.
-                                self.buffer.insert((timestamp_datum.clone().unwrap(), pk), (row, false));
+                                self.buffer.insert((timestamp_datum, pk), (row, false));
                             },
                             // Other operations are not supported currently.
                             _ => unimplemented!("operations other than insert currently are not supported by sort executor")
@@ -210,7 +199,7 @@ impl<S: StateStore> SortExecutor<S> {
                         // buffer that have not been persisted before to state store.
                         for (row, persisted) in self.buffer.values_mut() {
                             if !*persisted {
-                                self.state_table.insert(row.clone());
+                                self.state_table.insert(&*row);
                                 // Update `persisted` so if the next barrier arrives before the
                                 // next watermark, this record will not be persisted redundantly.
                                 *persisted = true;
@@ -257,7 +246,7 @@ impl<S: StateStore> SortExecutor<S> {
                 Bitmap::bit_saturate_subtract(prev_vnode_bitmap, curr_vnode_bitmap);
             self.buffer.retain(|(_, pk), _| {
                 let vnode = self.state_table.compute_vnode(pk);
-                !no_longer_owned_vnodes.is_set(vnode as _)
+                !no_longer_owned_vnodes.is_set(vnode.to_index())
             });
         }
 
@@ -269,14 +258,16 @@ impl<S: StateStore> SortExecutor<S> {
             curr_vnode_bitmap.to_owned()
         };
         let mut values_per_vnode = Vec::new();
-        for (owned_vnode, _) in newly_owned_vnodes
-            .iter()
-            .enumerate()
-            .filter(|(_, is_set)| *is_set)
-        {
+        for owned_vnode in newly_owned_vnodes.ones() {
             let value_iter = self
                 .state_table
-                .iter_with_pk_range(&(Bound::Unbounded, Bound::Unbounded), owned_vnode as _)
+                .iter_with_pk_range(
+                    &(
+                        Bound::<row::Empty>::Unbounded,
+                        Bound::<row::Empty>::Unbounded,
+                    ),
+                    VirtualNode::from_index(owned_vnode),
+                )
                 .await?;
             let value_iter = Box::pin(value_iter);
             values_per_vnode.push(value_iter);
@@ -285,19 +276,15 @@ impl<S: StateStore> SortExecutor<S> {
             let mut stream = select_all(values_per_vnode);
             while let Some(storage_result) = stream.next().await {
                 // Insert the data into buffer.
-                let row = storage_result?.into_owned();
-                let timestamp_datum = row.0.get(self.sort_column_index).ok_or_else(|| {
-                    anyhow!(
-                        "column index {} out of range in row {:?}",
-                        self.sort_column_index,
-                        row
-                    )
-                })?;
-                let pk = row.by_indices(&self.pk_indices);
+                let row: Row = storage_result?.into_owned();
+                let timestamp_datum = row
+                    .datum_at(self.sort_column_index)
+                    .to_owned_datum()
+                    .unwrap();
+                let pk = (&row).project(&self.pk_indices).into_owned_row();
                 // Null event time should not exist in the row since the `WatermarkFilter` before
                 // the `Sort` will filter out the Null event time.
-                self.buffer
-                    .insert((timestamp_datum.clone().unwrap(), pk), (row, true));
+                self.buffer.insert((timestamp_datum, pk), (row, true));
             }
         }
         Ok(())
@@ -327,7 +314,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -351,8 +338,8 @@ mod tests {
             + 37 5
             + 60 8",
         );
-        let watermark1 = ScalarImpl::Int64(3);
-        let watermark2 = ScalarImpl::Int64(7);
+        let watermark1 = 3_i64;
+        let watermark2 = 7_i64;
 
         let state_table = create_state_table().await;
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table);
@@ -364,8 +351,8 @@ mod tests {
         sort_executor.next().await.unwrap().unwrap();
 
         // Init watermark
-        tx.push_watermark(0, ScalarImpl::Int64(0));
-        tx.push_watermark(sort_column_index, ScalarImpl::Int64(0));
+        tx.push_int64_watermark(0, 0_i64);
+        tx.push_int64_watermark(sort_column_index, 0_i64);
 
         // Consume the watermark
         sort_executor.next().await.unwrap().unwrap();
@@ -375,13 +362,13 @@ mod tests {
         tx.push_chunk(chunk1);
 
         // Push watermark1 on an irrelevant column
-        tx.push_watermark(0, watermark1.clone());
+        tx.push_int64_watermark(0, watermark1);
 
         // Consume the watermark
         sort_executor.next().await.unwrap().unwrap();
 
         // Push watermark1 on sorted column
-        tx.push_watermark(sort_column_index, watermark1);
+        tx.push_int64_watermark(sort_column_index, watermark1);
 
         // Consume the data chunk
         let chunk_msg = sort_executor.next().await.unwrap().unwrap();
@@ -408,13 +395,13 @@ mod tests {
         sort_executor.next().await.unwrap().unwrap();
 
         // Push watermark2 on an irrelevant column
-        tx.push_watermark(0, watermark2.clone());
+        tx.push_int64_watermark(0, watermark2);
 
         // Consume the watermark
         sort_executor.next().await.unwrap().unwrap();
 
         // Push watermark2 on sorted column
-        tx.push_watermark(sort_column_index, watermark2);
+        tx.push_int64_watermark(sort_column_index, watermark2);
 
         // Consume the data chunk
         let chunk_msg = sort_executor.next().await.unwrap().unwrap();
@@ -442,7 +429,7 @@ mod tests {
             + 3 6
             + 4 7",
         );
-        let watermark = ScalarImpl::Int64(3);
+        let watermark = 3_i64;
 
         let state_table = create_state_table().await;
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table.clone());
@@ -454,8 +441,8 @@ mod tests {
         sort_executor.next().await.unwrap().unwrap();
 
         // Init watermark
-        tx.push_watermark(0, ScalarImpl::Int64(0));
-        tx.push_watermark(sort_column_index, ScalarImpl::Int64(0));
+        tx.push_int64_watermark(0, 0_i64);
+        tx.push_int64_watermark(sort_column_index, 0_i64);
 
         // Consume the watermark
         sort_executor.next().await.unwrap().unwrap();
@@ -481,7 +468,7 @@ mod tests {
         recovered_sort_executor.next().await.unwrap().unwrap();
 
         // Push watermark on sorted column
-        recovered_tx.push_watermark(sort_column_index, watermark);
+        recovered_tx.push_int64_watermark(sort_column_index, watermark);
 
         // Consume the data chunk
         let chunk_msg = recovered_sort_executor.next().await.unwrap().unwrap();

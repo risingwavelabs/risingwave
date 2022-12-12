@@ -16,19 +16,18 @@ use std::{fmt, iter};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
 use super::generic::{
-    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggCallDisplay,
-    PlanAggOrderByField,
+    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
+    ProjectBuilder,
 };
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
-    StreamLocalSimpleAgg, StreamProject, ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg, StreamLocalSimpleAgg, StreamProject,
+    ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
@@ -295,7 +294,7 @@ impl LogicalAgg {
 /// having clause.
 struct LogicalAggBuilder {
     /// the builder of the input Project
-    input_proj_builder: LogicalProjectBuilder,
+    input_proj_builder: ProjectBuilder,
     /// the group key column indices in the project's output
     group_key: Vec<usize>,
     /// the agg calls
@@ -312,7 +311,7 @@ struct LogicalAggBuilder {
 
 impl LogicalAggBuilder {
     fn new(group_exprs: Vec<ExprImpl>) -> Result<Self> {
-        let mut input_proj_builder = LogicalProjectBuilder::default();
+        let mut input_proj_builder = ProjectBuilder::default();
 
         let group_key = group_exprs
             .into_iter()
@@ -333,7 +332,7 @@ impl LogicalAggBuilder {
 
     pub fn build(self, input: PlanRef) -> LogicalAgg {
         // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
-        let logical_project = self.input_proj_builder.build(input);
+        let logical_project = LogicalProject::with_core(self.input_proj_builder.build(input));
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
         LogicalAgg::new(self.agg_calls, self.group_key, logical_project.into())
@@ -573,7 +572,7 @@ impl ExprRewriter for LogicalAggBuilder {
     }
 
     fn rewrite_subquery(&mut self, subquery: crate::expr::Subquery) -> ExprImpl {
-        if subquery.is_correlated() {
+        if subquery.is_correlated(0) {
             self.error = Some(ErrorCode::NotImplemented(
                 "correlated subquery in HAVING or SELECT with agg".into(),
                 2275.into(),
@@ -680,14 +679,6 @@ impl LogicalAgg {
         &self.core.agg_calls
     }
 
-    pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
-        self.core.agg_calls_display()
-    }
-
-    pub fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
-        self.core.group_key_display()
-    }
-
     /// Get a reference to the logical agg's group key.
     pub fn group_key(&self) -> &Vec<usize> {
         &self.core.group_key
@@ -728,13 +719,8 @@ impl LogicalAgg {
         Self::new(agg_calls, group_key, input)
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        if !self.group_key().is_empty() {
-            builder.field("group_key", &self.group_key_display());
-        }
-        builder.field("aggs", &self.agg_calls_display());
-        builder.finish()
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        self.core.fmt_with_name(f, name)
     }
 }
 
@@ -956,8 +942,8 @@ mod tests {
     use crate::expr::{
         assert_eq_input_ref, input_ref_to_column_indices, AggCall, ExprType, FunctionCall, OrderBy,
     };
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_create() {
@@ -1246,12 +1232,12 @@ mod tests {
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 1);
         assert_eq_input_ref!(&project.exprs()[0], 1);
-        assert_eq!(project.id().0, 4);
+        assert_eq!(project.id().0, 5);
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
         assert_eq!(agg_new.group_key(), &vec![0]);
-        assert_eq!(agg_new.id().0, 3);
+        assert_eq!(agg_new.id().0, 4);
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();

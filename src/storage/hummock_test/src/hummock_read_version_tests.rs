@@ -19,6 +19,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use risingwave_storage::hummock::iterator::test_utils::{
@@ -49,14 +50,16 @@ async fn test_read_version_basic() {
     {
         // single imm
         let kv_pairs = gen_dummy_batch(epoch);
+        let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items);
         let imm = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            kv_pairs,
+            sorted_items,
+            size,
             vec![],
             TableId::from(table_id),
             None,
-        )
-        .await;
+        );
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
@@ -84,14 +87,16 @@ async fn test_read_version_basic() {
             // epoch from 1 to 6
             epoch += 1;
             let kv_pairs = gen_dummy_batch(epoch);
+            let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
+            let size = SharedBufferBatch::measure_batch_size(&sorted_items);
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
-                kv_pairs,
+                sorted_items,
+                size,
                 vec![],
                 TableId::from(table_id),
                 None,
-            )
-            .await;
+            );
 
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
@@ -140,7 +145,7 @@ async fn test_read_version_basic() {
 
         let dummy_sst = StagingSstableInfo::new(
             vec![
-                SstableInfo {
+                LocalSstableInfo::for_test(SstableInfo {
                     id: 1,
                     key_range: Some(KeyRange {
                         left: key_with_epoch(iterator_test_user_key_of(1).encode(), 1),
@@ -153,8 +158,8 @@ async fn test_read_version_basic() {
                     stale_key_count: 1,
                     total_key_count: 1,
                     divide_version: 0,
-                },
-                SstableInfo {
+                }),
+                LocalSstableInfo::for_test(SstableInfo {
                     id: 2,
                     key_range: Some(KeyRange {
                         left: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
@@ -167,10 +172,11 @@ async fn test_read_version_basic() {
                     stale_key_count: 1,
                     total_key_count: 1,
                     divide_version: 0,
-                },
+                }),
             ],
             epoch_id_vec_for_clear,
             batch_id_vec_for_clear,
+            1,
         );
 
         {
@@ -252,21 +258,23 @@ async fn test_read_filter_basic() {
     let (pinned_version, _, _) =
         prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(pinned_version.clone())));
+    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(pinned_version)));
     let epoch = 1;
     let table_id = 0;
 
     {
         // single imm
         let kv_pairs = gen_dummy_batch(epoch);
+        let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items);
         let imm = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            kv_pairs,
+            sorted_items,
+            size,
             vec![],
             TableId::from(table_id),
             None,
-        )
-        .await;
+        );
 
         read_version
             .write()

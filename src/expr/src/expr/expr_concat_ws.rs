@@ -19,7 +19,7 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8ArrayBuilder,
 };
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -74,19 +74,19 @@ impl Expression for ConcatWsExpression {
             let mut string_columns = string_columns_ref.iter();
             for string_column in string_columns.by_ref() {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    writer.write_ref(string)?;
+                    writer.write_ref(string);
                     break;
                 }
             }
 
             for string_column in string_columns {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    writer.write_ref(sep)?;
-                    writer.write_ref(string)?;
+                    writer.write_ref(sep);
+                    writer.write_ref(string);
                 }
             }
 
-            builder = writer.finish()?.into_inner();
+            writer.finish();
         }
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
@@ -115,7 +115,7 @@ impl Expression for ConcatWsExpression {
             final_string.push_str(string.as_utf8());
         }
 
-        Ok(Some(final_string.to_scalar_value()))
+        Ok(Some(final_string.into()))
     }
 }
 
@@ -160,7 +160,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::row::Row;
-    use risingwave_common::types::{Datum, Scalar};
+    use risingwave_common::types::Datum;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;
@@ -238,14 +238,11 @@ mod tests {
         let expected = vec![Some("a,b,c"), None, Some("b,c"), Some(""), None];
 
         for (i, row_input) in row_inputs.iter().enumerate() {
-            let datum_vec: Vec<Datum> = row_input
-                .iter()
-                .map(|e| e.map(|s| s.to_string().to_scalar_value()))
-                .collect();
+            let datum_vec: Vec<Datum> = row_input.iter().map(|e| e.map(|s| s.into())).collect();
             let row = Row::new(datum_vec);
 
             let result = concat_ws_expr.eval_row(&row).unwrap();
-            let expected = expected[i].map(|s| s.to_string().to_scalar_value());
+            let expected = expected[i].map(|s| s.into());
 
             assert_eq!(result, expected);
         }

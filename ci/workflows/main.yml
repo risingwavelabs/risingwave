@@ -44,6 +44,22 @@ steps:
     timeout_in_minutes: 20
     retry: *auto-retry
 
+  - label: "build other components"
+    command: "ci/scripts/build-other.sh"
+    key: "build-other"
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - GITHUB_TOKEN
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
@@ -157,11 +173,44 @@ steps:
 
   - label: "end-to-end source test (release mode)"
     command: "ci/scripts/e2e-source-test.sh -p ci-release"
-    depends_on: "build-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
+          run: source-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
+    retry: *auto-retry
+
+  - label: "unit test"
+    command: "ci/scripts/pr-unit-test.sh"
+    plugins:
+      - ./ci/plugins/swapfile
+      - gencer/cache#v2.4.10: *cargo-cache
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            CODECOV_TOKEN: my-codecov-token
+      - docker-compose#v3.9.0:
           run: rw-build-env
+          config: ci/docker-compose.yml
+          environment:
+            - CODECOV_TOKEN
+    timeout_in_minutes: 15
+    retry: *auto-retry
+
+  - label: "end-to-end sink test (release mode)"
+    command: "ci/scripts/e2e-sink-test.sh -p ci-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: sink-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
@@ -183,7 +232,7 @@ steps:
           environment:
             - GITHUB_TOKEN
             - BUILDKITE_TAG
-    timeout_in_minutes: 20
+    timeout_in_minutes: 60
     retry: *auto-retry
 
   - label: "release docker image: amd64"
@@ -198,7 +247,7 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
-    timeout_in_minutes: 25
+    timeout_in_minutes: 60
     retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
@@ -213,7 +262,7 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
-    timeout_in_minutes: 25
+    timeout_in_minutes: 60
     retry: *auto-retry
     agents:
       queue: "linux-arm64"

@@ -427,7 +427,7 @@ impl<'a> Tokenizer<'a> {
                 }
                 // numbers and period
                 '0'..='9' | '.' => {
-                    let mut s = peeking_take_while(chars, |ch| matches!(ch, '0'..='9'));
+                    let mut s = peeking_take_while(chars, |ch| ch.is_ascii_digit());
 
                     // match binary literal that starts with 0x
                     if s == "0" && chars.peek() == Some(&'x') {
@@ -444,7 +444,7 @@ impl<'a> Tokenizer<'a> {
                         s.push('.');
                         chars.next();
                     }
-                    s += &peeking_take_while(chars, |ch| matches!(ch, '0'..='9'));
+                    s += &peeking_take_while(chars, |ch| ch.is_ascii_digit());
 
                     // No number -> Token::Period
                     if s == "." {
@@ -461,7 +461,7 @@ impl<'a> Tokenizer<'a> {
                                 s.push('-');
                                 chars.next();
                             }
-                            s += &peeking_take_while(chars, |ch| matches!(ch, '0'..='9'));
+                            s += &peeking_take_while(chars, |ch| ch.is_ascii_digit());
                             return Ok(Some(Token::Number(s)));
                         }
                         // Not a scientific number
@@ -661,22 +661,24 @@ impl<'a> Tokenizer<'a> {
         chars: &mut Peekable<Chars<'_>>,
     ) -> Result<Option<Token>, TokenizerError> {
         let mut s = String::new();
-        let mut maybe_closing_comment = false;
-        // TODO: deal with nested comments
+
+        let mut nested = 1;
+        let mut last_ch = ' ';
+
         loop {
             match chars.next() {
                 Some(ch) => {
-                    if maybe_closing_comment {
-                        if ch == '/' {
+                    if last_ch == '/' && ch == '*' {
+                        nested += 1;
+                    } else if last_ch == '*' && ch == '/' {
+                        nested -= 1;
+                        if nested == 0 {
+                            s.pop();
                             break Ok(Some(Token::Whitespace(Whitespace::MultiLineComment(s))));
-                        } else {
-                            s.push('*');
                         }
                     }
-                    maybe_closing_comment = ch == '*';
-                    if !maybe_closing_comment {
-                        s.push(ch);
-                    }
+                    s.push(ch);
+                    last_ch = ch;
                 }
                 None => break self.tokenizer_error("Unexpected EOF while in a multi-line comment"),
             }
@@ -1143,6 +1145,21 @@ mod tests {
             Token::Number("0".to_string()),
             Token::Whitespace(Whitespace::MultiLineComment(
                 "multi-line\n* /comment".to_string(),
+            )),
+            Token::Number("1".to_string()),
+        ];
+        compare(expected, tokens);
+    }
+
+    #[test]
+    fn tokenize_nested_multiline_comment() {
+        let sql = String::from("0/*multi-line\n* \n/* comment \n /*comment*/*/ */ /comment*/1");
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize().unwrap();
+        let expected = vec![
+            Token::Number("0".to_string()),
+            Token::Whitespace(Whitespace::MultiLineComment(
+                "multi-line\n* \n/* comment \n /*comment*/*/ */ /comment".to_string(),
             )),
             Token::Number("1".to_string()),
         ];

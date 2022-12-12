@@ -15,14 +15,17 @@
 use core::time::Duration;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::io::Write;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_recursion::async_recursion;
 use async_stack_trace::{StackTraceManager, StackTraceReport, TraceConfig};
+use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -76,7 +79,7 @@ pub struct LocalStreamManagerCore {
     pub(crate) config: StreamingConfig,
 
     /// Manages the stack traces of all actors.
-    stack_trace_manager: Option<(StackTraceManager<ActorId>, TraceConfig)>,
+    stack_trace_manager: Option<StackTraceManager<ActorId>>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -104,6 +107,9 @@ pub struct ExecutorParams {
     /// Information of the operator from plan node.
     pub op_info: String,
 
+    /// The output schema of the executor.
+    pub schema: Schema,
+
     /// The input executor.
     pub input: Vec<BoxedExecutor>,
 
@@ -127,6 +133,7 @@ impl Debug for ExecutorParams {
             .field("executor_id", &self.executor_id)
             .field("operator_id", &self.operator_id)
             .field("op_info", &self.op_info)
+            .field("schema", &self.schema)
             .field("input", &self.input.len())
             .field("actor_id", &self.actor_context.id)
             .finish_non_exhaustive()
@@ -149,7 +156,7 @@ impl LocalStreamManager {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         async_stack_trace_config: Option<TraceConfig>,
-        enable_managed_cache: bool,
+        total_memory_available_bytes: usize,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
@@ -157,7 +164,7 @@ impl LocalStreamManager {
             streaming_metrics,
             config,
             async_stack_trace_config,
-            enable_managed_cache,
+            total_memory_available_bytes,
         ))
     }
 
@@ -172,15 +179,15 @@ impl LocalStreamManager {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
                 let mut core = self.core.lock().await;
+                let mut o = std::io::stdout().lock();
 
                 for (k, trace) in core
                     .stack_trace_manager
                     .as_mut()
                     .expect("async stack trace not enabled")
-                    .0
                     .get_all()
                 {
-                    println!(">> Actor {}\n\n{}", k, &*trace);
+                    writeln!(o, ">> Actor {}\n\n{}", k, &*trace).ok();
                 }
             }
         })
@@ -190,7 +197,7 @@ impl LocalStreamManager {
     pub async fn get_actor_traces(&self) -> HashMap<ActorId, StackTraceReport> {
         let mut core = self.core.lock().await;
         match &mut core.stack_trace_manager {
-            Some((mgr, _)) => mgr.get_all().map(|(k, v)| (*k, v.clone())).collect(),
+            Some(mgr) => mgr.get_all().map(|(k, v)| (*k, v.clone())).collect(),
             None => Default::default(),
         }
     }
@@ -216,9 +223,10 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    /// Clear all collect rx in barrier manager.
-    pub fn clear_all_collect_rx(&self) {
+    /// Clear all senders and collect rx in barrier manager.
+    pub fn clear_all_senders_and_collect_rx(&self) {
         let mut barrier_manager = self.context.lock_barrier_manager();
+        barrier_manager.clear_senders();
         barrier_manager.clear_collect_rx();
     }
 
@@ -301,7 +309,7 @@ impl LocalStreamManager {
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
-        self.clear_all_collect_rx();
+        self.clear_all_senders_and_collect_rx();
         self.core.lock().await.drop_all_actors();
 
         Ok(())
@@ -369,9 +377,15 @@ impl LocalStreamManagerCore {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         async_stack_trace_config: Option<TraceConfig>,
-        enable_managed_cache: bool,
+        total_memory_available_bytes: usize,
     ) -> Self {
-        let context = SharedContext::new(addr, state_store.clone(), &config, enable_managed_cache);
+        let context = SharedContext::new(
+            addr,
+            state_store.clone(),
+            streaming_metrics.clone(),
+            &config,
+            total_memory_available_bytes,
+        );
         Self::new_inner(
             state_store,
             context,
@@ -410,8 +424,7 @@ impl LocalStreamManagerCore {
             state_store,
             streaming_metrics,
             config,
-            stack_trace_manager: async_stack_trace_config
-                .map(|c| (StackTraceManager::default(), c)),
+            stack_trace_manager: async_stack_trace_config.map(StackTraceManager::new),
         }
     }
 
@@ -512,6 +525,7 @@ impl LocalStreamManagerCore {
         // same.
         let executor_id = unique_executor_id(actor_context.id, node.operator_id);
         let operator_id = unique_operator_id(fragment_id, node.operator_id);
+        let schema = node.fields.iter().map(Field::from).collect();
 
         // Build the executor with params.
         let executor_params = ExecutorParams {
@@ -520,6 +534,7 @@ impl LocalStreamManagerCore {
             executor_id,
             operator_id,
             op_info,
+            schema,
             input,
             fragment_id,
             executor_stats: self.streaming_metrics.clone(),
@@ -619,10 +634,6 @@ impl LocalStreamManagerCore {
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
-            let trace_reporter = self
-                .stack_trace_manager
-                .as_mut()
-                .map(|(m, _)| m.register(actor_id));
 
             let handle = {
                 let context = self.context.clone();
@@ -633,18 +644,12 @@ impl LocalStreamManagerCore {
                         context.lock_barrier_manager().notify_failure(actor_id, err);
                     }
                 };
-                #[auto_enums::auto_enum(Future)]
-                let traced = match trace_reporter {
-                    Some(trace_reporter) => trace_reporter.trace(
-                        actor,
-                        format!("Actor {actor_id}: `{}`", mview_definition),
-                        TraceConfig {
-                            report_detached: true,
-                            verbose: true,
-                            interval: Duration::from_secs(1),
-                        },
-                    ),
-                    None => actor,
+                let traced = match &mut self.stack_trace_manager {
+                    Some(m) => m
+                        .register(actor_id)
+                        .trace(actor, format!("Actor {actor_id}: `{}`", mview_definition))
+                        .left_future(),
+                    None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
                 self.runtime.spawn(instrumented)
@@ -766,8 +771,8 @@ impl LocalStreamManagerCore {
         }
         self.actors.clear();
         self.context.clear_channels();
-        if let Some((stack_trace_manager, _)) = self.stack_trace_manager.as_mut() {
-            std::mem::take(stack_trace_manager);
+        if let Some(m) = self.stack_trace_manager.as_mut() {
+            m.reset()
         }
         self.actor_monitor_tasks.clear();
         self.context.actor_infos.write().clear();

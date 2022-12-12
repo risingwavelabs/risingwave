@@ -24,6 +24,7 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -50,20 +51,17 @@ impl fmt::Display for LogicalApply {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("LogicalApply");
 
-        builder.field("type", &format_args!("{:?}", &self.join_type));
+        builder.field("type", &self.join_type);
 
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
         builder.field(
             "on",
-            &format_args!(
-                "{}",
-                ConditionDisplay {
-                    condition: &self.on,
-                    input_schema: &concat_schema
-                }
-            ),
+            &ConditionDisplay {
+                condition: &self.on,
+                input_schema: &concat_schema,
+            },
         );
 
         builder.field("correlated_id", &self.correlated_id);
@@ -174,7 +172,25 @@ impl LogicalApply {
     /// Translate Apply.
     ///
     /// Used to convert other kinds of Apply to cross Apply.
-    pub fn translate_apply(self, new_apply_left: PlanRef, eq_predicates: Vec<ExprImpl>) -> PlanRef {
+    ///
+    /// Before:
+    ///
+    /// ```text
+    ///     LogicalApply
+    ///    /            \
+    ///  LHS           RHS
+    /// ```
+    ///
+    /// After:
+    ///
+    /// ```text
+    ///      LogicalJoin
+    ///    /            \
+    ///  LHS        LogicalApply
+    ///             /           \
+    ///          Domain         RHS
+    /// ```
+    pub fn translate_apply(self, domain: PlanRef, eq_predicates: Vec<ExprImpl>) -> PlanRef {
         let (
             apply_left,
             apply_right,
@@ -188,7 +204,7 @@ impl LogicalApply {
         let correlated_indices_len = correlated_indices.len();
 
         let new_apply = LogicalApply::create(
-            new_apply_left,
+            domain,
             apply_right,
             JoinType::Inner,
             Condition::true_cond(),
@@ -202,7 +218,10 @@ impl LogicalApply {
         });
         let new_join = LogicalJoin::new(apply_left, new_apply, apply_type, on);
 
-        if new_join.join_type() != JoinType::LeftSemi {
+        if new_join.join_type() == JoinType::LeftSemi {
+            // Schema doesn't change, still LHS.
+            new_join.into()
+        } else {
             // `new_join`'s schema is different from original apply's schema, so `LogicalProject` is
             // used to ensure they are the same.
             let mut exprs: Vec<ExprImpl> = vec![];
@@ -217,8 +236,6 @@ impl LogicalApply {
                     }
                 });
             LogicalProject::create(new_join.into(), exprs)
-        } else {
-            new_join.into()
         }
     }
 
@@ -276,8 +293,50 @@ impl ColPrunable for LogicalApply {
 }
 
 impl PredicatePushdown for LogicalApply {
-    fn predicate_pushdown(&self, _predicate: Condition) -> PlanRef {
-        panic!("LogicalApply should be unnested")
+    fn predicate_pushdown(&self, mut predicate: Condition) -> PlanRef {
+        let left_col_num = self.left().schema().len();
+        let right_col_num = self.right().schema().len();
+        let join_type = self.join_type();
+
+        let (left_from_filter, right_from_filter, on) = LogicalJoin::push_down(
+            &mut predicate,
+            left_col_num,
+            right_col_num,
+            LogicalJoin::can_push_left_from_filter(join_type),
+            LogicalJoin::can_push_right_from_filter(join_type),
+            LogicalJoin::can_push_on_from_filter(join_type),
+        );
+
+        let mut new_on = self.on.clone().and(on);
+        let (left_from_on, right_from_on, on) = LogicalJoin::push_down(
+            &mut new_on,
+            left_col_num,
+            right_col_num,
+            LogicalJoin::can_push_left_from_on(join_type),
+            LogicalJoin::can_push_right_from_on(join_type),
+            false,
+        );
+        assert!(
+            on.always_true(),
+            "On-clause should not be pushed to on-clause."
+        );
+
+        let left_predicate = left_from_filter.and(left_from_on);
+        let right_predicate = right_from_filter.and(right_from_on);
+
+        let new_left = self.left().predicate_pushdown(left_predicate);
+        let new_right = self.right().predicate_pushdown(right_predicate);
+
+        let new_apply = LogicalApply::create(
+            new_left,
+            new_right,
+            join_type,
+            new_on,
+            self.correlated_id,
+            self.correlated_indices.clone(),
+            self.max_one_row,
+        );
+        LogicalFilter::create(new_apply, predicate)
     }
 }
 

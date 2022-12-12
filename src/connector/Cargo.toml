@@ -11,7 +11,7 @@ repository = { workspace = true }
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { workspace = true } 
+aws-config = { workspace = true }
 aws-sdk-kinesis = { workspace = true } 
 aws-sdk-s3 = { workspace = true } 
 aws-sdk-sqs = { workspace = true } 
@@ -29,19 +29,20 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 futures-concurrency = "3"
 globset = "0.4.8"
+google-cloud-googleapis = { version = "0.6.0", features = ["pubsub"] }
+google-cloud-pubsub = "0.7.0"
 http = "0.2"
 http-serde = "1.1.0"
 humantime = "2.1"
 hyper = "0.14"
 itertools = "0.10"
 maplit = "1.0.2"
-memcomparable = { path = "../utils/memcomparable" }
 mysql_async = "0.31"
-nexmark = { path = "../utils/nexmark", features = ["serde"] }
+nexmark = { version = "0.1", features = ["serde"] }
 num-traits = "0.2"
 paste = "1"
 prost = "0.11"
-pulsar = { version = "5", default-features = false, features = ["tokio-runtime"], rev = "7fab6a9", git = "https://github.com/skyzh/pulsar-rs" }
+pulsar = { version = "4.2", default-features = false, features = ["tokio-runtime"] }
 rand = "0.8"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.8-alpha", features = ["cmake-build", "ssl-vendored", "gssapi"] }
 risingwave_common = { path = "../common" }

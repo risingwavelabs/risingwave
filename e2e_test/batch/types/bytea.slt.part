@@ -1,0 +1,79 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE bytes(i bytea);
+
+statement ok
+INSERT INTO bytes VALUES ('fgh');
+
+statement ok
+INSERT INTO bytes VALUES ('0xfgh');
+
+statement ok
+INSERT INTO bytes VALUES ('\xDEADBeef');
+
+statement ok
+INSERT INTO bytes VALUES ('1234');
+
+statement ok
+INSERT INTO bytes VALUES ('12CD');
+
+statement ok
+INSERT INTO bytes VALUES ('\x12CD');
+
+query T rowsort
+select * from bytes;
+----
+\x12cd
+\x3078666768
+\x31323334
+\x31324344
+\x666768
+\xdeadbeef
+
+statement ok
+drop table bytes;
+
+query T
+SELECT '\xDeAdBeEf'::bytea;
+----
+\xdeadbeef
+
+query T
+SELECT '\x De Ad Be Ef '::bytea;
+----
+\xdeadbeef
+
+statement error
+SELECT '\xDeAdBeEx'::bytea;
+
+query T
+SELECT '\xDe00BeEf'::bytea;
+----
+\xde00beef
+
+query T
+SELECT 'DeAdBeEf'::bytea;
+----
+\x4465416442654566
+
+query T
+SELECT 'De\\000dBeEf'::bytea;
+----
+\x44655c3030306442654566
+
+query T
+SELECT 'De\123dBeEf'::bytea;
+----
+\x4465536442654566
+
+query T
+SELECT 'De\\123dBeEf'::bytea;
+----
+\x44655c3132336442654566
+
+query T
+SELECT 'De\\678dBeEf'::bytea;
+----
+\x44655c3637386442654566

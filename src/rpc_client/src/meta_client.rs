@@ -21,10 +21,13 @@ use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
+use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
     SstIdRange,
 };
+use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
+use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
     Source as ProstSource, Table as ProstTable, View as ProstView,
@@ -93,7 +96,12 @@ impl MetaClient {
             host: Some(self.host_addr.to_protobuf()),
             worker_id: self.worker_id(),
         };
-        self.inner.subscribe(request).await
+        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+        tokio_retry::Retry::spawn(retry_strategy, || async {
+            let request = request.clone();
+            self.inner.subscribe(request).await
+        })
+        .await
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
@@ -109,7 +117,12 @@ impl MetaClient {
             host: Some(addr.to_protobuf()),
             worker_node_parallelism: worker_node_parallelism as u64,
         };
-        let resp = grpc_meta_client.add_worker_node(request).await?;
+        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+        let resp = tokio_retry::Retry::spawn(retry_strategy, || async {
+            let request = request.clone();
+            grpc_meta_client.add_worker_node(request).await
+        })
+        .await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
         Ok(Self {
             worker_id: worker_node.id,
@@ -124,7 +137,13 @@ impl MetaClient {
         let request = ActivateWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
         };
-        self.inner.activate_worker_node(request).await?;
+        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+        tokio_retry::Retry::spawn(retry_strategy, || async {
+            let request = request.clone();
+            self.inner.activate_worker_node(request).await
+        })
+        .await?;
+
         Ok(())
     }
 
@@ -629,6 +648,26 @@ impl MetaClient {
         let _resp = self.inner.rise_ctl_update_compaction_config(req).await?;
         Ok(())
     }
+
+    pub async fn backup_meta(&self) -> Result<u64> {
+        let req = BackupMetaRequest {};
+        let resp = self.inner.backup_meta(req).await?;
+        Ok(resp.job_id)
+    }
+
+    pub async fn get_backup_job_status(&self, job_id: u64) -> Result<BackupJobStatus> {
+        let req = GetBackupJobStatusRequest { job_id };
+        let resp = self.inner.get_backup_job_status(req).await?;
+        Ok(resp.job_status())
+    }
+
+    pub async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()> {
+        let req = DeleteMetaSnapshotRequest {
+            snapshot_ids: snapshot_ids.to_vec(),
+        };
+        let _resp = self.inner.delete_meta_snapshot(req).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -695,10 +734,15 @@ impl HummockMetaClient for MetaClient {
         Ok(SstIdRange::new(resp.start_id, resp.end_id))
     }
 
-    async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
+    async fn report_compaction_task(
+        &self,
+        compact_task: CompactTask,
+        table_stats_change: HashMap<u32, risingwave_hummock_sdk::table_stats::TableStats>,
+    ) -> Result<()> {
         let req = ReportCompactionTasksRequest {
             context_id: self.worker_id(),
             compact_task: Some(compact_task),
+            table_stats_change: to_prost_table_stats_map(table_stats_change),
         };
         self.inner.report_compaction_tasks(req).await?;
         Ok(())
@@ -797,6 +841,7 @@ struct GrpcMetaClient {
     stream_client: StreamManagerServiceClient<Channel>,
     user_client: UserServiceClient<Channel>,
     scale_client: ScaleServiceClient<Channel>,
+    backup_client: BackupServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -808,6 +853,12 @@ impl GrpcMetaClient {
     const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
     // See `Endpoint::keep_alive_timeout`
     const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
+    // Max retry times for request to meta server.
+    const REQUEST_RETRY_BASE_INTERVAL_MS: u64 = 50;
+    // Max retry times for connecting to meta server.
+    const REQUEST_RETRY_MAX_ATTEMPTS: usize = 10;
+    // Max retry interval in ms for request to meta server.
+    const REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
@@ -843,7 +894,8 @@ impl GrpcMetaClient {
         let notification_client = NotificationServiceClient::new(channel.clone());
         let stream_client = StreamManagerServiceClient::new(channel.clone());
         let user_client = UserServiceClient::new(channel.clone());
-        let scale_client = ScaleServiceClient::new(channel);
+        let scale_client = ScaleServiceClient::new(channel.clone());
+        let backup_client = BackupServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
@@ -853,7 +905,16 @@ impl GrpcMetaClient {
             stream_client,
             user_client,
             scale_client,
+            backup_client,
         })
+    }
+
+    /// Return retry strategy for retrying meta requests.
+    pub fn retry_strategy_for_request() -> impl Iterator<Item = Duration> {
+        ExponentialBackoff::from_millis(Self::REQUEST_RETRY_BASE_INTERVAL_MS)
+            .max_delay(Duration::from_millis(Self::REQUEST_RETRY_MAX_INTERVAL_MS))
+            .map(jitter)
+            .take(Self::REQUEST_RETRY_MAX_ATTEMPTS)
     }
 }
 
@@ -922,6 +983,9 @@ macro_rules! for_all_meta_rpc {
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
+            ,{ backup_client, backup_meta, BackupMetaRequest, BackupMetaResponse }
+            ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
+            ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
         }
     };
 }

@@ -72,8 +72,7 @@
     └─BatchValues { rows: [[]] }
 - sql: |
     select array_cat(array[233], array[array[array[66]]]);
-  binder_error: 'Bind error: unable to find least restrictive type between integer[]
-    and integer[][][]'
+  binder_error: 'Bind error: unable to find least restrictive type between integer[] and integer[][][]'
 - sql: |
     select array_cat(array[233], 123);
   binder_error: 'Bind error: Cannot concatenate integer[] and integer'
@@ -116,8 +115,7 @@
 - name: string from/to varchar[] in implicit context
   sql: |
     values (array['a', 'b']), ('{c,' || 'd}');
-  binder_error: 'Bind error: types List { datatype: Varchar } and Varchar cannot be
-    matched'
+  binder_error: 'Bind error: types List { datatype: Varchar } and Varchar cannot be matched'
 - name: string to varchar[] in assign context
   sql: |
     create table t (v1 varchar[]);

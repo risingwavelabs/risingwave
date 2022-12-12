@@ -25,10 +25,10 @@ done
 shift $((OPTIND -1))
 
 echo "--- Rust cargo-sort check"
-cargo sort -c -w
+cargo sort --check --workspace
 
 echo "--- Rust cargo-hakari check"
-cargo hakari verify
+cargo hakari generate --diff
 
 echo "--- Rust format check"
 cargo fmt --all -- --check
@@ -40,16 +40,23 @@ cargo build \
     -p risingwave_regress_test \
     -p risingwave_sqlsmith \
     -p risingwave_compaction_test \
+    -p risingwave_backup_cmd \
     --features "static-link static-log-level" --profile "$profile"
 
-echo "--- Compress RisingWave debug info"
+echo "--- Compress debug info for artifacts"
 objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave
+objcopy --compress-debug-sections=zlib-gnu target/"$target"/sqlsmith
+objcopy --compress-debug-sections=zlib-gnu target/"$target"/compaction-test
+objcopy --compress-debug-sections=zlib-gnu target/"$target"/backup-restore
+objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave_regress_test
+objcopy --compress-debug-sections=zlib-gnu target/"$target"/risedev-dev
 
 echo "--- Show link info"
 ldd target/"$target"/risingwave
 
 echo "--- Upload artifacts"
 cp target/"$target"/compaction-test ./compaction-test-"$profile"
+cp target/"$target"/backup-restore ./backup-restore-"$profile"
 cp target/"$target"/risingwave ./risingwave-"$profile"
 cp target/"$target"/risedev-dev ./risedev-dev-"$profile"
 cp target/"$target"/risingwave_regress_test ./risingwave_regress_test-"$profile"
@@ -59,3 +66,4 @@ buildkite-agent artifact upload risedev-dev-"$profile"
 buildkite-agent artifact upload risingwave_regress_test-"$profile"
 buildkite-agent artifact upload ./sqlsmith-"$profile"
 buildkite-agent artifact upload ./compaction-test-"$profile"
+buildkite-agent artifact upload ./backup-restore-"$profile"

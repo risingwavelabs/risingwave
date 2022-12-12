@@ -5,10 +5,13 @@ extend = [
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/jaeger.toml" },
   { path = "src/risedevtool/kafka.toml" },
+  { path = "src/risedevtool/gcloud-pubsub.toml"},
   { path = "src/risedevtool/redis.toml" },
+  { path = "src/risedevtool/connector.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
+  { path = "src/storage/backup/integration_tests/Makefile.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -91,6 +94,54 @@ echo ""
 echo ""
 '''
 
+
+[tasks.ls]
+category = "Misc"
+description = "List all nodes in the cluster"
+script = '''
+#!/bin/bash
+tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
+'''
+
+[tasks.lsw]
+category = "Misc"
+description = "List --watch all nodes in the cluster"
+script = '''
+#!/bin/bash
+watch -n 1 "tmux list-windows -t risedev | grep -v active | cut -d'(' -f1"
+'''
+
+[tasks.del]
+alias = "delete"
+
+[tasks.delete]
+category = "Misc"
+description = "Delete a node in the cluster"
+script = '''
+#!/bin/bash
+
+risedev_ls () {
+  tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
+}
+
+err () {
+  echo "Available nodes are"
+  risedev_ls
+  exit 1
+}
+
+if [[ -z "$1" ]]; then 
+  echo "Please pass a parameter to this script, defining which node you want to delete"
+  err
+fi
+
+if [[ -z $(risedev_ls | grep "$1" ) ]]; then 
+  echo "Please select a node that is currently running"
+  err
+fi
+
+tmux kill-window -t $1
+'''
 
 [tasks.f]
 alias = "follow"
@@ -298,23 +349,32 @@ script = '''
 
 set -e
 
-cp "src/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
+echo > "${PREFIX_CONFIG}/risingwave.toml"
 cp "src/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
+
+[tasks.download-all]
+category = "RiseDev - Components"
+description = "Download all available components at once"
+dependencies = [
+  "download-connector",
+  "download-etcd",
+  "download-grafana",
+  "download-jaeger",
+  "download-kafka",
+  "download-mcli",
+  "download-minio",
+  "download-prometheus",
+  "download-pubsub",
+  "download-redis",
+]
 
 [tasks.pre-start-dev]
 category = "RiseDev - Prepare"
 description = "Prepare dev cluster by downloading necessary tools and build required components"
 dependencies = [
-  "download-minio",
-  "download-mcli",
-  "download-etcd",
-  "download-grafana",
-  "download-prometheus",
-  "download-jaeger",
-  "download-kafka",
-  "download-redis",
+  "download-all",
   "build-risingwave",
   "post-build-risingwave",
   "extract-dashboard-artifact",
@@ -344,10 +404,6 @@ category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
 script = '''
 #!/bin/bash
-
-set -e
-
-echo "Use \`./risedev d\` instead if you want to start a full cluster."
 
 set -ex
 
@@ -534,7 +590,7 @@ script = """
 set -e
 
 cargo nextest run \
-  -p risingwave_simulation_scale \
+  -p risingwave_simulation \
   "$@"
 """
 
@@ -548,7 +604,7 @@ script = """
 set -e
 
 cargo nextest archive \
-  -p risingwave_simulation_scale \
+  -p risingwave_simulation \
   --archive-file scale-test.tar.zst \
   "$@"
 """

@@ -66,13 +66,10 @@ impl fmt::Display for StreamDynamicFilter {
 
         builder.field(
             "predicate",
-            &format_args!(
-                "{}",
-                ConditionDisplay {
-                    condition: &self.core.predicate,
-                    input_schema: &concat_schema
-                }
-            ),
+            &ConditionDisplay {
+                condition: &self.core.predicate,
+                input_schema: &concat_schema,
+            },
         );
 
         if verbose {

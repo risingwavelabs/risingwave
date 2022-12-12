@@ -21,7 +21,7 @@ use super::{ArrayResult, DataChunkTestExt};
 use crate::array::column::Column;
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
-use crate::row::Row;
+use crate::row::{Row, Row2};
 use crate::types::to_text::ToText;
 use crate::types::DataType;
 
@@ -110,7 +110,7 @@ impl StreamChunk {
 
         for (op, row) in rows {
             ops.push(*op);
-            for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
+            for (datum, builder) in row.iter().zip_eq(array_builders.iter_mut()) {
                 builder.append_datum(datum);
             }
         }
@@ -246,7 +246,7 @@ impl StreamChunk {
                     None => "".to_owned(), // NULL
                     Some(scalar) => scalar.to_text(),
                 };
-                cells.push(Cell::new(&str));
+                cells.push(Cell::new(str));
             }
             table.add_row(cells);
         }

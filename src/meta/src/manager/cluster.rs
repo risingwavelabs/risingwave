@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::heartbeat_request;
@@ -443,8 +443,8 @@ impl ClusterManagerCore {
         worker_state: Option<State>,
     ) -> Vec<WorkerNode> {
         self.workers
-            .iter()
-            .map(|(_, worker)| worker.to_protobuf())
+            .values()
+            .map(|worker| worker.to_protobuf())
             .filter(|w| w.r#type == worker_type as i32)
             .filter(|w| match worker_state {
                 None => true,
@@ -475,8 +475,8 @@ impl ClusterManagerCore {
         ];
         let mut ret = HashMap::new();
         self.workers
-            .iter()
-            .map(|(_, worker)| worker.worker_type())
+            .values()
+            .map(|worker| worker.worker_type())
             .filter(|worker_type| MONITORED_WORKER_TYPES.contains(worker_type))
             .for_each(|worker_type| {
                 ret.entry(worker_type)

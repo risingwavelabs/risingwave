@@ -25,7 +25,7 @@ use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo};
+use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableId};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -36,6 +36,7 @@ use risingwave_pb::stream_service::{
 use risingwave_rpc_client::StreamClientPoolRef;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{Receiver, Sender};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -67,6 +68,16 @@ mod snapshot;
 
 pub use self::command::{Command, Reschedule};
 pub use self::schedule::BarrierScheduler;
+
+/// Status of barrier manager.
+enum BarrierManagerStatus {
+    /// Barrier manager is starting.
+    Starting,
+    /// Barrier manager is under recovery.
+    Recovering,
+    /// Barrier manager is running.
+    Running,
+}
 
 /// Scheduled command with its notifiers.
 struct Scheduled {
@@ -112,6 +123,8 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 
     /// Enable recovery or not when failover.
     enable_recovery: bool,
+
+    status: Mutex<BarrierManagerStatus>,
 
     /// The queue of scheduled barriers.
     scheduled_barriers: schedule::ScheduledBarriers,
@@ -467,6 +480,7 @@ where
         Self {
             interval,
             enable_recovery,
+            status: Mutex::new(BarrierManagerStatus::Starting),
             scheduled_barriers,
             in_flight_barrier_nums,
             cluster_manager,
@@ -489,6 +503,18 @@ where
         (join_handle, shutdown_tx)
     }
 
+    /// Return whether the barrier manager is running.
+    pub async fn is_running(&self) -> bool {
+        let status = self.status.lock().await;
+        matches!(*status, BarrierManagerStatus::Running)
+    }
+
+    /// Set barrier manager status.
+    async fn set_status(&self, new_status: BarrierManagerStatus) {
+        let mut status = self.status.lock().await;
+        *status = new_status;
+    }
+
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
         let mut tracker = CreateMviewProgressTracker::new();
@@ -500,6 +526,7 @@ where
             assert!(new_epoch > state.in_flight_prev_epoch);
             state.in_flight_prev_epoch = new_epoch;
 
+            self.set_status(BarrierManagerStatus::Recovering).await;
             let new_epoch = self.recovery(state.in_flight_prev_epoch).await;
             state.in_flight_prev_epoch = new_epoch;
             state
@@ -507,6 +534,7 @@ where
                 .await
                 .unwrap();
         }
+        self.set_status(BarrierManagerStatus::Running).await;
         let mut min_interval = tokio::time::interval(self.interval);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut barrier_timer: Option<HistogramTimer> = None;
@@ -603,7 +631,7 @@ where
         let result = self.inject_barrier_inner(command_context.clone()).await;
         match result {
             Ok(node_need_collect) => {
-                let _ = tokio::spawn(Self::collect_barrier(
+                tokio::spawn(Self::collect_barrier(
                     node_need_collect,
                     self.env.stream_client_pool_ref(),
                     command_context,
@@ -775,6 +803,7 @@ where
         }
         if self.enable_recovery {
             // If failed, enter recovery mode.
+            self.set_status(BarrierManagerStatus::Recovering).await;
             *tracker = CreateMviewProgressTracker::new();
             let new_epoch = self.recovery(state.in_flight_prev_epoch).await;
             state.in_flight_prev_epoch = new_epoch;
@@ -782,6 +811,7 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
+            self.set_status(BarrierManagerStatus::Running).await;
         } else {
             panic!("failed to execute barrier: {:?}", err);
         }
@@ -795,7 +825,7 @@ where
         checkpoint_control: &mut CheckpointControl<S>,
     ) -> MetaResult<()> {
         let prev_epoch = node.command_ctx.prev_epoch.0;
-        match &node.state {
+        match &mut node.state {
             Completed(resps) => {
                 // We must ensure all epochs are committed in ascending order,
                 // because the storage engine will query from new to old in the order in which
@@ -803,16 +833,20 @@ where
                 // See https://github.com/singularity-data/risingwave/issues/1251
                 let checkpoint = node.command_ctx.checkpoint;
                 let mut sst_to_worker: HashMap<HummockSstableId, WorkerId> = HashMap::new();
-                let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
-                for resp in resps {
-                    let mut t: Vec<LocalSstableInfo> = resp
+                let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
+                for resp in resps.iter_mut() {
+                    let mut t: Vec<ExtendedSstableInfo> = resp
                         .synced_sstables
-                        .iter()
-                        .cloned()
+                        .iter_mut()
                         .map(|grouped| {
-                            let sst = grouped.sst.expect("field not None");
-                            sst_to_worker.insert(sst.id, resp.worker_id);
-                            LocalSstableInfo::new(grouped.compaction_group_id, sst)
+                            let sst_info =
+                                std::mem::take(&mut grouped.sst).expect("field not None");
+                            sst_to_worker.insert(sst_info.id, resp.worker_id);
+                            ExtendedSstableInfo::new(
+                                grouped.compaction_group_id,
+                                sst_info,
+                                std::mem::take(&mut grouped.table_stats_map),
+                            )
                         })
                         .collect_vec();
                     synced_ssts.append(&mut t);

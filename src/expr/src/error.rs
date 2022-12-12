@@ -22,17 +22,18 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ExprError {
+    // Ideally "Unsupported" errors are caught by frontend. But when the match arms between
+    // frontend and backend are inconsistent, we do not panic with `unreachable!`.
     #[error("Unsupported function: {0}")]
     UnsupportedFunction(String),
 
-    #[error("Can't cast {0} to {1}")]
-    Cast(&'static str, &'static str),
+    #[error("Unsupported cast: {0:?} to {1:?}")]
+    UnsupportedCast(DataType, DataType),
 
-    // TODO: Unify Cast and Cast2.
-    #[error("Can't cast {0:?} to {1:?}")]
-    Cast2(DataType, DataType),
+    #[error("Casting to {0} out of range")]
+    CastOutOfRange(&'static str),
 
-    #[error("Out of range")]
+    #[error("Numeric out of range")]
     NumericOutOfRange,
 
     #[error("Division by zero")]

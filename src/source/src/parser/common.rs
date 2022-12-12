@@ -65,17 +65,18 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
         DataType::Decimal => Decimal::from_f64(ensure_float!(v, Decimal))
             .ok_or_else(|| anyhow!("expect decimal"))?
             .into(),
+        DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
         DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
         DataType::Timestamp => match v {
             Value::String(s) => str_to_timestamp(s)?.into(),
-            Value::Number(n) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
+            Value::Number(_n) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
             _ => anyhow::bail!("expect timestamp, but found {v}"),
         },
         DataType::Timestampz => match v {
             Value::String(s) => str_to_timestampz(s)?.into(),
-            Value::Number(n) => i64_to_timestampz(ensure_int!(v, i64))?.into(),
+            Value::Number(_n) => i64_to_timestampz(ensure_int!(v, i64))?.into(),
             _ => anyhow::bail!("expect timestampz, but found {v}"),
         },
         DataType::Struct(struct_type_info) => {
@@ -154,6 +155,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             .ok_or_else(|| anyhow!("expect decimal"))?
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
+        DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
         DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
         DataType::Timestamp => match v {

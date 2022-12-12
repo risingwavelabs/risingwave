@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 
 use super::{ColPrunable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
@@ -143,23 +143,19 @@ impl ToBatch for LogicalUnion {
 
 impl ToStream for LogicalUnion {
     fn to_stream(&self) -> Result<PlanRef> {
-        // TODO: use round robin distribution instead of using single distribution of all inputs.
+        // TODO: use round robin distribution instead of using hash distribution of all inputs.
+        let dist = RequiredDist::hash_shard(self.base.logical_pk());
         let new_inputs: Result<Vec<_>> = self
             .inputs()
             .iter()
-            .map(|input| input.to_stream_with_dist_required(&RequiredDist::single()))
+            .map(|input| input.to_stream_with_dist_required(&dist))
             .collect();
         let new_logical = Self::new_with_source_col(true, new_inputs?, self.core.source_col);
-        if !self.all() {
-            // TODO: we should rely on optimizer to transform not all to all. after that, we can use
-            // assert instead of return an error.
-            Err(
-                ErrorCode::NotImplemented("Union for streaming query".to_string(), 2911.into())
-                    .into(),
-            )
-        } else {
-            Ok(StreamUnion::new(new_logical).into())
-        }
+        assert!(
+            self.all(),
+            "After UnionToDistinctRule, union should become union all"
+        );
+        Ok(StreamUnion::new(new_logical).into())
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
@@ -299,8 +295,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_prune_union() {

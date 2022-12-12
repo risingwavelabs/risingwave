@@ -18,6 +18,7 @@ use anyhow;
 use async_trait::async_trait;
 use etcd_client::{Client, Compare, CompareOp, Error as EtcdError, GetOptions, Txn, TxnOp};
 use futures::Future;
+use itertools::Itertools;
 use tokio::sync::Mutex;
 
 use super::{Key, MetaStore, MetaStoreError, MetaStoreResult, Snapshot, Transaction, Value};
@@ -122,7 +123,7 @@ struct ListViewer {
 }
 
 impl SnapshotViewer for ListViewer {
-    type Output = Vec<Vec<u8>>;
+    type Output = Vec<(Vec<u8>, Vec<u8>)>;
 
     type OutputFuture<'a> = impl Future<Output = MetaStoreResult<(i64, Self::Output)>> + 'a;
 
@@ -141,19 +142,28 @@ impl SnapshotViewer for ListViewer {
                     "Etcd response missing header"
                 )));
             };
-            let value = res.kvs().iter().map(|kv| kv.value().to_vec()).collect();
-            Ok((new_revision, value))
+            let kv = res
+                .kvs()
+                .iter()
+                .map(|kv| (kv.key().to_vec(), kv.value().to_vec()))
+                .collect();
+            Ok((new_revision, kv))
         }
     }
 }
 
 #[async_trait]
 impl Snapshot for EtcdSnapshot {
-    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<Vec<u8>>> {
+    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>> {
         let view = ListViewer {
             key: encode_etcd_key(cf, &[]),
         };
-        self.view_inner(view).await
+        let cf_bytes = cf.as_bytes().len() + 1;
+        self.view_inner(view).await.map(|kvs| {
+            kvs.into_iter()
+                .map(|(mut k, v)| (k.drain(cf_bytes..).collect_vec(), v))
+                .collect()
+        })
     }
 
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>> {

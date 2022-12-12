@@ -121,7 +121,11 @@ impl<F: Future, const VERBOSE: bool> Future for StackTraced<F, VERBOSE> {
         let this = self.project();
 
         // For assertion.
-        let old_current = try_with_context(|c| c.current());
+        let old_current = if cfg!(debug_assertions) {
+            try_with_context(|c| c.current())
+        } else {
+            None
+        };
 
         let this_node = match this.state {
             StackTracedState::Initial(span) => {
@@ -173,7 +177,7 @@ impl<F: Future, const VERBOSE: bool> Future for StackTraced<F, VERBOSE> {
         };
 
         // The current node must be the this_node.
-        assert_eq!(this_node, with_context(|c| c.current()));
+        debug_assert_eq!(this_node, with_context(|c| c.current()));
 
         let r = match this.inner.poll(cx) {
             // The future is ready, clean-up this span by popping from the context.
@@ -190,7 +194,7 @@ impl<F: Future, const VERBOSE: bool> Future for StackTraced<F, VERBOSE> {
         };
 
         // The current node must be the same as we started with.
-        assert_eq!(old_current.unwrap(), with_context(|c| c.current()));
+        debug_assert_eq!(old_current.unwrap(), with_context(|c| c.current()));
 
         r
     }
@@ -235,19 +239,8 @@ pub trait StackTrace: Future + Sized {
 
     /// Similar to [`stack_trace`], but the span is a verbose one, which means it will be traced
     /// only if the verbose configuration is enabled.
-    #[cfg(not(debug_assertions))]
     fn verbose_stack_trace(self, span: impl Into<SpanValue>) -> StackTraced<Self, true> {
         StackTraced::new(self, span)
-    }
-
-    /// Similar to [`stack_trace`], but the span is a verbose one, which means it will be traced
-    /// only if the verbose configuration is enabled.
-    ///
-    /// With `debug_assertions` on, this span will be disabled statically to avoid affecting
-    /// performance too much. Therefore, `verbose` mode in [`TraceConfig`] is ignored.
-    #[cfg(debug_assertions)]
-    fn verbose_stack_trace(self, _span: impl Into<SpanValue>) -> Self {
-        self
     }
 }
 impl<F> StackTrace for F where F: Future {}

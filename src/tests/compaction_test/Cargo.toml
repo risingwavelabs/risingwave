@@ -12,6 +12,7 @@ repository = { workspace = true }
 anyhow = "1"
 bytes = "1"
 clap = { version = "3", features = ["derive"] }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 parking_lot = "0.12"
 risingwave_common = { path = "../../common" }
@@ -23,6 +24,7 @@ risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_rt = { path = "../../utils/runtime" }
 risingwave_storage = { path = "../../storage", features = ["test"] }
+risingwave_tracing = { path = "../../tracing" }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",

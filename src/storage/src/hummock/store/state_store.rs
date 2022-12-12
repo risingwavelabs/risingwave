@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-#[cfg(not(madsim))]
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::key::{map_table_key_range, FullKey, TableKey, TableKeyRange};
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use tokio::sync::mpsc;
+use tracing::warn;
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
-use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
 use crate::hummock::iterator::{
     ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
     UnorderedMergeIteratorInner, UserIterator,
@@ -33,16 +33,11 @@ use crate::hummock::iterator::{
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
-#[cfg(any(test, feature = "test"))]
-use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
-use crate::store::{
-    GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, LocalStateStore, ReadOptions,
-    StateStoreRead, StateStoreWrite, WriteOptions,
-};
+use crate::store::*;
 use crate::{
     define_state_store_read_associated_type, define_state_store_write_associated_type,
     StateStoreIter,
@@ -51,6 +46,7 @@ use crate::{
 pub struct HummockStorageCore {
     /// Mutable memtable.
     // memtable: Memtable,
+    instance_guard: LocalInstanceGuard,
 
     /// Read handle.
     read_version: Arc<RwLock<HummockReadVersion>>,
@@ -65,8 +61,6 @@ pub struct HummockStorageCore {
 
 pub struct LocalHummockStorage {
     core: Arc<HummockStorageCore>,
-
-    #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
@@ -76,7 +70,6 @@ impl Clone for LocalHummockStorage {
     fn clone(&self) -> Self {
         Self {
             core: self.core.clone(),
-            #[cfg(not(madsim))]
             tracing: self.tracing.clone(),
         }
     }
@@ -84,12 +77,14 @@ impl Clone for LocalHummockStorage {
 
 impl HummockStorageCore {
     pub fn new(
+        instance_guard: LocalInstanceGuard,
         read_version: Arc<RwLock<HummockReadVersion>>,
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
     ) -> Self {
         Self {
+            instance_guard,
             read_version,
             event_sender,
             memory_limiter,
@@ -130,7 +125,7 @@ impl HummockStorageCore {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<HummockStorageIterator> {
+    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
         let read_snapshot = read_filter_for_local(
             epoch,
             read_options.table_id,
@@ -145,7 +140,7 @@ impl HummockStorageCore {
 }
 
 impl StateStoreRead for LocalHummockStorage {
-    type Iter = HummockStorageIterator;
+    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
 
     define_state_store_read_associated_type!();
 
@@ -164,13 +159,9 @@ impl StateStoreRead for LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        let iter = self
-            .core
-            .iter_inner(map_table_key_range(key_range), epoch, read_options);
-        #[cfg(not(madsim))]
-        return iter.in_span(self.tracing.new_tracer("hummock_iter"));
-        #[cfg(madsim)]
-        iter
+        self.core
+            .iter_inner(map_table_key_range(key_range), epoch, read_options)
+            .in_span(self.tracing.new_tracer("hummock_iter"))
     }
 }
 
@@ -191,14 +182,38 @@ impl StateStoreWrite for LocalHummockStorage {
             let epoch = write_options.epoch;
             let table_id = write_options.table_id;
 
+            let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
+            let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+            let limiter = self.core.memory_limiter.as_ref();
+            let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
+                tracker
+            } else {
+                warn!(
+                    "blocked at requiring memory: {}, current {}",
+                    size,
+                    limiter.get_memory_usage()
+                );
+                self.core
+                    .event_sender
+                    .send(HummockEvent::BufferMayFlush)
+                    .expect("should be able to send");
+                let tracker = limiter.require_memory(size as u64).await;
+                warn!(
+                    "successfully requiring memory: {}, current {}",
+                    size,
+                    limiter.get_memory_usage()
+                );
+                tracker
+            };
+
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
-                kv_pairs,
+                sorted_items,
+                size,
                 delete_ranges,
                 table_id,
-                Some(self.core.memory_limiter.as_ref()),
-            )
-            .await;
+                Some(tracker),
+            );
             let imm_size = imm.size();
             self.core
                 .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
@@ -217,30 +232,16 @@ impl StateStoreWrite for LocalHummockStorage {
 impl LocalStateStore for LocalHummockStorage {}
 
 impl LocalHummockStorage {
-    #[cfg(any(test, feature = "test"))]
-    pub fn for_test(
-        sstable_store: SstableStoreRef,
-        read_version: Arc<RwLock<HummockReadVersion>>,
-        event_sender: mpsc::UnboundedSender<HummockEvent>,
-    ) -> Self {
-        Self::new(
-            read_version,
-            HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused())),
-            event_sender,
-            MemoryLimiter::unlimit(),
-            #[cfg(not(madsim))]
-            Arc::new(risingwave_tracing::RwTracingService::new()),
-        )
-    }
-
     pub fn new(
+        instance_guard: LocalInstanceGuard,
         read_version: Arc<RwLock<HummockReadVersion>>,
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
-        #[cfg(not(madsim))] tracing: Arc<risingwave_tracing::RwTracingService>,
+        tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> Self {
         let storage_core = HummockStorageCore::new(
+            instance_guard,
             read_version,
             hummock_version_reader,
             event_sender,
@@ -249,7 +250,6 @@ impl LocalHummockStorage {
 
         Self {
             core: Arc::new(storage_core),
-            #[cfg(not(madsim))]
             tracing,
         }
     }
@@ -261,6 +261,14 @@ impl LocalHummockStorage {
 
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
         self.core.read_version.clone()
+    }
+
+    pub fn table_id(&self) -> TableId {
+        self.core.instance_guard.table_id
+    }
+
+    pub fn instance_id(&self) -> u64 {
+        self.core.instance_guard.instance_id
     }
 }
 
@@ -282,9 +290,9 @@ pub struct HummockStorageIterator {
 }
 
 impl StateStoreIter for HummockStorageIterator {
-    type Item = (FullKey<Vec<u8>>, Bytes);
+    type Item = StateStoreIterItem;
 
-    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
+    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {

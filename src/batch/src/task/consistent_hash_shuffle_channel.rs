@@ -54,7 +54,7 @@ fn generate_hash_values(
     chunk: &DataChunk,
     consistent_hash_info: &ConsistentHashInfo,
 ) -> BatchResult<Vec<usize>> {
-    let hasher_builder = Crc32FastBuilder {};
+    let hasher_builder = Crc32FastBuilder;
 
     let hash_values = chunk
         .get_hash_values(
@@ -66,7 +66,7 @@ fn generate_hash_values(
             hasher_builder,
         )
         .iter_mut()
-        .map(|hash_value| consistent_hash_info.vmap[hash_value.to_vnode() as usize] as usize)
+        .map(|hash_value| consistent_hash_info.vmap[hash_value.to_vnode().to_index()] as usize)
         .collect::<Vec<_>>();
     Ok(hash_values)
 }
@@ -107,7 +107,7 @@ fn generate_new_data_chunks(
 }
 
 impl ChanSender for ConsistentHashShuffleSender {
-    type SendFuture<'a> = impl Future<Output = BatchResult<()>>;
+    type SendFuture<'a> = impl Future<Output = BatchResult<()>> + 'a;
 
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async move {
@@ -152,7 +152,7 @@ impl ConsistentHashShuffleSender {
 }
 
 impl ChanReceiver for ConsistentHashShuffleReceiver {
-    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>>;
+    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>> + 'a;
 
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {

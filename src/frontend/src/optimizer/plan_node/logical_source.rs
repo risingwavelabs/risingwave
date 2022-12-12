@@ -23,8 +23,8 @@ use super::{
     StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition};
 use crate::TableCatalog;
 

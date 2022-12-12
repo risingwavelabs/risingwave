@@ -30,13 +30,17 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use crate::source::cdc::{
-    CdcProperties, CdcSplit, CdcSplitEnumerator, CdcSplitReader, CDC_CONNECTOR,
+    CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, CDC_CONNECTOR,
 };
 use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
 };
 use crate::source::dummy_connector::DummySplitReader;
 use crate::source::filesystem::s3::{S3Properties, S3_CONNECTOR};
+use crate::source::google_pubsub::{
+    PubsubProperties, PubsubSplit, PubsubSplitEnumerator, PubsubSplitReader,
+    GOOGLE_PUBSUB_CONNECTOR,
+};
 use crate::source::kafka::enumerator::KafkaSplitEnumerator;
 use crate::source::kafka::source::KafkaSplitReader;
 use crate::source::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
@@ -95,6 +99,7 @@ pub enum SplitImpl {
     Nexmark(NexmarkSplit),
     Datagen(DatagenSplit),
     Cdc(CdcSplit),
+    GooglePubsub(PubsubSplit),
 }
 
 pub enum SplitReaderImpl {
@@ -105,6 +110,7 @@ pub enum SplitReaderImpl {
     Pulsar(Box<PulsarSplitReader>),
     Datagen(Box<DatagenSplitReader>),
     Cdc(Box<CdcSplitReader>),
+    GooglePubsub(Box<PubsubSplitReader>),
 }
 
 pub enum SplitEnumeratorImpl {
@@ -113,7 +119,8 @@ pub enum SplitEnumeratorImpl {
     Kinesis(KinesisSplitEnumerator),
     Nexmark(NexmarkSplitEnumerator),
     Datagen(DatagenSplitEnumerator),
-    Cdc(CdcSplitEnumerator),
+    Cdc(DebeziumSplitEnumerator),
+    GooglePubsub(PubsubSplitEnumerator),
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -126,6 +133,7 @@ pub enum ConnectorProperties {
     S3(Box<S3Properties>),
     Cdc(Box<CdcProperties>),
     Dummy(Box<()>),
+    GooglePubsub(Box<PubsubProperties>),
 }
 
 impl_connector_properties! {
@@ -135,7 +143,8 @@ impl_connector_properties! {
     { Nexmark, NEXMARK_CONNECTOR },
     { Datagen, DATAGEN_CONNECTOR },
     { S3, S3_CONNECTOR },
-    { Cdc, CDC_CONNECTOR }
+    { Cdc, CDC_CONNECTOR },
+    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR}
 }
 
 impl_split_enumerator! {
@@ -144,7 +153,8 @@ impl_split_enumerator! {
     { Kinesis, KinesisSplitEnumerator },
     { Nexmark, NexmarkSplitEnumerator },
     { Datagen, DatagenSplitEnumerator },
-    { Cdc, CdcSplitEnumerator }
+    { Cdc, DebeziumSplitEnumerator },
+    { GooglePubsub, PubsubSplitEnumerator}
 }
 
 impl_split! {
@@ -153,7 +163,8 @@ impl_split! {
     { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
     { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
     { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
-    { Cdc, CDC_CONNECTOR, CdcSplit }
+    { Cdc, CDC_CONNECTOR, CdcSplit },
+    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit }
 }
 
 impl_split_reader! {
@@ -163,6 +174,7 @@ impl_split_reader! {
     { Nexmark, NexmarkSplitReader },
     { Datagen, DatagenSplitReader },
     { Cdc, CdcSplitReader},
+    { GooglePubsub, PubsubSplitReader },
     { Dummy, DummySplitReader }
 }
 
@@ -247,6 +259,19 @@ mod tests {
     }
 
     #[test]
+    fn test_cdc_split_state() -> Result<()> {
+        let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
+        let split_impl = SplitImpl::Cdc(CdcSplit::new(1001, offset_str.to_string()));
+        let encoded_split = split_impl.encode_to_bytes();
+        let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
+        assert_eq!(
+            split_impl.encode_to_bytes(),
+            restored_split_impl.encode_to_bytes()
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_extract_nexmark_config() {
         let props: HashMap<String, String> = convert_args!(hashmap!(
             "connector" => "nexmark",
@@ -257,7 +282,7 @@ mod tests {
         let props = ConnectorProperties::extract(props).unwrap();
 
         if let ConnectorProperties::Nexmark(props) = props {
-            assert_eq!(props.table_type, EventType::Person);
+            assert_eq!(props.table_type, Some(EventType::Person));
             assert_eq!(props.split_num, 1);
         } else {
             panic!("extract nexmark config failed");

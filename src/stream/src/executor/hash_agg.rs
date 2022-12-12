@@ -25,13 +25,15 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorage};
-use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
+use super::{
+    expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult, Watermark,
+};
 use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
@@ -117,6 +119,12 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
 
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
+
+    /// Map group key column idx to its position in group keys.
+    group_key_invert_idx: Vec<Option<usize>>,
+
+    /// Buffer watermarks on group keys received since last barrier.
+    buffered_watermarks: Vec<Option<Watermark>>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -157,6 +165,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
 
+        let mut group_key_invert_idx = vec![None; input.info().schema.len()];
+        for (group_key_seq, group_key_idx) in group_key_indices.iter().enumerate() {
+            group_key_invert_idx[*group_key_idx] = Some(group_key_seq);
+        }
+
         Ok(Self {
             input,
             extra: HashAggExecutorExtra {
@@ -178,6 +191,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 total_lookup_count: AtomicU64::new(0),
                 metrics,
                 chunk_size,
+                group_key_invert_idx,
+                buffered_watermarks: Vec::default(),
             },
             _phantom: PhantomData,
         })
@@ -224,7 +239,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .map(|(key, hash_code)| {
                 (
                     key.clone(),
-                    hash_code.clone(),
+                    *hash_code,
                     key_to_vis_maps.remove(key).unwrap().into_iter().collect(),
                 )
             })
@@ -287,7 +302,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             lookup_miss_count.fetch_add(1, Ordering::Relaxed);
                             Box::new(
                                 AggGroup::create(
-                                    Some(key.clone().deserialize(group_key_types)?),
+                                    Some(key.deserialize(group_key_types)?),
                                     agg_calls,
                                     storages,
                                     result_table,
@@ -381,11 +396,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref total_lookup_count,
             ref metrics,
             ref chunk_size,
+            ref buffered_watermarks,
             ..
         }: &'a mut HashAggExecutorExtra<K, S>,
         agg_groups: &'a mut AggGroupMap<K, S>,
         epoch: EpochPair,
     ) {
+        let state_clean_watermark = buffered_watermarks
+            .first()
+            .and_then(|opt_watermark| opt_watermark.as_ref())
+            .map(|watermark| watermark.val.clone());
+
         let actor_id_str = ctx.id.to_string();
         metrics
             .agg_lookup_miss_count
@@ -438,7 +459,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     }
 
                     for _ in 0..n_appended_ops {
-                        key.clone().deserialize_to_builders(
+                        key.deserialize_to_builders(
                             &mut builders[..group_key_indices.len()],
                             group_key_data_types,
                         )?;
@@ -447,7 +468,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         let old_row = agg_group
                             .group_key()
                             .unwrap_or_else(Row::empty)
-                            .concat(prev_outputs.into_iter());
+                            .chain(prev_outputs);
                         result_table.update(old_row, result_row);
                     } else {
                         result_table.insert(result_row);
@@ -466,10 +487,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             }
 
             // Commit all state tables.
-            futures::future::try_join_all(
-                iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
-            )
+            futures::future::try_join_all(iter_table_storage(storages).map(|state_table| async {
+                if let Some(watermark) = state_clean_watermark.as_ref() {
+                    state_table.update_watermark(watermark.clone())
+                };
+                state_table.commit(epoch).await
+            }))
             .await?;
+            if let Some(watermark) = state_clean_watermark.as_ref() {
+                result_table.update_watermark(watermark.clone());
+            };
             result_table.commit(epoch).await?;
 
             // Evict cache to target capacity.
@@ -478,8 +505,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
             iter_table_storage(storages).for_each(|state_table| {
+                if let Some(watermark) = state_clean_watermark.as_ref() {
+                    state_table.update_watermark(watermark.clone())
+                };
                 state_table.commit_no_data_expected(epoch);
             });
+            if let Some(watermark) = state_clean_watermark.as_ref() {
+                result_table.update_watermark(watermark.clone());
+            };
             result_table.commit_no_data_expected(epoch);
             return Ok(());
         }
@@ -512,12 +545,18 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         yield Message::Barrier(barrier);
 
+        extra.buffered_watermarks = vec![None; extra.group_key_indices.len()];
+
         #[for_await]
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                Message::Watermark(mut watermark) => {
+                    let group_key_seq = extra.group_key_invert_idx[watermark.col_idx];
+                    if let Some(group_key_seq) = group_key_seq {
+                        watermark.col_idx = group_key_seq;
+                        extra.buffered_watermarks[group_key_seq] = Some(watermark);
+                    }
                 }
 
                 Message::Chunk(chunk) => {
@@ -527,6 +566,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     #[for_await]
                     for chunk in Self::flush_data(&mut extra, &mut agg_states, barrier.epoch) {
                         yield Message::Chunk(chunk?);
+                    }
+
+                    for buffered_watermark in &mut extra.buffered_watermarks {
+                        if let Some(watermark) = buffered_watermark.take() {
+                            yield Message::Watermark(watermark);
+                        }
                     }
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
@@ -564,7 +609,7 @@ mod tests {
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::hash::SerializedKey;
-    use risingwave_common::row::Row;
+    use risingwave_common::row::{Row, Row2};
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
@@ -1055,7 +1100,7 @@ mod tests {
         fn sorted_rows(self) -> Vec<(Op, Row)> {
             let (chunk, ops) = self.into_parts();
             ops.into_iter()
-                .zip_eq(chunk.rows().map(Row::from))
+                .zip_eq(chunk.rows().map(Row2::into_owned_row))
                 .sorted()
                 .collect_vec()
         }
