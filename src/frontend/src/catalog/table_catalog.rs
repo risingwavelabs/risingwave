@@ -106,7 +106,7 @@ pub struct TableCatalog {
 
     pub handle_pk_conflict: bool,
 
-    pub prefix_len: usize,
+    pub pk_prefix_len_hint: usize,
 }
 
 pub enum TableKind {
@@ -224,7 +224,7 @@ impl TableCatalog {
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
             definition: self.definition.clone(),
             handle_pk_conflict: self.handle_pk_conflict,
-            prefix_len: self.prefix_len as u32,
+            pk_prefix_len_hint: self.pk_prefix_len_hint as u32,
         }
     }
 }
@@ -272,7 +272,7 @@ impl From<ProstTable> for TableCatalog {
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition.clone(),
             handle_pk_conflict: tb.handle_pk_conflict,
-            prefix_len: tb.prefix_len as usize,
+            pk_prefix_len_hint: tb.pk_prefix_len_hint as usize,
         }
     }
 }
@@ -358,7 +358,7 @@ mod tests {
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,
-            prefix_len: 0,
+            pk_prefix_len_hint: 0,
         }
         .into();
 
@@ -417,7 +417,7 @@ mod tests {
                 value_indices: vec![0],
                 definition: "".into(),
                 handle_pk_conflict: false,
-                prefix_len: 0,
+                pk_prefix_len_hint: 0,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

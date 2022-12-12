@@ -328,7 +328,7 @@ fn infer_internal_table_catalog(
             OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap()),
         );
     }
-    internal_table_catalog_builder.set_pk_prefix_len(distribution_key.len());
+    internal_table_catalog_builder.set_pk_prefix_len_hint(distribution_key.len());
 
     internal_table_catalog_builder.build(distribution_key)
 }

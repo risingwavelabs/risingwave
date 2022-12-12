@@ -509,7 +509,7 @@ mod tests {
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,
-            prefix_len: 0,
+            pk_prefix_len_hint: 0,
         }
     }
 

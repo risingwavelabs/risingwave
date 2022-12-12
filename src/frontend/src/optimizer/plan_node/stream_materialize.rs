@@ -152,7 +152,7 @@ impl StreamMaterialize {
         let ctx = input.ctx();
         let distribution_key = base.dist.dist_column_indices().to_vec();
         let properties = ctx.with_options().internal_table_subset();
-        let prefix_len = pk_indices.len();
+        let pk_prefix_len_hint = pk_indices.len();
         let table = TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -171,7 +171,7 @@ impl StreamMaterialize {
             value_indices,
             definition,
             handle_pk_conflict,
-            prefix_len,
+            pk_prefix_len_hint,
         };
 
         Ok(Self { base, input, table })

@@ -80,7 +80,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
             internal_table_catalog_builder.set_vnode_col_idx(vnode_col_idx);
         }
 
-        internal_table_catalog_builder.set_pk_prefix_len(self.group_key.len());
+        internal_table_catalog_builder.set_pk_prefix_len_hint(self.group_key.len());
         internal_table_catalog_builder
             .build(self.input.distribution().dist_column_indices().to_vec())
     }
