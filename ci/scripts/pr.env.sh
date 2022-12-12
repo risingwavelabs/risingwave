@@ -13,6 +13,8 @@ set -e
 
 # Don't run e2e compaction test in PR build
 export RUN_COMPACTION=0;
+# Don't run meta store backup/recovery test
+export RUN_META_BACKUP=0;
 
 if [[ -n "$CHANGED" ]]; then
     echo "Changes to Sqlsmith source files detected.";
