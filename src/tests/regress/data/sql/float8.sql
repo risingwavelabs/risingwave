@@ -30,11 +30,11 @@ INSERT INTO FLOAT8_TBL(f1) VALUES ('    - 3');
 INSERT INTO FLOAT8_TBL(f1) VALUES ('123           5');
 
 -- special inputs
---@ SELECT 'NaN'::float8;
---@ SELECT 'nan'::float8;
---@ SELECT '   NAN  '::float8;
---@ SELECT 'infinity'::float8;
---@ SELECT '          -INFINiTY   '::float8;
+SELECT 'NaN'::float8 AS float8;
+SELECT 'nan'::float8 AS float8;
+SELECT '   NAN  '::float8 AS float8;
+SELECT 'infinity'::float8 AS float8;
+SELECT '          -INFINiTY   '::float8 AS float8;
 -- bad special inputs
 SELECT 'N A N'::float8;
 SELECT 'NaN x'::float8;
@@ -45,7 +45,7 @@ SELECT 'Infinity'::float8 / 'Infinity'::float8;
 SELECT '42'::float8 / 'Infinity'::float8;
 SELECT 'nan'::float8 / 'nan'::float8;
 SELECT 'nan'::float8 / '0'::float8;
---@ SELECT 'nan'::numeric::float8;
+SELECT 'nan'::numeric::float8 AS float8;
 
 SELECT * FROM FLOAT8_TBL;
 
@@ -247,18 +247,18 @@ INSERT INTO FLOAT8_TBL(f1) VALUES ('-1.2345678901234e-200');
 SELECT * FROM FLOAT8_TBL;
 
 -- test edge-case coercions to integer
---@ SELECT '32767.4'::float8::int2;
+SELECT '32767.4'::float8::int2 AS int2;
 --@ SELECT '32767.6'::float8::int2;
---@ SELECT '-32768.4'::float8::int2;
+SELECT '-32768.4'::float8::int2 AS int2;
 --@ SELECT '-32768.6'::float8::int2;
---@ SELECT '2147483647.4'::float8::int4;
+SELECT '2147483647.4'::float8::int4 AS int4;
 --@ SELECT '2147483647.6'::float8::int4;
---@ SELECT '-2147483648.4'::float8::int4;
+SELECT '-2147483648.4'::float8::int4 AS int4;
 --@ SELECT '-2147483648.6'::float8::int4;
---@ SELECT '9223372036854773760'::float8::int8;
---@ SELECT '9223372036854775807'::float8::int8;
---@ SELECT '-9223372036854775808.5'::float8::int8;
---@ SELECT '-9223372036854780000'::float8::int8;
+SELECT '9223372036854773760'::float8::int8 AS int8;
+SELECT '9223372036854775807'::float8::int8;
+SELECT '-9223372036854775808.5'::float8::int8 AS int8;
+SELECT '-9223372036854780000'::float8::int8;
 
 -- test exact cases for trigonometric functions in degrees
 

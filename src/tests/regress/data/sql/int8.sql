@@ -89,9 +89,9 @@ SELECT q1 + 42::int2 AS "8plus2", q1 - 42::int2 AS "8minus2", q1 * 42::int2 AS "
 -- int2 op int8
 SELECT 246::int2 + q1 AS "2plus8", 246::int2 - q1 AS "2minus8", 246::int2 * q1 AS "2mul8", 246::int2 / q1 AS "2div8" FROM INT8_TBL;
 
---@ SELECT q2, abs(q2) FROM INT8_TBL;
---@ SELECT min(q1), min(q2) FROM INT8_TBL;
---@ SELECT max(q1), max(q2) FROM INT8_TBL;
+SELECT q2, abs(q2) AS abs FROM INT8_TBL;
+SELECT min(q1) AS min, min(q2) AS min FROM INT8_TBL;
+SELECT max(q1) AS max, max(q2) AS max FROM INT8_TBL;
 
 
 -- TO_CHAR()
@@ -124,9 +124,9 @@ SELECT 246::int2 + q1 AS "2plus8", 246::int2 - q1 AS "2minus8", 246::int2 * q1 A
 
 -- check min/max values and overflow behavior
 
---@ select '-9223372036854775808'::int8;
+select '-9223372036854775808'::int8 AS int8;
 select '-9223372036854775809'::int8;
---@ select '9223372036854775807'::int8;
+select '9223372036854775807'::int8 AS int8;
 select '9223372036854775808'::int8;
 
 select -('-9223372036854775807'::int8);
@@ -163,16 +163,16 @@ select '-100'::int2 - '9223372036854775800'::int8;
 select '100'::int2 * '9223372036854775800'::int8;
 select '100'::int2 / '0'::int8;
 
---@ SELECT CAST(q1 AS int4) FROM int8_tbl WHERE q2 = 456;
+SELECT CAST(q1 AS int4) AS q1 FROM int8_tbl WHERE q2 = 456;
 SELECT CAST(q1 AS int4) FROM int8_tbl WHERE q2 <> 456;
 
---@ SELECT CAST(q1 AS int2) FROM int8_tbl WHERE q2 = 456;
+SELECT CAST(q1 AS int2) AS q1 FROM int8_tbl WHERE q2 = 456;
 SELECT CAST(q1 AS int2) FROM int8_tbl WHERE q2 <> 456;
 
---@ SELECT CAST('42'::int2 AS int8), CAST('-37'::int2 AS int8);
+SELECT CAST('42'::int2 AS int8) AS int8, CAST('-37'::int2 AS int8) AS int8;
 
---@ SELECT CAST(q1 AS float4), CAST(q2 AS float8) FROM INT8_TBL;
---@ SELECT CAST('36854775807.0'::float4 AS int8);
+--@ SELECT CAST(q1 AS float4) AS q1, CAST(q2 AS float8) AS q2 FROM INT8_TBL;
+SELECT CAST('36854775807.0'::float4 AS int8) AS int8;
 SELECT CAST('922337203685477580700.0'::float8 AS int8);
 
 SELECT CAST(q1 AS oid) FROM INT8_TBL;
@@ -192,8 +192,8 @@ SELECT * FROM generate_series('+4567890123456789'::int8, '+4567890123456799'::in
 --@ SELECT * FROM generate_series('+4567890123456789'::int8, '+4567890123456799'::int8, 2);
 
 -- corner case
---@ SELECT (-1::int8<<63)::text;
---@ SELECT ((-1::int8<<63)+1)::text;
+SELECT (-1::int8<<63)::text AS text;
+SELECT ((-1::int8<<63)+1)::text AS text;
 
 -- check sane handling of INT64_MIN overflow cases
 SELECT (-9223372036854775808)::int8 * (-1)::int8;
