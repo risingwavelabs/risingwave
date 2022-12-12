@@ -15,7 +15,7 @@
 use std::env;
 use std::ffi::OsString;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::str::FromStr;
 
@@ -40,7 +40,7 @@ async fn load_risedev_config(profile: &str) -> Result<(Option<String>, Vec<Servi
         content
     };
     let (config_path, risedev_config) = ConfigExpander::expand(&risedev_config, profile)?;
-    let services = ConfigExpander::deserialize(&risedev_config, profile)?;
+    let services = ConfigExpander::deserialize(&risedev_config)?;
 
     Ok((config_path, services))
 }
@@ -63,10 +63,9 @@ pub async fn playground() -> Result<()> {
     let force_shared_hummock_in_mem = std::env::var("FORCE_SHARED_HUMMOCK_IN_MEM").is_ok();
 
     let apply_config_file = |cmd: &mut Command, config_path: Option<&str>| {
-        let path = Path::new(config_path.unwrap_or("src/config/risingwave.toml"));
-        println!("config file: {}", path.display());
-        if path.exists() {
-            cmd.arg("--config-path").arg(path);
+        if let Some(c) = config_path {
+            println!("config file: {}", c);
+            cmd.arg("--config-path").arg(c);
         }
     };
 

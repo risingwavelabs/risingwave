@@ -20,6 +20,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{FragmentId, TableCatalog, TableId};
 use crate::optimizer::property::{Direction, FieldOrder};
 use crate::utils::WithOptions;
@@ -117,13 +118,16 @@ impl TableCatalogBuilder {
             pk: self.pk,
             stream_key: vec![],
             distribution_key,
-            is_index: false,
-            appendonly: false,
+            // NOTE: This should be altered if `TableCatalogBuilder` is used to build something
+            // other than internal tables.
+            table_type: TableType::Internal,
+            append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: self.properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
-            vnode_col_idx: self.vnode_col_idx,
+            vnode_col_index: self.vnode_col_idx,
+            row_id_index: None,
             value_indices: self
                 .value_indices
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),

@@ -19,7 +19,6 @@ select distinct sum(v1) from t group by v2;
 5
 
 # v2, v3 can be either 2, 3 or 3, 2
-
 query I
 select distinct on(v1) v2 + v3 from t order by v1;
 ----

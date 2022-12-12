@@ -63,7 +63,7 @@ pub struct CompactionTestOpts {
     #[clap(long, default_value = "5")]
     pub num_trigger_rounds: u32,
 
-    /// Te path of `risingwave.toml` configuration file.
+    /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
     ///

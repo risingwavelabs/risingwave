@@ -115,7 +115,6 @@ select extract(epoch from to_timestamp(1262349296.7890123));
 
 # If this was done in PostgreSQL under 'US/Pacific', it will return 1 hour
 # earlier because there are only 23 hours in this day due to Daylight Saving.
-
 query T
 select '2022-03-13 09:00:00Z'::timestamptz + interval '1' day - interval '24' hour;
 ----
