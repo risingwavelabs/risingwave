@@ -988,7 +988,7 @@ impl<S: StateStore> StateTable<S> {
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
         let prefix_hint = {
-            if self.pk_prefix_len > pk_prefix.len() || pk_prefix.is_empty(){
+            if self.pk_prefix_len > pk_prefix.len() || pk_prefix.is_empty() {
                 None
             } else {
                 let encoded_prefix_len = self

@@ -14,14 +14,13 @@
 
 //! Hummock is the state store of the streaming system.
 
-
 use std::ops::Deref;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use risingwave_common::catalog::TableId;
+use risingwave_common::{catalog::TableId, hash::VirtualNode};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
@@ -331,7 +330,7 @@ pub async fn get_from_sstable_info(
     };
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
-    let pk_prefix = &ukey.table_key;
+    let pk_prefix = &ukey.table_key[VirtualNode::SIZE..];
     if read_options.check_bloom_filter
         && !hit_sstable_bloom_filter(sstable.value(), pk_prefix, local_stats)
     {

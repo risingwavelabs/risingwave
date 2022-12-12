@@ -239,6 +239,7 @@ impl HashJoin {
             .collect();
 
         // The pk of hash join internal and degree table should be join_key + input_pk.
+        let join_key_len = join_key_indices.len();
         let mut pk_indices = join_key_indices;
         // TODO(yuhao): dedup the dist key and pk.
         pk_indices.extend(input.logical_pk());
@@ -270,8 +271,8 @@ impl HashJoin {
         degree_table_catalog_builder
             .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
 
-        internal_table_catalog_builder.set_pk_prefix_len(pk_indices.len());
-        degree_table_catalog_builder.set_pk_prefix_len(pk_indices.len());
+        internal_table_catalog_builder.set_pk_prefix_len(join_key_len);
+        degree_table_catalog_builder.set_pk_prefix_len(join_key_len);
 
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),

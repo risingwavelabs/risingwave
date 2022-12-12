@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{future::Future, ops::RangeBounds};
-use std::ops::Bound;
+use std::future::Future;
+use std::ops::{Bound, RangeBounds};
 use std::sync::atomic::Ordering as MemOrdering;
 use std::time::Duration;
 
@@ -21,7 +21,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange, next_key};
+use risingwave_hummock_sdk::key::{map_table_key_range, next_key, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::oneshot;
