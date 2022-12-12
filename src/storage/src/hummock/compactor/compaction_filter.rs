@@ -18,7 +18,7 @@ use dyn_clone::DynClone;
 use risingwave_common::catalog::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_hummock_sdk::key::FullKey;
 
-pub trait CompactionFilter: Send + DynClone {
+pub trait CompactionFilter: Send + Sync + DynClone {
     fn should_delete(&mut self, _: FullKey<&[u8]>) -> bool {
         false
     }

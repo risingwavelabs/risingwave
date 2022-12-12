@@ -1,4 +1,4 @@
-query II rowsort
+query II
 select	 c_count, count(*) as custdist
 from	 (select c_id, count(o_id)
     	 from customer left outer join orders on (

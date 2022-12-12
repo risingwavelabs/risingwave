@@ -1,4 +1,5 @@
 # Todo: The precision is different from PostgresSql, Same issue in TPCH. We use `round` to ignore the imprecision.
+
 statement ok
 create materialized view ch_benchmark_q1 as
 select   ol_number,

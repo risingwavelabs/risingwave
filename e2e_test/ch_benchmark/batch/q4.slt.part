@@ -1,4 +1,4 @@
-query II rowsort
+query II
 select	o_ol_cnt, count(*) as order_count
 from	orders
 where	o_entry_d >= '2007-01-02 00:00:00.000000'

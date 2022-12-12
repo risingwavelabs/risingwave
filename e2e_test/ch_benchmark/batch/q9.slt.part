@@ -1,4 +1,4 @@
-query TTR rowsort
+query TTR
 select	 n_name, extract(year from o_entry_d::timestamp) as l_year, sum(ol_amount) as sum_profit
 from	 item, stock, supplier, orderline, orders, nation
 where	 ol_i_id = st_i_id

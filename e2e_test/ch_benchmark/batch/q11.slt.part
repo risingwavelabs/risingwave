@@ -1,4 +1,4 @@
-query II rowsort
+query II
 select	 st_i_id, sum(st_order_cnt) as ordercount
 from	 stock, supplier, nation
 where	 (st_w_id * st_i_id) % 10000 = s_suppkey
