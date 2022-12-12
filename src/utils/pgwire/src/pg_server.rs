@@ -168,6 +168,7 @@ mod tests {
     use bytes::Bytes;
     use futures::stream::BoxStream;
     use futures::StreamExt;
+    use risingwave_sqlparser::ast::Statement;
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
@@ -238,12 +239,26 @@ mod tests {
             ))
         }
 
+        /// The test below will issue "BEGIN", "ROLLBACK" as simple query, but the results do not
+        /// matter, so just return a fake one.
         async fn run_one_query(
             self: Arc<Self>,
             _sql: Statement,
             _format: bool,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
-            unreachable!()
+            let res: Vec<Option<Bytes>> = vec![Some(Bytes::new())];
+            // let param_len = 2;
+            Ok(PgResponse::new_for_stream(
+                StatementType::SELECT,
+                Some(1),
+                futures::stream::iter(vec![Ok(vec![Row::new(res)])]).boxed(),
+                vec![
+                    // 1043 is the oid of varchar type.
+                    // -1 is the type len of varchar type.
+                    PgFieldDescriptor::new("".to_string(), 1043, -1);
+                    1
+                ],
+            ))
         }
 
         fn user_authenticator(&self) -> &UserAuthenticator {
