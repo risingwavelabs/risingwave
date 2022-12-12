@@ -16,7 +16,6 @@ anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 global_stats_alloc = { path = "../utils/global_stats_alloc" }
 log = { version = "0.4" }
-risingwave_backup = { path = "../storage/backup" }
 risingwave_compaction_test = { path = "../tests/compaction_test" }
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }
@@ -60,6 +59,3 @@ path = "src/bin/compactor.rs"
 name = "risectl"
 path = "src/bin/ctl.rs"
 
-[[bin]]
-name = "backup-restore"
-path = "src/bin/backup_restore.rs"

@@ -40,6 +40,7 @@ cargo build \
     -p risingwave_regress_test \
     -p risingwave_sqlsmith \
     -p risingwave_compaction_test \
+    -p risingwave_backup_cmd \
     --features "static-link static-log-level" --profile "$profile"
 
 echo "--- Compress debug info for artifacts"

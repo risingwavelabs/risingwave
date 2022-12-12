@@ -4997,6 +4997,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_backup_cmd"
+version = "0.2.0-alpha"
+dependencies = [
+ "clap 3.2.23",
+ "madsim-tokio",
+ "risingwave_backup",
+ "risingwave_meta",
+ "risingwave_rt",
+]
+
+[[package]]
 name = "risingwave_batch"
 version = "0.2.0-alpha"
 dependencies = [
@@ -5102,7 +5113,6 @@ dependencies = [
  "global_stats_alloc",
  "log",
  "madsim-tokio",
- "risingwave_backup",
  "risingwave_compaction_test",
  "risingwave_compactor",
  "risingwave_compute",
