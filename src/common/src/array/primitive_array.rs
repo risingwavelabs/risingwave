@@ -151,7 +151,11 @@ impl<'a, T: PrimitiveArrayItemType> FromIterator<&'a Option<T>> for PrimitiveArr
 
 impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        iter.into_iter().map(Some).collect()
+        let data: Vec<T> = iter.into_iter().collect();
+        PrimitiveArray {
+            bitmap: Bitmap::all_high_bits(data.len()),
+            data,
+        }
     }
 }
 

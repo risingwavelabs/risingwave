@@ -54,7 +54,11 @@ impl<'a> FromIterator<&'a Option<bool>> for BoolArray {
 
 impl FromIterator<bool> for BoolArray {
     fn from_iter<I: IntoIterator<Item = bool>>(iter: I) -> Self {
-        iter.into_iter().map(Some).collect()
+        let data: Bitmap = iter.into_iter().collect();
+        BoolArray {
+            bitmap: Bitmap::all_high_bits(data.len()),
+            data,
+        }
     }
 }
 
