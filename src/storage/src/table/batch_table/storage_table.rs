@@ -244,7 +244,7 @@ impl<S: StateStore> StorageTable<S> {
 
         let read_options = ReadOptions {
             prefix_hint: None,
-            check_bloom_filter: !key_indices.is_empty(),
+            check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
@@ -309,7 +309,7 @@ impl<S: StateStore> StorageTable<S> {
             let prefix_hint = prefix_hint.clone();
             let wait_epoch = wait_epoch.clone();
             async move {
-                let check_bloom_filter = prefix_hint.is_some();
+                let check_bloom_filter = false;
                 let read_options = ReadOptions {
                     prefix_hint,
                     check_bloom_filter,
