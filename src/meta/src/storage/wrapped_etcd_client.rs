@@ -101,7 +101,7 @@ impl ClientWithVersion {
 
 /// Asynchronous `etcd` client using v3 API, wrapped with a refresh logic. Since the `etcd` client
 /// doesn't provide any token refresh apis like golang library, we have to implement it ourselves:
-/// (support token refresh for long-live clients)[https://github.com/etcdv3/etcd-client/issues/45].
+/// [support token refresh for long-live clients](https://github.com/etcdv3/etcd-client/issues/45).
 ///
 /// The client will re-connect to etcd when An `Unauthenticated` error is encountered with message
 /// "invalid auth token". The token used for authentication will be refreshed.
