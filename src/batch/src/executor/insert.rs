@@ -301,9 +301,6 @@ mod tests {
         .into();
         assert_eq!(*chunk.columns()[2].array(), array);
 
-        // TODO(Yuanxin): Rewrite the comments.
-        // There's nothing in store since `TableSource` has no side effect.
-        // Data will be materialized in associated streaming task.
         let epoch = u64::MAX;
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
         let store_content = store
