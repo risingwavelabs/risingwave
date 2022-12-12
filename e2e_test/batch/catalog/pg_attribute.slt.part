@@ -19,6 +19,7 @@ select a.attname, a.atttypid, a.attlen, a.attnum from pg_catalog.pg_class t
 ----
 id2 23 4 1
 
+
 statement ok
 drop view view1;
 

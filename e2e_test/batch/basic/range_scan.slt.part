@@ -68,7 +68,6 @@ SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (2222, 3333);
 42 3333 1
 
 # Test same value in `in` is deduplicated.
-
 query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (2222, 2222, 3333);
 ----
@@ -104,6 +103,7 @@ query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id = 9999 and date is null;
 ----
 9999 NULL 1
+
 
 query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id = 9999 or user_id is null order by user_id, date, orders_count;

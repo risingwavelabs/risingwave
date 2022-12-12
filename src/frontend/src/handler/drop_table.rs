@@ -23,7 +23,7 @@ use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceKind;
-use crate::catalog::table_catalog::TableKind;
+use crate::catalog::table_catalog::TableType;
 use crate::handler::HandlerArgs;
 
 pub fn check_source(
@@ -88,18 +88,23 @@ pub async fn handle_drop_table(
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
 
-        match table.kind() {
-            TableKind::TableOrSource => {
+        match table.table_type() {
+            TableType::Table => {
                 check_source(&reader, db_name, schema_name, &table_name)?;
             }
-            TableKind::Index => {
+            TableType::MaterializedView => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
+                )));
+            }
+            TableType::Index => {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP INDEX` to drop an index.".to_owned(),
                 )));
             }
-            TableKind::MView => {
+            TableType::Internal => {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
+                    "Internal tables cannot be dropped.".to_owned(),
                 )));
             }
         }
