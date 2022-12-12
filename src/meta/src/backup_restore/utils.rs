@@ -43,7 +43,7 @@ macro_rules! dispatch_meta_store {
 
 // Code is copied from src/meta/src/rpc/server.rs. TODO #6482: extract method.
 pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendImpl> {
-    let meta_store_backend = match opts.backend {
+    let meta_store_backend = match opts.meta_store_type {
         Backend::Etcd => MetaStoreBackend::Etcd {
             endpoints: opts
                 .etcd_endpoints

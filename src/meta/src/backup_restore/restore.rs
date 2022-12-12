@@ -27,20 +27,29 @@ use crate::{dispatch_meta_store, Backend};
 /// Command-line arguments for restore.
 #[derive(Parser, Debug, Clone)]
 pub struct RestoreOpts {
+    /// Id of snapshot used to restore. Available snapshots can be found in
+    /// <storage_directory>/manifest.json.
     #[clap(long)]
     pub meta_snapshot_id: u64,
-    #[clap(long, arg_enum, default_value_t = Backend::Mem)]
-    pub backend: Backend,
+    /// Type of meta store to restore.
+    #[clap(long, arg_enum, default_value_t = Backend::Etcd)]
+    pub meta_store_type: Backend,
+    /// Etcd endpoints.
     #[clap(long, default_value_t = String::from(""))]
     pub etcd_endpoints: String,
+    /// Whether etcd auth has been enabled.
     #[clap(long)]
     pub etcd_auth: bool,
-    #[clap(long, env = "ETCD_USERNAME", default_value = "")]
+    /// Username if etcd auth has been enabled.
+    #[clap(long, default_value = "")]
     pub etcd_username: String,
-    #[clap(long, env = "ETCD_PASSWORD", default_value = "")]
+    /// Password if etcd auth has been enabled.
+    #[clap(long, default_value = "")]
     pub etcd_password: String,
+    /// Url of storage to fetch meta snapshot from.
     #[clap(long, default_value_t = String::from("memory"))]
     pub storage_url: String,
+    /// Directory of storage to fetch meta snapshot from.
     #[clap(long, default_value_t = String::from("backup"))]
     pub storage_directory: String,
 }
