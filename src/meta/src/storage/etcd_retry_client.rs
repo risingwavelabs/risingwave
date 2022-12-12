@@ -51,7 +51,10 @@ impl EtcdRetryClient {
     fn should_retry(err: &Error) -> bool {
         match err {
             Error::GRpcStatus(status) => {
-                status.code() == tonic::Code::Unavailable || status.code() == tonic::Code::Unknown
+                status.code() == tonic::Code::Unavailable
+                    || status.code() == tonic::Code::Unknown
+                    || (status.code() == tonic::Code::Unauthenticated
+                        && status.message().contains("invalid auth token"))
             }
             _ => false,
         }
