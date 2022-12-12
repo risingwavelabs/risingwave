@@ -65,6 +65,7 @@ impl EtcdRefreshClient {
         if guard.version == old_version {
             let client =
                 etcd_client::Client::connect(&self.endpoints, self.options.clone()).await?;
+            tracing::debug!("connection to etcd refreshed");
             *guard = ClientWithVersion::new(client, old_version + 1);
         }
         Ok(())
