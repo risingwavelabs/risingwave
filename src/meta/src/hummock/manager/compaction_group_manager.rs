@@ -731,7 +731,7 @@ mod tests {
     use std::ops::Deref;
 
     use risingwave_common::catalog::{TableId, TableOption};
-    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::meta::table_fragments::Fragment;
 

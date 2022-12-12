@@ -78,6 +78,7 @@ mod gc;
 #[cfg(test)]
 mod tests;
 mod versioning;
+pub use versioning::HummockVersionSafePoint;
 use versioning::*;
 mod compaction;
 mod worker;

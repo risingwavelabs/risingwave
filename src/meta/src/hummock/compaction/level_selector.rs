@@ -440,7 +440,7 @@ pub mod tests {
     use std::ops::Range;
 
     use itertools::Itertools;
-    use risingwave_common::config::constant::hummock::CompactionFilterFlag;
+    use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
     use risingwave_pb::hummock::{KeyRange, Level, LevelType, OverlappingLevel, SstableInfo};
 
