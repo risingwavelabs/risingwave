@@ -20,14 +20,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures::TryFutureExt;
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{
-    bound_table_key_range, map_table_key_range, next_key, user_key, FullKey, TableKey,
-    TableKeyRange, UserKey,
+    bound_table_key_range, map_table_key_range, user_key, FullKey, TableKey, TableKeyRange, UserKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
@@ -61,7 +61,7 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore, StateStoreIter,
+    define_state_store_write_associated_type,
 };
 
 impl HummockStorageV1 {
@@ -296,11 +296,7 @@ impl HummockStorageV1 {
         );
         assert!(pinned_version.is_valid());
         // encode once
-        let bloom_filter_key = if let Some(prefix) = read_options.prefix_hint.as_ref() {
-            Some(UserKey::new(read_options.table_id, TableKey(prefix)).encode())
-        } else {
-            None
-        };
+        let bloom_filter_key = read_options.dist_key_hint.map(TableKey);
         for level in pinned_version.levels(table_id) {
             if level.table_infos.is_empty() {
                 continue;
@@ -416,7 +412,7 @@ impl HummockStorageV1 {
 }
 
 impl StateStoreRead for HummockStorageV1 {
-    type Iter = HummockStateStoreIter;
+    type IterStream = StreamTypeOfIter<HummockStateStoreIter>;
 
     define_state_store_read_associated_type!();
 
@@ -437,58 +433,9 @@ impl StateStoreRead for HummockStorageV1 {
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        if let Some(prefix_hint) = read_options.prefix_hint.as_ref() {
-            let next_key = next_key(prefix_hint);
-
-            // learn more detail about start_bound with storage_table.rs.
-            match key_range.start_bound() {
-                // it guarantees that the start bound must be included (some different case)
-                // 1. Include(pk + col_bound) => prefix_hint <= start_bound <
-                // next_key(prefix_hint)
-                //
-                // for case2, frontend need to reject this, avoid excluded start_bound and
-                // transform it to included(next_key), without this case we can just guarantee
-                // that start_bound < next_key
-                //
-                // 2. Include(next_key(pk +
-                // col_bound)) => prefix_hint <= start_bound <= next_key(prefix_hint)
-                //
-                // 3. Include(pk) => prefix_hint <= start_bound < next_key(prefix_hint)
-                Included(range_start) | Excluded(range_start) => {
-                    assert!(range_start.as_slice() >= prefix_hint.as_slice());
-                    assert!(range_start.as_slice() < next_key.as_slice() || next_key.is_empty());
-                }
-
-                _ => unreachable!(),
-            }
-
-            match key_range.end_bound() {
-                Included(range_end) => {
-                    assert!(range_end.as_slice() >= prefix_hint.as_slice());
-                    assert!(range_end.as_slice() < next_key.as_slice() || next_key.is_empty());
-                }
-
-                // 1. Excluded(end_bound_of_prefix(pk + col)) => prefix_hint < end_bound <=
-                // next_key(prefix_hint)
-                //
-                // 2. Excluded(pk + bound) => prefix_hint < end_bound <=
-                // next_key(prefix_hint)
-                Excluded(range_end) => {
-                    assert!(range_end.as_slice() > prefix_hint.as_slice());
-                    assert!(range_end.as_slice() <= next_key.as_slice() || next_key.is_empty());
-                }
-
-                std::ops::Bound::Unbounded => {
-                    assert!(next_key.is_empty());
-                }
-            }
-        } else {
-            // not check
-        }
-
-        let iter =
-            self.iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options);
-        iter.in_span(self.tracing.new_tracer("hummock_iter"))
+        self.iter_inner::<ForwardIter>(epoch, map_table_key_range(key_range), read_options)
+            .map_ok(|iter| iter.into_stream())
+            .in_span(self.tracing.new_tracer("hummock_iter"))
     }
 }
 
@@ -659,11 +606,9 @@ impl HummockStateStoreIter {
 }
 
 impl StateStoreIter for HummockStateStoreIter {
-    // TODO: directly return `&[u8]` to user instead of `Bytes`.
-    type Item = (FullKey<Vec<u8>>, Bytes);
+    type Item = StateStoreIterItem;
 
-    type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
+    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {

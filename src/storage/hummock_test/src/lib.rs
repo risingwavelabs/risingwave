@@ -28,8 +28,8 @@ mod local_version_manager_tests;
 mod snapshot_tests;
 #[cfg(test)]
 mod state_store_tests;
-#[cfg(test)]
-mod test_utils;
+#[cfg(any(test, feature = "test"))]
+pub mod test_utils;
 #[cfg(test)]
 mod vacuum_tests;
 

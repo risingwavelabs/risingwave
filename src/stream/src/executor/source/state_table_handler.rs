@@ -21,6 +21,7 @@ use risingwave_common::row::{Row, Row2};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -60,9 +61,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     async fn set(&mut self, key: SplitId, value: Bytes) -> StreamExecutorResult<()> {
         let row = Row::new(vec![
             Some(Self::string_to_scalar(key.deref())),
-            Some(Self::string_to_scalar(
-                String::from_utf8_lossy(&value).to_string(),
-            )),
+            Some(ScalarImpl::Bytea(Box::from(value.as_ref()))),
         ]);
         match self.get(key).await? {
             Some(prev_row) => {
@@ -103,7 +102,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(match self.get(stream_source_split.id()).await? {
             None => None,
             Some(row) => match row.datum_at(1) {
-                Some(ScalarRefImpl::Utf8(s)) => Some(SplitImpl::restore_from_bytes(s.as_bytes())?),
+                Some(ScalarRefImpl::Bytea(bytes)) => Some(SplitImpl::restore_from_bytes(bytes)?),
                 _ => unreachable!(),
             },
         })
@@ -129,7 +128,7 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
 
     let columns = vec![
         make_column(TypeName::Varchar, 0),
-        make_column(TypeName::Varchar, 1),
+        make_column(TypeName::Bytea, 1),
     ];
     ProstTable {
         id,
@@ -137,7 +136,7 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
         database_id: DatabaseId::placeholder() as u32,
         name: String::new(),
         columns,
-        is_index: false,
+        table_type: TableType::Internal as i32,
         value_indices: vec![0, 1],
         pk: vec![ColumnOrder {
             index: 0,

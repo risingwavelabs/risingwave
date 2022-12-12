@@ -3152,9 +3152,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.10"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85b32d93334a4030dad86dde50018e57ccd9e4c0f64a23e2a7be240e9d7d958c"
+checksum = "a5b15031e1ca7bb25f51c6ddb36f9ec8e10aa184e21987c49118e18a1141f7a8"
 dependencies = [
  "ahash",
  "async-channel",
@@ -3179,15 +3179,19 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.8"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d6c5383c2297a0a3306fbcc0475a6ab1decb5b49c3cd20adae6fd8d149dbde0"
+checksum = "f83388bf9b75da759e6ebc7470e8ab4911314504eb75e16946de66f56a5608ea"
 dependencies = [
  "etcd-client",
  "futures-util",
  "http",
  "madsim",
+ "serde",
+ "serde_with",
  "spin 0.9.4",
+ "thiserror",
+ "toml",
  "tonic",
  "tracing",
 ]
@@ -4972,6 +4976,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_backup"
+version = "0.2.0-alpha"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "itertools",
+ "parking_lot 0.12.1",
+ "prost 0.11.2",
+ "risingwave_common",
+ "risingwave_hummock_sdk",
+ "risingwave_object_store",
+ "risingwave_pb",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "thiserror",
+ "twox-hash",
+]
+
+[[package]]
+name = "risingwave_backup_cmd"
+version = "0.2.0-alpha"
+dependencies = [
+ "clap 3.2.23",
+ "madsim-tokio",
+ "risingwave_backup",
+ "risingwave_meta",
+ "risingwave_rt",
+]
+
+[[package]]
 name = "risingwave_batch"
 version = "0.2.0-alpha"
 dependencies = [
@@ -5172,7 +5208,6 @@ dependencies = [
  "static_assertions",
  "strum",
  "strum_macros",
- "sysinfo",
  "thiserror",
  "tokio-stream",
  "toml",
@@ -5208,6 +5243,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "clap 3.2.23",
+ "futures",
  "itertools",
  "lazy_static",
  "madsim-tokio",
@@ -5303,6 +5339,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "static_assertions",
+ "sysinfo",
  "tempfile",
  "thiserror",
  "tokio-stream",
@@ -5531,8 +5568,10 @@ dependencies = [
 name = "risingwave_hummock_test"
 version = "0.2.0-alpha"
 dependencies = [
+ "async-stream",
  "async-trait",
  "bytes",
+ "criterion",
  "fail",
  "futures",
  "itertools",
@@ -5541,7 +5580,6 @@ dependencies = [
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_common_service",
- "risingwave_compute",
  "risingwave_hummock_sdk",
  "risingwave_meta",
  "risingwave_object_store",
@@ -5582,6 +5620,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
+ "memcomparable",
  "mime_guess",
  "num-integer",
  "num-traits",
@@ -5592,6 +5631,7 @@ dependencies = [
  "prost 0.11.2",
  "rand 0.8.5",
  "reqwest",
+ "risingwave_backup",
  "risingwave_common",
  "risingwave_common_service",
  "risingwave_connector",
@@ -5615,7 +5655,6 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
- "twox-hash",
  "url",
  "uuid",
  "workspace-hack",
@@ -5942,6 +5981,7 @@ dependencies = [
  "twox-hash",
  "uuid",
  "workspace-hack",
+ "xxhash-rust",
  "zstd",
 ]
 
@@ -6052,7 +6092,6 @@ dependencies = [
  "bytes",
  "num-traits",
  "postgres",
- "rand 0.8.5",
  "serde",
  "tokio-postgres",
 ]
@@ -7958,7 +7997,6 @@ dependencies = [
  "crossbeam-channel",
  "crossbeam-deque",
  "crossbeam-epoch",
- "crossbeam-utils",
  "either",
  "fail",
  "fixedbitset",
@@ -7999,7 +8037,6 @@ dependencies = [
  "petgraph",
  "phf",
  "phf_shared",
- "postgres-types",
  "proc-macro2",
  "prometheus",
  "prost 0.11.2",
@@ -8010,7 +8047,6 @@ dependencies = [
  "regex-syntax",
  "reqwest",
  "ring",
- "rust_decimal",
  "scopeguard",
  "serde",
  "smallvec",
@@ -8048,6 +8084,12 @@ name = "xmlparser"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d25c75bf9ea12c4040a97f829154768bbbce366287e2dc044af160cd79a13fd"
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "735a71d46c4d68d71d4b24d03fdc2b98e38cea81730595801db779c04fe80d70"
 
 [[package]]
 name = "xz2"

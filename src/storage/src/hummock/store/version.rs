@@ -52,7 +52,7 @@ use crate::hummock::{
     SstableDeleteRangeIterator, SstableIterator,
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
-use crate::store::{gen_min_epoch, ReadOptions};
+use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIter};
 
 // TODO: use a custom data structure to allow in-place update instead of proto
 // pub type CommittedVersion = HummockVersion;
@@ -521,7 +521,7 @@ impl HummockVersionReader {
         epoch: u64,
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
-    ) -> StorageResult<HummockStorageIterator> {
+    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
         let (imms, uncommitted_ssts, committed) = read_version_tuple;
 
         let mut local_stats = StoreLocalStatistic::default();
@@ -539,11 +539,7 @@ impl HummockVersionReader {
         }
         let mut staging_sst_iter_count = 0;
         // encode once
-        let bloom_filter_key = if let Some(prefix) = read_options.prefix_hint.as_ref() {
-            Some(UserKey::new(read_options.table_id, TableKey(prefix)).encode())
-        } else {
-            None
-        };
+        let bloom_filter_key = read_options.dist_key_hint.as_deref();
 
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
@@ -554,7 +550,7 @@ impl HummockVersionReader {
             if let Some(bloom_filter_key) = bloom_filter_key.as_ref() {
                 if !hit_sstable_bloom_filter(
                     table_holder.value(),
-                    bloom_filter_key.as_slice(),
+                    bloom_filter_key,
                     &mut local_stats,
                 ) {
                     continue;
@@ -625,12 +621,10 @@ impl HummockVersionReader {
                         .sstable(sstable_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
+                    if let Some(bloom_filter_key) = read_options.dist_key_hint.as_deref() {
                         if !hit_sstable_bloom_filter(
                             sstable.value(),
-                            UserKey::new(read_options.table_id, TableKey(bloom_filter_key))
-                                .encode()
-                                .as_slice(),
+                            bloom_filter_key,
                             &mut local_stats,
                         ) {
                             continue;
@@ -670,7 +664,7 @@ impl HummockVersionReader {
                     if let Some(bloom_filter_key) = bloom_filter_key.as_ref()
                         && !hit_sstable_bloom_filter(
                             sstable.value(),
-                            bloom_filter_key.as_slice(),
+                            bloom_filter_key,
                             &mut local_stats,
                         )
                     {
@@ -731,6 +725,6 @@ impl HummockVersionReader {
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
         local_stats.report(self.stats.deref());
-        Ok(HummockStorageIterator::new(user_iter, self.stats.clone()))
+        Ok(HummockStorageIterator::new(user_iter, self.stats.clone()).into_stream())
     }
 }
