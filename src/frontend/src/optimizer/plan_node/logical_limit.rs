@@ -17,9 +17,10 @@ use std::fmt;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
-    gen_filter_and_pushdown, BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchLimit, ColPrunableImpl, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdownImpl, ToBatch, ToStream,
 };
+use crate::optimizer::plan_node::ColPrunableRef;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
@@ -89,15 +90,15 @@ impl fmt::Display for LogicalLimit {
     }
 }
 
-impl ColPrunable for LogicalLimit {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+impl ColPrunableImpl for LogicalLimit {
+    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
         let new_input = self.input.prune_col(required_cols);
         self.clone_with_input(new_input).into()
     }
 }
 
-impl PredicatePushdown for LogicalLimit {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+impl PredicatePushdownImpl for LogicalLimit {
+    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
         // filter can not transpose limit
         gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }

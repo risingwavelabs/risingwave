@@ -17,8 +17,8 @@ use std::fmt;
 use risingwave_common::error::Result;
 
 use super::{
-    generic, BatchProjectSet, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
+    generic, BatchProjectSet, ColPrunableImpl, LogicalFilter, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdownImpl, StreamProjectSet, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
@@ -246,16 +246,16 @@ impl fmt::Display for LogicalProjectSet {
     }
 }
 
-impl ColPrunable for LogicalProjectSet {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+impl ColPrunableImpl for LogicalProjectSet {
+    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
         // TODO: column pruning for ProjectSet
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
-impl PredicatePushdown for LogicalProjectSet {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+impl PredicatePushdownImpl for LogicalProjectSet {
+    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
         // TODO: predicate pushdown for ProjectSet
         LogicalFilter::create(self.clone().into(), predicate)
     }

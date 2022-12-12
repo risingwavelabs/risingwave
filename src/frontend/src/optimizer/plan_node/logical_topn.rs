@@ -20,11 +20,11 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::generic::GenericPlanNode;
 use super::{
-    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunableImpl, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdownImpl, StreamGroupTopN, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
+use crate::optimizer::plan_node::{BatchTopN, ColPrunableRef, LogicalProject, StreamTopN};
 use crate::optimizer::property::{Distribution, FieldOrder, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, Condition};
@@ -277,8 +277,8 @@ impl fmt::Display for LogicalTopN {
     }
 }
 
-impl ColPrunable for LogicalTopN {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+impl ColPrunableImpl for LogicalTopN {
+    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
         let input_required_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
         let order_required_cols = {
             let mut order_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
@@ -350,8 +350,8 @@ impl ColPrunable for LogicalTopN {
     }
 }
 
-impl PredicatePushdown for LogicalTopN {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+impl PredicatePushdownImpl for LogicalTopN {
+    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
         // filter can not transpose topN
         gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
@@ -408,7 +408,7 @@ mod tests {
 
     use super::LogicalTopN;
     use crate::optimizer::optimizer_context::OptimizerContext;
-    use crate::optimizer::plan_node::{ColPrunable, LogicalValues};
+    use crate::optimizer::plan_node::{ColPrunableImpl, LogicalValues};
     use crate::optimizer::property::Order;
 
     #[tokio::test]
@@ -427,7 +427,7 @@ mod tests {
             LogicalTopN::with_group(input, 1, 0, false, Order::default(), vec![1]);
         assert_eq!(original_logical.group_key(), &[1]);
 
-        let pruned_node = original_logical.prune_col(&[0, 1, 2]);
+        let pruned_node = original_logical.prune_col_impl(&[0, 1, 2]);
 
         let pruned_logical = pruned_node.as_logical_top_n().unwrap();
         assert_eq!(pruned_logical.group_key(), &[1]);

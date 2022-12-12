@@ -61,7 +61,12 @@ impl<'a> HeuristicOptimizer<'a> {
             .into_iter()
             .map(|sub_tree| self.optimize(sub_tree))
             .collect_vec();
-        plan.clone_with_inputs(&inputs)
+        if let Some(logical_share) = plan.clone().as_logical_share() {
+            logical_share.replace_input(inputs[0].clone());
+            plan
+        } else {
+            plan.clone_with_inputs(&inputs)
+        }
     }
 
     pub fn optimize(&mut self, mut plan: PlanRef) -> PlanRef {

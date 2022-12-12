@@ -19,7 +19,7 @@ pub use crate::expr::CollectInputRef;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 
 /// The trait for column pruning, only logical plan node will use it, though all plan node impl it.
-pub trait ColPrunable {
+pub trait ColPrunableImpl {
     /// Transform the plan node to only output the required columns ordered by index number.
     ///
     /// `required_cols` must be a subset of the range `0..self.schema().len()`.
@@ -31,20 +31,20 @@ pub trait ColPrunable {
     /// When implementing this method for a node, it may require its children to produce additional
     /// columns besides `required_cols`. In this case, it may need to insert a
     /// [`LogicalProject`](super::LogicalProject) above to have a correct schema.
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef;
+    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef;
 }
 
 /// Implements [`ColPrunable`] for batch and streaming node.
-macro_rules! impl_prune_col {
+macro_rules! impl_prune_col_impl {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
-            $(impl ColPrunable for [<$convention $name>] {
-                fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+            $(impl ColPrunableImpl for [<$convention $name>] {
+                fn prune_col_impl(&self, _required_cols: &[usize]) -> PlanRef {
                     panic!("column pruning is only allowed on logical plan")
                 }
             })*
         }
     }
 }
-for_batch_plan_nodes! { impl_prune_col }
-for_stream_plan_nodes! { impl_prune_col }
+for_batch_plan_nodes! { impl_prune_col_impl }
+for_stream_plan_nodes! { impl_prune_col_impl }

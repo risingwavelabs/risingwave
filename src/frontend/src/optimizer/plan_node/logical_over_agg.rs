@@ -22,8 +22,8 @@ use risingwave_common::types::DataType;
 
 use super::generic::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
 use super::{
-    gen_filter_and_pushdown, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, ColPrunableImpl, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdownImpl, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
 use crate::utils::{ColIndexMapping, Condition};
@@ -254,15 +254,15 @@ impl fmt::Display for LogicalOverAgg {
     }
 }
 
-impl ColPrunable for LogicalOverAgg {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+impl ColPrunableImpl for LogicalOverAgg {
+    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
-impl PredicatePushdown for LogicalOverAgg {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+impl PredicatePushdownImpl for LogicalOverAgg {
+    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
         let mut window_col = FixedBitSet::with_capacity(self.schema().len());
         window_col.insert(self.schema().len() - 1);
         let (window_pred, other_pred) = predicate.split_disjoint(&window_col);

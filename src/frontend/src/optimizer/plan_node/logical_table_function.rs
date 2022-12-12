@@ -17,7 +17,9 @@ use std::fmt;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 
-use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
+use super::{
+    ColPrunableImpl, LogicalFilter, PlanBase, PlanRef, PredicatePushdownImpl, ToBatch, ToStream,
+};
 use crate::expr::{Expr, TableFunction};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::BatchTableFunction;
@@ -58,15 +60,15 @@ impl fmt::Display for LogicalTableFunction {
 }
 
 // the leaf node don't need colprunable
-impl ColPrunable for LogicalTableFunction {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+impl ColPrunableImpl for LogicalTableFunction {
+    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
         let _ = required_cols;
         self.clone().into()
     }
 }
 
-impl PredicatePushdown for LogicalTableFunction {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+impl PredicatePushdownImpl for LogicalTableFunction {
+    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }

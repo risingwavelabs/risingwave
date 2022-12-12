@@ -20,8 +20,8 @@ use risingwave_common::error::Result;
 
 use super::generic::GenericPlanNode;
 use super::{
-    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchExpand, ColPrunableImpl, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdownImpl, StreamExpand, ToBatch, ToStream,
 };
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
@@ -148,14 +148,14 @@ impl fmt::Display for LogicalExpand {
     }
 }
 
-impl ColPrunable for LogicalExpand {
-    fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+impl ColPrunableImpl for LogicalExpand {
+    fn prune_col_impl(&self, _required_cols: &[usize]) -> PlanRef {
         todo!("prune_col of LogicalExpand is not implemented yet.");
     }
 }
 
-impl PredicatePushdown for LogicalExpand {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+impl PredicatePushdownImpl for LogicalExpand {
+    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
         // TODO: how to do predicate pushdown for Expand?
         //
         // let new_input = self.input.predicate_pushdown(predicate);

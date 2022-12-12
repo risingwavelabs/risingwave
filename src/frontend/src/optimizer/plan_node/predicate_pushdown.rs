@@ -19,7 +19,7 @@ use crate::utils::Condition;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 /// The trait for predicate pushdown, only logical plan node will use it, though all plan node impl
 /// it.
-pub trait PredicatePushdown {
+pub trait PredicatePushdownImpl {
     /// Push predicate down for every logical plan node.
     ///
     /// There are three kinds of predicates:
@@ -35,22 +35,22 @@ pub trait PredicatePushdown {
     /// the predicates with the `Condition` of it.
     ///
     /// 3. those can be pushed down. We pass them to current `PlanNode`'s input.
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef;
+    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef;
 }
 
-macro_rules! ban_predicate_pushdown {
+macro_rules! ban_predicate_pushdown_impl {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
-            $(impl PredicatePushdown for [<$convention $name>] {
-                fn predicate_pushdown(&self, _predicate: Condition) -> PlanRef {
+            $(impl PredicatePushdownImpl for [<$convention $name>] {
+                fn predicate_pushdown_impl(&self, _predicate: Condition) -> PlanRef {
                     unreachable!("predicate pushdown is only allowed on logical plan")
                 }
             })*
         }
     }
 }
-for_batch_plan_nodes! {ban_predicate_pushdown}
-for_stream_plan_nodes! {ban_predicate_pushdown}
+for_batch_plan_nodes! {ban_predicate_pushdown_impl}
+for_stream_plan_nodes! {ban_predicate_pushdown_impl}
 
 #[inline]
 pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
@@ -61,4 +61,8 @@ pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
     let new_input = node.input().predicate_pushdown(pushed_predicate);
     let new_node = node.clone_with_input(new_input);
     LogicalFilter::create(Rc::new(new_node), filter_predicate)
+}
+
+pub struct PredicatePushdownCtx {
+
 }

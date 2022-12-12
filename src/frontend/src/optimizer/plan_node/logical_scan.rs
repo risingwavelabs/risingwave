@@ -24,7 +24,7 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::generic::GenericPlanNode;
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown,
+    generic, BatchFilter, BatchProject, ColPrunableImpl, PlanBase, PlanRef, PredicatePushdownImpl,
     StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
@@ -419,8 +419,8 @@ impl fmt::Display for LogicalScan {
     }
 }
 
-impl ColPrunable for LogicalScan {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+impl ColPrunableImpl for LogicalScan {
+    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
         let output_col_idx: Vec<usize> = required_cols
             .iter()
             .map(|i| self.required_col_idx()[*i])
@@ -433,8 +433,8 @@ impl ColPrunable for LogicalScan {
     }
 }
 
-impl PredicatePushdown for LogicalScan {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+impl PredicatePushdownImpl for LogicalScan {
+    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
         // If the predicate contains `CorrelatedInputRef`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}
@@ -454,7 +454,6 @@ impl PredicatePushdown for LogicalScan {
                 predicate,
             );
         }
-
         let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
         ));

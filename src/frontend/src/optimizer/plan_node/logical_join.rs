@@ -23,16 +23,17 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::GenericPlanNode;
 use super::{
-    generic, BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, BatchProject, ColPrunableImpl, CollectInputRef, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeBinary, PredicatePushdownImpl, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::max_one_row_visitor::MaxOneRowVisitor;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
-    LogicalFilter, LogicalScan, StreamDynamicFilter, StreamFilter,
+    BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColPrunableRef,
+    EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownRef, StreamDynamicFilter,
+    StreamFilter,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
@@ -708,8 +709,8 @@ impl PlanTreeNodeBinary for LogicalJoin {
 
 impl_plan_tree_node_for_binary! { LogicalJoin }
 
-impl ColPrunable for LogicalJoin {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+impl ColPrunableImpl for LogicalJoin {
+    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
         // make `required_cols` point to internal table instead of output schema.
         let required_cols = required_cols
             .iter()
@@ -774,7 +775,7 @@ impl ColPrunable for LogicalJoin {
     }
 }
 
-impl PredicatePushdown for LogicalJoin {
+impl PredicatePushdownImpl for LogicalJoin {
     /// Pushes predicates above and within a join node into the join node and/or its children nodes.
     ///
     /// # Which predicates can be pushed
@@ -798,7 +799,7 @@ impl PredicatePushdown for LogicalJoin {
     /// |--------------------------|---------------------|----------------------|
     /// | Join predicate (on)      | Not Pushed          | Pushed               |
     /// | Where predicate (filter) | Pushed              | Not Pushed           |
-    fn predicate_pushdown(&self, mut predicate: Condition) -> PlanRef {
+    fn predicate_pushdown_impl(&self, mut predicate: Condition) -> PlanRef {
         let left_col_num = self.left().schema().len();
         let right_col_num = self.right().schema().len();
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
@@ -1270,7 +1271,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![2, 3];
-        let plan = join.prune_col(&required_cols);
+        let plan = join.prune_col_impl(&required_cols);
 
         // Check the result
         let join = plan.as_logical_join().unwrap();
@@ -1341,7 +1342,7 @@ mod tests {
             // Perform the prune
             let required_cols = vec![0];
             // key 0 is never used in the join (always key 1)
-            let plan = join.prune_col(&required_cols);
+            let plan = join.prune_col_impl(&required_cols);
             let as_plan = plan.as_logical_join().unwrap();
             // Check the result
             assert_eq!(as_plan.schema().fields().len(), 1);
@@ -1350,7 +1351,7 @@ mod tests {
             // Perform the prune
             let required_cols = vec![0, 1, 2];
             // should not panic here
-            let plan = join.prune_col(&required_cols);
+            let plan = join.prune_col_impl(&required_cols);
             let as_plan = plan.as_logical_join().unwrap();
             // Check the result
             assert_eq!(as_plan.schema().fields().len(), 3);
@@ -1413,7 +1414,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![1, 3];
-        let plan = join.prune_col(&required_cols);
+        let plan = join.prune_col_impl(&required_cols);
 
         // Check the result
         let join = plan.as_logical_join().unwrap();
@@ -1656,7 +1657,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![3, 2];
-        let plan = join.prune_col(&required_cols);
+        let plan = join.prune_col_impl(&required_cols);
 
         // Check the result
         let join = plan.as_logical_join().unwrap();

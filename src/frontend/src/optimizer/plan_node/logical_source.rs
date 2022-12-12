@@ -19,8 +19,8 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::generic::GenericPlanNode;
 use super::{
-    generic, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef, PredicatePushdown,
-    StreamSource, ToBatch, ToStream,
+    generic, ColPrunableImpl, LogicalFilter, LogicalProject, PlanBase, PlanRef,
+    PredicatePushdownImpl, StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -87,15 +87,15 @@ impl fmt::Display for LogicalSource {
     }
 }
 
-impl ColPrunable for LogicalSource {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+impl ColPrunableImpl for LogicalSource {
+    fn prune_col_impl(&self, required_cols: &[usize]) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
-impl PredicatePushdown for LogicalSource {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+impl PredicatePushdownImpl for LogicalSource {
+    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }

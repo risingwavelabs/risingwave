@@ -54,13 +54,13 @@ pub trait PlanNode:
     + Debug
     + Display
     + Downcast
-    + ColPrunable
+    + ColPrunableImpl
     + ToBatch
     + ToStream
     + ToDistributedBatch
     + ToProst
     + ToLocalBatch
-    + PredicatePushdown
+    + PredicatePushdownImpl
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
@@ -78,6 +78,36 @@ pub enum Convention {
     Logical,
     Batch,
     Stream,
+}
+
+pub trait ColPrunableRef {
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef;
+}
+
+impl ColPrunableRef for PlanRef {
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+        if let Some(_logical_share) = self.as_logical_share() {
+            let mapping =
+                ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
+            LogicalProject::with_mapping(self.clone(), mapping).into()
+        } else {
+            self.prune_col_impl(required_cols)
+        }
+    }
+}
+
+pub trait PredicatePushdownRef {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef;
+}
+
+impl PredicatePushdownRef for PlanRef {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        if let Some(_logical_share) = self.as_logical_share() {
+            LogicalFilter::create(self.clone(), predicate)
+        } else {
+            self.predicate_pushdown_impl(predicate)
+        }
+    }
 }
 
 impl StreamPlanRef for PlanRef {
@@ -300,6 +330,7 @@ mod logical_over_agg;
 mod logical_project;
 mod logical_project_set;
 mod logical_scan;
+mod logical_share;
 mod logical_source;
 mod logical_table_function;
 mod logical_topn;
@@ -328,6 +359,7 @@ mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
 
+mod stream_share;
 mod stream_union;
 pub mod utils;
 
@@ -369,6 +401,7 @@ pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
+pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
 pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
@@ -392,6 +425,7 @@ pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
 pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
+pub use stream_share::StreamShare;
 pub use stream_sink::StreamSink;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
@@ -400,6 +434,7 @@ pub use stream_union::StreamUnion;
 
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
@@ -437,6 +472,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, ProjectSet }
             , { Logical, Union }
             , { Logical, OverAgg }
+            , { Logical, Share }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -484,6 +520,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Union }
             , { Stream, RowIdGen }
             , { Stream, Dml }
+            , { Stream, Share }
         }
     };
 }
@@ -513,6 +550,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, ProjectSet }
             , { Logical, Union }
             , { Logical, OverAgg }
+            , { Logical, Share }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -579,6 +617,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Union }
             , { Stream, RowIdGen }
             , { Stream, Dml }
+            , { Stream, Share }
         }
     };
 }

@@ -20,8 +20,8 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    ColPrunable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase, PlanNodeType, PlanRef,
-    PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    ColPrunableImpl, LogicalFilter, LogicalJoin, LogicalProject, PlanBase, PlanNodeType, PlanRef,
+    PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdownImpl, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanTreeNode;
@@ -508,8 +508,8 @@ impl ToBatch for LogicalMultiJoin {
     }
 }
 
-impl ColPrunable for LogicalMultiJoin {
-    fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+impl ColPrunableImpl for LogicalMultiJoin {
+    fn prune_col_impl(&self, _required_cols: &[usize]) -> PlanRef {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."
@@ -517,8 +517,8 @@ impl ColPrunable for LogicalMultiJoin {
     }
 }
 
-impl PredicatePushdown for LogicalMultiJoin {
-    fn predicate_pushdown(&self, _predicate: Condition) -> PlanRef {
+impl PredicatePushdownImpl for LogicalMultiJoin {
+    fn predicate_pushdown_impl(&self, _predicate: Condition) -> PlanRef {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."

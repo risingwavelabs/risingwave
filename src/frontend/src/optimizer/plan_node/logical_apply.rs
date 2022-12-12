@@ -20,11 +20,11 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PredicatePushdown, ToBatch, ToStream,
+    ColPrunableImpl, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
+    PredicatePushdownImpl, ToBatch, ToStream,
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::LogicalFilter;
+use crate::optimizer::plan_node::{LogicalFilter, PredicatePushdownRef};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -286,14 +286,14 @@ impl PlanTreeNodeBinary for LogicalApply {
 
 impl_plan_tree_node_for_binary! { LogicalApply }
 
-impl ColPrunable for LogicalApply {
-    fn prune_col(&self, _: &[usize]) -> PlanRef {
+impl ColPrunableImpl for LogicalApply {
+    fn prune_col_impl(&self, _: &[usize]) -> PlanRef {
         panic!("LogicalApply should be unnested")
     }
 }
 
-impl PredicatePushdown for LogicalApply {
-    fn predicate_pushdown(&self, mut predicate: Condition) -> PlanRef {
+impl PredicatePushdownImpl for LogicalApply {
+    fn predicate_pushdown_impl(&self, mut predicate: Condition) -> PlanRef {
         let left_col_num = self.left().schema().len();
         let right_col_num = self.right().schema().len();
         let join_type = self.join_type();

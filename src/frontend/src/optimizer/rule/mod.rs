@@ -72,7 +72,9 @@ pub use over_agg_to_topn::*;
 mod union_to_distinct;
 pub use union_to_distinct::*;
 mod agg_project_merge;
+mod dag_to_tree;
 pub use agg_project_merge::*;
+pub use dag_to_tree::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -100,6 +102,7 @@ macro_rules! for_all_rules {
             ,{JoinCommuteRule}
             ,{UnionToDistinctRule}
             ,{AggProjectMergeRule}
+            ,{DagToTreeRule}
         }
     };
 }

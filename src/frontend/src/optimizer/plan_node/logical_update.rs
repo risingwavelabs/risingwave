@@ -19,11 +19,12 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
-    gen_filter_and_pushdown, BatchUpdate, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchUpdate, ColPrunableImpl, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdownImpl, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
+use crate::optimizer::plan_node::ColPrunableRef;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
@@ -130,16 +131,16 @@ impl fmt::Display for LogicalUpdate {
     }
 }
 
-impl ColPrunable for LogicalUpdate {
-    fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+impl ColPrunableImpl for LogicalUpdate {
+    fn prune_col_impl(&self, _required_cols: &[usize]) -> PlanRef {
         let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
         self.clone_with_input(self.input.prune_col(&required_cols))
             .into()
     }
 }
 
-impl PredicatePushdown for LogicalUpdate {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+impl PredicatePushdownImpl for LogicalUpdate {
+    fn predicate_pushdown_impl(&self, predicate: Condition) -> PlanRef {
         gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
