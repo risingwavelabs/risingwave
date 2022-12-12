@@ -1,5 +1,4 @@
 # INNER JOIN
-
 statement ok
 create table t1 (v1 int, v2 int, v3 int);
 
@@ -25,7 +24,6 @@ select v1, v2, v3, v10, v20, v30 from mv1;
 2 3 3 2 4 6
 
 # LEFT JOIN
-
 statement ok
 create table t3 (v1 int, v2 int, v3 int);
 
@@ -48,7 +46,6 @@ select v1, v2, v3, v10, v20, v30 from mv2;
 2 3 3 NULL NULL NULL
 
 # RIGHT JOIN
-
 statement ok
 create table t5 (v1 int, v2 int, v3 int);
 
@@ -71,7 +68,6 @@ NULL NULL NULL 1 3 5
 NULL NULL NULL 2 4 6
 
 # FULL JOIN
-
 statement ok
 create table t7 (v1 int, v2 int, v3 int);
 
@@ -99,7 +95,6 @@ NULL	NULL	NULL	3	3	5
 NULL	NULL	NULL	4	4	6
 
 # Non-equal join
-
 statement ok
 create table t9 (v1 int, v2 int, v3 int);
 
@@ -125,6 +120,7 @@ select v1, v2, v3, v10, v20, v30 from mv_full_outer_cond;
 2	3	3	NULL	NULL	NULL
 NULL	NULL	NULL	2	4	6
 
+
 statement ok
 drop materialized view mv1
 
@@ -137,8 +133,10 @@ drop materialized view mv3
 statement ok
 drop materialized view mv4
 
+
 statement ok
 drop materialized view mv_full_outer_cond
+
 
 statement ok
 drop table t1

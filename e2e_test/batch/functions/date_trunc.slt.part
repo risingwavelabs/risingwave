@@ -38,8 +38,7 @@ week	2202-02-15 00:00:00
 year	2202-01-01 00:00:00
 
 # invalid field
-
-statement error 
+statement error
 SELECT date_trunc('s', TIMESTAMP '2202-02-16 20:38:40.123456');
 
 query T rowsort
@@ -63,7 +62,6 @@ statement ok
 DELETE FROM t WHERE field = 'week';
 
 # TODO: support us precision in interval
-
 query T rowsort
 SELECT field, date_trunc(field, INTERVAL '2333 year 4 months 5 days 02:47:33.123') FROM t;
 ----
@@ -81,8 +79,7 @@ second	2333 years 4 mons 5 days 02:47:33
 year	2333 years
 
 # truncate 'week' is not supported for interval
-
-statement error 
+statement error
 SELECT date_trunc('week', INTERVAL '3 days 02:47:33');
 
 statement ok

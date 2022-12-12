@@ -25,7 +25,7 @@ done
 shift $((OPTIND -1))
 
 echo "--- Rust cargo-sort check"
-cargo sort -c -w
+cargo sort --check --workspace
 
 echo "--- Rust cargo-hakari check"
 cargo hakari generate --diff

@@ -352,3 +352,5 @@ SELECT '-9223380000000000000'::float4::int8;
 
 -- clean up, lest opr_sanity complain
 --@ drop type xfloat4 cascade;
+
+DROP TABLE FLOAT4_TBL;

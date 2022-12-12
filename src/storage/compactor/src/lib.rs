@@ -54,7 +54,7 @@ pub struct CompactorOpts {
     #[clap(long)]
     pub compaction_worker_threads_number: Option<usize>,
 
-    /// Te path of `risingwave.toml` configuration file.
+    /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
     ///
