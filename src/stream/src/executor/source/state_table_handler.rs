@@ -21,6 +21,7 @@ use risingwave_common::row::{Row, Row2};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -135,7 +136,7 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
         database_id: DatabaseId::placeholder() as u32,
         name: String::new(),
         columns,
-        is_index: false,
+        table_type: TableType::Internal as i32,
         value_indices: vec![0, 1],
         pk: vec![ColumnOrder {
             index: 0,

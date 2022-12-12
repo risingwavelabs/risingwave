@@ -1,4 +1,4 @@
-query TIITIR rowsort
+query TIITIR
 select	 c_last, c_id o_id, o_entry_d, o_ol_cnt, sum(ol_amount)
 from	 customer, orders, orderline
 where	 c_id = o_c_id

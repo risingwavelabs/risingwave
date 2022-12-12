@@ -1,4 +1,4 @@
-query IIIIII rowsort
+query IIIIII
 select   ol_number,
          sum(ol_quantity) as sum_qty,
          sum(ol_amount) as sum_amount,
