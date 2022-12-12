@@ -27,7 +27,9 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::test_utils::{
+    setup_compute_env, update_filter_key_extractor_for_table_ids,
+};
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
@@ -361,6 +363,11 @@ pub async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHummockMeta
     .await
     .unwrap();
 
+    update_filter_key_extractor_for_table_ids(
+        hummock_storage.filter_key_extractor_manager().clone(),
+        &[0],
+    );
+
     (hummock_storage, meta_client)
 }
 
@@ -384,6 +391,11 @@ pub async fn with_hummock_storage_v2(
     )
     .await
     .unwrap();
+
+    update_filter_key_extractor_for_table_ids(
+        hummock_storage.filter_key_extractor_manager().clone(),
+        &[0],
+    );
 
     (
         HummockV2MixedStateStore::new(hummock_storage, table_id).await,

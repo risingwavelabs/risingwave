@@ -33,11 +33,11 @@ pub(crate) mod tests {
         FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
         FixedLengthFilterKeyExtractor, FullKeyFilterKeyExtractor,
     };
-    use risingwave_hummock_sdk::key::{get_table_id, next_key, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
     use risingwave_meta::hummock::compaction::ManualCompactionOption;
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env,
-        unregister_table_ids_from_compaction_group,
+        unregister_table_ids_from_compaction_group, update_filter_key_extractor_for_table_ids,
     };
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
     use risingwave_meta::storage::MemStore;
@@ -87,6 +87,11 @@ pub(crate) mod tests {
         )
         .await
         .unwrap();
+
+        update_filter_key_extractor_for_table_ids(
+            hummock.filter_key_extractor_manager().clone(),
+            &[table_id.table_id()],
+        );
 
         HummockV2MixedStateStore::new(hummock, table_id).await
     }
@@ -212,29 +217,15 @@ pub(crate) mod tests {
         ));
 
         // 1. add sstables
-        let mut key = Vec::new();
-        key.extend_from_slice(&1u32.to_be_bytes());
-        key.extend_from_slice(&0u64.to_be_bytes());
-        let key = Bytes::from(key);
-        let table_id = get_table_id(&key);
-        assert_eq!(table_id, 1);
+        let key = Bytes::from(0u64.to_be_bytes().to_vec());
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
             get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
-            TableId::from(table_id),
+            Default::default(),
         )
         .await;
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
-
-        hummock_manager_ref
-            .register_table_ids(&mut [(
-                table_id,
-                StaticCompactionGroupId::StateDefault.into(),
-                risingwave_common::catalog::TableOption::default(),
-            )])
-            .await
-            .unwrap();
 
         prepare_test_put_data(
             &storage,
@@ -244,11 +235,6 @@ pub(crate) mod tests {
             (1..129).into_iter().map(|v| (v * 1000) << 16).collect_vec(),
         )
         .await;
-
-        hummock_manager_ref
-            .unregister_table_ids(&[table_id])
-            .await
-            .unwrap();
 
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
