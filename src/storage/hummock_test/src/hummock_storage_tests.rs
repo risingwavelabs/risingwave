@@ -23,9 +23,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::key::{map_table_key_range, FullKey};
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_meta::hummock::test_utils::{
-    setup_compute_env, update_filter_key_extractor_for_table_ids,
-};
+use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::MemStore;
@@ -48,7 +46,7 @@ use risingwave_storage::store::{
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
-use crate::test_utils::prepare_first_valid_version;
+use crate::test_utils::{prepare_first_valid_version, register_test_tables};
 
 pub async fn prepare_hummock_event_handler(
     opt: Arc<StorageConfig>,
@@ -67,7 +65,7 @@ pub async fn prepare_hummock_event_handler(
     ));
 
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
-    update_filter_key_extractor_for_table_ids(filter_key_extractor_manager.clone(), &[0]);
+    register_test_tables(&filter_key_extractor_manager, &hummock_manager_ref, &[0]).await;
 
     let compactor_context = Arc::new(Context::new_local_compact_context(
         opt.clone(),

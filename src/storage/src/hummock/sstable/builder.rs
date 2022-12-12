@@ -106,7 +106,7 @@ pub struct SstableBuilder<W: SstableWriter> {
     /// Buffer for encoded key and value to avoid allocation.
     raw_key: BytesMut,
     raw_value: BytesMut,
-    last_table_id: u32,
+    last_table_id: Option<u32>,
     sstable_id: u64,
 
     /// `stale_key_count` counts range_tombstones as well.
@@ -149,7 +149,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             table_ids: BTreeSet::new(),
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
-            last_table_id: 0,
+            last_table_id: None,
             raw_key: BytesMut::new(),
             raw_value: BytesMut::new(),
             last_full_key: vec![],
@@ -199,10 +199,10 @@ impl<W: SstableWriter> SstableBuilder<W> {
         value.encode(&mut self.raw_value);
         if is_new_user_key {
             let table_id = full_key.user_key.table_id.table_id();
-            if self.last_table_id != table_id {
+            if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
                 self.table_ids.insert(table_id);
                 self.finalize_last_table_stats();
-                self.last_table_id = table_id;
+                self.last_table_id = Some(table_id);
             }
             let mut extract_key = user_key(&self.raw_key);
             extract_key = self.filter_key_extractor.extract(extract_key);
@@ -396,11 +396,11 @@ impl<W: SstableWriter> SstableBuilder<W> {
     }
 
     fn finalize_last_table_stats(&mut self) {
-        if self.table_ids.is_empty() {
+        if self.table_ids.is_empty() || self.last_table_id.is_none() {
             return;
         }
         self.table_stats.insert(
-            self.last_table_id,
+            self.last_table_id.unwrap(),
             std::mem::take(&mut self.last_table_stats),
         );
     }

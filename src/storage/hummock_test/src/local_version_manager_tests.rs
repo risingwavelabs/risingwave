@@ -68,7 +68,7 @@ pub async fn prepare_local_version_manager(
     ));
 
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
-    update_filter_key_extractor_for_table_ids(filter_key_extractor_manager.clone(), &[0]);
+    update_filter_key_extractor_for_table_ids(&filter_key_extractor_manager, &[0]);
 
     let buffer_tracker = BufferTracker::from_storage_config(&opt);
     let compactor_context = Arc::new(Context::new_local_compact_context(
