@@ -112,7 +112,10 @@ impl SqlGeneratorContext {
     pub fn can_gen_agg(self) -> bool {
         self.can_agg && !self.inside_agg
     }
-    pub fn is_inside_agg(self) -> bool { self.inside_agg }
+
+    pub fn is_inside_agg(self) -> bool {
+        self.inside_agg
+    }
 }
 
 pub(crate) struct SqlGenerator<'a, R: Rng> {
