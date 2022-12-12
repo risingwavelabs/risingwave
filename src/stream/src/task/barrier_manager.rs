@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use anyhow::anyhow;
 use prometheus::HistogramTimer;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress as ProstCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
@@ -184,14 +185,15 @@ impl LocalBarrierManager {
     }
 
     /// Use `prev_epoch` to remove collect rx and return rx.
-    pub fn remove_collect_rx(&mut self, prev_epoch: u64) -> CompleteReceiver {
+    pub fn remove_collect_rx(&mut self, prev_epoch: u64) -> StreamResult<CompleteReceiver> {
         self.collect_complete_receiver
             .remove(&prev_epoch)
-            .unwrap_or_else(|| {
-                panic!(
+            .ok_or_else(|| {
+                anyhow!(
                     "barrier collect complete receiver for prev epoch {} not exists",
                     prev_epoch
                 )
+                .into()
             })
     }
 
