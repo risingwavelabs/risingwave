@@ -38,6 +38,7 @@ mod create_schema;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_table;
+pub mod create_table_as;
 pub mod create_user;
 mod create_view;
 mod describe;
@@ -141,8 +142,9 @@ pub async fn handle(
                 )
                 .into());
             }
-            if query.is_some() {
-                return Err(ErrorCode::NotImplemented("CREATE AS".to_string(), 6215.into()).into());
+            if let Some(query) = query {
+                return create_table_as::handle_create_as(handler_args, name, if_not_exists, query)
+                    .await;
             }
             create_table::handle_create_table(
                 handler_args,

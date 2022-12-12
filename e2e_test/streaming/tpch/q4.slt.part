@@ -1,5 +1,4 @@
 # scan MV with ORDER BY isn't guaranteed to be ordered
-
 query TI rowsort
 select * from tpch_q4;
 ----
