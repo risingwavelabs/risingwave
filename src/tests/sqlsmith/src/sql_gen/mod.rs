@@ -70,7 +70,7 @@ pub(crate) struct SqlGeneratorContext {
     can_agg: bool, // This is used to disable agg expr totally,
     // Used in top level, where we want to test queries
     // without aggregates.
-    inside_agg: bool, // TODO: Maybe we can get rid of this???
+    inside_agg: bool,
     inside_explicit_cast: bool,
 }
 
@@ -112,6 +112,7 @@ impl SqlGeneratorContext {
     pub fn can_gen_agg(self) -> bool {
         self.can_agg && !self.inside_agg
     }
+    pub fn is_inside_agg(self) -> bool { self.inside_agg }
 }
 
 pub(crate) struct SqlGenerator<'a, R: Rng> {
