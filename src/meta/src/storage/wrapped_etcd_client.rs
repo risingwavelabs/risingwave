@@ -157,21 +157,14 @@ impl EtcdRefreshClient {
         let (resp, version) = {
             let inner = self.inner.read().await;
             (
-                inner
-                    .client
-                    .kv_client()
-                    .get(key.clone(), options.clone())
-                    .await,
+                inner.client.kv_client().get(key, options).await,
                 inner.version,
             )
         };
         if let Err(err) = &resp && Self::should_refresh(err) {
             self.try_refresh_conn(version).await?;
-            let mut client = self.inner.read().await.client.kv_client();
-            client.get(key, options).await
-        } else {
-            resp
         }
+        resp
     }
 
     #[inline]
@@ -184,21 +177,14 @@ impl EtcdRefreshClient {
         let (resp, version) = {
             let inner = self.inner.read().await;
             (
-                inner
-                    .client
-                    .kv_client()
-                    .put(key.clone(), value.clone(), options.clone())
-                    .await,
+                inner.client.kv_client().put(key, value, options).await,
                 inner.version,
             )
         };
         if let Err(err) = &resp && Self::should_refresh(err) {
             self.try_refresh_conn(version).await?;
-            let mut client = self.inner.read().await.client.kv_client();
-            client.put(key, value, options).await
-        } else {
-            resp
         }
+        resp
     }
 
     #[inline]
@@ -210,36 +196,25 @@ impl EtcdRefreshClient {
         let (resp, version) = {
             let inner = self.inner.read().await;
             (
-                inner
-                    .client
-                    .kv_client()
-                    .delete(key.clone(), options.clone())
-                    .await,
+                inner.client.kv_client().delete(key, options).await,
                 inner.version,
             )
         };
         if let Err(err) = &resp && Self::should_refresh(err) {
             self.try_refresh_conn(version).await?;
-            self.inner.read().await.client.kv_client().delete(key, options).await
-        } else {
-            resp
         }
+        resp
     }
 
     #[inline]
     pub async fn txn(&self, txn: Txn) -> Result<TxnResponse> {
         let (resp, version) = {
             let inner = self.inner.read().await;
-            (
-                inner.client.kv_client().txn(txn.clone()).await,
-                inner.version,
-            )
+            (inner.client.kv_client().txn(txn).await, inner.version)
         };
         if let Err(err) = &resp && Self::should_refresh(err) {
             self.try_refresh_conn(version).await?;
-            self.inner.read().await.client.kv_client().txn(txn).await
-        } else {
-            resp
         }
+        resp
     }
 }
