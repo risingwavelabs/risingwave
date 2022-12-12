@@ -130,7 +130,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             is_distinct_allowed: true,
             bound_relations: vec![],
             bound_columns: vec![],
-            is_mview: false,
+            is_mview: true,
         }
     }
 
