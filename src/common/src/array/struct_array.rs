@@ -22,6 +22,7 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
 
+use super::iterator::ArrayRawIter;
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
 };
@@ -156,7 +157,12 @@ impl Array for StructArray {
     type Builder = StructArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = StructValue;
+    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = StructRef<'a>;
+
+    fn value_at_raw(&self, idx: usize) -> StructRef<'_> {
+        StructRef::Indexed { arr: self, idx }
+    }
 
     fn value_at(&self, idx: usize) -> Option<StructRef<'_>> {
         if !self.is_null(idx) {
@@ -180,6 +186,10 @@ impl Array for StructArray {
 
     fn iter(&self) -> Self::Iter<'_> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        ArrayRawIter::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {

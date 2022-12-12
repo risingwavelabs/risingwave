@@ -20,6 +20,7 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
+use super::iterator::ArrayRawIter;
 use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
@@ -36,7 +37,14 @@ impl Array for BytesArray {
     type Builder = BytesArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = Box<[u8]>;
+    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = &'a [u8];
+
+    fn value_at_raw(&self, idx: usize) -> Self::RefItem<'_> {
+        let start = self.offset[idx];
+        let end = self.offset[idx + 1];
+        &self.data[start..end]
+    }
 
     fn value_at(&self, idx: usize) -> Option<&[u8]> {
         if !self.is_null(idx) {
@@ -61,6 +69,10 @@ impl Array for BytesArray {
 
     fn iter(&self) -> ArrayIterator<'_, Self> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        ArrayRawIter::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {

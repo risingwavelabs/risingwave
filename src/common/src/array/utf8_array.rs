@@ -15,6 +15,7 @@
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter, WrittenGuard};
+use super::iterator::ArrayRawIter;
 use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, BytesArray, BytesArrayBuilder};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
@@ -29,9 +30,14 @@ impl Array for Utf8Array {
     type Builder = Utf8ArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = Box<str>;
+    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = &'a str;
 
-    #[inline]
+    fn value_at_raw(&self, idx: usize) -> Self::RefItem<'_> {
+        let bytes = self.bytes.value_at_raw(idx);
+        unsafe { std::str::from_utf8_unchecked(bytes) }
+    }
+
     fn value_at(&self, idx: usize) -> Option<&str> {
         self.bytes
             .value_at(idx)
@@ -52,6 +58,10 @@ impl Array for Utf8Array {
 
     fn iter(&self) -> ArrayIterator<'_, Self> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        ArrayRawIter::new(self)
     }
 
     #[inline]

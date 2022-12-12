@@ -16,7 +16,7 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
 use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::buffer::{Bitmap, BitmapBuilder, BitmapIter};
 
 #[derive(Debug, Clone)]
 pub struct BoolArray {
@@ -62,7 +62,12 @@ impl Array for BoolArray {
     type Builder = BoolArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = bool;
+    type RawIter<'a> = BitmapIter<'a>;
     type RefItem<'a> = bool;
+
+    fn value_at_raw(&self, idx: usize) -> Self::RefItem<'_> {
+        self.data.is_set(idx)
+    }
 
     fn value_at(&self, idx: usize) -> Option<bool> {
         if !self.is_null(idx) {
@@ -87,6 +92,10 @@ impl Array for BoolArray {
 
     fn iter(&self) -> Self::Iter<'_> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        self.data.iter()
     }
 
     fn to_protobuf(&self) -> ProstArray {

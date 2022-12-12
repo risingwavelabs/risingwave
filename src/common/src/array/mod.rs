@@ -164,6 +164,16 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     where
         Self: 'a;
 
+    /// Raw iterator type of this array.
+    type RawIter<'a>: Iterator<Item = Self::RefItem<'a>>
+    where
+        Self: 'a;
+
+    /// Retrieve a reference to value regardless of whether it is null.
+    ///
+    /// The returned value for NULL values is undefined.
+    fn value_at_raw(&self, idx: usize) -> Self::RefItem<'_>;
+
     /// Retrieve a reference to value.
     fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>>;
 
@@ -177,6 +187,12 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 
     /// Get iterator of current array.
     fn iter(&self) -> Self::Iter<'_>;
+
+    /// Get raw iterator of current array.
+    ///
+    /// The raw iterator simply iterates values without checking the null bitmap.
+    /// The returned value for NULL values is undefined.
+    fn raw_iter(&self) -> Self::RawIter<'_>;
 
     /// Serialize to protobuf
     fn to_protobuf(&self) -> ProstArray;

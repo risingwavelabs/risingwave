@@ -159,7 +159,12 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type Builder = PrimitiveArrayBuilder<T>;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = T;
+    type RawIter<'a> = std::iter::Cloned<std::slice::Iter<'a, T>>;
     type RefItem<'a> = T;
+
+    fn value_at_raw(&self, idx: usize) -> Self::RefItem<'_> {
+        self.data[idx]
+    }
 
     fn value_at(&self, idx: usize) -> Option<T> {
         if self.is_null(idx) {
@@ -187,6 +192,10 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
 
     fn iter(&self) -> Self::Iter<'_> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        self.data.iter().cloned()
     }
 
     fn to_protobuf(&self) -> ProstArray {

@@ -23,6 +23,7 @@ use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 use serde::{Deserializer, Serializer};
 
+use super::iterator::ArrayRawIter;
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult, RowRef,
 };
@@ -158,7 +159,12 @@ impl Array for ListArray {
     type Builder = ListArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = ListValue;
+    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = ListRef<'a>;
+
+    fn value_at_raw(&self, idx: usize) -> Self::RefItem<'_> {
+        ListRef::Indexed { arr: self, idx }
+    }
 
     fn value_at(&self, idx: usize) -> Option<ListRef<'_>> {
         if !self.is_null(idx) {
@@ -182,6 +188,10 @@ impl Array for ListArray {
 
     fn iter(&self) -> Self::Iter<'_> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        ArrayRawIter::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
