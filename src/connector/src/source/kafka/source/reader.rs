@@ -117,18 +117,19 @@ impl KafkaSplitReader {
             let mut res = Vec::with_capacity(msgs.len());
             for msg in msgs {
                 let msg = msg?;
+                let cur_offset = msg.offset();
+                res.push(SourceMessage::from(msg));
                 if let Some(stop_offset) = self.stop_offset {
-                    if msg.offset() == stop_offset - 1 {
+                    if cur_offset == stop_offset - 1 {
                         tracing::debug!(
                             "stop offset reached, stop reading, offset: {}, stop offset: {}",
-                            msg.offset(),
+                            cur_offset,
                             stop_offset
                         );
                         yield res;
                         break 'for_outer_loop;
                     }
                 }
-                res.push(SourceMessage::from(msg));
             }
             yield res;
         }

@@ -228,7 +228,7 @@ statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 2s
+sleep 1s
 
 query IT rowsort
 select * from s1
