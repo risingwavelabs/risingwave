@@ -22,8 +22,8 @@ use risingwave_common::types::DataType;
 
 use super::generic::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
 use super::{
-    gen_filter_and_pushdown, ColPrunableImpl, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdownImpl, ToBatch, ToStream,
+    gen_filter_and_pushdown, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
 use crate::optimizer::plan_node::{ColumnPruningCtx, PredicatePushdownCtx};
@@ -255,19 +255,15 @@ impl fmt::Display for LogicalOverAgg {
     }
 }
 
-impl ColPrunableImpl for LogicalOverAgg {
-    fn prune_col_impl(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
+impl ColPrunable for LogicalOverAgg {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
-impl PredicatePushdownImpl for LogicalOverAgg {
-    fn predicate_pushdown_impl(
-        &self,
-        predicate: Condition,
-        ctx: &mut PredicatePushdownCtx,
-    ) -> PlanRef {
+impl PredicatePushdown for LogicalOverAgg {
+    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
         let mut window_col = FixedBitSet::with_capacity(self.schema().len());
         window_col.insert(self.schema().len() - 1);
         let (window_pred, other_pred) = predicate.split_disjoint(&window_col);

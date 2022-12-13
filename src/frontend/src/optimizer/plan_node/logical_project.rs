@@ -20,13 +20,11 @@ use risingwave_common::error::Result;
 
 use super::generic::{self, GenericPlanNode, Project};
 use super::{
-    gen_filter_and_pushdown, BatchProject, ColPrunableImpl, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdownImpl, StreamProject, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
-use crate::optimizer::plan_node::{
-    ColPrunableRef, CollectInputRef, ColumnPruningCtx, PredicatePushdownCtx,
-};
+use crate::optimizer::plan_node::{CollectInputRef, ColumnPruningCtx, PredicatePushdownCtx};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
@@ -165,8 +163,8 @@ impl fmt::Display for LogicalProject {
     }
 }
 
-impl ColPrunableImpl for LogicalProject {
-    fn prune_col_impl(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+impl ColPrunable for LogicalProject {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
         let input_col_num = self.input().schema().len();
         let mut input_required_appeared = FixedBitSet::with_capacity(input_col_num);
 
@@ -203,12 +201,8 @@ impl ColPrunableImpl for LogicalProject {
     }
 }
 
-impl PredicatePushdownImpl for LogicalProject {
-    fn predicate_pushdown_impl(
-        &self,
-        predicate: Condition,
-        ctx: &mut PredicatePushdownCtx,
-    ) -> PlanRef {
+impl PredicatePushdown for LogicalProject {
+    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
         // convert the predicate to one that references the child of the project
         let mut subst = Substitute {
             mapping: self.exprs().clone(),
@@ -378,7 +372,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = project.prune_col_impl(&required_cols, &mut Default::default());
+        let plan = project.prune_col(&required_cols, &mut Default::default());
 
         // Check the result
         let project = plan.as_logical_project().unwrap();

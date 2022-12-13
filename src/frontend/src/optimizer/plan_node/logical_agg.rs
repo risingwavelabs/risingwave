@@ -25,17 +25,16 @@ use super::generic::{
     ProjectBuilder,
 };
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunableImpl, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdownImpl, StreamGlobalSimpleAgg, StreamHashAgg, StreamLocalSimpleAgg,
-    StreamProject, ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg, StreamLocalSimpleAgg, StreamProject,
+    ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
 };
 use crate::optimizer::plan_node::{
-    gen_filter_and_pushdown, BatchSortAgg, ColPrunableRef, ColumnPruningCtx, LogicalProject,
-    PredicatePushdownCtx,
+    gen_filter_and_pushdown, BatchSortAgg, ColumnPruningCtx, LogicalProject, PredicatePushdownCtx,
 };
 use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
@@ -757,8 +756,8 @@ impl fmt::Display for LogicalAgg {
     }
 }
 
-impl ColPrunableImpl for LogicalAgg {
-    fn prune_col_impl(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+impl ColPrunable for LogicalAgg {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
         let group_key_required_cols = FixedBitSet::from_iter(self.group_key().iter().copied());
 
         let (agg_call_required_cols, agg_calls) = {
@@ -828,12 +827,8 @@ impl ColPrunableImpl for LogicalAgg {
     }
 }
 
-impl PredicatePushdownImpl for LogicalAgg {
-    fn predicate_pushdown_impl(
-        &self,
-        predicate: Condition,
-        ctx: &mut PredicatePushdownCtx,
-    ) -> PlanRef {
+impl PredicatePushdown for LogicalAgg {
+    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
         let num_group_key = self.group_key().len();
         let num_agg_calls = self.agg_calls().len();
         assert!(num_group_key + num_agg_calls == self.schema().len());
@@ -1134,7 +1129,7 @@ mod tests {
         let agg = generate_agg_call(ty.clone(), fields.clone()).await;
         // Perform the prune
         let required_cols = vec![0, 1];
-        let plan = agg.prune_col_impl(&required_cols, &mut Default::default());
+        let plan = agg.prune_col(&required_cols, &mut Default::default());
 
         // Check the result
         let agg_new = plan.as_logical_agg().unwrap();
@@ -1173,7 +1168,7 @@ mod tests {
         let agg = generate_agg_call(ty.clone(), fields.clone()).await;
         // Perform the prune
         let required_cols = vec![1, 0];
-        let plan = agg.prune_col_impl(&required_cols, &mut Default::default());
+        let plan = agg.prune_col(&required_cols, &mut Default::default());
         // Check the result
         let proj = plan.as_logical_project().unwrap();
         assert_eq!(proj.exprs().len(), 2);
@@ -1233,7 +1228,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![1];
-        let plan = agg.prune_col_impl(&required_cols, &mut Default::default());
+        let plan = agg.prune_col(&required_cols, &mut Default::default());
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
@@ -1307,7 +1302,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![0, 3];
-        let plan = agg.prune_col_impl(&required_cols, &mut Default::default());
+        let plan = agg.prune_col(&required_cols, &mut Default::default());
         // Check the result
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 2);

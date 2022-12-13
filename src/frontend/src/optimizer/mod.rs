@@ -45,9 +45,7 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::TableType;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
-use crate::optimizer::plan_node::{
-    BatchExchange, ColPrunableRef, PlanNodeType, PredicatePushdownRef,
-};
+use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
 use crate::optimizer::plan_visitor::has_batch_source;
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;

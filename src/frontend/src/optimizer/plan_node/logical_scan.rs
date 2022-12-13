@@ -24,7 +24,7 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::generic::GenericPlanNode;
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunableImpl, PlanBase, PlanRef, PredicatePushdownImpl,
+    generic, BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown,
     StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
@@ -422,8 +422,8 @@ impl fmt::Display for LogicalScan {
     }
 }
 
-impl ColPrunableImpl for LogicalScan {
-    fn prune_col_impl(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
+impl ColPrunable for LogicalScan {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
         let output_col_idx: Vec<usize> = required_cols
             .iter()
             .map(|i| self.required_col_idx()[*i])
@@ -436,12 +436,8 @@ impl ColPrunableImpl for LogicalScan {
     }
 }
 
-impl PredicatePushdownImpl for LogicalScan {
-    fn predicate_pushdown_impl(
-        &self,
-        predicate: Condition,
-        _ctx: &mut PredicatePushdownCtx,
-    ) -> PlanRef {
+impl PredicatePushdown for LogicalScan {
+    fn predicate_pushdown(&self, predicate: Condition, _ctx: &mut PredicatePushdownCtx) -> PlanRef {
         // If the predicate contains `CorrelatedInputRef`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}

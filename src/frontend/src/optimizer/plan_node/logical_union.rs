@@ -18,13 +18,13 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 
-use super::{ColPrunableImpl, PlanBase, PlanRef, PredicatePushdownImpl, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
-    generic, BatchHashAgg, BatchUnion, ColPrunableRef, ColumnPruningCtx, LogicalAgg,
-    LogicalProject, PlanTreeNode, PredicatePushdownCtx, PredicatePushdownRef,
+    generic, BatchHashAgg, BatchUnion, ColumnPruningCtx, LogicalAgg, LogicalProject, PlanTreeNode,
+    PredicatePushdownCtx,
 };
 use crate::optimizer::property::{FunctionalDependencySet, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
@@ -98,8 +98,8 @@ impl fmt::Display for LogicalUnion {
     }
 }
 
-impl ColPrunableImpl for LogicalUnion {
-    fn prune_col_impl(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+impl ColPrunable for LogicalUnion {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
         let new_inputs = self
             .inputs()
             .iter()
@@ -109,12 +109,8 @@ impl ColPrunableImpl for LogicalUnion {
     }
 }
 
-impl PredicatePushdownImpl for LogicalUnion {
-    fn predicate_pushdown_impl(
-        &self,
-        predicate: Condition,
-        ctx: &mut PredicatePushdownCtx,
-    ) -> PlanRef {
+impl PredicatePushdown for LogicalUnion {
+    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
         let new_inputs = self
             .inputs()
             .iter()
@@ -320,7 +316,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = union.prune_col_impl(&required_cols, &mut Default::default());
+        let plan = union.prune_col(&required_cols, &mut Default::default());
 
         // Check the result
         let union = plan.as_logical_union().unwrap();

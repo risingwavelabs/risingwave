@@ -29,6 +29,7 @@
 //!   in the `new()` function.
 
 use std::fmt::{Debug, Display};
+use std::ops::Deref;
 use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
@@ -55,13 +56,13 @@ pub trait PlanNode:
     + Debug
     + Display
     + Downcast
-    + ColPrunableImpl
+    + ColPrunable
     + ToBatch
     + ToStream
     + ToDistributedBatch
     + ToProst
     + ToLocalBatch
-    + PredicatePushdownImpl
+    + PredicatePushdown
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
@@ -81,11 +82,7 @@ pub enum Convention {
     Stream,
 }
 
-pub trait ColPrunableRef {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef;
-}
-
-impl ColPrunableRef for PlanRef {
+impl ColPrunable for PlanRef {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
             let parent_has_pushed = ctx.add_required_cols(self.id(), required_cols.into());
@@ -99,7 +96,7 @@ impl ColPrunableRef for PlanRef {
                     .dedup()
                     .collect_vec();
                 let input: PlanRef = logical_share.input();
-                let input = input.prune_col_impl(&merge_require_cols, ctx);
+                let input = input.prune_col(&merge_require_cols, ctx);
                 let logical_share: &LogicalShare = logical_share;
                 let exprs = logical_share
                     .base
@@ -125,18 +122,18 @@ impl ColPrunableRef for PlanRef {
                 ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
             LogicalProject::with_mapping(self.clone(), mapping).into()
         } else {
-            self.prune_col_impl(required_cols, ctx)
+            // Dispatch to dyn PlanNode instead of PlanRef.
+            let dyn_t = self.deref();
+            dyn_t.prune_col(required_cols, ctx)
         }
     }
 }
 
-pub trait PredicatePushdownRef {
-    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef;
-}
-
-impl PredicatePushdownRef for PlanRef {
+impl PredicatePushdown for PlanRef {
     fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
+            // `LogicalShare` can't clone, so we implement predicate pushdown for `LogicalShare`
+            // here.
             let parent_has_pushed = ctx.add_predicate(self.id(), predicate.clone());
             if parent_has_pushed == logical_share.parent_num() {
                 let merge_predicate = ctx
@@ -151,7 +148,9 @@ impl PredicatePushdownRef for PlanRef {
             }
             LogicalFilter::create(self.clone(), predicate)
         } else {
-            self.predicate_pushdown_impl(predicate, ctx)
+            // Dispatch to dyn PlanNode instead of PlanRef.
+            let dyn_t = self.deref();
+            dyn_t.predicate_pushdown(predicate, ctx)
         }
     }
 }

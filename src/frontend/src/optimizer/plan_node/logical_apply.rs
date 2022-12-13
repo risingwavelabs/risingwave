@@ -20,13 +20,11 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunableImpl, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PredicatePushdownImpl, ToBatch, ToStream,
+    ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{
-    ColumnPruningCtx, LogicalFilter, PredicatePushdownCtx, PredicatePushdownRef,
-};
+use crate::optimizer::plan_node::{ColumnPruningCtx, LogicalFilter, PredicatePushdownCtx};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -288,14 +286,14 @@ impl PlanTreeNodeBinary for LogicalApply {
 
 impl_plan_tree_node_for_binary! { LogicalApply }
 
-impl ColPrunableImpl for LogicalApply {
-    fn prune_col_impl(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
+impl ColPrunable for LogicalApply {
+    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
         panic!("LogicalApply should be unnested")
     }
 }
 
-impl PredicatePushdownImpl for LogicalApply {
-    fn predicate_pushdown_impl(
+impl PredicatePushdown for LogicalApply {
+    fn predicate_pushdown(
         &self,
         mut predicate: Condition,
         ctx: &mut PredicatePushdownCtx,

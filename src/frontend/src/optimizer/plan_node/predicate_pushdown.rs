@@ -21,7 +21,7 @@ use crate::utils::Condition;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 /// The trait for predicate pushdown, only logical plan node will use it, though all plan node impl
 /// it.
-pub trait PredicatePushdownImpl {
+pub trait PredicatePushdown {
     /// Push predicate down for every logical plan node.
     ///
     /// There are three kinds of predicates:
@@ -37,26 +37,22 @@ pub trait PredicatePushdownImpl {
     /// the predicates with the `Condition` of it.
     ///
     /// 3. those can be pushed down. We pass them to current `PlanNode`'s input.
-    fn predicate_pushdown_impl(
-        &self,
-        predicate: Condition,
-        ctx: &mut PredicatePushdownCtx,
-    ) -> PlanRef;
+    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef;
 }
 
-macro_rules! ban_predicate_pushdown_impl {
+macro_rules! ban_predicate_pushdown {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
-            $(impl PredicatePushdownImpl for [<$convention $name>] {
-                fn predicate_pushdown_impl(&self, _predicate: Condition, _ctx: &mut PredicatePushdownCtx) -> PlanRef {
+            $(impl PredicatePushdown for [<$convention $name>] {
+                fn predicate_pushdown(&self, _predicate: Condition, _ctx: &mut PredicatePushdownCtx) -> PlanRef {
                     unreachable!("predicate pushdown is only allowed on logical plan")
                 }
             })*
         }
     }
 }
-for_batch_plan_nodes! {ban_predicate_pushdown_impl}
-for_stream_plan_nodes! {ban_predicate_pushdown_impl}
+for_batch_plan_nodes! {ban_predicate_pushdown}
+for_stream_plan_nodes! {ban_predicate_pushdown}
 
 #[inline]
 pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(

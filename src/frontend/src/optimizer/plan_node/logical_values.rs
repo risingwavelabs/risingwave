@@ -19,7 +19,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
-    BatchValues, ColPrunableImpl, LogicalFilter, PlanBase, PlanRef, PredicatePushdownImpl, ToBatch,
+    BatchValues, ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch,
     ToStream,
 };
 use crate::expr::{Expr, ExprImpl};
@@ -74,8 +74,8 @@ impl fmt::Display for LogicalValues {
     }
 }
 
-impl ColPrunableImpl for LogicalValues {
-    fn prune_col_impl(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
+impl ColPrunable for LogicalValues {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
         let rows = self
             .rows
             .iter()
@@ -89,12 +89,8 @@ impl ColPrunableImpl for LogicalValues {
     }
 }
 
-impl PredicatePushdownImpl for LogicalValues {
-    fn predicate_pushdown_impl(
-        &self,
-        predicate: Condition,
-        _ctx: &mut PredicatePushdownCtx,
-    ) -> PlanRef {
+impl PredicatePushdown for LogicalValues {
+    fn predicate_pushdown(&self, predicate: Condition, _ctx: &mut PredicatePushdownCtx) -> PlanRef {
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }
@@ -162,7 +158,7 @@ mod tests {
         );
 
         let required_cols = vec![0, 2];
-        let pruned = values.prune_col_impl(&required_cols, &mut Default::default());
+        let pruned = values.prune_col(&required_cols, &mut Default::default());
 
         let values = pruned.as_logical_values().unwrap();
         let rows: &[Vec<ExprImpl>] = values.rows();

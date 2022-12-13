@@ -19,7 +19,7 @@ use risingwave_common::error::Result;
 
 use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunableImpl, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdownImpl, ToBatch, ToStream,
+    ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{ColumnPruningCtx, PredicatePushdownCtx, StreamShare};
@@ -104,19 +104,21 @@ impl fmt::Display for LogicalShare {
     }
 }
 
-impl ColPrunableImpl for LogicalShare {
-    fn prune_col_impl(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
-        unimplemented!()
+impl ColPrunable for LogicalShare {
+    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
+        unimplemented!("call prune_col of the PlanRef instead of calling directly on LogicalShare")
     }
 }
 
-impl PredicatePushdownImpl for LogicalShare {
-    fn predicate_pushdown_impl(
+impl PredicatePushdown for LogicalShare {
+    fn predicate_pushdown(
         &self,
         _predicate: Condition,
         _ctx: &mut PredicatePushdownCtx,
     ) -> PlanRef {
-        unimplemented!()
+        unimplemented!(
+            "call predicate_pushdown of the PlanRef instead of calling directly on LogicalShare"
+        )
     }
 }
 

@@ -22,11 +22,11 @@ use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::generic::GenericPlanNode;
 use super::{
-    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunableImpl, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdownImpl, StreamHopWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::InputRef;
-use crate::optimizer::plan_node::{ColPrunableRef, ColumnPruningCtx, PredicatePushdownCtx};
+use crate::optimizer::plan_node::{ColumnPruningCtx, PredicatePushdownCtx};
 use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -259,8 +259,8 @@ impl fmt::Display for LogicalHopWindow {
     }
 }
 
-impl ColPrunableImpl for LogicalHopWindow {
-    fn prune_col_impl(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+impl ColPrunable for LogicalHopWindow {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
         let o2i = self.o2i_col_mapping();
         let input_required_cols = {
             let mut tmp = FixedBitSet::with_capacity(self.schema().len());
@@ -316,12 +316,8 @@ impl ColPrunableImpl for LogicalHopWindow {
     }
 }
 
-impl PredicatePushdownImpl for LogicalHopWindow {
-    fn predicate_pushdown_impl(
-        &self,
-        predicate: Condition,
-        ctx: &mut PredicatePushdownCtx,
-    ) -> PlanRef {
+impl PredicatePushdown for LogicalHopWindow {
+    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
         // TODO: hop's predicate pushdown https://github.com/risingwavelabs/risingwave/issues/6606
         gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
@@ -419,7 +415,7 @@ mod test {
         .into();
         // Perform the prune
         let required_cols = vec![4, 2, 3];
-        let plan = hop_window.prune_col_impl(&required_cols, &mut Default::default());
+        let plan = hop_window.prune_col(&required_cols, &mut Default::default());
         println!(
             "{}\n{}",
             hop_window.explain_to_string().unwrap(),

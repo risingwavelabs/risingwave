@@ -19,11 +19,11 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
-    gen_filter_and_pushdown, BatchDelete, ColPrunableImpl, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdownImpl, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchDelete, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::optimizer::plan_node::{ColPrunableRef, ColumnPruningCtx, PredicatePushdownCtx};
+use crate::optimizer::plan_node::{ColumnPruningCtx, PredicatePushdownCtx};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
@@ -110,20 +110,16 @@ impl fmt::Display for LogicalDelete {
     }
 }
 
-impl ColPrunableImpl for LogicalDelete {
-    fn prune_col_impl(&self, _required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+impl ColPrunable for LogicalDelete {
+    fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
         let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
         self.clone_with_input(self.input.prune_col(&required_cols, ctx))
             .into()
     }
 }
 
-impl PredicatePushdownImpl for LogicalDelete {
-    fn predicate_pushdown_impl(
-        &self,
-        predicate: Condition,
-        ctx: &mut PredicatePushdownCtx,
-    ) -> PlanRef {
+impl PredicatePushdown for LogicalDelete {
+    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
         gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
