@@ -1409,7 +1409,7 @@ where
                 fragment_actors_to_create.get(&downstream_fragment_id);
 
             match dispatcher.r#type() {
-                d @ (DispatcherType::Hash | DispatcherType::Simple) => {
+                d @ (DispatcherType::Hash | DispatcherType::Simple | DispatcherType::Broadcast) => {
                     if let Some(downstream_actors_to_remove) = downstream_fragment_actors_to_remove
                     {
                         dispatcher
@@ -1437,10 +1437,7 @@ where
                         .unwrap();
                     dispatcher.downstream_actor_id = vec![*downstream_actor_id as ActorId];
                 }
-                d => bail!(
-                    "cascading resolution of {:?} dispatcher is not supported for now",
-                    d
-                ),
+                DispatcherType::Unspecified => unreachable!(),
             }
 
             if let Some(mapping) = dispatcher.hash_mapping.as_mut() {
