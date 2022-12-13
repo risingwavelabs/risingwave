@@ -117,7 +117,7 @@ where
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
-        debug!("recovery start!");
+        tracing::info!("recovery start!");
         self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");
@@ -189,7 +189,7 @@ where
         })
         .await
         .expect("Retry until recovery success.");
-        debug!("recovery success");
+        tracing::info!("recovery success");
 
         new_epoch
     }
