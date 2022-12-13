@@ -27,7 +27,8 @@ use super::overlap_strategy::OverlapInfo;
 use crate::hummock::compaction::level_selector::{LevelSelector, LevelSelectorCore};
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapInfo};
 use crate::hummock::compaction::{
-    CompactionInput, CompactionPicker, CompactionTask, ManualCompactionOption,
+    CompactionInput, CompactionPicker, CompactionTask, LocalPickerStatistic,
+    LocalSelectorStatistic, ManualCompactionOption,
 };
 use crate::hummock::level_handler::LevelHandler;
 
@@ -214,6 +215,7 @@ impl CompactionPicker for ManualCompactionPicker {
         &self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
+        _stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         if self.option.level == 0 {
             if !self.option.sst_ids.is_empty() {
@@ -350,6 +352,7 @@ impl LevelSelector for ManualCompactionSelector {
         task_id: HummockCompactionTaskId,
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
+        _selector_stats: &mut LocalSelectorStatistic,
     ) -> Option<CompactionTask> {
         let ctx = self.inner.calculate_level_base_size(levels);
         let target_level = if self.option.level == 0 {
@@ -368,7 +371,8 @@ impl LevelSelector for ManualCompactionSelector {
             target_level,
         );
 
-        let ret = picker.pick_compaction(levels, level_handlers)?;
+        let ret =
+            picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default())?;
         ret.add_pending_task(task_id, level_handlers);
         Some(self.inner.create_compaction_task(ret, ctx.base_level))
     }

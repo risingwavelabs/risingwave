@@ -20,7 +20,7 @@ use risingwave_pb::hummock::{InputLevel, LevelType, SstableInfo};
 
 use super::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::CompactionInput;
+use crate::hummock::compaction::{CompactionInput, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct MinOverlappingPicker {
@@ -100,6 +100,7 @@ impl CompactionPicker for MinOverlappingPicker {
         &self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
+        stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         assert!(self.level > 0);
         let (select_input_ssts, target_input_ssts) = self.pick_tables(
@@ -108,6 +109,7 @@ impl CompactionPicker for MinOverlappingPicker {
             level_handlers,
         );
         if select_input_ssts.is_empty() {
+            stats.skip_by_pending_files += 1;
             return None;
         }
         Some(CompactionInput {

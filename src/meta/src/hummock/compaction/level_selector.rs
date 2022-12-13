@@ -28,9 +28,10 @@ use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPic
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::{
     create_overlap_strategy, CompactionInput, CompactionPicker, CompactionTask,
-    LevelCompactionPicker, TierCompactionPicker,
+    LevelCompactionPicker, LocalPickerStatistic, LocalSelectorStatistic, TierCompactionPicker,
 };
 use crate::hummock::level_handler::LevelHandler;
+use crate::rpc::metrics::MetaMetrics;
 
 const SCORE_BASE: u64 = 100;
 
@@ -42,7 +43,10 @@ pub trait LevelSelector: Sync + Send {
         task_id: HummockCompactionTaskId,
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
+        selector_stats: &mut LocalSelectorStatistic,
     ) -> Option<CompactionTask>;
+
+    fn report_statistic_metrics(&self, _metrics: &MetaMetrics) {}
 
     fn name(&self) -> &'static str;
 }
@@ -289,6 +293,7 @@ impl LevelSelector for DynamicLevelSelector {
         task_id: HummockCompactionTaskId,
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
+        selector_stats: &mut LocalSelectorStatistic,
     ) -> Option<CompactionTask> {
         let ctx = self.inner.get_priority_levels(levels, level_handlers);
         for (score, select_level, target_level) in ctx.score_levels {
@@ -298,10 +303,14 @@ impl LevelSelector for DynamicLevelSelector {
             let picker = self
                 .inner
                 .create_compaction_picker(select_level, target_level);
-            if let Some(ret) = picker.pick_compaction(levels, level_handlers) {
+            let mut stats = LocalPickerStatistic::default();
+            if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
                 ret.add_pending_task(task_id, level_handlers);
                 return Some(self.inner.create_compaction_task(ret, ctx.base_level));
             }
+            selector_stats
+                .skip_picker
+                .push((select_level, target_level, stats));
         }
         None
     }

@@ -536,6 +536,16 @@ def section_compaction(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
+                    "Compaction Skip Count",
+                    "num of compaction task which does not trigger",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_skip_compact_frequency')}[$__rate_interval])) by (level, type)",
+                            "{{level}}-{{type}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
                     "Compactor Running Task Count",
                     "num of compactions from each level to next level",
                     [

@@ -19,7 +19,7 @@ use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, Overlappin
 
 use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{CompactionInput, CompactionPicker};
+use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -44,6 +44,7 @@ impl TierCompactionPicker {
         &self,
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
+        stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         // do not pick the first sub-level because we do not want to block the level compaction.
         let non_overlapping_type = LevelType::Nonoverlapping as i32;
@@ -101,6 +102,7 @@ impl TierCompactionPicker {
             if compact_file_count < self.config.level0_tier_compact_file_number as usize
                 && compaction_bytes < max_compaction_bytes
             {
+                stats.skip_by_count_limit += 1;
                 continue;
             }
 
@@ -118,6 +120,7 @@ impl TierCompactionPicker {
                 && is_write_amp_large
                 && (select_level_inputs.len() == 1 || compaction_bytes < max_compaction_bytes)
             {
+                stats.skip_by_write_amp_limit += 1;
                 continue;
             }
 
@@ -191,6 +194,7 @@ impl CompactionPicker for TierCompactionPicker {
         &self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
+        stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let l0 = levels.l0.as_ref().unwrap();
         if l0.sub_levels.is_empty() {
@@ -201,7 +205,7 @@ impl CompactionPicker for TierCompactionPicker {
             return Some(ret);
         }
 
-        self.pick_whole_level(l0, &level_handlers[0])
+        self.pick_whole_level(l0, &level_handlers[0], stats)
     }
 }
 

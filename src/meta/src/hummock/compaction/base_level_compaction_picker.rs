@@ -22,7 +22,7 @@ use risingwave_pb::hummock::{
 
 use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{CompactionInput, CompactionPicker};
+use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 
 fn cal_file_size(table_infos: &[SstableInfo]) -> u64 {
@@ -40,6 +40,7 @@ impl CompactionPicker for LevelCompactionPicker {
         &self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
+        stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let target_level = self.target_level as u32;
 
@@ -78,6 +79,7 @@ impl CompactionPicker for LevelCompactionPicker {
         let mut input_levels =
             self.pick_min_overlap_tables(l0, levels.get_level(self.target_level), level_handlers);
         if input_levels.is_empty() {
+            stats.skip_by_pending_files += 1;
             return None;
         }
 
@@ -93,6 +95,7 @@ impl CompactionPicker for LevelCompactionPicker {
             if is_l0_pending_compact
                 || level_handlers[self.target_level].get_pending_file_count() > 0
             {
+                stats.skip_by_pending_files += 1;
                 return None;
             }
             input_levels.clear();
@@ -127,6 +130,7 @@ impl CompactionPicker for LevelCompactionPicker {
             if all_level_amplification > MAX_WRITE_AMPLIFICATION
                 && l0_total_file_size < self.config.max_compaction_bytes
             {
+                stats.skip_by_write_amp_limit += 1;
                 return None;
             }
             // reverse because the ix of low sub-level is smaller.
