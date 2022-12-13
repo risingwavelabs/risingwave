@@ -192,6 +192,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         .await
         .unwrap();
         join_handle.await.unwrap();
+
+        // TODO: use shutdown send here?
+        // match shutdown_send.send(()) {
+        // Ok(_) => tracing::info!("Stopping meta server gracefully"),
+        // Err(_) => tracing::info!("Error when shutting down meta server"),
+        // }
         tracing::info!("Meta server is stopped");
     })
 }
