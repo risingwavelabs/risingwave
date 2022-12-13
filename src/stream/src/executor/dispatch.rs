@@ -157,18 +157,17 @@ impl DispatchExecutorInner {
         let dispatcher = self.find_dispatcher(update.dispatcher_id);
         dispatcher.remove_outputs(&ids);
 
-        match dispatcher {
-            // The hash mapping is only used by the hash dispatcher.
-            DispatcherImpl::Hash(dispatcher) => {
-                dispatcher.hash_mapping = {
-                    let compressed_mapping = update.get_hash_mapping()?;
-                    decompress_data(
-                        &compressed_mapping.original_indices,
-                        &compressed_mapping.data,
-                    )
-                }
+        // The hash mapping is only used by the hash dispatcher.
+        // We do not assert on the inexistence of the hash mapping field for other dispatchers to
+        // make it more tolerant for meta resolution.
+        if let DispatcherImpl::Hash(dispatcher) = dispatcher {
+            dispatcher.hash_mapping = {
+                let compressed_mapping = update.get_hash_mapping()?;
+                decompress_data(
+                    &compressed_mapping.original_indices,
+                    &compressed_mapping.data,
+                )
             }
-            _ => assert!(update.hash_mapping.is_none()),
         }
 
         Ok(())
