@@ -97,8 +97,8 @@ impl ManagedBarrierState {
         if to_notify {
             while let Some((
                 _,
-                &BarrierState {
-                    inner: ref barrier_inner,
+                BarrierState {
+                    inner: barrier_inner,
                     ..
                 },
             )) = self.epoch_barrier_state_map.first_key_value()

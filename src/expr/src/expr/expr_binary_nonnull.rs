@@ -281,8 +281,8 @@ macro_rules! gen_binary_expr_bitwise {
             { int32, int16, int32, $general_f },
             { int32, int32, int32, $general_f },
             { int32, int64, int64, $general_f },
-            { int64, int16,int64, $general_f },
-            { int64, int32,int64, $general_f },
+            { int64, int16, int64, $general_f },
+            { int64, int32, int64, $general_f },
             { int64, int64, int64, $general_f },
             $(
                 { $i1, $i2, $rt, $func },

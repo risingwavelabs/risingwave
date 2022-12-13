@@ -1,4 +1,4 @@
 query R rowsort
 select * from ch_benchmark_q14;
 ----
-99.9812030075188
+58.000
