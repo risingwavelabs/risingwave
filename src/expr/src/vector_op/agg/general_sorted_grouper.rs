@@ -215,14 +215,14 @@ mod tests {
         };
         let mut builder = I32ArrayBuilder::new(0);
 
-        let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]);
+        let input = I32Array::from_iter([1, 1, 3]);
         let eq = g.detect_groups_concrete(&input)?;
         assert_eq!(eq.indices, vec![2]);
         g.update_concrete(&input, 0, *eq.indices.first().unwrap())?;
         g.output_concrete(&mut builder)?;
         g.update_concrete(&input, *eq.indices.first().unwrap(), input.len())?;
 
-        let input = I32Array::from_slice(&[Some(3), Some(4), Some(4)]);
+        let input = I32Array::from_iter([3, 4, 4]);
         let eq = g.detect_groups_concrete(&input)?;
         assert_eq!(eq.indices, vec![1]);
         g.update_concrete(&input, 0, *eq.indices.first().unwrap())?;

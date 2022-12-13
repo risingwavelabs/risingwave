@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use futures::future::BoxFuture;
 use itertools::Itertools;
 use madsim::rand::thread_rng;
 use rand::seq::{IteratorRandom, SliceRandom};
@@ -206,9 +205,9 @@ impl Fragment {
 
 impl Cluster {
     /// Locate fragments that satisfy all the predicates.
-    async fn locate_fragments_inner(
+    pub async fn locate_fragments(
         &mut self,
-        predicates: Vec<BoxedPredicate>,
+        predicates: impl IntoIterator<Item = BoxedPredicate>,
     ) -> Result<Vec<Fragment>> {
         let predicates = predicates.into_iter().collect_vec();
 
@@ -239,17 +238,10 @@ impl Cluster {
         Ok(fragments)
     }
 
-    pub fn locate_fragments(
-        &mut self,
-        predicates: Vec<BoxedPredicate>,
-    ) -> BoxFuture<'_, Result<Vec<Fragment>>> {
-        Box::pin(self.locate_fragments_inner(predicates))
-    }
-
     /// Locate exactly one fragment that satisfies all the predicates.
-    async fn locate_one_fragment_inner(
+    pub async fn locate_one_fragment(
         &mut self,
-        predicates: Vec<BoxedPredicate>,
+        predicates: impl IntoIterator<Item = BoxedPredicate>,
     ) -> Result<Fragment> {
         let [fragment]: [_; 1] = self
             .locate_fragments(predicates)
@@ -259,16 +251,9 @@ impl Cluster {
         Ok(fragment)
     }
 
-    pub fn locate_one_fragment(
-        &mut self,
-        predicates: Vec<BoxedPredicate>,
-    ) -> BoxFuture<'_, Result<Fragment>> {
-        Box::pin(self.locate_one_fragment_inner(predicates))
-    }
-
     /// Locate a random fragment that is reschedulable.
     pub async fn locate_random_fragment(&mut self) -> Result<Fragment> {
-        self.locate_fragments(vec![predicate::can_reschedule()])
+        self.locate_fragments([predicate::can_reschedule()])
             .await?
             .into_iter()
             .choose(&mut thread_rng())
@@ -277,9 +262,7 @@ impl Cluster {
 
     /// Locate some random fragments that are reschedulable.
     pub async fn locate_random_fragments(&mut self) -> Result<Vec<Fragment>> {
-        let fragments = self
-            .locate_fragments(vec![predicate::can_reschedule()])
-            .await?;
+        let fragments = self.locate_fragments([predicate::can_reschedule()]).await?;
         let len = thread_rng().gen_range(1..=fragments.len());
         let selected = fragments
             .into_iter()
@@ -289,12 +272,14 @@ impl Cluster {
 
     /// Locate a fragment with the given id.
     pub async fn locate_fragment_by_id(&mut self, id: u32) -> Result<Fragment> {
-        self.locate_one_fragment(vec![predicate::id(id)]).await
+        self.locate_one_fragment([predicate::id(id)]).await
     }
 
     /// Reschedule with the given `plan`. Check the document of
     /// [`risingwave_ctl::cmd_impl::meta::reschedule`] for more details.
-    async fn reschedule_inner(&mut self, plan: String) -> Result<()> {
+    pub async fn reschedule(&mut self, plan: impl Into<String>) -> Result<()> {
+        let plan = plan.into();
+
         self.ctl
             .spawn(async move {
                 let opts = risingwave_ctl::CliOpts::parse_from([
@@ -302,16 +287,12 @@ impl Cluster {
                     "meta",
                     "reschedule",
                     "--plan",
-                    &plan,
+                    plan.as_ref(),
                 ]);
                 risingwave_ctl::start(opts).await
             })
             .await??;
 
         Ok(())
-    }
-
-    pub fn reschedule(&mut self, plan: String) -> BoxFuture<'_, Result<()>> {
-        Box::pin(self.reschedule_inner(plan))
     }
 }

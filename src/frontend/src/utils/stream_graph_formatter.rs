@@ -96,7 +96,7 @@ impl StreamGraphFormatter {
             tb.pk,
             tb.value_indices,
             tb.distribution_key,
-            if let Some(vnode_col_idx) = tb.vnode_col_idx {
+            if let Some(vnode_col_idx) = tb.vnode_col_index {
                 format!(", vnode column idx: {}", vnode_col_idx)
             } else {
                 "".to_string()

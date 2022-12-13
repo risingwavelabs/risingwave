@@ -12,5 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod combined_event;
 pub mod message;
 pub mod reader;

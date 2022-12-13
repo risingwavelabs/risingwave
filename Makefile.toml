@@ -11,6 +11,7 @@ extend = [
   { path = "src/risedevtool/risedev-components.toml" },
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
+  { path = "src/storage/backup/integration_tests/Makefile.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -348,25 +349,32 @@ script = '''
 
 set -e
 
-cp "src/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
+echo > "${PREFIX_CONFIG}/risingwave.toml"
 cp "src/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
+
+[tasks.download-all]
+category = "RiseDev - Components"
+description = "Download all available components at once"
+dependencies = [
+  "download-connector",
+  "download-etcd",
+  "download-grafana",
+  "download-jaeger",
+  "download-kafka",
+  "download-mcli",
+  "download-minio",
+  "download-prometheus",
+  "download-pubsub",
+  "download-redis",
+]
 
 [tasks.pre-start-dev]
 category = "RiseDev - Prepare"
 description = "Prepare dev cluster by downloading necessary tools and build required components"
 dependencies = [
-  "download-minio",
-  "download-mcli",
-  "download-etcd",
-  "download-grafana",
-  "download-prometheus",
-  "download-jaeger",
-  "download-kafka",
-  "download-pubsub",
-  "download-redis",
-  "download-connector",
+  "download-all",
   "build-risingwave",
   "post-build-risingwave",
   "extract-dashboard-artifact",

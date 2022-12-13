@@ -26,6 +26,7 @@ rustflags = [
     # lints
     # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
     "-Funused_must_use",
+    "-Aclippy::uninlined_format_args",
     "-Wclippy::dbg_macro",
     "-Wclippy::disallowed_methods",
     "-Wclippy::disallowed_types",

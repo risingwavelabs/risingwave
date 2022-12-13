@@ -282,7 +282,7 @@ mod tests {
         let props = ConnectorProperties::extract(props).unwrap();
 
         if let ConnectorProperties::Nexmark(props) = props {
-            assert_eq!(props.table_type, EventType::Person);
+            assert_eq!(props.table_type, Some(EventType::Person));
             assert_eq!(props.split_num, 1);
         } else {
             panic!("extract nexmark config failed");

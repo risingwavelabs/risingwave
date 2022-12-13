@@ -29,7 +29,7 @@ unsafe fn u32(ptr: *const u8) -> u32 {
 }
 
 #[inline]
-pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
+pub fn bytes_diff<'a>(base: &[u8], target: &'a [u8]) -> &'a [u8] {
     let end = cmp::min(base.len(), target.len());
     let mut i = 0;
     unsafe {

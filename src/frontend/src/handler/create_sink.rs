@@ -40,7 +40,7 @@ fn into_sink_prost(table: Table) -> ProstSink {
         dependent_relations: table.dependent_relations,
         distribution_key: table.distribution_key,
         stream_key: table.stream_key,
-        appendonly: table.appendonly,
+        append_only: table.append_only,
         properties: table.properties,
         owner: table.owner,
         definition: table.definition,
@@ -99,7 +99,7 @@ pub fn gen_sink_plan(
     // If colume names not specified, use the name in materialized view.
     let col_names = get_column_names(&bound, session, stmt.columns)?;
 
-    let properties = context.inner().with_options.clone();
+    let properties = context.with_options().clone();
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     let col_names = if let Some(col_names) = col_names {
