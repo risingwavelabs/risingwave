@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(let_chains)]
+
 use std::env;
 use std::sync::Arc;
 
@@ -40,12 +42,13 @@ pub struct SqlsmithEnv {
 }
 
 /// Executes sql queries, prints recoverable errors.
-/// Panic recovery happens separately.
+/// Panic recovery happens separately, see [`reproduce_failing_queries`].
 async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<()> {
-    handler::handle(session.clone(), stmt, sql, false)
+    let result = handler::handle(session.clone(), stmt, sql, false)
         .await
         .map(|_| ())
-        .map_err(|e| format!("Error Reason:\n{}", e).into())
+        .map_err(|e| format!("Error Reason:\n{}", e).into());
+    validate_result(result)
 }
 
 fn get_seed_table_sql() -> String {
@@ -56,7 +59,7 @@ fn get_seed_table_sql() -> String {
         .collect::<String>()
 }
 
-/// Prints failing queries and their setup code.
+/// Prints failing queries and their setup code, if execution fails.
 /// NOTE: This depends on convention of test suites
 /// not writing to stderr, unless the test fails.
 /// (This applies to nextest).
