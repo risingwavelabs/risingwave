@@ -40,7 +40,7 @@ import Title from "../components/Title"
 import { ActorBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { StreamNode } from "../proto/gen/stream_plan"
-import { getFragments, getMaterializedViews } from "./api/streaming"
+import { getFragments, getRelations } from "./api/streaming"
 
 function buildPlanNodeDependency(
   fragment: TableFragments_Fragment
@@ -128,7 +128,7 @@ function useFetch<T>(fetchFn: () => Promise<T>) {
 }
 
 export default function Streaming() {
-  const { response: mvList } = useFetch(getMaterializedViews)
+  const { response: relationList } = useFetch(getRelations)
   const { response: fragmentList } = useFetch(getFragments)
 
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
@@ -137,8 +137,8 @@ export default function Streaming() {
   const fragmentDependencyCallback = useCallback(() => {
     if (fragmentList) {
       if (router.query.id) {
-        const mvId = parseInt(router.query.id as string)
-        const fragments = fragmentList.find((x) => x.tableId === mvId)
+        const id = parseInt(router.query.id as string)
+        const fragments = fragmentList.find((x) => x.tableId === id)
         if (fragments) {
           const fragmentDep = buildFragmentDependencyAsEdges(fragments)
           return {
@@ -153,15 +153,15 @@ export default function Streaming() {
   }, [fragmentList, router.query.id])
 
   useEffect(() => {
-    if (mvList) {
+    if (relationList) {
       if (!router.query.id) {
-        if (mvList.length > 0) {
-          router.replace(`?id=${mvList[0].id}`)
+        if (relationList.length > 0) {
+          router.replace(`?id=${relationList[0].id}`)
         }
       }
     }
     return () => {}
-  }, [router, router.query.id, mvList])
+  }, [router, router.query.id, relationList])
 
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
@@ -183,32 +183,32 @@ export default function Streaming() {
 
   const planNodeDependencies = planNodeDependenciesCallback()
 
-  const mvInfoCallback = useCallback(() => {
+  const relationInfoCallback = useCallback(() => {
     const id = router.query.id
     if (id) {
-      if (mvList) {
-        return mvList.find((x) => x.id == parseInt(id as string))
+      if (relationList) {
+        return relationList.find((x) => x.id == parseInt(id as string))
       }
     }
     return undefined
-  }, [mvList, router.query.id])
+  }, [relationList, router.query.id])
 
-  const mvInfo = mvInfoCallback()
+  const relationInfo = relationInfoCallback()
 
   const [searchActorId, setSearchActorId] = useState<string>("")
   const [searchFragId, setSearchFragId] = useState<string>("")
 
-  const setMvId = (id: number) => router.replace(`?id=${id}`)
+  const setRelationId = (id: number) => router.replace(`?id=${id}`)
 
   const toast = useToast()
 
   const handleSearchFragment = () => {
     const searchFragIdInt = parseInt(searchFragId)
     if (fragmentList) {
-      for (const mv of fragmentList) {
-        for (const fragmentId in mv.fragments) {
-          if (mv.fragments[fragmentId].fragmentId == searchFragIdInt) {
-            setMvId(mv.tableId)
+      for (const tf of fragmentList) {
+        for (const fragmentId in tf.fragments) {
+          if (tf.fragments[fragmentId].fragmentId == searchFragIdInt) {
+            setRelationId(tf.tableId)
             setSelectedFragmentId(searchFragIdInt)
             return
           }
@@ -228,12 +228,12 @@ export default function Streaming() {
   const handleSearchActor = () => {
     const searchActorIdInt = parseInt(searchActorId)
     if (fragmentList) {
-      for (const mv of fragmentList) {
-        for (const fragmentId in mv.fragments) {
-          const fragment = mv.fragments[fragmentId]
+      for (const tf of fragmentList) {
+        for (const fragmentId in tf.fragments) {
+          const fragment = tf.fragments[fragmentId]
           for (const actor of fragment.actors) {
             if (actor.actorId == searchActorIdInt) {
-              setMvId(mv.tableId)
+              setRelationId(tf.tableId)
               setSelectedFragmentId(fragment.fragmentId)
               return
             }
@@ -263,39 +263,41 @@ export default function Streaming() {
           height="full"
         >
           <FormControl>
-            <FormLabel>Materialized View</FormLabel>
+            <FormLabel>Relations</FormLabel>
             <Input
-              list="mvList"
+              list="relationList"
               spellCheck={false}
               onChange={(event) => {
-                const id = mvList?.find((x) => x.name == event.target.value)?.id
+                const id = relationList?.find(
+                  (x) => x.name == event.target.value
+                )?.id
                 if (id) {
-                  setMvId(id)
+                  setRelationId(id)
                 }
               }}
               placeholder="Search..."
               mb={2}
             ></Input>
-            <datalist id="mvList">
-              {mvList &&
-                mvList
-                  .filter((mv) => !mv.name.startsWith("__"))
-                  .map((mv) => (
-                    <option value={mv.name} key={mv.id}>
-                      ({mv.id}) {mv.name}
+            <datalist id="relationList">
+              {relationList &&
+                relationList
+                  .filter((r) => !r.name.startsWith("__"))
+                  .map((r) => (
+                    <option value={r.name} key={r.id}>
+                      ({r.id}) {r.name}
                     </option>
                   ))}
             </datalist>
             <Select
               value={router.query.id}
-              onChange={(event) => setMvId(parseInt(event.target.value))}
+              onChange={(event) => setRelationId(parseInt(event.target.value))}
             >
-              {mvList &&
-                mvList
-                  .filter((mv) => !mv.name.startsWith("__"))
-                  .map((mv) => (
-                    <option value={mv.id} key={mv.name}>
-                      ({mv.id}) {mv.name}
+              {relationList &&
+                relationList
+                  .filter((r) => !r.name.startsWith("__"))
+                  .map((r) => (
+                    <option value={r.id} key={r.name}>
+                      ({r.id}) {r.name}
                     </option>
                   ))}
             </Select>
@@ -323,9 +325,9 @@ export default function Streaming() {
           </FormControl>
           <Flex height="full" width="full" flexDirection="column">
             <Text fontWeight="semibold">Plan</Text>
-            {mvInfo && (
+            {relationInfo && (
               <Text>
-                {mvInfo.id} - {mvInfo.name}
+                {relationInfo.id} - {relationInfo.name}
               </Text>
             )}
             {fragmentDependencyDag && (

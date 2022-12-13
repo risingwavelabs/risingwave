@@ -670,7 +670,6 @@ pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
 /// Expect the first message of the given `stream` as a barrier.
-#[track_caller]
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
@@ -686,7 +685,6 @@ pub async fn expect_first_barrier(
 }
 
 /// Expect the first message of the given `stream` as a barrier.
-#[track_caller]
 pub async fn expect_first_barrier_from_aligned_stream(
     stream: &mut (impl AlignedMessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
