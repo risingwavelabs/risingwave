@@ -333,7 +333,7 @@ where
 
     /// Reset all compute nodes by calling `force_stop_actors`.
     async fn reset_compute_nodes(&self, info: &BarrierActorInfo) -> MetaResult<()> {
-        let futures = info.node_map.iter().map(|(_, worker_node)| async move {
+        let futures = info.node_map.values().map(|worker_node| async move {
             let client = self.env.stream_client_pool().get(worker_node).await?;
             debug!(worker = ?worker_node.id, "force stop actors");
             client

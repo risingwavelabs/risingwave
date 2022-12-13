@@ -329,5 +329,6 @@ fn infer_internal_table_catalog(
         );
     }
 
+    // TODO: give the real look-up keys
     internal_table_catalog_builder.build(distribution_key)
 }

@@ -69,6 +69,7 @@ tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+xxhash-rust = { version = "0.8.5", features = ["xxh64"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 axum = "0.6"
