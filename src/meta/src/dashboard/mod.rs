@@ -53,7 +53,7 @@ pub type Service<S> = Arc<DashboardService<S>>;
 pub(super) mod handlers {
     use axum::Json;
     use itertools::Itertools;
-    use risingwave_pb::catalog::{Source, Table};
+    use risingwave_pb::catalog::{Sink, Source, Table};
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::{ActorLocation, TableFragments as ProstTableFragments};
     use risingwave_pb::stream_plan::StreamActor;
@@ -116,6 +116,15 @@ pub(super) mod handlers {
 
         let sources = Source::list(&*srv.meta_store).await.map_err(err)?;
         Ok(Json(sources))
+    }
+
+    pub async fn list_sinks<S: MetaStore>(
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<Vec<Sink>>> {
+        use crate::model::MetadataModel;
+
+        let sinks = Sink::list(&*srv.meta_store).await.map_err(err)?;
+        Ok(Json(sinks))
     }
 
     pub async fn list_actors<S: MetaStore>(
@@ -188,6 +197,7 @@ where
             .route("/fragments2", get(list_fragments::<S>))
             .route("/materialized_views", get(list_materialized_views::<S>))
             .route("/sources", get(list_sources::<S>))
+            .route("/sinks", get(list_sinks::<S>))
             .route(
                 "/metrics/cluster",
                 get(prometheus::list_prometheus_cluster::<S>),

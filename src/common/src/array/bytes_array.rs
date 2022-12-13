@@ -20,6 +20,7 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
+use super::iterator::ArrayRawIter;
 use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
@@ -36,12 +37,19 @@ impl Array for BytesArray {
     type Builder = BytesArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = Box<[u8]>;
+    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = &'a [u8];
+
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> &[u8] {
+        let begin = *self.offset.get_unchecked(idx);
+        let end = *self.offset.get_unchecked(idx + 1);
+        self.data.get_unchecked(begin..end)
+    }
 
     fn value_at(&self, idx: usize) -> Option<&[u8]> {
         if !self.is_null(idx) {
             // SAFETY: The idx is checked in `is_null` and the offset should always be valid.
-            Some(unsafe { self.non_null_value_at_unchecked(idx) })
+            Some(unsafe { self.raw_value_at_unchecked(idx) })
         } else {
             None
         }
@@ -49,7 +57,7 @@ impl Array for BytesArray {
 
     unsafe fn value_at_unchecked(&self, idx: usize) -> Option<&[u8]> {
         if !self.is_null_unchecked(idx) {
-            Some(self.non_null_value_at_unchecked(idx))
+            Some(self.raw_value_at_unchecked(idx))
         } else {
             None
         }
@@ -61,6 +69,10 @@ impl Array for BytesArray {
 
     fn iter(&self) -> ArrayIterator<'_, Self> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        ArrayRawIter::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -138,17 +150,6 @@ impl BytesArray {
         }
     }
 
-    /// Retrieve the non-null bytes value at the given index, without checking whether the value is
-    /// null and whether the index is out of bound.
-    ///
-    /// # Safety
-    /// Calling this method with an out-of-bound index or a null value is undefined behavior.
-    #[inline(always)]
-    unsafe fn non_null_value_at_unchecked(&self, idx: usize) -> &[u8] {
-        self.data
-            .get_unchecked(*self.offset.get_unchecked(idx)..*self.offset.get_unchecked(idx + 1))
-    }
-
     #[cfg(test)]
     pub(super) fn data(&self) -> &[u8] {
         &self.data
@@ -199,16 +200,23 @@ impl ArrayBuilder for BytesArrayBuilder {
         }
     }
 
-    fn append<'a>(&'a mut self, value: Option<&'a [u8]>) {
+    fn append_n<'a>(&'a mut self, n: usize, value: Option<&'a [u8]>) {
         match value {
             Some(x) => {
-                self.bitmap.append(true);
-                self.data.extend_from_slice(x);
-                self.offset.push(self.data.len())
+                self.bitmap.append_n(n, true);
+                self.data.reserve(x.len() * n);
+                self.offset.reserve(n);
+                for _ in 0..n {
+                    self.data.extend_from_slice(x);
+                    self.offset.push(self.data.len());
+                }
             }
             None => {
-                self.bitmap.append(false);
-                self.offset.push(self.data.len())
+                self.bitmap.append_n(n, false);
+                self.offset.reserve(n);
+                for _ in 0..n {
+                    self.offset.push(self.data.len());
+                }
             }
         }
     }

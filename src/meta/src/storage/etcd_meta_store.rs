@@ -16,13 +16,14 @@ use std::sync::atomic::{self, AtomicI64};
 
 use anyhow;
 use async_trait::async_trait;
-use etcd_client::{Client, Compare, CompareOp, Error as EtcdError, GetOptions, Txn, TxnOp};
+use etcd_client::{Compare, CompareOp, Error as EtcdError, GetOptions, Txn, TxnOp};
 use futures::Future;
 use itertools::Itertools;
 use tokio::sync::Mutex;
 
 use super::{Key, MetaStore, MetaStoreError, MetaStoreResult, Snapshot, Transaction, Value};
 use crate::storage::etcd_retry_client::EtcdRetryClient as KvClient;
+use crate::storage::WrappedEtcdClient;
 
 impl From<EtcdError> for MetaStoreError {
     fn from(err: EtcdError) -> Self {
@@ -93,7 +94,7 @@ impl SnapshotViewer for GetViewer {
 
     type OutputFuture<'a> = impl Future<Output = MetaStoreResult<(i64, Self::Output)>> + 'a;
 
-    fn view(&self, mut client: KvClient, revision: i64) -> Self::OutputFuture<'_> {
+    fn view(&self, client: KvClient, revision: i64) -> Self::OutputFuture<'_> {
         async move {
             let res = client
                 .get(
@@ -127,7 +128,7 @@ impl SnapshotViewer for ListViewer {
 
     type OutputFuture<'a> = impl Future<Output = MetaStoreResult<(i64, Self::Output)>> + 'a;
 
-    fn view(&self, mut client: KvClient, revision: i64) -> Self::OutputFuture<'_> {
+    fn view(&self, client: KvClient, revision: i64) -> Self::OutputFuture<'_> {
         async move {
             let res = client
                 .get(
@@ -175,9 +176,9 @@ impl Snapshot for EtcdSnapshot {
 }
 
 impl EtcdMetaStore {
-    pub fn new(client: Client) -> Self {
+    pub fn new(client: WrappedEtcdClient) -> Self {
         Self {
-            client: KvClient::new(client.kv_client()),
+            client: KvClient::new(client),
         }
     }
 }
