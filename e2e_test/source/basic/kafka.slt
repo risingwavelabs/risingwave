@@ -16,18 +16,7 @@ create materialized source s1 (v1 int, v2 varchar) with (
 ) row format json
 
 statement ok
-create source ps1 (v1 int, v2 varchar) with (
-  connector = 'kafka',
-  topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
-  scan.startup.mode = 'earliest'
-) row format json
-
-statement ok
 select * from s1;
-
-statement ok
-select * from ps1;
 
 statement ok
 create materialized source s2 (v1 int, v2 varchar) with (
@@ -38,18 +27,7 @@ create materialized source s2 (v1 int, v2 varchar) with (
 ) row format json
 
 statement ok
-create source ps2 (v1 int, v2 varchar) with (
-  connector = 'kafka',
-  topic = 'kafka_2_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
-  scan.startup.mode = 'earliest'
-) row format json
-
-statement ok
 select * from s2;
-
-statement ok
-select * from ps2;
 
 statement ok
 create materialized source s3 (v1 int, v2 varchar) with (
@@ -60,18 +38,7 @@ create materialized source s3 (v1 int, v2 varchar) with (
 ) row format json
 
 statement ok
-create source ps3 (v1 int, v2 varchar) with (
-  connector = 'kafka',
-  topic = 'kafka_3_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
-  scan.startup.mode = 'earliest'
-) row format json
-
-statement ok
 select * from s3;
-
-statement ok
-select * from ps3;
 
 statement ok
 create materialized source s4 (v1 int, v2 varchar) with (
@@ -82,18 +49,7 @@ create materialized source s4 (v1 int, v2 varchar) with (
 ) row format json
 
 statement ok
-create source ps4 (v1 int, v2 varchar) with (
-  connector = 'kafka',
-  topic = 'kafka_4_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
-  scan.startup.mode = 'earliest'
-) row format json
-
-statement ok
 select * from s4;
-
-statement ok
-select * from ps4;
 
 statement ok
 create materialized source s5 (v1 int, v2 varchar) with (
@@ -104,19 +60,7 @@ create materialized source s5 (v1 int, v2 varchar) with (
 ) row format json
 
 statement ok
-create materialized source ps5 (v1 int, v2 varchar) with (
-  connector = 'kafka',
-  topic = 'kafka_4_partition_topic_with_100_message',
-  properties.bootstrap.server = '127.0.0.1:29092',
-  scan.startup.mode = 'earliest'
-) row format json
-
-
-statement ok
 select * from s5;
-
-statement ok
-select * from ps5;
 
 statement ok
 create materialized source s6 (v1 int, v2 varchar) with (
@@ -127,18 +71,7 @@ create materialized source s6 (v1 int, v2 varchar) with (
 ) row format json
 
 statement ok
-create source ps6 (v1 int, v2 varchar) with (
-  connector = 'kafka',
-  topic = 'kafka_1_partition_mv_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
-  scan.startup.mode = 'earliest'
-) row format json
-
-statement ok
 select * from s6;
-
-statement ok
-select * from ps6;
 
 statement ok
 create sink si
@@ -164,18 +97,7 @@ create materialized source s7 (v1 int, v2 varchar) with (
 ) row format json
 
 statement ok
-create source ps7 (v1 int, v2 varchar) with (
-  connector = 'kafka',
-  topic = 'sink_target',
-  properties.bootstrap.server = '127.0.0.1:29092',
-  scan.startup.mode = 'earliest'
-) row format json
-
-statement ok
 select * from s7
-
-statement ok
-select * from ps7
 
 # we cannot create debezium source without pk
 statement error
@@ -230,20 +152,6 @@ create materialized source s11 with (
 
 statement ok
 CREATE materialized SOURCE s12(
-    id int,
-    code string, 
-    timestamp bigint, 
-    xfas struct<device_model_id int, device_make_id int, ip string>[],
-    contacts struct<emails string[], phones string[]>)
-WITH (
-    connector = 'kafka',
-    topic = 'json_c',
-    properties.bootstrap.server = '127.0.0.1:29092',
-    scan.startup.mode = 'earliest')
-ROW format JSON;
-
-statement ok
-CREATE SOURCE ps12(
     id int,
     code string, 
     timestamp bigint, 
@@ -317,18 +225,10 @@ create materialized source s16 (v1 int, v2 varchar) with (
 ) row format json
 
 statement ok
-create materialized source ps16 (v1 int, v2 varchar) with (
-  connector = 'kafka',
-  topic = 'kafka_4_partition_topic_with_100_message',
-  properties.bootstrap.server = '127.0.0.1:29092',
-  scan.startup.mode = 'latest'
-) row format json
-
-statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 1s
+sleep 2s
 
 query IT rowsort
 select * from s1
@@ -338,25 +238,8 @@ select * from s1
 3 333
 4 4444
 
-query IT rowsort
-select * from ps1
-----
-1 1
-2 22
-3 333
-4 4444
-
-query IT rowsort
-select * from ps1 limit 2
-----
-1 1
-2 22
-
 statement ok
 drop source s1
-
-statement ok
-drop source ps1
 
 query IT rowsort
 select * from s2
@@ -366,19 +249,8 @@ select * from s2
 3 333
 4 4444
 
-query IT rowsort
-select * from ps2
-----
-1 1
-2 22
-3 333
-4 4444
-
 statement ok
 drop source s2
-
-statement ok
-drop source ps2
 
 query IT rowsort
 select * from s3
@@ -388,19 +260,8 @@ select * from s3
 3 333
 4 4444
 
-query IT rowsort
-select * from ps3
-----
-1 1
-2 22
-3 333
-4 4444
-
 statement ok
 drop source s3
-
-statement ok
-drop source ps3
 
 query IT rowsort
 select * from s4
@@ -410,19 +271,8 @@ select * from s4
 3 333
 4 4444
 
-query IT rowsort
-select * from ps4
-----
-1 1
-2 22
-3 333
-4 4444
-
 statement ok
 drop source s4
-
-statement ok
-drop source ps4
 
 query I
 select count(*) from s5
@@ -430,17 +280,7 @@ select count(*) from s5
 100
 
 query I
-select count(*) from ps5
-----
-100
-
-query I
 select count(*) from s7
-----
-100
-
-query I
-select count(*) from ps7
 ----
 100
 
@@ -451,21 +291,10 @@ statement ok
 drop source s5
 
 statement ok
-drop source ps5
-
-statement ok
 drop source s7
-
-statement ok
-drop source ps7
 
 query I
 select count(*) from s6
-----
-20
-
-query I
-select count(*) from ps6
 ----
 20
 
@@ -540,11 +369,6 @@ select id, code, timestamp, xfas, contacts from s12;
 ----
 100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx})
 
-query ITITT
-select id, code, timestamp, xfas, contacts from ps12;
-----
-100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx})
-
 query ITIT
 select * from s13 order by id;
 ----
@@ -566,11 +390,6 @@ select count(*) from s16
 ----
 0
 
-query I
-select count(*) from ps16
-----
-0
-
 statement ok
 drop materialized view source_mv1
 
@@ -579,9 +398,6 @@ drop materialized view source_mv2
 
 statement ok
 drop source s6
-
-statement ok
-drop source ps6
 
 statement ok
 drop source s8
@@ -599,9 +415,6 @@ statement ok
 drop source s12
 
 statement ok
-drop source ps12
-
-statement ok
 drop source s13
 
 statement ok
@@ -612,6 +425,3 @@ drop source s15
 
 statement ok
 drop source s16
-
-statement ok
-drop source ps16
