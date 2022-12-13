@@ -141,7 +141,7 @@ pub async fn rpc_serve(
 /// Start single leader setup
 ///
 /// ## Arguments
-/// `addr`: Address of the current leader, e.g. "127.0.0.1"
+/// `addr`: Address of the current leader, e.g. "127.0.0.1:5690"
 /// `meta_store`: Store that will hold information about the leader
 /// `lease_time_sec`: Time that a lease will be valid for.
 /// If this `lease_time_sec` is large, elections will be less frequent, resulting in less traffic
