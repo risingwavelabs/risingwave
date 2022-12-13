@@ -1,0 +1,4 @@
+query ITTITT
+SELECT * FROM pg_catalog.pg_database;
+----
+0 dev NULL 6 C C
