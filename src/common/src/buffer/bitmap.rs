@@ -102,7 +102,7 @@ impl BitmapBuilder {
     }
 
     pub fn append_n(&mut self, mut n: usize, bit_set: bool) -> &mut Self {
-        while self.len % 8 != 0 {
+        while n != 0 && self.len % 8 != 0 {
             self.append(bit_set);
             n -= 1;
         }
