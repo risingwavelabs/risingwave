@@ -1,98 +1,45 @@
-#![feature(allocator_api)]
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #![cfg(loom)]
 
-// use task_stats_alloc::*;
-use std::alloc::System;
-use std::borrow::BorrowMut;
-use std::hint::black_box;
-use std::ptr::NonNull;
-use std::time::Duration;
-
-use loom::sync::atomic::{fence, AtomicUsize, Ordering};
+use loom::sync::atomic::{AtomicUsize, Ordering};
 use loom::sync::Arc;
 use loom::thread;
-use task_stats_alloc::{allocation_stat, BYTES_ALLOCATED};
-use tokio::runtime::Handle;
-
-#[repr(transparent)]
-#[derive(Clone, Debug)]
-pub struct TaskLocalBytesAllocated(Option<NonNull<AtomicUsize>>);
-
-impl Default for TaskLocalBytesAllocated {
-    fn default() -> Self {
-        Self(Some(
-            NonNull::new(Box::leak(Box::new_in(0.into(), System))).unwrap(),
-        ))
-    }
-}
-
-impl TaskLocalBytesAllocated {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Create an invalid counter.
-    pub const fn invalid() -> Self {
-        Self(None)
-    }
-
-    /// Adds to the current counter.
-    #[inline(always)]
-    pub(crate) fn add(&self, val: usize) {
-        if let Some(bytes) = self.0 {
-            let bytes_ref = unsafe { bytes.as_ref() };
-            bytes_ref.fetch_add(val, Ordering::Relaxed);
-        }
-    }
-
-    /// Subtracts from the counter value, and `drop` the counter while the count reaches zero.
-    #[inline(always)]
-    pub(crate) fn sub(&self, val: usize, atomic: Arc<AtomicUsize>) {
-        if let Some(bytes) = self.0 {
-            let bytes_ref = unsafe { bytes.as_ref() };
-            // Use Release to synchronize with the below deletion.
-            let old_bytes = bytes_ref.fetch_sub(val, Ordering::Relaxed);
-            // If the counter reaches zero, delete the counter. Note that we've ensured there's no
-            // zero deltas in `wrap_layout`, so there'll be no more uses of the counter.
-            if old_bytes == val {
-                // No fence here. Atomic add to avoid
-                atomic.fetch_add(1, Ordering::Relaxed);
-                unsafe { Box::from_raw_in(bytes.as_ptr(), System) };
-            }
-        }
-    }
-
-    #[inline(always)]
-    pub fn val(&self) -> usize {
-        let bytes_ref = self.0.as_ref().expect("bytes is invalid");
-        let bytes_ref = unsafe { bytes_ref.as_ref() };
-        bytes_ref.load(Ordering::Relaxed)
-    }
-}
+use task_stats_alloc::TaskLocalBytesAllocated;
 
 #[test]
 fn test_to_avoid_double_drop() {
     loom::model(|| {
         let bytes_num = 3;
-        let mut num = Arc::new(TaskLocalBytesAllocated(Some(
-            NonNull::new(Box::leak(Box::new_in(bytes_num.into(), System))).unwrap(),
-        )));
+        let num = Arc::new(TaskLocalBytesAllocated::new_for_test(3));
 
         // Add the flag value when counter drop so we can observe.
         let flag_num = Arc::new(AtomicUsize::new(0));
 
-        let ths: Vec<_> = (0..bytes_num)
+        let threads: Vec<_> = (0..bytes_num)
             .map(|_| {
                 let num = num.clone();
                 let flag_num = flag_num.clone();
                 thread::spawn(move || {
-                    num.sub(1, flag_num);
+                    num.sub_for_test(1, flag_num);
                 })
             })
             .collect();
 
-        for th in ths {
-            th.join().unwrap();
+        for t in threads {
+            t.join().unwrap();
         }
 
         // Ensure the counter is dropped.

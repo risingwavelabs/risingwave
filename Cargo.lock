@@ -6936,6 +6936,7 @@ version = "0.1.11"
 dependencies = [
  "loom",
  "madsim-tokio",
+ "workspace-hack",
 ]
 
 [[package]]

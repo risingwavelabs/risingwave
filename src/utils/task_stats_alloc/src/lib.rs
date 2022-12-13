@@ -18,6 +18,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::future::Future;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -25,17 +26,28 @@ use tokio::task_local;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
-pub struct TaskLocalBytesAllocated(Option<&'static AtomicUsize>);
+pub struct TaskLocalBytesAllocated(Option<NonNull<AtomicUsize>>);
 
 impl Default for TaskLocalBytesAllocated {
     fn default() -> Self {
-        Self(Some(Box::leak(Box::new_in(0.into(), System))))
+        Self(Some(
+            NonNull::new(Box::leak(Box::new_in(0.into(), System))).unwrap(),
+        ))
     }
 }
+
+// Need this otherwise the NonNull is not Send and can not be used in future.
+unsafe impl Send for TaskLocalBytesAllocated {}
 
 impl TaskLocalBytesAllocated {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn new_for_test(val: usize) -> Self {
+        Self(Some(
+            NonNull::new(Box::leak(Box::new_in(val.into(), System))).unwrap(),
+        ))
     }
 
     /// Create an invalid counter.
@@ -45,9 +57,10 @@ impl TaskLocalBytesAllocated {
 
     /// Adds to the current counter.
     #[inline(always)]
-    fn add(&self, val: usize) {
+    pub(crate) fn add(&self, val: usize) {
         if let Some(bytes) = self.0 {
-            bytes.fetch_add(val, Ordering::Relaxed);
+            let bytes_ref = unsafe { bytes.as_ref() };
+            bytes_ref.fetch_add(val, Ordering::Relaxed);
         }
     }
 
@@ -57,33 +70,57 @@ impl TaskLocalBytesAllocated {
     /// The caller must ensure that `self` is valid.
     #[inline(always)]
     unsafe fn add_unchecked(&self, val: usize) {
-        self.0.unwrap_unchecked().fetch_add(val, Ordering::Relaxed);
+        let bytes = self.0.unwrap_unchecked();
+        let bytes_ref = unsafe { bytes.as_ref() };
+        bytes_ref.fetch_add(val, Ordering::Relaxed);
     }
 
     /// Subtracts from the counter value, and `drop` the counter while the count reaches zero.
     #[inline(always)]
-    fn sub(&self, val: usize) {
+    pub(crate) fn sub(&self, val: usize) {
         if let Some(bytes) = self.0 {
             // Use `Relaxed` order as we don't need to sync read/write with other memory addresses.
             // Accesses to the counter itself are serialized by atomic operations.
-            let old_bytes = bytes.fetch_sub(val, Ordering::Relaxed);
+            let bytes_ref = unsafe { bytes.as_ref() };
+            let old_bytes = bytes_ref.fetch_sub(val, Ordering::Relaxed);
             // If the counter reaches zero, delete the counter. Note that we've ensured there's no
             // zero deltas in `wrap_layout`, so there'll be no more uses of the counter.
             if old_bytes == val {
                 // No fence here, this is different from ref counter impl in https://www.boost.org/doc/libs/1_55_0/doc/html/atomic/usage_examples.html#boost_atomic.usage_examples.example_reference_counters.
                 // As here, T is the exactly Counter and they have same memory address, so there
                 // should not happen out-of-order commit.
-                unsafe { Box::from_raw_in(bytes.as_mut_ptr(), System) };
+                unsafe { Box::from_raw_in(bytes.as_ptr(), System) };
             }
         }
     }
 
     #[inline(always)]
     pub fn val(&self) -> usize {
-        self.0
-            .as_ref()
-            .expect("bytes is invalid")
-            .load(Ordering::Relaxed)
+        let bytes_ref = self.0.as_ref().expect("bytes is invalid");
+        let bytes_ref = unsafe { bytes_ref.as_ref() };
+        bytes_ref.load(Ordering::Relaxed)
+    }
+
+    /// Subtracts from the counter value, and `drop` the counter while the count reaches zero.
+    #[inline(always)]
+    #[cfg(loom)]
+    pub fn sub_for_test(
+        &self,
+        val: usize,
+        atomic: loom::sync::Arc<loom::sync::atomic::AtomicUsize>,
+    ) {
+        if let Some(bytes) = self.0 {
+            let bytes_ref = unsafe { bytes.as_ref() };
+            // Use Release to synchronize with the below deletion.
+            let old_bytes = bytes_ref.fetch_sub(val, Ordering::Relaxed);
+            // If the counter reaches zero, delete the counter. Note that we've ensured there's no
+            // zero deltas in `wrap_layout`, so there'll be no more uses of the counter.
+            if old_bytes == val {
+                // No fence here. Atomic add to avoid
+                atomic.fetch_add(1, Ordering::Relaxed);
+                unsafe { Box::from_raw_in(bytes.as_ptr(), System) };
+            }
+        }
     }
 }
 
