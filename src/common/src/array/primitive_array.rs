@@ -166,7 +166,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type RawIter<'a> = std::iter::Cloned<std::slice::Iter<'a, T>>;
     type RefItem<'a> = T;
 
-    fn value_at_raw(&self, idx: usize) -> Self::RefItem<'_> {
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
         self.data[idx]
     }
 

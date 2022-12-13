@@ -160,7 +160,7 @@ impl Array for StructArray {
     type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = StructRef<'a>;
 
-    fn value_at_raw(&self, idx: usize) -> StructRef<'_> {
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> StructRef<'_> {
         StructRef::Indexed { arr: self, idx }
     }
 

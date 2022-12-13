@@ -166,7 +166,7 @@ impl Array for ListArray {
     type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = ListRef<'a>;
 
-    fn value_at_raw(&self, idx: usize) -> Self::RefItem<'_> {
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
         ListRef::Indexed { arr: self, idx }
     }
 

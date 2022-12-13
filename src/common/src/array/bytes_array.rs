@@ -40,16 +40,16 @@ impl Array for BytesArray {
     type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = &'a [u8];
 
-    fn value_at_raw(&self, idx: usize) -> Self::RefItem<'_> {
-        let start = self.offset[idx];
-        let end = self.offset[idx + 1];
-        &self.data[start..end]
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> &[u8] {
+        let begin = *self.offset.get_unchecked(idx);
+        let end = *self.offset.get_unchecked(idx + 1);
+        self.data.get_unchecked(begin..end)
     }
 
     fn value_at(&self, idx: usize) -> Option<&[u8]> {
         if !self.is_null(idx) {
             // SAFETY: The idx is checked in `is_null` and the offset should always be valid.
-            Some(unsafe { self.non_null_value_at_unchecked(idx) })
+            Some(unsafe { self.raw_value_at_unchecked(idx) })
         } else {
             None
         }
@@ -57,7 +57,7 @@ impl Array for BytesArray {
 
     unsafe fn value_at_unchecked(&self, idx: usize) -> Option<&[u8]> {
         if !self.is_null_unchecked(idx) {
-            Some(self.non_null_value_at_unchecked(idx))
+            Some(self.raw_value_at_unchecked(idx))
         } else {
             None
         }
@@ -150,17 +150,6 @@ impl BytesArray {
         }
     }
 
-    /// Retrieve the non-null bytes value at the given index, without checking whether the value is
-    /// null and whether the index is out of bound.
-    ///
-    /// # Safety
-    /// Calling this method with an out-of-bound index or a null value is undefined behavior.
-    #[inline(always)]
-    unsafe fn non_null_value_at_unchecked(&self, idx: usize) -> &[u8] {
-        self.data
-            .get_unchecked(*self.offset.get_unchecked(idx)..*self.offset.get_unchecked(idx + 1))
-    }
-
     #[cfg(test)]
     pub(super) fn data(&self) -> &[u8] {
         &self.data
@@ -215,6 +204,8 @@ impl ArrayBuilder for BytesArrayBuilder {
         match value {
             Some(x) => {
                 self.bitmap.append_n(n, true);
+                self.data.reserve(x.len() * n);
+                self.offset.reserve(n);
                 for _ in 0..n {
                     self.data.extend_from_slice(x);
                     self.offset.push(self.data.len());
@@ -222,6 +213,7 @@ impl ArrayBuilder for BytesArrayBuilder {
             }
             None => {
                 self.bitmap.append_n(n, false);
+                self.offset.reserve(n);
                 for _ in 0..n {
                     self.offset.push(self.data.len());
                 }

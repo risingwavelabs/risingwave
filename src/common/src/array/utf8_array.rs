@@ -33,9 +33,9 @@ impl Array for Utf8Array {
     type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = &'a str;
 
-    fn value_at_raw(&self, idx: usize) -> Self::RefItem<'_> {
-        let bytes = self.bytes.value_at_raw(idx);
-        unsafe { std::str::from_utf8_unchecked(bytes) }
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        let bytes = self.bytes.raw_value_at_unchecked(idx);
+        std::str::from_utf8_unchecked(bytes)
     }
 
     fn value_at(&self, idx: usize) -> Option<&str> {

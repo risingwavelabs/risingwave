@@ -69,8 +69,8 @@ impl Array for BoolArray {
     type RawIter<'a> = BitmapIter<'a>;
     type RefItem<'a> = bool;
 
-    fn value_at_raw(&self, idx: usize) -> Self::RefItem<'_> {
-        self.data.is_set(idx)
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> bool {
+        self.data.is_set_unchecked(idx)
     }
 
     fn value_at(&self, idx: usize) -> Option<bool> {

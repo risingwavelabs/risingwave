@@ -176,10 +176,15 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     where
         Self: 'a;
 
-    /// Retrieve a reference to value regardless of whether it is null.
+    /// Retrieve a reference to value regardless of whether it is null
+    /// without checking the index boundary.
     ///
-    /// The returned value for NULL values is undefined.
-    fn value_at_raw(&self, idx: usize) -> Self::RefItem<'_>;
+    /// The returned value for NULL values is the default value.
+    ///
+    /// # Safety
+    ///
+    /// Index must be within the bounds.
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_>;
 
     /// Retrieve a reference to value.
     fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>>;

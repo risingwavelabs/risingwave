@@ -70,7 +70,8 @@ impl<'a, A: Array> Iterator for ArrayRawIter<'a, A> {
         if self.pos >= self.data.len() {
             None
         } else {
-            let item = self.data.value_at_raw(self.pos);
+            // SAFETY: we have checked that pos < len
+            let item = unsafe { self.data.raw_value_at_unchecked(self.pos) };
             self.pos += 1;
             Some(item)
         }
