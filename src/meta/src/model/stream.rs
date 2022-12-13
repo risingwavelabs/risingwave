@@ -197,18 +197,24 @@ impl TableFragments {
         })
     }
 
-    fn contains_chain(stream_node: &StreamNode) -> bool {
-        if let Some(NodeBody::Chain(_)) = stream_node.node_body {
-            return true;
-        }
+    /// Returns actors that contains Chain node.
+    pub fn chain_actor_ids(&self) -> HashSet<ActorId> {
+        Self::filter_actor_ids(self, |fragment_type_mask| {
+            (fragment_type_mask & FragmentTypeFlag::ChainNode as u32) != 0
+        })
+        .into_iter()
+        .collect()
+    }
 
-        for child in &stream_node.input {
-            if Self::contains_chain(child) {
-                return true;
-            }
-        }
-
-        false
+    /// Returns fragments that contains Chain node.
+    pub fn chain_fragment_ids(&self) -> HashSet<FragmentId> {
+        self.fragments
+            .values()
+            .filter(|fragment| {
+                (fragment.get_fragment_type_mask() & FragmentTypeFlag::ChainNode as u32) != 0
+            })
+            .map(|f| f.fragment_id)
+            .collect()
     }
 
     pub fn fetch_parallel_unit_by_actor(&self, actor_id: &ActorId) -> Option<ParallelUnit> {
@@ -255,32 +261,6 @@ impl TableFragments {
             }
         }
         source_fragments
-    }
-
-    /// Returns actors that contains Chain node.
-    pub fn chain_actor_ids(&self) -> HashSet<ActorId> {
-        self.fragments
-            .values()
-            .flat_map(|fragment| {
-                fragment
-                    .actors
-                    .iter()
-                    .filter(|actor| Self::contains_chain(actor.nodes.as_ref().unwrap()))
-                    .map(|actor| actor.actor_id)
-            })
-            .collect()
-    }
-
-    /// Returns fragments that contains Chain node.
-    pub fn chain_fragment_ids(&self) -> HashSet<FragmentId> {
-        self.fragments
-            .values()
-            .filter(|fragment| {
-                let actor = fragment.actors.first().unwrap();
-                Self::contains_chain(actor.nodes.as_ref().unwrap())
-            })
-            .map(|f| f.fragment_id)
-            .collect()
     }
 
     /// Resolve dependent table
