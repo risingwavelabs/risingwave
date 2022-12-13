@@ -72,9 +72,7 @@ impl sqllogictest::AsyncDB for RisingWave {
     type Error = tokio_postgres::error::Error;
 
     async fn run(&mut self, sql: &str) -> Result<sqllogictest::DBOutput, Self::Error> {
-        use std::fmt::Write;
-
-        use sqllogictest::DBOutput;
+        use sqllogictest::{ColumnType, DBOutput};
 
         if self.client.is_closed() {
             // connection error, reset the client
@@ -109,7 +107,7 @@ impl sqllogictest::AsyncDB for RisingWave {
                         }
                     }
                 }
-                tokio_postgres::SimpleQueryMessage::CommandComplete(_) => {
+                tokio_postgres::SimpleQueryMessage::CommandComplete(cnt) => {
                     if is_query_sql {
                         break;
                     } else {
