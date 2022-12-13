@@ -12,12 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(clippy::iter_kv_map, reason = "FIXME: fix later")]
-#![expect(
-    clippy::or_fun_call,
-    reason = "https://github.com/rust-lang/rust-clippy/issues/8574"
-)]
-#![feature(once_cell)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]

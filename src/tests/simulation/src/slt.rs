@@ -92,7 +92,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             // spawn a background task to kill nodes
             let handle = if should_kill {
                 let cluster = cluster.clone();
-                let opts = opts.clone();
+                let opts = *opts;
                 Some(tokio::spawn(async move {
                     let t = thread_rng().gen_range(Duration::default()..Duration::from_secs(1));
                     tokio::time::sleep(t).await;

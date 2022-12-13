@@ -74,7 +74,8 @@ message TableFragments {
       HASH = 2;
     }
     uint32 fragment_id = 1;
-    stream_plan.FragmentType fragment_type = 2;
+    // Bitwise-OR of FragmentTypeFlags
+    uint32 fragment_type_mask = 2;
     FragmentDistributionType distribution_type = 3;
     repeated stream_plan.StreamActor actors = 4;
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
