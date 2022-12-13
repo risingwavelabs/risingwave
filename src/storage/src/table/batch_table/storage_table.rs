@@ -433,7 +433,7 @@ impl<S: StateStore> StorageTable<S> {
             };
             let prefix_len = self
                 .pk_serializer
-                .deserialize_prefix_len(encoded_prefix, pk_prefix.len())
+                .deserialize_prefix_len(encoded_prefix, self.prefix_hint_len)
                 .unwrap();
             Some(encoded_prefix[..prefix_len].to_vec())
         } else {
