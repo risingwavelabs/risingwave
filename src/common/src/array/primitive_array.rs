@@ -167,14 +167,15 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type RefItem<'a> = T;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        self.data[idx]
+        *self.data.get_unchecked(idx)
     }
 
     fn value_at(&self, idx: usize) -> Option<T> {
         if self.is_null(idx) {
             None
         } else {
-            Some(self.data[idx])
+            // Safety: the above `is_null` check ensures that the index is valid.
+            Some(unsafe { *self.data.get_unchecked(idx) })
         }
     }
 
