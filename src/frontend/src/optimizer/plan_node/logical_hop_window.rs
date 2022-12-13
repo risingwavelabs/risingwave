@@ -27,7 +27,7 @@ use super::{
 };
 use crate::expr::InputRef;
 use crate::optimizer::property::Order;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// `LogicalHopWindow` implements Hop Table Function.
 #[derive(Debug, Clone)]
@@ -317,8 +317,20 @@ impl ColPrunable for LogicalHopWindow {
 
 impl PredicatePushdown for LogicalHopWindow {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        // TODO: hop's predicate pushdown https://github.com/risingwavelabs/risingwave/issues/6606
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
+        // For reference: HOP(table_or_source, start_time, hop_size, window_size);
+        // `window_start`, `window_end` cannot be pushed-down, they are produced by HopWindow.
+        let mut window_columns = FixedBitSet::with_capacity(4);
+        window_columns.insert_range(2..4);
+        let (time_window_pred, pushed_predicate) = predicate.split_disjoint(&window_columns);
+
+        // convert the predicate to one that references the child of the agg
+        // TODO: Not sure how to rewrite this?
+        // What is the semantics of substitute?
+        let mut subst = Substitute {
+            mapping: self.exprs().clone(),
+        };
+        let pushed_predicate = pushed_predicate.rewrite_expr(&mut subst);
+        gen_filter_and_pushdown(self, time_window_pred, pushed_predicate)
     }
 }
 
