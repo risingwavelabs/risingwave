@@ -26,7 +26,6 @@ use super::task_progress::TaskProgress;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
-    MultiCompactionFilter,
 };
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::DeleteRangeAggregatorBuilder;

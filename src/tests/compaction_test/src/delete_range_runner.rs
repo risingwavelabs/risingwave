@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures::StreamExt;
 use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
@@ -34,7 +35,7 @@ use risingwave_storage::hummock::{
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
-use risingwave_storage::{StateStore, StateStoreIter};
+use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
 
@@ -78,7 +79,7 @@ pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()
         storage_config,
         &opts.state_store,
         1000000,
-        100000,
+        2000,
     )
     .await
 }
@@ -105,18 +106,20 @@ async fn compaction_test(
         columns: vec![],
         pk: vec![],
         dependent_relations: vec![],
-        is_index: false,
         distribution_key: vec![],
         stream_key: vec![],
-        appendonly: false,
         owner: 0,
         properties: Default::default(),
         fragment_id: 0,
-        vnode_col_idx: None,
+        vnode_col_index: None,
         value_indices: vec![],
         definition: "".to_string(),
         handle_pk_conflict: false,
+        pk_prefix_len_hint: 0,
         optional_associated_source_id: None,
+        table_type: 0,
+        append_only: false,
+        row_id_index: None,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -403,9 +406,9 @@ impl NormalState {
                 key,
                 self.epoch,
                 ReadOptions {
-                    prefix_hint: None,
+                    dist_key_hint: None,
                     ignore_range_tombstone,
-                    check_bloom_filter: true,
+                    check_bloom_filter: false,
                     retention_seconds: None,
                     table_id: self.table_id,
                 },
@@ -430,25 +433,27 @@ impl CheckState for NormalState {
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
         self.cache
             .retain(|key, _| key.as_slice().lt(left) || key.as_slice().ge(right));
-        let mut iter = self
-            .storage
-            .iter(
-                (
-                    Bound::Included(left.to_vec()),
-                    Bound::Excluded(right.to_vec()),
-                ),
-                self.epoch,
-                ReadOptions {
-                    prefix_hint: None,
-                    ignore_range_tombstone: true,
-                    check_bloom_filter: false,
-                    retention_seconds: None,
-                    table_id: self.table_id,
-                },
-            )
-            .await
-            .unwrap();
-        while let Some((full_key, _)) = iter.next().await.unwrap() {
+        let mut iter = Box::pin(
+            self.storage
+                .iter(
+                    (
+                        Bound::Included(left.to_vec()),
+                        Bound::Excluded(right.to_vec()),
+                    ),
+                    self.epoch,
+                    ReadOptions {
+                        dist_key_hint: None,
+                        ignore_range_tombstone: true,
+                        check_bloom_filter: false,
+                        retention_seconds: None,
+                        table_id: self.table_id,
+                    },
+                )
+                .await
+                .unwrap(),
+        );
+        while let Some(item) = iter.next().await {
+            let (full_key, _) = item.unwrap();
             self.cache
                 .insert(full_key.user_key.table_key.0, StorageValue::new_delete());
         }
@@ -464,26 +469,28 @@ impl CheckState for NormalState {
     }
 
     async fn scan(&self, left: &[u8], right: &[u8]) -> Vec<(Bytes, Bytes)> {
-        let mut iter = self
-            .storage
-            .iter(
-                (
-                    Bound::Included(left.to_vec()),
-                    Bound::Excluded(right.to_vec()),
-                ),
-                self.epoch,
-                ReadOptions {
-                    prefix_hint: None,
-                    ignore_range_tombstone: true,
-                    check_bloom_filter: false,
-                    retention_seconds: None,
-                    table_id: self.table_id,
-                },
-            )
-            .await
-            .unwrap();
+        let mut iter = Box::pin(
+            self.storage
+                .iter(
+                    (
+                        Bound::Included(left.to_vec()),
+                        Bound::Excluded(right.to_vec()),
+                    ),
+                    self.epoch,
+                    ReadOptions {
+                        dist_key_hint: None,
+                        ignore_range_tombstone: true,
+                        check_bloom_filter: false,
+                        retention_seconds: None,
+                        table_id: self.table_id,
+                    },
+                )
+                .await
+                .unwrap(),
+        );
         let mut ret = vec![];
-        while let Some((full_key, val)) = iter.next().await.unwrap() {
+        while let Some(item) = iter.next().await {
+            let (full_key, val) = item.unwrap();
             let tkey = full_key.user_key.table_key.0.clone();
             if let Some(cache_val) = self.cache.get(&tkey) {
                 if cache_val.user_value.is_some() {
@@ -620,7 +627,7 @@ mod tests {
             storage_config,
             "hummock+memory",
             10000,
-            800,
+            100,
         )
         .await
         .unwrap();
