@@ -109,8 +109,6 @@ pub async fn rpc_serve(
                 .await
                 .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
-            let x = address_info.clone().addr;
-            tracing::info!("meta_store addr {:?}", x);
             rpc_serve_with_store(
                 meta_store,
                 address_info,
