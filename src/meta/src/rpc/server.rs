@@ -145,35 +145,6 @@ pub async fn rpc_serve(
     }
 }
 
-/// Wrapper for `elections::run_elections`
-/// Start single leader setup
-///
-/// ## Arguments
-/// `addr`: Address of the current leader, e.g. "127.0.0.1"
-/// `meta_store`: Store that will hold information about the leader
-/// `lease_time_sec`: Time that a lease will be valid for.
-/// If this `lease_time_sec` is large, elections will be less frequent, resulting in less traffic
-/// for the meta store, but node failover may be slow If this `lease_time_sec` is small, elections
-/// will be more frequent, resulting in more traffic for the meta store. Node failover will be fast
-///
-/// ## Returns
-/// `MetaLeaderInfo` containing the leader who got initially elected
-/// `JoinHandle` running all future elections concurrently
-/// `Sender` for signaling a shutdown
-/// `Receiver` receiving true if this node got elected as leader and false if it is a follower
-pub async fn register_leader_for_meta<S: MetaStore>(
-    addr: String,
-    meta_store: Arc<S>,
-    lease_time_sec: u64,
-) -> MetaResult<(
-    MetaLeaderInfo,
-    JoinHandle<()>,
-    Sender<()>,
-    Receiver<(HostAddr, bool)>,
-)> {
-    run_elections(addr, meta_store, lease_time_sec).await
-}
-
 pub async fn rpc_serve_with_store<S: MetaStore>(
     meta_store: Arc<S>,
     address_info: AddressInfo,
@@ -185,7 +156,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     //   address_info.listen_addr;
 
     // Initialize managers.
-    let (info, lease_handle, lease_shutdown, leader_rx) = register_leader_for_meta(
+    let (info, lease_handle, lease_shutdown, leader_rx) = run_elections(
         address_info.listen_addr.clone().to_string(),
         meta_store.clone(),
         lease_interval_secs,
