@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use itertools::Itertools;
@@ -189,8 +189,10 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
             }
 
-            let prefix_len: HashSet<usize> = self.group_key.clone().into_iter().collect();
-            internal_table_catalog_builder.set_pk_prefix_len_hint(prefix_len.len());
+            // prefix_len_hint should be the length of deduplicated group key because pk is
+            // deduplicated.
+            let prefix_len = self.group_key.iter().unique().count();
+            internal_table_catalog_builder.set_pk_prefix_len_hint(prefix_len);
             // set value indices to reduce ser/de overhead
             let table_value_indices = table_value_indices.into_iter().collect_vec();
             internal_table_catalog_builder.set_value_indices(table_value_indices.clone());

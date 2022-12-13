@@ -85,26 +85,6 @@ impl OrderedRowSerde {
         &self.schema
     }
 
-    pub fn deserialize_prefix_len_with_column_indices(
-        &self,
-        key: &[u8],
-        column_indices: impl Iterator<Item = usize>,
-    ) -> memcomparable::Result<usize> {
-        use crate::types::ScalarImpl;
-        let mut len: usize = 0;
-        for index in column_indices {
-            let data_type = &self.schema[index];
-            let order_type = &self.order_types[index];
-            let data = &key[len..];
-            let mut deserializer = memcomparable::Deserializer::new(data);
-            deserializer.set_reverse(*order_type == OrderType::Descending);
-
-            len += ScalarImpl::encoding_data_size(data_type, &mut deserializer)?;
-        }
-
-        Ok(len)
-    }
-
     pub fn deserialize_prefix_len(
         &self,
         key: &[u8],
@@ -230,9 +210,7 @@ mod tests {
         }
 
         {
-            let row_0_idx_0_len = serde
-                .deserialize_prefix_len_with_column_indices(&array[0], 0..=0)
-                .unwrap();
+            let row_0_idx_0_len = serde.deserialize_prefix_len(&array[0], 1).unwrap();
 
             let schema = vec![DataType::Varchar];
             let order_types = vec![OrderType::Descending];
@@ -245,9 +223,7 @@ mod tests {
         }
 
         {
-            let row_0_idx_1_len = serde
-                .deserialize_prefix_len_with_column_indices(&array[0], 0..=1)
-                .unwrap();
+            let row_0_idx_1_len = serde.deserialize_prefix_len(&array[0], 2).unwrap();
 
             let order_types = vec![OrderType::Descending, OrderType::Ascending];
             let schema = vec![DataType::Varchar, DataType::Int16];

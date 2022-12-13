@@ -142,7 +142,6 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
-        // todo(wcy-fdu): fix
 
         let bloom_filter_key_len = self
             .deserializer
