@@ -97,9 +97,6 @@ impl sqllogictest::AsyncDB for RisingWave {
             match row {
                 tokio_postgres::SimpleQueryMessage::Row(row) => {
                     for i in 0..row.len() {
-                        if i != 0 {
-                            row_vec.push(" ".to_string());
-                        }
                         match row.get(i) {
                             Some(v) if v.is_empty() => row_vec.push("(empty)".to_string()),
                             Some(v) => row_vec.push(v.to_string()),
