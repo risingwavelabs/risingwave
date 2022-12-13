@@ -247,7 +247,7 @@ impl<S: StateStore> StorageTable<S> {
 
         let read_options = ReadOptions {
             prefix_hint: None,
-            check_bloom_filter: !pk.is_empty() && self.prefix_hint_len <= pk.len(),
+            check_bloom_filter: self.prefix_hint_len != 0 && self.prefix_hint_len <= pk.len(),
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
@@ -425,7 +425,7 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
 
-        let prefix_hint = if !pk_prefix.is_empty() && self.prefix_hint_len <= pk_prefix.len() {
+        let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len <= pk_prefix.len() {
             let encoded_prefix = if let Bound::Included(start_key) = start_key.as_ref() {
                 start_key
             } else {

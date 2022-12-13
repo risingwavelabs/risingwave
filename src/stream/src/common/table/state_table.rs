@@ -131,8 +131,6 @@ impl<S: StateStore> StateTable<S> {
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-
-        println!("build state table, table_id = {:?}", table_catalog.id);
         let table_id = TableId::new(table_catalog.id);
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
@@ -447,14 +445,10 @@ impl<S: StateStore> StateTable<S> {
             },
             None => {
                 assert!(pk.len() <= self.pk_indices.len());
-                let key_indices = (0..pk.len())
-                    .into_iter()
-                    .map(|index| self.pk_indices[index])
-                    .collect_vec();
                 let read_options = ReadOptions {
                     prefix_hint: None,
-                    check_bloom_filter: !key_indices.is_empty()
-                        && self.prefix_hint_len <= key_indices.len(),
+                    check_bloom_filter: self.prefix_hint_len != 0
+                        && self.prefix_hint_len <= pk.len(),
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,
@@ -992,7 +986,7 @@ impl<S: StateStore> StateTable<S> {
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
         let prefix_hint = {
-            if self.prefix_hint_len > pk_prefix.len() || pk_prefix.is_empty() {
+            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
                 None
             } else {
                 let encoded_prefix_len = self
