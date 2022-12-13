@@ -24,7 +24,7 @@ use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{FragmentType, SourceNode, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{FragmentTypeFlag, SourceNode, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
 use crate::manager::{SourceId, WorkerId};
@@ -136,11 +136,13 @@ impl TableFragments {
 
     /// Returns mview fragment vnode mapping.
     /// Note that: the sink fragment is also stored as `TableFragments`, it's possible that
-    /// there's no fragment with `FragmentType::Mview` exists.
+    /// there's no fragment with `FragmentTypeFlag::Mview` exists.
     pub fn mview_vnode_mapping(&self) -> Option<ParallelUnitMapping> {
         self.fragments
             .values()
-            .find(|fragment| fragment.fragment_type == FragmentType::Mview as i32)
+            .find(|fragment| {
+                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0
+            })
             .and_then(|fragment| fragment.vnode_mapping.clone())
     }
 
@@ -172,22 +174,26 @@ impl TableFragments {
     }
 
     /// Returns the actor ids with the given fragment type.
-    fn filter_actor_ids(&self, fragment_type: FragmentType) -> Vec<ActorId> {
+    fn filter_actor_ids(&self, check_type: impl Fn(u32) -> bool) -> Vec<ActorId> {
         self.fragments
             .values()
-            .filter(|fragment| fragment.fragment_type == fragment_type as i32)
+            .filter(|fragment| check_type(fragment.get_fragment_type_mask()))
             .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
             .collect()
     }
 
     /// Returns source actor ids.
     pub fn source_actor_ids(&self) -> Vec<ActorId> {
-        Self::filter_actor_ids(self, FragmentType::Source)
+        Self::filter_actor_ids(self, |fragment_type_mask| {
+            (fragment_type_mask & FragmentTypeFlag::Source as u32) != 0
+        })
     }
 
     /// Returns mview actor ids.
     pub fn mview_actor_ids(&self) -> Vec<ActorId> {
-        Self::filter_actor_ids(self, FragmentType::Mview)
+        Self::filter_actor_ids(self, |fragment_type_mask| {
+            (fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0
+        })
     }
 
     fn contains_chain(stream_node: &StreamNode) -> bool {
@@ -402,7 +408,9 @@ impl TableFragments {
     pub fn mview_vnode_bitmap_info(&self) -> Vec<(ActorId, Option<Buffer>)> {
         self.fragments
             .values()
-            .filter(|fragment| fragment.fragment_type == FragmentType::Mview as i32)
+            .filter(|fragment| {
+                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0
+            })
             .flat_map(|fragment| {
                 fragment
                     .actors

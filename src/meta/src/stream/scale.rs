@@ -32,7 +32,7 @@ use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    ActorMapping, DispatcherType, FragmentType, PauseMutation, ResumeMutation, StreamActor,
+    ActorMapping, DispatcherType, FragmentTypeFlag, PauseMutation, ResumeMutation, StreamActor,
     StreamNode,
 };
 use risingwave_pb::stream_service::{
@@ -468,7 +468,7 @@ where
                 }
             }
 
-            if fragment.get_fragment_type()? == FragmentType::Source {
+            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
                 let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
                 let source_node = TableFragments::find_source_node(stream_node).unwrap();
                 if is_stream_source(source_node) {
