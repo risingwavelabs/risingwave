@@ -77,7 +77,7 @@ impl SplitReader for CdcSplitReader {
 impl CdcSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(self) {
-        tracing::info!("cdc props: {:?}", self.conn_props);
+        tracing::debug!("cdc props: {:?}", self.conn_props);
         let cdc_client =
             ConnectorClient::new(HostAddr::from_str(&self.conn_props.connector_node_addr)?).await?;
 
