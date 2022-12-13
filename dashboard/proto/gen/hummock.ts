@@ -487,12 +487,12 @@ export interface CompactTaskProgress {
   numSstsUploaded: number;
 }
 
-export interface ReportCompactionTaskProgressRequest {
+export interface CompactorHeartbeatRequest {
   contextId: number;
   progress: CompactTaskProgress[];
 }
 
-export interface ReportCompactionTaskProgressResponse {
+export interface CompactorHeartbeatResponse {
   status: Status | undefined;
 }
 
@@ -2675,19 +2675,19 @@ export const CompactTaskProgress = {
   },
 };
 
-function createBaseReportCompactionTaskProgressRequest(): ReportCompactionTaskProgressRequest {
+function createBaseCompactorHeartbeatRequest(): CompactorHeartbeatRequest {
   return { contextId: 0, progress: [] };
 }
 
-export const ReportCompactionTaskProgressRequest = {
-  fromJSON(object: any): ReportCompactionTaskProgressRequest {
+export const CompactorHeartbeatRequest = {
+  fromJSON(object: any): CompactorHeartbeatRequest {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
       progress: Array.isArray(object?.progress) ? object.progress.map((e: any) => CompactTaskProgress.fromJSON(e)) : [],
     };
   },
 
-  toJSON(message: ReportCompactionTaskProgressRequest): unknown {
+  toJSON(message: CompactorHeartbeatRequest): unknown {
     const obj: any = {};
     message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
     if (message.progress) {
@@ -2698,35 +2698,35 @@ export const ReportCompactionTaskProgressRequest = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<ReportCompactionTaskProgressRequest>, I>>(
+  fromPartial<I extends Exact<DeepPartial<CompactorHeartbeatRequest>, I>>(
     object: I,
-  ): ReportCompactionTaskProgressRequest {
-    const message = createBaseReportCompactionTaskProgressRequest();
+  ): CompactorHeartbeatRequest {
+    const message = createBaseCompactorHeartbeatRequest();
     message.contextId = object.contextId ?? 0;
     message.progress = object.progress?.map((e) => CompactTaskProgress.fromPartial(e)) || [];
     return message;
   },
 };
 
-function createBaseReportCompactionTaskProgressResponse(): ReportCompactionTaskProgressResponse {
+function createBaseCompactorHeartbeatResponse(): CompactorHeartbeatResponse {
   return { status: undefined };
 }
 
-export const ReportCompactionTaskProgressResponse = {
-  fromJSON(object: any): ReportCompactionTaskProgressResponse {
+export const CompactorHeartbeatResponse = {
+  fromJSON(object: any): CompactorHeartbeatResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
 
-  toJSON(message: ReportCompactionTaskProgressResponse): unknown {
+  toJSON(message: CompactorHeartbeatResponse): unknown {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<ReportCompactionTaskProgressResponse>, I>>(
+  fromPartial<I extends Exact<DeepPartial<CompactorHeartbeatResponse>, I>>(
     object: I,
-  ): ReportCompactionTaskProgressResponse {
-    const message = createBaseReportCompactionTaskProgressResponse();
+  ): CompactorHeartbeatResponse {
+    const message = createBaseCompactorHeartbeatResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;

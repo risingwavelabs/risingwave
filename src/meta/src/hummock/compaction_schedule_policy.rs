@@ -211,11 +211,11 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
 /// Currently the score >= 0, but we use signed type because the score delta might be < 0.
 type Score = i64;
 
-#[derive(PartialEq, Eq)]
-enum CompactorState {
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum CompactorState {
     Burst(Instant),
     Idle(Instant),
-    Busy,
+    Busy(Instant),
 }
 
 /// Give priority to compactors with the least score. Currently the score is composed only of
@@ -303,11 +303,89 @@ impl ScoredPolicy {
             let running_task = *compactor_assigned_task_num
                 .get(&compactor.context_id())
                 .unwrap_or(&0);
-            if running_task < compactor.max_concurrent_task_number() {
-                return Some(compactor.clone());
+            // if running_task < 2 * compactor.max_concurrent_task_number() {
+            //     // if let CompactorState::Idle(_) = compactor.state() {
+            //     //     return Some(compactor.clone());
+            //     // }
+
+            //     // compactor.try_down_state();
+
+            //     if let CompactorState::Busy(_) = compactor.state() {
+            //         continue;
+            //     }
+
+            //     return Some(compactor.clone());
+            // } else {
+            //     // compactor.set_state(new_state);
+            //     // compactor.try_up_state();
+            // }
+
+            match compactor.state() {
+                CompactorState::Idle(_) => {
+                    if running_task > compactor.max_concurrent_task_number() {
+                        continue;
+                    }
+                }
+
+                CompactorState::Burst(_) => {
+                    if running_task > 2 * compactor.max_concurrent_task_number() {
+                        continue;
+                    }
+                }
+
+                CompactorState::Busy(_) => {
+                    continue;
+                }
             }
+
+            return Some(compactor.clone());
         }
         None
+    }
+
+    fn refresh_state(&mut self) {
+        let idle_count = self
+            .score_to_compactor
+            .values()
+            .filter(|compactor| matches!(compactor.state(), CompactorState::Idle(_)))
+            .count();
+
+        if idle_count * 10 < self.score_to_compactor.len() * 2 {
+            match self.state {
+                CompactorState::Idle(_) => {
+                    self.state = CompactorState::Burst(Instant::now());
+                }
+                CompactorState::Burst(last_burst) => {
+                    if last_burst.elapsed().as_secs() > MAX_BURST_TIME {
+                        self.state = CompactorState::Busy(Instant::now());
+                    }
+                }
+                CompactorState::Busy(_) => {}
+            }
+        } else {
+            match self.state {
+                CompactorState::Idle(_) => {}
+
+                CompactorState::Burst(last_burst) => {
+                    if last_burst.elapsed().as_secs() > 60 {
+                        self.state = CompactorState::Idle(Instant::now());
+                    }
+                }
+
+                CompactorState::Busy(last_busy) => {
+                    if last_busy.elapsed().as_secs() > 60 {
+                        self.state = CompactorState::Burst(Instant::now());
+                    }
+                }
+            }
+        }
+
+        tracing::info!(
+            "refresh_state idle_count {} total {} state {:?}",
+            idle_count,
+            self.score_to_compactor.len(),
+            self.state
+        );
     }
 }
 
@@ -316,37 +394,47 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         &mut self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
+        self.refresh_state();
+
+        if let CompactorState::Busy(_) = self.state {
+            return None;
+        }
+
         if let Some(compactor) = self.fetch_idle_compactor(compactor_assigned_task_num) {
-            if let CompactorState::Idle(_) = &self.state {
-                // do not change state.
-            } else {
-                self.state = CompactorState::Idle(Instant::now());
-            }
+            // if let CompactorState::Idle(_) = &self.state {
+            //     // do not change state.
+            // } else {
+            //      self.state = CompactorState::Idle(Instant::now());
+            // }
+
+            // self.refresh_state();
             return Some(compactor);
         }
-        match self.state {
-            CompactorState::Idle(_) => {
-                self.state = CompactorState::Burst(Instant::now());
-            }
-            CompactorState::Burst(last_burst) => {
-                if last_burst.elapsed().as_secs() > MAX_BURST_TIME {
-                    self.state = CompactorState::Busy;
-                    return None;
-                }
-            }
-            CompactorState::Busy => {
-                return None;
-            }
-        }
-        for compactor in self.score_to_compactor.values() {
-            let running_task = *compactor_assigned_task_num
-                .get(&compactor.context_id())
-                .unwrap_or(&0);
-            if running_task < 2 * compactor.max_concurrent_task_number() {
-                return Some(compactor.clone());
-            }
-        }
-        self.state = CompactorState::Busy;
+
+        // match self.state {
+        //     CompactorState::Idle(_) => {
+        //         // self.state = CompactorState::Burst(Instant::now());
+        //     }
+        //     CompactorState::Burst(last_burst) => {
+        //         // if last_burst.elapsed().as_secs() > MAX_BURST_TIME {
+        //         //     self.state = CompactorState::Busy(Instant::now());
+        //         //     return None;
+        //         // }
+        //     }
+        //     CompactorState::Busy(_) => {
+        //         return None;
+        //     }
+        // }
+
+        // for compactor in self.score_to_compactor.values() {
+        //     let running_task = *compactor_assigned_task_num
+        //         .get(&compactor.context_id())
+        //         .unwrap_or(&0);
+        //     if running_task < 2 * compactor.max_concurrent_task_number() {
+        //         return Some(compactor.clone());
+        //     }
+        // }
+        // self.state = CompactorState::Busy(Instant::now());
         None
     }
 
@@ -420,7 +508,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
 
     fn suggest_scale_policy(&self) -> ScalePolicy {
         match &self.state {
-            CompactorState::Busy => return ScalePolicy::ScaleOut,
+            CompactorState::Busy(_) => return ScalePolicy::ScaleOut,
             CompactorState::Burst(_) => (),
             CompactorState::Idle(last_idle_time) => {
                 if last_idle_time.elapsed().as_secs() > MAX_IDLE_TIME {

@@ -19,7 +19,8 @@ use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion, VacuumTask,
+    CompactTask, CompactTaskProgress, CompactionGroup, CompactorWorkload, HummockSnapshot,
+    HummockVersion, SubscribeCompactTasksResponse, VacuumTask,
 };
 
 use crate::error::Result;
@@ -41,9 +42,10 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         compact_task: CompactTask,
         table_stats_change: TableStatsMap,
     ) -> Result<()>;
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
         progress: Vec<CompactTaskProgress>,
+        workload: CompactorWorkload,
     ) -> Result<()>;
     // We keep `commit_epoch` only for test/benchmark.
     async fn commit_epoch(

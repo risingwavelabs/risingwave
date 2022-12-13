@@ -16,21 +16,23 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 use fail::fail_point;
 use itertools::Itertools;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress,
+    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress, CompactorWorkload,
     SubscribeCompactTasksResponse,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 
-use super::compaction_schedule_policy::{CompactionSchedulePolicy, RoundRobinPolicy, ScoredPolicy};
+use super::compaction_schedule_policy::{
+    CompactionSchedulePolicy, CompactorState, RoundRobinPolicy, ScoredPolicy,
+};
 use crate::hummock::compaction_schedule_policy::ScalePolicy;
 use crate::hummock::error::Result;
 use crate::manager::MetaSrvEnv;
@@ -47,6 +49,7 @@ pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
     max_concurrent_task_number: AtomicU64,
+    state: Mutex<CompactorState>,
 }
 
 struct TaskHeartbeat {
@@ -66,6 +69,7 @@ impl Compactor {
             context_id,
             sender,
             max_concurrent_task_number: AtomicU64::new(max_concurrent_task_number),
+            state: Mutex::new(CompactorState::Idle(Instant::now())),
         }
     }
 
@@ -105,6 +109,71 @@ impl Compactor {
     pub fn set_config(&self, config: CompactorRuntimeConfig) {
         self.max_concurrent_task_number
             .store(config.max_concurrent_task_number, Ordering::Relaxed);
+    }
+}
+
+impl Compactor {
+    pub fn state(&self) -> CompactorState {
+        self.state.try_lock().unwrap().clone()
+    }
+
+    pub fn set_state(&self, new_state: CompactorState) {
+        *self.state.try_lock().unwrap() = new_state;
+    }
+
+    pub fn try_up_state(&self) {
+        match self.state() {
+            CompactorState::Idle(_) => self.try_update_state(CompactorState::Burst(Instant::now())),
+
+            CompactorState::Burst(_) => self.try_update_state(CompactorState::Busy(Instant::now())),
+
+            _ => {}
+        }
+    }
+
+    pub fn try_down_state(&self) {
+        match self.state() {
+            CompactorState::Busy(_) => self.try_update_state(CompactorState::Burst(Instant::now())),
+
+            CompactorState::Burst(_) => self.try_update_state(CompactorState::Idle(Instant::now())),
+
+            _ => {}
+        }
+    }
+
+    pub fn try_update_state(&self, new_state: CompactorState) {
+        match new_state {
+            CompactorState::Idle(_) => {
+                if let CompactorState::Burst(last_burst) = self.state() {
+                    if last_burst.elapsed().as_secs() > 60 {
+                        self.set_state(new_state)
+                    }
+                }
+            }
+
+            CompactorState::Burst(last_burst) => {
+                if let CompactorState::Idle(_) = self.state() {
+                    // up
+                    if last_burst.elapsed().as_secs() > 60 {
+                        self.set_state(new_state)
+                    }
+                } else if let CompactorState::Busy(last_busy) = self.state() {
+                    // down
+                    if last_busy.elapsed().as_secs() > 60 {
+                        self.set_state(new_state)
+                    }
+                }
+            }
+
+            CompactorState::Busy(_) => {
+                // up
+                if let CompactorState::Burst(last_burst) = self.state() {
+                    if last_burst.elapsed().as_secs() > 60 {
+                        self.set_state(new_state)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -391,6 +460,53 @@ impl CompactorManager {
 
     pub fn suggest_scale_policy(&self) -> ScalePolicy {
         self.policy.read().suggest_scale_policy()
+    }
+
+    /// Update compactor state based on its workload.
+    pub fn update_compactor_state(
+        &self,
+        context_id: HummockContextId,
+        workload: CompactorWorkload,
+    ) {
+        const CPU_THRESHOLD: u32 = 80;
+
+        if let Some(compactor) = self.policy.read().get_compactor(context_id) {
+            if workload.cpu > CPU_THRESHOLD {
+                // match compactor.state() {
+                //     CompactorState::Idle(_) => {
+                //         compactor.set_state(CompactorState::Burst(Instant::now()))
+                //     }
+
+                //     CompactorState::Burst(last_burst) => {
+                //         if last_burst.elapsed().as_secs() > 120 {
+                //             compactor.set_state(CompactorState::Busy(Instant::now()))
+                //         }
+                //     }
+
+                //     CompactorState::Busy(_) => {}
+                // }
+
+                compactor.try_up_state();
+            } else {
+                // match compactor.state() {
+                //     CompactorState::Idle(_) => {}
+
+                //     CompactorState::Burst(last_burst) => {
+                //         if last_burst.elapsed().as_secs() > 60 {
+                //             compactor.set_state(CompactorState::Idle(Instant::now()))
+                //         }
+                //     }
+
+                //     CompactorState::Busy(last_busy) => {
+                //         if last_busy.elapsed().as_secs() > 60 {
+                //             compactor.set_state(CompactorState::Burst(Instant::now()))
+                //         }
+                //     }
+                // }
+
+                compactor.try_down_state();
+            }
+        }
     }
 }
 

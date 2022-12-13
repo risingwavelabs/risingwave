@@ -37,6 +37,7 @@ use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
+use risingwave_common::monitor::process_local::LocalProcessCollector;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
@@ -47,7 +48,7 @@ use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, KeyRange as KeyRange_vec, LevelType,
+    CompactTask, CompactTaskProgress, CompactorWorkload, KeyRange as KeyRange_vec, LevelType,
     SubscribeCompactTasksResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
@@ -424,6 +425,7 @@ impl Compactor {
                 drop(config);
 
                 let executor = compactor_context.context.compaction_executor.clone();
+                let mut process_collector = LocalProcessCollector::new().unwrap();
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
                     let message = tokio::select! {
@@ -436,7 +438,20 @@ impl Compactor {
                                     num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
                                 });
                             }
-                            if let Err(e) = hummock_meta_client.report_compaction_task_progress(progress_list).await {
+
+                            let cpu = match process_collector.cpu_avg() {
+                                Ok(v) => (v * 100.0) as u32,
+                                Err(e) => {
+                                    tracing::warn!("Failed to collect process cpu. {e:?}");
+                                    0
+                                }
+                            };
+                            tracing::info!("compactor cpu {cpu}");
+                            let workload = CompactorWorkload {
+                                cpu,
+                            };
+
+                            if let Err(e) = hummock_meta_client.compactor_heartbeat(progress_list, workload).await {
                                 // ignore any errors while trying to report task progress
                                 tracing::warn!("Failed to report task progress. {e:?}");
                             }

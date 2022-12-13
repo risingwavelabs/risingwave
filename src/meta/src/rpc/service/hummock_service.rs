@@ -268,16 +268,19 @@ where
     }
 
     // TODO: convert this into a stream.
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
-        request: Request<ReportCompactionTaskProgressRequest>,
-    ) -> Result<Response<ReportCompactionTaskProgressResponse>, Status> {
+        request: Request<CompactorHeartbeatRequest>,
+    ) -> Result<Response<CompactorHeartbeatResponse>, Status> {
         let req = request.into_inner();
         self.compactor_manager
             .update_task_heartbeats(req.context_id, &req.progress);
-        Ok(Response::new(ReportCompactionTaskProgressResponse {
-            status: None,
-        }))
+
+        self.compactor_manager
+            .update_compactor_state(req.context_id, req.workload.unwrap());
+
+        // todo update compactor status
+        Ok(Response::new(CompactorHeartbeatResponse { status: None }))
     }
 
     async fn report_vacuum_task(
