@@ -25,4 +25,4 @@ pub const PG_SETTINGS_TABLE_NAME: &str = "pg_settings";
 pub const PG_SETTINGS_COLUMNS: &[SystemCatalogColumnsDef<'_>] =
     &[(DataType::Varchar, "name"), (DataType::Varchar, "setting")];
 
-pub static PG_SETTINGS_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| vec![]);
+pub static PG_SETTINGS_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(Vec::new);

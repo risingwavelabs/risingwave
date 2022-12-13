@@ -30,4 +30,4 @@ pub const PG_KEYWORDS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
 ];
 
 // TODO: set reserved keywords here
-pub static PG_KEYWORDS_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| vec![]);
+pub static PG_KEYWORDS_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(Vec::new);
