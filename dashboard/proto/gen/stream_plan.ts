@@ -139,6 +139,7 @@ export const FragmentTypeFlag = {
   MVIEW: "MVIEW",
   SINK: "SINK",
   NOW: "NOW",
+  CHAIN_NODE: "CHAIN_NODE",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -161,6 +162,9 @@ export function fragmentTypeFlagFromJSON(object: any): FragmentTypeFlag {
     case 8:
     case "NOW":
       return FragmentTypeFlag.NOW;
+    case 16:
+    case "CHAIN_NODE":
+      return FragmentTypeFlag.CHAIN_NODE;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -180,6 +184,8 @@ export function fragmentTypeFlagToJSON(object: FragmentTypeFlag): string {
       return "SINK";
     case FragmentTypeFlag.NOW:
       return "NOW";
+    case FragmentTypeFlag.CHAIN_NODE:
+      return "CHAIN_NODE";
     case FragmentTypeFlag.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
