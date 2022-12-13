@@ -153,7 +153,7 @@ pub async fn prepare_first_valid_version(
         ),
     )
     .await;
-    let _ = observer_manager.start().await;
+    observer_manager.start().await;
     let hummock_version = match rx.recv().await {
         Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(
             version,

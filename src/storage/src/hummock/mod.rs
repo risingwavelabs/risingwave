@@ -171,7 +171,7 @@ impl HummockStorage {
             ),
         )
         .await;
-        let _ = observer_manager.start().await;
+        observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
             Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
@@ -513,7 +513,7 @@ impl HummockStorageV1 {
             ),
         )
         .await;
-        let _ = observer_manager.start().await;
+        observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
             Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,

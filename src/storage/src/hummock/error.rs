@@ -35,7 +35,7 @@ enum HummockErrorInner {
     #[error("Mock error {0}.")]
     MockError(String),
     #[error("ObjectStore failed with IO error {0}.")]
-    ObjectIoError(ObjectError),
+    ObjectIoError(Box<ObjectError>),
     #[error("Meta error {0}.")]
     MetaError(String),
     #[error("Invalid WriteBatch.")]
@@ -70,7 +70,7 @@ pub struct HummockError {
 
 impl HummockError {
     pub fn object_io_error(error: ObjectError) -> HummockError {
-        HummockErrorInner::ObjectIoError(error).into()
+        HummockErrorInner::ObjectIoError(error.into()).into()
     }
 
     pub fn invalid_format_version(v: u32) -> HummockError {
@@ -154,7 +154,7 @@ impl From<prost::DecodeError> for HummockError {
 
 impl From<ObjectError> for HummockError {
     fn from(error: ObjectError) -> Self {
-        HummockErrorInner::ObjectIoError(error).into()
+        HummockErrorInner::ObjectIoError(error.into()).into()
     }
 }
 
@@ -167,11 +167,7 @@ impl std::fmt::Debug for HummockError {
         if let Some(backtrace) = (&self.inner as &dyn Error).request_ref::<Backtrace>() {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
-            write!(
-                f,
-                "  backtrace of `TracedHummockError`:\n{}",
-                self.backtrace
-            )?;
+            write!(f, "  backtrace of `HummockError`:\n{}", self.backtrace)?;
         }
         Ok(())
     }

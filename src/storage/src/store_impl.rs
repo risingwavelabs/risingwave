@@ -410,7 +410,7 @@ pub mod verify {
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
         type Local = VerifyStateStore<A::Local, E::Local>;
 
-        type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send;
+        type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
         define_state_store_associated_type!();
 

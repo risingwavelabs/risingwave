@@ -123,6 +123,7 @@ message Table {
   repeated int32 value_indices = 20;
   string definition = 21;
   bool handle_pk_conflict = 22;
+  uint32 pk_prefix_len_hint = 23;
 }
 
 message View {

@@ -5459,6 +5459,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "crc32fast",
+ "criterion",
  "dyn-clone",
  "either",
  "hex",
@@ -5654,6 +5655,7 @@ dependencies = [
  "url",
  "uuid",
  "workspace-hack",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -5975,7 +5977,6 @@ dependencies = [
  "tokio-retry",
  "tokio-stream",
  "tracing",
- "twox-hash",
  "uuid",
  "workspace-hack",
  "xxhash-rust",

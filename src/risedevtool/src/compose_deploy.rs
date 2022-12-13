@@ -241,7 +241,7 @@ fi
         x
     };
     let deploy_sh = Path::new(output_directory).join("deploy.sh");
-    fs::write(&deploy_sh, &shell_script)?;
+    fs::write(&deploy_sh, shell_script)?;
     let mut perms = fs::metadata(&deploy_sh)?.permissions();
     perms.set_mode(perms.mode() | 0o755);
     fs::set_permissions(&deploy_sh, perms)?;
