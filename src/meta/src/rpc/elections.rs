@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -278,8 +280,10 @@ async fn get_infos_obj<S: MetaStore>(
     }
 }
 
-fn gen_rand_lease_id() -> u64 {
-    123
+fn gen_rand_lease_id(addr: String) -> u64 {
+    let mut ds = DefaultHasher::new();
+    addr.hash(&mut ds);
+    ds.finish()
     // FIXME: We are unable to use a random lease at the moment
     // During testing, meta gets killed, new meta starts
     // meta detects that lease is still there, with same addr, but diff ID
@@ -332,8 +336,13 @@ pub async fn run_elections<S: MetaStore>(
         let mut initial_election = true;
 
         // run the initial election
-        let election_outcome =
-            campaign(&meta_store, &addr, lease_time_sec, gen_rand_lease_id()).await;
+        let election_outcome = campaign(
+            &meta_store,
+            &addr,
+            lease_time_sec,
+            gen_rand_lease_id(addr.clone()),
+        )
+        .await;
         let (leader_addr, initial_leader, is_initial_leader) = match election_outcome {
             Some(outcome) => {
                 tracing::info!("initial election finished");
@@ -372,24 +381,28 @@ pub async fn run_elections<S: MetaStore>(
                 let n_addr = initial_leader.node_address.as_str();
                 let mut leader_addr = n_addr.parse::<HostAddr>().unwrap();
                 if !initial_election {
-                    let (l_addr, l_info, is_l) =
-                        match campaign(&meta_store, &addr, lease_time_sec, gen_rand_lease_id())
-                            .await
-                        {
-                            None => {
-                                tracing::info!("election failed. Repeating election");
-                                _ = ticker.tick();
-                                continue 'election;
-                            }
-                            Some(outcome) => {
-                                tracing::info!("election finished");
-                                (
-                                    outcome.get_leader_addr(),
-                                    outcome.meta_leader_info,
-                                    outcome.is_leader,
-                                )
-                            }
-                        };
+                    let (l_addr, l_info, is_l) = match campaign(
+                        &meta_store,
+                        &addr,
+                        lease_time_sec,
+                        gen_rand_lease_id(addr.clone()),
+                    )
+                    .await
+                    {
+                        None => {
+                            tracing::info!("election failed. Repeating election");
+                            _ = ticker.tick();
+                            continue 'election;
+                        }
+                        Some(outcome) => {
+                            tracing::info!("election finished");
+                            (
+                                outcome.get_leader_addr(),
+                                outcome.meta_leader_info,
+                                outcome.is_leader,
+                            )
+                        }
+                    };
 
                     if is_l {
                         tracing::info!(
@@ -805,7 +818,7 @@ mod tests {
         };
         let new_leader = MetaLeaderInfo {
             node_address: "other:789".to_owned(),
-            lease_id: gen_rand_lease_id(),
+            lease_id: gen_rand_lease_id("other:789".to_owned()),
         };
         put_leader_info(&new_leader, &mock_meta_store).await;
         assert!(
