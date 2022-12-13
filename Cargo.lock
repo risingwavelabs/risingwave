@@ -3152,9 +3152,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.11"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5b15031e1ca7bb25f51c6ddb36f9ec8e10aa184e21987c49118e18a1141f7a8"
+checksum = "19a97146650b9d03128eb9a1101f45c7dadb1f867ef7b10e58d878432e47de00"
 dependencies = [
  "ahash",
  "async-channel",
@@ -3168,6 +3168,7 @@ dependencies = [
  "madsim-macros",
  "naive-timer",
  "rand 0.8.5",
+ "rustversion",
  "serde",
  "spin 0.9.4",
  "tokio",
