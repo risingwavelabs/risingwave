@@ -158,7 +158,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
-        let (join_handle, shutdown_send) = rpc_serve(
+        let (join_handle, _shutdown_send) = rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
@@ -187,9 +187,5 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         .await
         .unwrap();
         join_handle.await.unwrap();
-        match shutdown_send.send(()) {
-            Ok(_) => tracing::info!("Stopping meta server gracefully"),
-            Err(_) => tracing::info!("Error when shutting down meta server"),
-        }
     })
 }
