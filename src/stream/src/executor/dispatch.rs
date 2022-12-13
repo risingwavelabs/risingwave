@@ -158,8 +158,11 @@ impl DispatchExecutorInner {
         dispatcher.remove_outputs(&ids);
 
         // The hash mapping is only used by the hash dispatcher.
-        // We do not assert on the inexistence of the hash mapping field for other dispatchers to
-        // make it more tolerant for meta resolution.
+        //
+        // We specify a single upstream hash mapping for scaling the downstream fragment. However,
+        // it's possible that there're multiple upstreams with different exchange types, for
+        // example, the `Broadcast` inner side of the dynamic filter. There're too many combinations
+        // to handle here, so we just ignore the `hash_mapping` field for any other exchange types.
         if let DispatcherImpl::Hash(dispatcher) = dispatcher {
             dispatcher.hash_mapping = {
                 let compressed_mapping = update.get_hash_mapping()?;
