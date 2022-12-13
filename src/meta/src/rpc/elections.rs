@@ -391,7 +391,7 @@ pub async fn run_elections<S: MetaStore>(
                     {
                         None => {
                             tracing::info!("election failed. Repeating election");
-                            _ = ticker.tick();
+                            _ = ticker.tick().await;
                             continue 'election;
                         }
                         Some(outcome) => {
