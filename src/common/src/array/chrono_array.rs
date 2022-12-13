@@ -53,7 +53,7 @@ mod tests {
             NaiveDateWrapper::with_days(67890).ok(),
         ];
 
-        let array = NaiveDateArray::from_slice(&input);
+        let array = NaiveDateArray::from_iter(&input);
         let buffers = array.to_protobuf().values;
 
         assert_eq!(buffers.len(), 1);

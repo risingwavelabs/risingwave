@@ -6,7 +6,6 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 # create tables
-
 statement ok
 CREATE VIEW east AS SELECT * FROM (VALUES
     ('r1', 100, 140, 12, 2),
@@ -23,7 +22,6 @@ CREATE VIEW west AS SELECT * FROM (VALUES
 ) west(rid, t_id, time, cost, cores)
 
 # Qs
-
 query II
 SELECT s1.rid, s2.rid
 FROM west s1, west s2
@@ -38,7 +36,6 @@ s2	s4
 s4	s3
 
 # Qp
-
 query II
 SELECT s1.rid, s2.rid
 FROM west s1, west s2
@@ -49,7 +46,6 @@ s1	s3
 s4	s3
 
 # Qt
-
 query II
 SELECT east.rid, west.rid
 FROM east, west
@@ -59,7 +55,6 @@ ORDER BY 1, 2
 r2	s2
 
 # Test string comparisons
-
 query II
 WITH weststr AS (
 	SELECT rid, time::VARCHAR AS time, cost::VARCHAR as cost

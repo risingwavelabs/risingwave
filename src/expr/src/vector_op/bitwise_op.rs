@@ -58,7 +58,7 @@ where
     // TODO: We need to improve the error message
     let r: u32 = r
         .try_into()
-        .map_err(|_| ExprError::Cast(type_name::<T2>(), type_name::<u32>()))?;
+        .map_err(|_| ExprError::CastOutOfRange(type_name::<u32>()))?;
     atm(l, r)
 }
 

@@ -21,15 +21,14 @@ select (ARRAY['foo', 'bar'])[3];
 ----
 NULL
 
-statement error 
+statement error
 select (ARRAY['foo', 'bar'])[];
 
 # array access is not possible for non-composite types
-
-statement error 
+statement error
 select (1::INT)[1];
 
-statement error 
+statement error
 select ('a'::VARCHAR)[1];
 
 query T
