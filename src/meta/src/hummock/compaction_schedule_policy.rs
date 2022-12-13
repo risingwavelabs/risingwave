@@ -308,34 +308,23 @@ impl ScoredPolicy {
             //     //     return Some(compactor.clone());
             //     // }
 
-            //     // compactor.try_down_state();
-
-            //     if let CompactorState::Busy(_) = compactor.state() {
-            //         continue;
-            //     }
-
             //     return Some(compactor.clone());
             // } else {
             //     // compactor.set_state(new_state);
-            //     // compactor.try_up_state();
             // }
 
-            match compactor.state() {
-                CompactorState::Idle(_) => {
-                    if running_task > compactor.max_concurrent_task_number() {
-                        continue;
-                    }
-                }
+            // compactor busy
+            if matches!(compactor.state(), CompactorState::Busy(_)) {
+                continue;
+            }
 
-                CompactorState::Burst(_) => {
-                    if running_task > 2 * compactor.max_concurrent_task_number() {
-                        continue;
-                    }
-                }
-
-                CompactorState::Busy(_) => {
-                    continue;
-                }
+            if (matches!(self.state, CompactorState::Idle(_))
+                && running_task > compactor.max_concurrent_task_number())
+                || (matches!(self.state, CompactorState::Burst(_))
+                    && running_task > 2 * compactor.max_concurrent_task_number())
+            {
+                // policy idle or burst
+                continue;
             }
 
             return Some(compactor.clone());

@@ -17,6 +17,9 @@ use std::io::{Error, ErrorKind, Result};
 use prometheus::core::{Collector, Desc};
 use prometheus::{proto, IntCounter, IntGauge, Opts, Registry};
 
+#[cfg(target_os = "linux")]
+use super::{CLOCK_TICK, PAGESIZE};
+
 /// Monitors current process.
 pub fn monitor_process(registry: &Registry) -> Result<()> {
     let pc = ProcessCollector::new();
@@ -182,11 +185,3 @@ impl Collector for ProcessCollector {
         mfs
     }
 }
-
-#[cfg(target_os = "linux")]
-static PAGESIZE: std::sync::LazyLock<i64> =
-    std::sync::LazyLock::new(|| unsafe { libc::sysconf(libc::_SC_PAGESIZE) });
-
-#[cfg(target_os = "linux")]
-static CLOCK_TICK: std::sync::LazyLock<u64> =
-    std::sync::LazyLock::new(|| unsafe { libc::sysconf(libc::_SC_CLK_TCK) as u64 });
