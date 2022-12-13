@@ -7,10 +7,10 @@ create materialized source products ( id INT,
  PRIMARY KEY (id)
 ) with (
  connector = 'mysql-cdc',
- database.hostname = 'mysql',
- database.port = '3306',
- database.user = 'root',
- database.password = '123456',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
  database.name = 'mydb',
  table.name = 'products',
  server.id = '5085'
@@ -30,10 +30,10 @@ create materialized source orders (
    PRIMARY KEY (order_id)
 ) with (
  connector = 'mysql-cdc',
- database.hostname = 'mysql',
- database.port = '3306',
- database.user = 'root',
- database.password = '123456',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
  database.name = 'mydb',
  table.name = 'orders',
  server.id = '5086'
@@ -52,10 +52,10 @@ create materialized source shipments (
  PRIMARY KEY (shipment_id)
 ) with (
  connector = 'postgres-cdc',
- database.hostname = 'db',
- database.port = '5432',
- database.user = 'postgres',
- database.password = 'postgres',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
  database.name = 'cdc_test',
  schema.name = 'public',
  table.name = 'shipments',
@@ -79,11 +79,12 @@ create materialized source mytable (
   v3 STRING,
  PRIMARY KEY (v1)
 ) with (
- connector = 'cdc',
- database.hostname = 'mysql',
- database.port = '3306',
- database.user = 'root',
- database.password = '123456',
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
  database.name = 'mydb',
- table.name = 'mytable'
+ table.name = 'mytable',
+ server.id = '5087'
 ) row format debezium_json;
