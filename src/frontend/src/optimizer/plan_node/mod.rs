@@ -83,8 +83,12 @@ pub enum Convention {
 }
 
 impl ColPrunable for PlanRef {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
+            // `LogicalShare` can't clone, so we implement column pruning for `LogicalShare`
+            // here.
+            // Basically, we need to wait for all parents of `LogicalShare` to prune columns before
+            // we merge the required columns and prune.
             let parent_has_pushed = ctx.add_required_cols(self.id(), required_cols.into());
             if parent_has_pushed == logical_share.parent_num() {
                 let merge_require_cols = ctx
@@ -130,10 +134,16 @@ impl ColPrunable for PlanRef {
 }
 
 impl PredicatePushdown for PlanRef {
-    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
             // `LogicalShare` can't clone, so we implement predicate pushdown for `LogicalShare`
             // here.
+            // Basically, we need to wait for all parents of `LogicalShare` to push down the
+            // predicate before we merge the predicates and pushdown.
             let parent_has_pushed = ctx.add_predicate(self.id(), predicate.clone());
             if parent_has_pushed == logical_share.parent_num() {
                 let merge_predicate = ctx

@@ -24,7 +24,9 @@ use super::{
     PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
-use crate::optimizer::plan_node::{CollectInputRef, ColumnPruningCtx, PredicatePushdownCtx};
+use crate::optimizer::plan_node::{
+    CollectInputRef, ColumnPruningContext, PredicatePushdownContext,
+};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
@@ -164,7 +166,7 @@ impl fmt::Display for LogicalProject {
 }
 
 impl ColPrunable for LogicalProject {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let input_col_num = self.input().schema().len();
         let mut input_required_appeared = FixedBitSet::with_capacity(input_col_num);
 
@@ -202,7 +204,11 @@ impl ColPrunable for LogicalProject {
 }
 
 impl PredicatePushdown for LogicalProject {
-    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         // convert the predicate to one that references the child of the project
         let mut subst = Substitute {
             mapping: self.exprs().clone(),

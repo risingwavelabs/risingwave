@@ -34,7 +34,8 @@ use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
 };
 use crate::optimizer::plan_node::{
-    gen_filter_and_pushdown, BatchSortAgg, ColumnPruningCtx, LogicalProject, PredicatePushdownCtx,
+    gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalProject,
+    PredicatePushdownContext,
 };
 use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
@@ -757,7 +758,7 @@ impl fmt::Display for LogicalAgg {
 }
 
 impl ColPrunable for LogicalAgg {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let group_key_required_cols = FixedBitSet::from_iter(self.group_key().iter().copied());
 
         let (agg_call_required_cols, agg_calls) = {
@@ -828,7 +829,11 @@ impl ColPrunable for LogicalAgg {
 }
 
 impl PredicatePushdown for LogicalAgg {
-    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let num_group_key = self.group_key().len();
         let num_agg_calls = self.agg_calls().len();
         assert!(num_group_key + num_agg_calls == self.schema().len());

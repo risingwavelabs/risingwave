@@ -23,8 +23,8 @@ use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
-    generic, BatchHashAgg, BatchUnion, ColumnPruningCtx, LogicalAgg, LogicalProject, PlanTreeNode,
-    PredicatePushdownCtx,
+    generic, BatchHashAgg, BatchUnion, ColumnPruningContext, LogicalAgg, LogicalProject,
+    PlanTreeNode, PredicatePushdownContext,
 };
 use crate::optimizer::property::{FunctionalDependencySet, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
@@ -99,7 +99,7 @@ impl fmt::Display for LogicalUnion {
 }
 
 impl ColPrunable for LogicalUnion {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let new_inputs = self
             .inputs()
             .iter()
@@ -110,7 +110,11 @@ impl ColPrunable for LogicalUnion {
 }
 
 impl PredicatePushdown for LogicalUnion {
-    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let new_inputs = self
             .inputs()
             .iter()

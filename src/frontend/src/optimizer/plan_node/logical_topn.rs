@@ -25,7 +25,7 @@ use super::{
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
-    BatchTopN, ColumnPruningCtx, LogicalProject, PredicatePushdownCtx, StreamTopN,
+    BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext, StreamTopN,
 };
 use crate::optimizer::property::{Distribution, FieldOrder, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
@@ -280,7 +280,7 @@ impl fmt::Display for LogicalTopN {
 }
 
 impl ColPrunable for LogicalTopN {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let input_required_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
         let order_required_cols = {
             let mut order_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
@@ -353,7 +353,11 @@ impl ColPrunable for LogicalTopN {
 }
 
 impl PredicatePushdown for LogicalTopN {
-    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         // filter can not transpose topN
         gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }

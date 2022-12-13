@@ -23,7 +23,7 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::optimizer::plan_node::{ColumnPruningCtx, PredicatePushdownCtx};
+use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
@@ -111,7 +111,7 @@ impl fmt::Display for LogicalDelete {
 }
 
 impl ColPrunable for LogicalDelete {
-    fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+    fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
         self.clone_with_input(self.input.prune_col(&required_cols, ctx))
             .into()
@@ -119,7 +119,11 @@ impl ColPrunable for LogicalDelete {
 }
 
 impl PredicatePushdown for LogicalDelete {
-    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }

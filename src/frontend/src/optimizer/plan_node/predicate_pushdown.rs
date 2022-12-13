@@ -37,14 +37,18 @@ pub trait PredicatePushdown {
     /// the predicates with the `Condition` of it.
     ///
     /// 3. those can be pushed down. We pass them to current `PlanNode`'s input.
-    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef;
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef;
 }
 
 macro_rules! ban_predicate_pushdown {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl PredicatePushdown for [<$convention $name>] {
-                fn predicate_pushdown(&self, _predicate: Condition, _ctx: &mut PredicatePushdownCtx) -> PlanRef {
+                fn predicate_pushdown(&self, _predicate: Condition, _ctx: &mut PredicatePushdownContext) -> PlanRef {
                     unreachable!("predicate pushdown is only allowed on logical plan")
                 }
             })*
@@ -59,7 +63,7 @@ pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
     node: &T,
     filter_predicate: Condition,
     pushed_predicate: Condition,
-    ctx: &mut PredicatePushdownCtx,
+    ctx: &mut PredicatePushdownContext,
 ) -> PlanRef {
     let new_input = node.input().predicate_pushdown(pushed_predicate, ctx);
     let new_node = node.clone_with_input(new_input);
@@ -67,11 +71,11 @@ pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct PredicatePushdownCtx {
+pub struct PredicatePushdownContext {
     share_predicate_map: HashMap<i32, Vec<Condition>>,
 }
 
-impl PredicatePushdownCtx {
+impl PredicatePushdownContext {
     pub fn add_predicate(&mut self, plan_node_id: PlanNodeId, predicate: Condition) -> usize {
         self.share_predicate_map
             .entry(plan_node_id.0)

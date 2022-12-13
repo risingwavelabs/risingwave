@@ -24,7 +24,7 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{ColumnPruningCtx, LogicalFilter, PredicatePushdownCtx};
+use crate::optimizer::plan_node::{ColumnPruningContext, LogicalFilter, PredicatePushdownContext};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -287,7 +287,7 @@ impl PlanTreeNodeBinary for LogicalApply {
 impl_plan_tree_node_for_binary! { LogicalApply }
 
 impl ColPrunable for LogicalApply {
-    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
+    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         panic!("LogicalApply should be unnested")
     }
 }
@@ -296,7 +296,7 @@ impl PredicatePushdown for LogicalApply {
     fn predicate_pushdown(
         &self,
         mut predicate: Condition,
-        ctx: &mut PredicatePushdownCtx,
+        ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
         let left_col_num = self.left().schema().len();
         let right_col_num = self.right().schema().len();

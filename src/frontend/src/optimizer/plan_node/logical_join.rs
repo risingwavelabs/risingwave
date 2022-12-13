@@ -31,8 +31,8 @@ use crate::optimizer::max_one_row_visitor::MaxOneRowVisitor;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningCtx,
-    EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownCtx, StreamDynamicFilter,
+    BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext,
+    EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownContext, StreamDynamicFilter,
     StreamFilter,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
@@ -710,7 +710,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
 impl_plan_tree_node_for_binary! { LogicalJoin }
 
 impl ColPrunable for LogicalJoin {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         // make `required_cols` point to internal table instead of output schema.
         let required_cols = required_cols
             .iter()
@@ -802,7 +802,7 @@ impl PredicatePushdown for LogicalJoin {
     fn predicate_pushdown(
         &self,
         mut predicate: Condition,
-        ctx: &mut PredicatePushdownCtx,
+        ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
         let left_col_num = self.left().schema().len();
         let right_col_num = self.right().schema().len();

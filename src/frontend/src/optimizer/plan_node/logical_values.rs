@@ -24,7 +24,7 @@ use super::{
 };
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::{ColumnPruningCtx, PredicatePushdownCtx};
+use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
@@ -75,7 +75,7 @@ impl fmt::Display for LogicalValues {
 }
 
 impl ColPrunable for LogicalValues {
-    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let rows = self
             .rows
             .iter()
@@ -90,7 +90,11 @@ impl ColPrunable for LogicalValues {
 }
 
 impl PredicatePushdown for LogicalValues {
-    fn predicate_pushdown(&self, predicate: Condition, _ctx: &mut PredicatePushdownCtx) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }

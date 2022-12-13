@@ -33,8 +33,8 @@ use crate::expr::{
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
-    BatchSeqScan, ColumnPruningCtx, LogicalFilter, LogicalProject, LogicalValues,
-    PredicatePushdownCtx,
+    BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
+    PredicatePushdownContext,
 };
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
@@ -423,7 +423,7 @@ impl fmt::Display for LogicalScan {
 }
 
 impl ColPrunable for LogicalScan {
-    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let output_col_idx: Vec<usize> = required_cols
             .iter()
             .map(|i| self.required_col_idx()[*i])
@@ -437,7 +437,11 @@ impl ColPrunable for LogicalScan {
 }
 
 impl PredicatePushdown for LogicalScan {
-    fn predicate_pushdown(&self, predicate: Condition, _ctx: &mut PredicatePushdownCtx) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         // If the predicate contains `CorrelatedInputRef`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}

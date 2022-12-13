@@ -33,7 +33,7 @@ pub trait ColPrunable {
     /// When implementing this method for a node, it may require its children to produce additional
     /// columns besides `required_cols`. In this case, it may need to insert a
     /// [`LogicalProject`](super::LogicalProject) above to have a correct schema.
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningCtx) -> PlanRef;
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef;
 }
 
 /// Implements [`ColPrunable`] for batch and streaming node.
@@ -41,7 +41,7 @@ macro_rules! impl_prune_col {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ColPrunable for [<$convention $name>] {
-                fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
+                fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
                     panic!("column pruning is only allowed on logical plan")
                 }
             })*
@@ -52,11 +52,11 @@ for_batch_plan_nodes! { impl_prune_col }
 for_stream_plan_nodes! { impl_prune_col }
 
 #[derive(Debug, Clone, Default)]
-pub struct ColumnPruningCtx {
+pub struct ColumnPruningContext {
     share_required_cols_map: HashMap<i32, Vec<Vec<usize>>>,
 }
 
-impl ColumnPruningCtx {
+impl ColumnPruningContext {
     pub fn add_required_cols(
         &mut self,
         plan_node_id: PlanNodeId,

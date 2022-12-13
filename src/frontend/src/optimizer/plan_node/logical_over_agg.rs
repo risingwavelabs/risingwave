@@ -26,7 +26,7 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
-use crate::optimizer::plan_node::{ColumnPruningCtx, PredicatePushdownCtx};
+use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
@@ -256,14 +256,18 @@ impl fmt::Display for LogicalOverAgg {
 }
 
 impl ColPrunable for LogicalOverAgg {
-    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningCtx) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
 impl PredicatePushdown for LogicalOverAgg {
-    fn predicate_pushdown(&self, predicate: Condition, ctx: &mut PredicatePushdownCtx) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let mut window_col = FixedBitSet::with_capacity(self.schema().len());
         window_col.insert(self.schema().len() - 1);
         let (window_pred, other_pred) = predicate.split_disjoint(&window_col);
