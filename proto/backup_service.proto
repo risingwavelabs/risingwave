@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package backup_service;
+
+option optimize_for = SPEED;
+
+enum BackupJobStatus {
+  UNSPECIFIED = 0;
+  RUNNING = 1;
+  SUCCEEDED = 2;
+  // NOT_FOUND indicates one of these cases:
+  // - Invalid job id.
+  // - Job has failed.
+  // - Job has succeeded, but its resulted backup has been deleted later.
+  NOT_FOUND = 3;
+}
+message BackupMetaRequest {}
+message BackupMetaResponse {
+  uint64 job_id = 1;
+}
+message GetBackupJobStatusRequest {
+  uint64 job_id = 1;
+}
+message GetBackupJobStatusResponse {
+  uint64 job_id = 1;
+  BackupJobStatus job_status = 2;
+}
+message DeleteMetaSnapshotRequest {
+  repeated uint64 snapshot_ids = 1;
+}
+message DeleteMetaSnapshotResponse {}
+
+service BackupService {
+  rpc BackupMeta(BackupMetaRequest) returns (BackupMetaResponse);
+  rpc GetBackupJobStatus(GetBackupJobStatusRequest) returns (GetBackupJobStatusResponse);
+  rpc DeleteMetaSnapshot(DeleteMetaSnapshotRequest) returns (DeleteMetaSnapshotResponse);
+}

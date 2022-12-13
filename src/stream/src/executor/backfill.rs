@@ -264,7 +264,7 @@ where
             }
         };
 
-        tracing::debug!(
+        tracing::trace!(
             actor = self.actor_id,
             "Backfill has already finished and forward messages directly to the downstream"
         );

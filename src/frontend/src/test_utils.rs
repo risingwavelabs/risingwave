@@ -228,7 +228,7 @@ impl CatalogWriter for MockCatalogWriter {
         todo!()
     }
 
-    async fn create_materialized_source(
+    async fn create_table(
         &self,
         source: ProstSource,
         mut table: ProstTable,

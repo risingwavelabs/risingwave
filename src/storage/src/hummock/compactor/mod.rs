@@ -33,10 +33,10 @@ pub use compaction_filter::{
 };
 pub use context::{CompactorContext, Context};
 use futures::future::try_join_all;
-use futures::{stream, StreamExt, TryFutureExt};
+use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
-use risingwave_common::config::constant::hummock::CompactionFilterFlag;
+use risingwave_common::constants::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
@@ -93,8 +93,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
         let tracker = self
             .limiter
             .require_memory((self.options.capacity + self.options.block_capacity) as u64)
-            .await
-            .unwrap();
+            .await;
         let timer = Instant::now();
         let table_id = self.sstable_id_manager.get_new_sst_id().await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
@@ -221,7 +220,7 @@ impl Compactor {
             need_quota
         );
 
-        let multi_filter = build_multi_compaction_filter(&compact_task);
+        let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
         let multi_filter_key_extractor = context
             .filter_key_extractor_manager
@@ -242,6 +241,7 @@ impl Compactor {
         let delete_range_agg = match CompactorRunner::build_delete_range_iter(
             &compact_task,
             &compactor_context.sstable_store,
+            &mut multi_filter,
         )
         .await
         {
@@ -569,7 +569,7 @@ impl Compactor {
         // Keep table stats changes due to dropping KV.
         let mut table_stats_drop = TableStatsMap::default();
         let mut last_table_stats = TableStats::default();
-
+        let mut last_table_id = None;
         while iter.is_valid() {
             let iter_key = iter.key();
 
@@ -583,12 +583,6 @@ impl Compactor {
                 if !max_key.is_empty() && iter_key >= max_key {
                     break;
                 }
-                if !last_key.is_empty() {
-                    table_stats_drop.insert(
-                        last_key.user_key.table_id.table_id,
-                        std::mem::take(&mut last_table_stats),
-                    );
-                }
                 last_key.set(iter_key);
                 watermark_can_see_last_key = false;
                 if value.is_delete() {
@@ -597,6 +591,16 @@ impl Compactor {
             } else {
                 local_stats.skip_multi_version_key_count += 1;
             }
+
+            if last_table_id.map_or(true, |last_table_id| {
+                last_table_id != last_key.user_key.table_id.table_id
+            }) {
+                if let Some(last_table_id) = last_table_id.take() {
+                    table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
+                }
+                last_table_id = Some(last_key.user_key.table_id.table_id);
+            }
+
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
             // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
             // key which satisfies `epoch` < `watermark`
@@ -618,7 +622,6 @@ impl Compactor {
             if epoch <= task_config.watermark {
                 watermark_can_see_last_key = true;
             }
-
             if drop {
                 let should_count = match task_config.stats_target_table_ids.as_ref() {
                     Some(target_table_ids) => {
@@ -628,9 +631,6 @@ impl Compactor {
                 };
                 if should_count {
                     last_table_stats.total_key_count -= 1;
-                    if !is_new_user_key {
-                        last_table_stats.stale_key_count -= 1;
-                    }
                     last_table_stats.total_key_size -= last_key.encoded_len() as i64;
                     last_table_stats.total_value_size -= iter.value().encoded_len() as i64;
                 }
@@ -645,11 +645,8 @@ impl Compactor {
 
             iter.next().await?;
         }
-        if !last_key.is_empty() {
-            table_stats_drop.insert(
-                last_key.user_key.table_id.table_id,
-                std::mem::take(&mut last_table_stats),
-            );
+        if let Some(last_table_id) = last_table_id.take() {
+            table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
         }
         iter.collect_local_statistic(&mut local_stats);
         local_stats.report(stats.as_ref());
@@ -740,25 +737,23 @@ impl Compactor {
 
             let tracker_cloned = task_progress.clone();
             let context_cloned = self.context.clone();
-            upload_join_handles.push(
+            upload_join_handles.push(async move {
                 upload_join_handle
-                    .map_err(HummockError::sstable_upload_error)
-                    .and_then(move |upload_result| async move {
-                        upload_result?;
-                        if let Some(tracker) = tracker_cloned {
-                            tracker.inc_ssts_uploaded();
-                        }
-                        if context_cloned.is_share_buffer_compact {
-                            context_cloned
-                                .stats
-                                .shared_buffer_to_sstable_size
-                                .observe(sst_size as _);
-                        } else {
-                            context_cloned.stats.compaction_upload_sst_counts.inc();
-                        }
-                        Ok(())
-                    }),
-            );
+                    .await
+                    .map_err(HummockError::sstable_upload_error)??;
+                if let Some(tracker) = tracker_cloned {
+                    tracker.inc_ssts_uploaded();
+                }
+                if context_cloned.is_share_buffer_compact {
+                    context_cloned
+                        .stats
+                        .shared_buffer_to_sstable_size
+                        .observe(sst_size as _);
+                } else {
+                    context_cloned.stats.compaction_upload_sst_counts.inc();
+                }
+                Ok::<_, HummockError>(())
+            });
         }
 
         // Check if there are any failed uploads. Report all of those SSTs.

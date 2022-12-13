@@ -123,14 +123,11 @@
         A.category = 10 and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: auction.seller = person.id, output: [person.name, person.city, person.state, auction.id] }
-      ├─BatchExchange { order: [], dist: HashShard(auction.seller) }
-      | └─BatchProject { exprs: [auction.id, auction.seller] }
-      |   └─BatchFilter { predicate: (auction.category = 10:Int32) }
-      |     └─BatchScan { table: auction, columns: [auction.id, auction.seller, auction.category], distribution: UpstreamHashShard(auction.id) }
-      └─BatchExchange { order: [], dist: HashShard(person.id) }
-        └─BatchFilter { predicate: (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)) }
-          └─BatchScan { table: person, columns: [person.id, person.name, person.city, person.state], distribution: UpstreamHashShard(person.id) }
+    └─BatchLookupJoin { type: Inner, predicate: auction.seller = person.id AND (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)), output: [person.name, person.city, person.state, auction.id] }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(auction.seller) }
+        └─BatchProject { exprs: [auction.id, auction.seller] }
+          └─BatchFilter { predicate: (auction.category = 10:Int32) }
+            └─BatchScan { table: auction, columns: [auction.id, auction.seller, auction.category], distribution: UpstreamHashShard(auction.id) }
   stream_plan: |
     StreamMaterialize { columns: [name, city, state, id, auction.seller(hidden), person.id(hidden)], pk_columns: [id, person.id, auction.seller] }
     └─StreamHashJoin { type: Inner, predicate: auction.seller = person.id, output: [person.name, person.city, person.state, auction.id, auction.seller, person.id] }
@@ -187,21 +184,20 @@
     └─BatchProject { exprs: [auction.category, (sum(max(bid.price)) / count(max(bid.price)))] }
       └─BatchHashAgg { group_key: [auction.category], aggs: [sum(max(bid.price)), count(max(bid.price))] }
         └─BatchExchange { order: [], dist: HashShard(auction.category) }
-          └─BatchProject { exprs: [auction.category, max(bid.price)] }
-            └─BatchHashAgg { group_key: [auction.id, auction.category], aggs: [max(bid.price)] }
-              └─BatchProject { exprs: [auction.id, auction.category, bid.price] }
-                └─BatchFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
-                  └─BatchHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
-                    ├─BatchExchange { order: [], dist: HashShard(auction.id) }
-                    | └─BatchScan { table: auction, columns: [auction.id, auction.date_time, auction.expires, auction.category], distribution: UpstreamHashShard(auction.id) }
-                    └─BatchExchange { order: [], dist: HashShard(bid.auction) }
-                      └─BatchScan { table: bid, columns: [bid.auction, bid.price, bid.date_time], distribution: SomeShard }
+          └─BatchHashAgg { group_key: [auction.id, auction.category], aggs: [max(bid.price)] }
+            └─BatchProject { exprs: [auction.id, auction.category, bid.price] }
+              └─BatchFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
+                └─BatchHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+                  ├─BatchExchange { order: [], dist: HashShard(auction.id) }
+                  | └─BatchScan { table: auction, columns: [auction.id, auction.date_time, auction.expires, auction.category], distribution: UpstreamHashShard(auction.id) }
+                  └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+                    └─BatchScan { table: bid, columns: [bid.auction, bid.price, bid.date_time], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [category, avg], pk_columns: [category] }
     └─StreamProject { exprs: [auction.category, (sum(max(bid.price)) / count(max(bid.price)))] }
       └─StreamHashAgg { group_key: [auction.category], aggs: [count, sum(max(bid.price)), count(max(bid.price))] }
         └─StreamExchange { dist: HashShard(auction.category) }
-          └─StreamProject { exprs: [auction.category, max(bid.price), auction.id] }
+          └─StreamProject { exprs: [auction.id, auction.category, max(bid.price)] }
             └─StreamHashAgg { group_key: [auction.id, auction.category], aggs: [count, max(bid.price)] }
               └─StreamProject { exprs: [auction.id, auction.category, bid.price, bid._row_id, bid.auction] }
                 └─StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
@@ -217,10 +213,10 @@
         StreamProject { exprs: [auction.category, (sum(max(bid.price)) / count(max(bid.price)))] }
           StreamHashAgg { group_key: [auction.category], aggs: [count, sum(max(bid.price)), count(max(bid.price))] }
               result table: 0, state tables: []
-            StreamExchange Hash([0]) from 1
+            StreamExchange Hash([1]) from 1
 
     Fragment 1
-      StreamProject { exprs: [auction.category, max(bid.price), auction.id] }
+      StreamProject { exprs: [auction.id, auction.category, max(bid.price)] }
         StreamHashAgg { group_key: [auction.id, auction.category], aggs: [count, max(bid.price)] }
             result table: 2, state tables: [1]
           StreamProject { exprs: [auction.id, auction.category, bid.price, bid._row_id, bid.auction] }
@@ -288,18 +284,16 @@
           ├─BatchExchange { order: [], dist: HashShard(window_start) }
           | └─BatchProject { exprs: [bid.auction, count, window_start] }
           |   └─BatchHashAgg { group_key: [window_start, bid.auction], aggs: [count] }
-          |     └─BatchExchange { order: [], dist: HashShard(window_start, bid.auction) }
-          |       └─BatchProject { exprs: [window_start, bid.auction] }
-          |         └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
-          |           └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
+          |     └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
+          |       └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+          |         └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
           └─BatchProject { exprs: [max(count), window_start] }
             └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
               └─BatchExchange { order: [], dist: HashShard(window_start) }
-                └─BatchProject { exprs: [window_start, count] }
-                  └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
-                    └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
-                      └─BatchExchange { order: [], dist: HashShard(bid.auction) }
-                        └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
+                └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
+                  └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
+                    └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+                      └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [window_start, auction, window_start#1] }
     └─StreamProject { exprs: [bid.auction, count, window_start, window_start] }
@@ -308,14 +302,13 @@
           ├─StreamExchange { dist: HashShard(window_start) }
           | └─StreamProject { exprs: [bid.auction, count, window_start] }
           |   └─StreamHashAgg { group_key: [window_start, bid.auction], aggs: [count, count] }
-          |     └─StreamExchange { dist: HashShard(window_start, bid.auction) }
-          |       └─StreamProject { exprs: [window_start, bid.auction, bid._row_id] }
-          |         └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
-          |           └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+          |     └─StreamExchange { dist: HashShard(bid.auction, window_start) }
+          |       └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
+          |         └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
           └─StreamProject { exprs: [max(count), window_start] }
             └─StreamHashAgg { group_key: [window_start], aggs: [count, max(count)] }
               └─StreamExchange { dist: HashShard(window_start) }
-                └─StreamProject { exprs: [window_start, count, bid.auction] }
+                └─StreamProject { exprs: [bid.auction, window_start, count] }
                   └─StreamHashAgg { group_key: [bid.auction, window_start], aggs: [count, count] }
                     └─StreamExchange { dist: HashShard(bid.auction, window_start) }
                       └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
@@ -332,7 +325,7 @@
               StreamProject { exprs: [max(count), window_start] }
                 StreamHashAgg { group_key: [window_start], aggs: [count, max(count)] }
                     result table: 6, state tables: [5]
-                  StreamExchange Hash([0]) from 3
+                  StreamExchange Hash([1]) from 3
 
     Fragment 1
       StreamProject { exprs: [bid.auction, count, window_start] }
@@ -341,14 +334,13 @@
           StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
-      StreamProject { exprs: [window_start, bid.auction, bid._row_id] }
-        StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
-          Chain { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-            Upstream
-            BatchPlanNode
+      StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
+        Chain { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+          Upstream
+          BatchPlanNode
 
     Fragment 3
-      StreamProject { exprs: [window_start, count, bid.auction] }
+      StreamProject { exprs: [bid.auction, window_start, count] }
         StreamHashAgg { group_key: [bid.auction, window_start], aggs: [count, count] }
             result table: 7, state tables: []
           StreamExchange Hash([0, 1]) from 4
@@ -363,7 +355,7 @@
      Table 1 { columns: [window_start, window_start_0, bid.auction, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
      Table 2 { columns: [max(count), window_start], primary key: [$1 ASC, $1 ASC], value indices: [0, 1], distribution key: [1] }
      Table 3 { columns: [window_start, window_start_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 4 { columns: [window_start, bid.auction, count, count_0], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0, 1] }
+     Table 4 { columns: [window_start, bid.auction, count, count_0], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [1, 0] }
      Table 5 { columns: [window_start, count, bid.auction], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
      Table 6 { columns: [window_start, count, max(count)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 7 { columns: [bid.auction, window_start, count, count_0], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0, 1] }
@@ -784,10 +776,9 @@
       └─BatchExchange { order: [], dist: HashShard(ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)) }
         └─BatchHashAgg { group_key: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag], aggs: [count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
           └─BatchExchange { order: [], dist: HashShard(ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.auction, flag) }
-            └─BatchProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.auction, bid.price, flag] }
-              └─BatchExpand { column_subsets: [[ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)], [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder], [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.auction]] }
-                └─BatchProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.price, bid.bidder, bid.auction] }
-                  └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time], distribution: SomeShard }
+            └─BatchExpand { column_subsets: [[ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)], [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder], [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.auction]] }
+              └─BatchProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.price, bid.bidder, bid.auction] }
+                └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], pk_columns: [day] }
     └─StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), sum0(count) filter((flag = 0:Int64)), sum0(count filter((bid.price < 10000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid.price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bid.bidder) filter((flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.auction) filter((flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))] }
@@ -796,10 +787,9 @@
           └─StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag, count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
             └─StreamHashAgg { group_key: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag], aggs: [count, count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
               └─StreamExchange { dist: HashShard(ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.auction, flag) }
-                └─StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.auction, bid.price, flag, bid._row_id] }
-                  └─StreamExpand { column_subsets: [[ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)], [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder], [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.auction]] }
-                    └─StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.price, bid.bidder, bid.auction, bid._row_id] }
-                      └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+                └─StreamExpand { column_subsets: [[ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)], [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder], [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.auction]] }
+                  └─StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.price, bid.bidder, bid.auction, bid._row_id] }
+                    └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], pk_columns: [day] }
@@ -813,15 +803,14 @@
       StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag, count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
         StreamHashAgg { group_key: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag], aggs: [count, count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
             result table: 1, state tables: []
-          StreamExchange Hash([0, 1, 2, 4]) from 2
+          StreamExchange Hash([0, 2, 3, 10]) from 2
 
     Fragment 2
-      StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.auction, bid.price, flag, bid._row_id] }
-        StreamExpand { column_subsets: [[ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)], [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder], [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.auction]] }
-          StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.price, bid.bidder, bid.auction, bid._row_id] }
-            Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-              Upstream
-              BatchPlanNode
+      StreamExpand { column_subsets: [[ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)], [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder], [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.auction]] }
+        StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.price, bid.bidder, bid.auction, bid._row_id] }
+          Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+            Upstream
+            BatchPlanNode
 
      Table 0 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count, sum0(count) filter((flag = 0:Int64)), sum0(count filter((bid.price < 10000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid.price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bid.bidder) filter((flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.auction) filter((flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))], primary key: [$0 ASC], value indices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [0] }
      Table 1 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count, count_0, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32))_0, count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))_0, count filter((bid.price >= 1000000:Int32))_0, count filter((bid.price < 10000:Int32))_1, count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))_1, count filter((bid.price >= 1000000:Int32))_1], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], distribution key: [0, 4, 8, 9] }
@@ -854,10 +843,9 @@
       └─BatchExchange { order: [], dist: HashShard(bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)) }
         └─BatchHashAgg { group_key: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag], aggs: [max(ToChar(bid.date_time, 'HH:mm':Varchar)), count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
           └─BatchExchange { order: [], dist: HashShard(bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.auction, flag) }
-            └─BatchProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar), bid.bidder, bid.auction, bid.price, flag] }
-              └─BatchExpand { column_subsets: [[bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar)], [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder], [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.auction]] }
-                └─BatchProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar), bid.price, bid.bidder, bid.auction] }
-                  └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.date_time], distribution: SomeShard }
+            └─BatchExpand { column_subsets: [[bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar)], [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder], [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.auction]] }
+              └─BatchProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar), bid.price, bid.bidder, bid.auction] }
+                └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.date_time], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], pk_columns: [channel, day] }
     └─StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), max(max(ToChar(bid.date_time, 'HH:mm':Varchar))) filter((flag = 0:Int64)), sum0(count) filter((flag = 0:Int64)), sum0(count filter((bid.price < 10000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid.price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bid.bidder) filter((flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.auction) filter((flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))] }
@@ -866,10 +854,9 @@
           └─StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag, max(ToChar(bid.date_time, 'HH:mm':Varchar)), count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
             └─StreamHashAgg { group_key: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag], aggs: [count, max(ToChar(bid.date_time, 'HH:mm':Varchar)), count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
               └─StreamExchange { dist: HashShard(bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.auction, flag) }
-                └─StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar), bid.bidder, bid.auction, bid.price, flag, bid._row_id] }
-                  └─StreamExpand { column_subsets: [[bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar)], [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder], [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.auction]] }
-                    └─StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar), bid.price, bid.bidder, bid.auction, bid._row_id] }
-                      └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+                └─StreamExpand { column_subsets: [[bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar)], [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder], [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.auction]] }
+                  └─StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar), bid.price, bid.bidder, bid.auction, bid._row_id] }
+                    └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], pk_columns: [channel, day] }
@@ -883,15 +870,14 @@
       StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag, max(ToChar(bid.date_time, 'HH:mm':Varchar)), count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
         StreamHashAgg { group_key: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag], aggs: [count, max(ToChar(bid.date_time, 'HH:mm':Varchar)), count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
             result table: 3, state tables: [2]
-          StreamExchange Hash([0, 1, 3, 4, 6]) from 2
+          StreamExchange Hash([0, 1, 4, 5, 14]) from 2
 
     Fragment 2
-      StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar), bid.bidder, bid.auction, bid.price, flag, bid._row_id] }
-        StreamExpand { column_subsets: [[bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar)], [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder], [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.auction]] }
-          StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar), bid.price, bid.bidder, bid.auction, bid._row_id] }
-            Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-              Upstream
-              BatchPlanNode
+      StreamExpand { column_subsets: [[bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar)], [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder], [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.auction]] }
+        StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), ToChar(bid.date_time, 'HH:mm':Varchar), bid.price, bid.bidder, bid.auction, bid._row_id] }
+          Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+            Upstream
+            BatchPlanNode
 
      Table 0 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), max(ToChar(bid.date_time, 'HH:mm':Varchar)), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag], primary key: [$0 ASC, $1 ASC, $2 DESC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1] }
      Table 1 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count, max(max(ToChar(bid.date_time, 'HH:mm':Varchar))) filter((flag = 0:Int64)), sum0(count) filter((flag = 0:Int64)), sum0(count filter((bid.price < 10000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid.price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bid.bidder) filter((flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.auction) filter((flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], distribution key: [0, 1] }
@@ -1025,12 +1011,9 @@
     WHERE A.category = 10;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: bid.auction = auction.id, output: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category] }
-      ├─BatchExchange { order: [], dist: HashShard(bid.auction) }
-      | └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time], distribution: SomeShard }
-      └─BatchExchange { order: [], dist: HashShard(auction.id) }
-        └─BatchFilter { predicate: (auction.category = 10:Int32) }
-          └─BatchScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], distribution: UpstreamHashShard(auction.id) }
+    └─BatchLookupJoin { type: Inner, predicate: bid.auction = auction.id AND (auction.category = 10:Int32), output: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category] }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(bid.auction) }
+        └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, bid._row_id(hidden), auction.id(hidden)], pk_columns: [bid._row_id, auction.id, auction] }
     └─StreamHashJoin { type: Inner, predicate: bid.auction = auction.id, output: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid._row_id, auction.id] }

@@ -22,7 +22,7 @@ use risingwave_pb::catalog::{
     Table as ProstTable, View as ProstView,
 };
 
-use super::source_catalog::SourceCatalog;
+use super::source_catalog::{SourceCatalog, SourceKind};
 use super::ViewId;
 use crate::catalog::index_catalog::IndexCatalog;
 use crate::catalog::sink_catalog::SinkCatalog;
@@ -186,21 +186,24 @@ impl SchemaCatalog {
         self.table_by_name
             .iter()
             .filter(|(_, v)| {
-                // Internally, a table with an associated source can be
-                // MATERIALIZED SOURCE or TABLE.
-                v.associated_source_id.is_some()
-                    && self.get_source_by_name(v.name()).unwrap().is_table()
+                v.is_table()
+                    && v.associated_source_id.is_some()  // TODO(Yuanxin): Remove this.
+                    && self.get_source_by_name(v.name()).unwrap().kind() == SourceKind::Table
             })
             .map(|(_, v)| v)
+    }
+
+    pub fn iter_valid_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_name
+            .iter()
+            .filter_map(|(key, v)| valid_table_name(key).then_some(v))
     }
 
     /// Iterate all materialized views, excluding the indices.
     pub fn iter_mv(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| {
-                v.associated_source_id.is_none() && valid_table_name(&v.name) && !v.is_index
-            })
+            .filter(|(_, v)| v.is_mview() && valid_table_name(&v.name))
             .map(|(_, v)| v)
     }
 
@@ -213,7 +216,7 @@ impl SchemaCatalog {
     pub fn iter_source(&self) -> impl Iterator<Item = &Arc<SourceCatalog>> {
         self.source_by_name
             .iter()
-            .filter(|(_, v)| v.is_stream())
+            .filter(|(_, v)| v.kind() == SourceKind::Stream)
             .map(|(_, v)| v)
     }
 
@@ -221,7 +224,9 @@ impl SchemaCatalog {
     pub fn iter_materialized_source(&self) -> impl Iterator<Item = &Arc<SourceCatalog>> {
         self.source_by_name
             .iter()
-            .filter(|(name, v)| v.is_stream() && self.table_by_name.get(*name).is_some())
+            .filter(|(name, v)| {
+                v.kind() == SourceKind::Stream && self.table_by_name.get(*name).is_some()
+            })
             .map(|(_, v)| v)
     }
 

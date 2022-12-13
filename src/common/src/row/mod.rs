@@ -18,7 +18,9 @@ mod empty;
 mod once;
 mod owned_row;
 mod project;
+mod repeat_n;
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::hash::{BuildHasher, Hasher};
 
@@ -29,9 +31,11 @@ pub use empty::{empty, Empty};
 pub use once::{once, Once};
 pub use owned_row::{Row, RowDeserializer};
 pub use project::Project;
+pub use repeat_n::{repeat_n, RepeatN};
 
 use crate::hash::HashCode;
-use crate::types::{hash_datum_ref, DatumRef, ToDatumRef, ToOwnedDatum};
+use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum};
+use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
@@ -63,9 +67,11 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Converts the row into an owned [`Row`].
+    ///
+    /// Prefer `into_owned_row` if the row is already owned.
     #[inline]
     fn to_owned_row(&self) -> Row {
-        Row(self.iter().map(|d| d.to_owned_datum()).collect())
+        Row::new(self.iter().map(|d| d.to_owned_datum()).collect())
     }
 
     /// Consumes `self` and converts it into an owned [`Row`].
@@ -78,15 +84,31 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     #[inline]
     fn value_serialize_into(&self, mut buf: impl BufMut) {
         for datum in self.iter() {
-            value_encoding::serialize_datum_ref(&datum, &mut buf);
+            value_encoding::serialize_datum(datum, &mut buf);
         }
     }
 
     /// Serializes the row with value encoding and returns the bytes.
     #[inline]
     fn value_serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(self.len()); // each datum is at least 1 byte
         self.value_serialize_into(&mut buf);
+        buf
+    }
+
+    /// Serializes the row with memcomparable encoding, into the given `buf`. As each datum may have
+    /// different order type, a `serde` should be provided.
+    #[inline]
+    fn memcmp_serialize_into(&self, serde: &OrderedRowSerde, buf: impl BufMut) {
+        serde.serialize(self, buf);
+    }
+
+    /// Serializes the row with memcomparable encoding and return the bytes. As each datum may have
+    /// different order type, a `serde` should be provided.
+    #[inline]
+    fn memcmp_serialize(&self, serde: &OrderedRowSerde) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(self.len()); // each datum is at least 1 byte
+        self.memcmp_serialize_into(serde, &mut buf);
         buf
     }
 
@@ -95,7 +117,7 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
         let mut hasher = hash_builder.build_hasher();
         for datum in self.iter() {
-            hash_datum_ref(datum, &mut hasher);
+            hash_datum(datum, &mut hasher);
         }
         HashCode(hasher.finish())
     }
@@ -176,6 +198,14 @@ macro_rules! deref_forward_row {
             (**self).value_serialize()
         }
 
+        fn memcmp_serialize_into(&self, serde: &OrderedRowSerde, buf: impl BufMut) {
+            (**self).memcmp_serialize_into(serde, buf)
+        }
+
+        fn memcmp_serialize(&self, serde: &OrderedRowSerde) -> Vec<u8> {
+            (**self).memcmp_serialize(serde)
+        }
+
         fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
             (**self).hash(hash_builder)
         }
@@ -198,7 +228,7 @@ impl<R: Row2> Row2 for &R {
     deref_forward_row!();
 }
 
-impl<R: Row2> Row2 for Box<R> {
+impl<R: Row2 + Clone> Row2 for Cow<'_, R> {
     type Iter<'a> = R::Iter<'a>
     where
         Self: 'a;
@@ -206,6 +236,20 @@ impl<R: Row2> Row2 for Box<R> {
     deref_forward_row!();
 
     // Manually implemented in case `R` has a more efficient implementation.
+    fn into_owned_row(self) -> Row {
+        self.into_owned().into_owned_row()
+    }
+}
+
+impl<R: Row2> Row2 for Box<R> {
+    type Iter<'a> = R::Iter<'a>
+    where
+        Self: 'a;
+
+    deref_forward_row!();
+
+    // Manually implemented in case the `Cow` is `Owned` and `R` has a more efficient
+    // implementation.
     fn into_owned_row(self) -> Row {
         (*self).into_owned_row()
     }

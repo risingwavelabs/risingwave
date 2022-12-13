@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::env;
 use std::fmt::Write;
 use std::fs::{File, OpenOptions};
@@ -27,9 +26,10 @@ use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
-    ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService,
-    GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService,
-    RedisService, ServiceConfig, Task, ZooKeeperService, RISEDEV_SESSION_NAME,
+    ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
+    FrontendService, GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService,
+    PrometheusService, PubsubService, RedisService, ServiceConfig, Task, ZooKeeperService,
+    RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -65,8 +65,7 @@ impl ProgressManager {
 
 fn task_main(
     manager: &mut ProgressManager,
-    steps: &[String],
-    services: &HashMap<String, ServiceConfig>,
+    services: &Vec<ServiceConfig>,
 ) -> Result<(Vec<(String, Duration)>, String)> {
     let log_path = env::var("PREFIX_LOG")?;
 
@@ -98,8 +97,7 @@ fn task_main(
     // Firstly, ensure that all ports needed is not occupied by previous runs.
     let mut ports = vec![];
 
-    for step in steps {
-        let service = services.get(step).unwrap();
+    for service in services {
         let listen_info = match service {
             ServiceConfig::Minio(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Etcd(c) => Some((c.port, c.id.clone())),
@@ -111,10 +109,12 @@ fn task_main(
             ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
             ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Pubsub(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
             ServiceConfig::RedPanda(_) => None,
+            ServiceConfig::ConnectorNode(c) => Some((c.port, c.id.clone())),
         };
 
         if let Some(x) = listen_info {
@@ -132,8 +132,7 @@ fn task_main(
 
     let mut stat = vec![];
 
-    for step in steps {
-        let service = services.get(step).unwrap();
+    for service in services {
         let start_time = Instant::now();
 
         match service {
@@ -209,9 +208,12 @@ fn task_main(
                 writeln!(
                     log_buffer,
                     "* Run {} to start Postgres interactive shell.",
-                    style(format!("psql -h localhost -p {} -d dev -U root", c.port))
-                        .blue()
-                        .bold()
+                    style(format_args!(
+                        "psql -h localhost -p {} -d dev -U root",
+                        c.port
+                    ))
+                    .blue()
+                    .bold()
                 )?;
             }
             ServiceConfig::Compactor(c) => {
@@ -296,6 +298,16 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("kafka {}:{}", c.address, c.port));
             }
+            ServiceConfig::Pubsub(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = PubsubService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task = risedev::PubsubReadyTaskCheck::new(c.clone())?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("pubsub {}:{}", c.address, c.port));
+            }
             ServiceConfig::RedPanda(_) => {
                 return Err(anyhow!("redpanda is only supported in RiseDev compose."));
             }
@@ -309,6 +321,17 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("redis {}:{}", c.address, c.port));
             }
+            ServiceConfig::ConnectorNode(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = ConnectorNodeService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("connector grpc://{}:{}", c.address, c.port));
+            }
         }
 
         let service_id = service.id().to_string();
@@ -320,6 +343,8 @@ fn task_main(
 }
 
 fn main() -> Result<()> {
+    preflight_check()?;
+
     let risedev_config = {
         let mut content = String::new();
         File::open("risedev.yml")?.read_to_string(&mut content)?;
@@ -330,7 +355,13 @@ fn main() -> Result<()> {
         .nth(1)
         .unwrap_or_else(|| "default".to_string());
 
-    let risedev_config = ConfigExpander::expand(&risedev_config, &task_name)?;
+    let (config_path, risedev_config) = ConfigExpander::expand(&risedev_config, &task_name)?;
+
+    if let Some(config_path) = &config_path {
+        let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
+        std::fs::copy(config_path, target)?;
+    }
+
     {
         let mut out_str = String::new();
         let mut emitter = YamlEmitter::new(&mut out_str);
@@ -340,10 +371,7 @@ fn main() -> Result<()> {
             &out_str,
         )?;
     }
-
-    preflight_check()?;
-
-    let (steps, services) = ConfigExpander::select(&risedev_config, &task_name)?;
+    let services = ConfigExpander::deserialize(&risedev_config)?;
 
     let mut manager = ProgressManager::new();
     // Always create a progress before calling `task_main`. Otherwise the progress bar won't be
@@ -352,10 +380,10 @@ fn main() -> Result<()> {
     p.set_prefix("dev cluster");
     p.set_message(format!(
         "starting {} services for {}...",
-        steps.len(),
+        services.len(),
         task_name
     ));
-    let task_result = task_main(&mut manager, &steps, &services);
+    let task_result = task_main(&mut manager, &services);
 
     match task_result {
         Ok(_) => {
@@ -391,7 +419,7 @@ fn main() -> Result<()> {
 
             std::fs::write(
                 Path::new(&env::var("PREFIX_CONFIG")?).join("risectl-env"),
-                &risectl_env,
+                risectl_env,
             )?;
 
             println!("All services started successfully.");

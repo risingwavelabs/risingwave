@@ -1,0 +1,11 @@
+statement ok
+create materialized view ch_benchmark_q1 as
+select   ol_number,
+         sum(ol_quantity) as sum_qty,
+         sum(round(ol_amount::decimal,0)) as sum_amount,
+         round(avg(ol_quantity)::decimal, 0) as avg_qty,
+         round(avg(ol_amount)::decimal, 0) as avg_amount,
+         count(*) as count_order
+from     orderline
+where    ol_delivery_d > '2007-01-02 00:00:00.000000'
+group by ol_number;

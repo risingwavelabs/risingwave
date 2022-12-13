@@ -210,9 +210,9 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     /// Pruning
@@ -267,7 +267,7 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
-        assert_eq!(filter.id().0, 3);
+        assert_eq!(filter.id().0, 4);
 
         let expr: ExprImpl = filter.predicate().clone().into();
         let call = expr.as_function_call().unwrap();

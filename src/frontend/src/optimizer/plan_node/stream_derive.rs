@@ -16,8 +16,8 @@ use risingwave_common::catalog::Schema;
 
 use super::generic::GenericPlanNode;
 use super::stream::*;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::Distribution;
-use crate::session::OptimizerContextRef;
 
 impl GenericPlanNode for DynamicFilter {
     fn schema(&self) -> Schema {

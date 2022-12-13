@@ -317,6 +317,7 @@ impl ColPrunable for LogicalHopWindow {
 
 impl PredicatePushdown for LogicalHopWindow {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        // TODO: hop's predicate pushdown https://github.com/risingwavelabs/risingwave/issues/6606
         gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
@@ -375,9 +376,9 @@ mod test {
 
     use super::*;
     use crate::expr::InputRef;
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
     #[tokio::test]
     /// Pruning
     /// ```text

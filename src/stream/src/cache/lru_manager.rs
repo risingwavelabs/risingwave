@@ -24,6 +24,7 @@ use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 use tracing;
 
 use super::ManagedLruCache;
+use crate::executor::monitor::StreamingMetrics;
 
 /// When `enable_managed_cache` is set, compute node will launch a [`LruManager`] to limit the
 /// memory usage.
@@ -34,6 +35,7 @@ pub struct LruManager {
     total_memory_available_bytes: usize,
     /// Barrier interval.
     barrier_interval_ms: u32,
+    metrics: Arc<StreamingMetrics>,
 }
 
 pub type LruManagerRef = Arc<LruManager>;
@@ -42,11 +44,20 @@ impl LruManager {
     const EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
     const EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
 
-    pub fn new(total_memory_available_bytes: usize, barrier_interval_ms: u32) -> Arc<Self> {
+    pub fn new(
+        total_memory_available_bytes: usize,
+        barrier_interval_ms: u32,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Arc<Self> {
+        // Arbitrarily set a minimal barrier interval in case it is too small,
+        // especially when it's 0.
+        let barrier_interval_ms = std::cmp::max(barrier_interval_ms, 10);
+
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
             total_memory_available_bytes,
             barrier_interval_ms,
+            metrics,
         })
     }
 
@@ -128,6 +139,7 @@ impl LruManager {
             //     last_step
             //   - or else we set the step to last_step * 2
 
+            let last_step = step;
             step = if cur_total_bytes_used < mem_threshold_graceful {
                 // Do not evict if the memory usage is lower than `mem_threshold_graceful`
                 0
@@ -138,7 +150,7 @@ impl LruManager {
                 } else {
                     step + 1
                 }
-            } else if last_total_bytes_used > cur_total_bytes_used {
+            } else if last_total_bytes_used < cur_total_bytes_used {
                 // Aggressively evict
                 if step == 0 {
                     2
@@ -150,7 +162,26 @@ impl LruManager {
             };
 
             last_total_bytes_used = cur_total_bytes_used;
-            watermark_time_ms += self.barrier_interval_ms as u64 * step;
+
+            // if watermark_time_ms + self.barrier_interval_ms as u64 * step > now, we do not
+            // increase the step, and set the epoch to now time epoch.
+            let physical_now = Epoch::physical_now();
+            if (physical_now - watermark_time_ms) / (self.barrier_interval_ms as u64) < step {
+                step = last_step;
+                watermark_time_ms = physical_now;
+            } else {
+                watermark_time_ms += self.barrier_interval_ms as u64 * step;
+            }
+
+            self.metrics
+                .lru_current_watermark_time_ms
+                .set(watermark_time_ms as i64);
+            self.metrics.lru_physical_now_ms.set(physical_now as i64);
+            self.metrics.lru_watermark_step.set(step as i64);
+            self.metrics.lru_runtime_loop_count.inc();
+            self.metrics
+                .jemalloc_allocated_bytes
+                .set(cur_total_bytes_used as i64);
 
             self.set_watermark_time_ms(watermark_time_ms);
         }

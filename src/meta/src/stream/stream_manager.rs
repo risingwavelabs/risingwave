@@ -933,15 +933,13 @@ mod tests {
             let compactor_manager =
                 Arc::new(CompactorManager::with_meta(env.clone(), 1).await.unwrap());
 
-            let hummock_manager = Arc::new(
-                HummockManager::new(
-                    env.clone(),
-                    cluster_manager.clone(),
-                    meta_metrics.clone(),
-                    compactor_manager.clone(),
-                )
-                .await?,
-            );
+            let hummock_manager = HummockManager::new(
+                env.clone(),
+                cluster_manager.clone(),
+                meta_metrics.clone(),
+                compactor_manager.clone(),
+            )
+            .await?;
 
             let (barrier_scheduler, scheduled_barriers) =
                 BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);

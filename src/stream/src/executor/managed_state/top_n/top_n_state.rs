@@ -127,7 +127,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         while let Some(item) = stream.next().await {
             rows.push(self.get_topn_row(
                 item?.into_owned(),
-                group_key.map(|p| p.size()).unwrap_or(0),
+                group_key.map(|p| p.len()).unwrap_or(0),
                 order_by_len,
             ));
         }
@@ -154,7 +154,7 @@ impl<S: StateStore> ManagedTopNState<S> {
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
             let topn_row = self.get_topn_row(
                 item?.into_owned(),
-                group_key.map(|p| p.size()).unwrap_or(0),
+                group_key.map(|p| p.len()).unwrap_or(0),
                 order_by_len,
             );
             if topn_row.cache_key <= start_key {
@@ -171,7 +171,7 @@ impl<S: StateStore> ManagedTopNState<S> {
             while let Some(item) = state_table_iter.next().await {
                 let topn_row = self.get_topn_row(
                     item?.into_owned(),
-                    group_key.map(|p| p.size()).unwrap_or(0),
+                    group_key.map(|p| p.len()).unwrap_or(0),
                     order_by_len,
                 );
                 if topn_row.cache_key.0 == high_last_sort_key {
@@ -203,7 +203,7 @@ impl<S: StateStore> ManagedTopNState<S> {
             while let Some(item) = state_table_iter.next().await {
                 let topn_row = self.get_topn_row(
                     item?.into_owned(),
-                    group_key.map(|p| p.size()).unwrap_or(0),
+                    group_key.map(|p| p.len()).unwrap_or(0),
                     order_by_len,
                 );
                 topn_cache
@@ -219,7 +219,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         while let Some(item) = state_table_iter.next().await {
             let topn_row = self.get_topn_row(
                 item?.into_owned(),
-                group_key.map(|p| p.size()).unwrap_or(0),
+                group_key.map(|p| p.len()).unwrap_or(0),
                 order_by_len,
             );
             topn_cache
@@ -234,7 +234,7 @@ impl<S: StateStore> ManagedTopNState<S> {
             while let Some(item) = state_table_iter.next().await {
                 let topn_row = self.get_topn_row(
                     item?.into_owned(),
-                    group_key.map(|p| p.size()).unwrap_or(0),
+                    group_key.map(|p| p.len()).unwrap_or(0),
                     order_by_len,
                 );
                 if topn_row.cache_key.0 == middle_last_sort_key {
@@ -255,7 +255,7 @@ impl<S: StateStore> ManagedTopNState<S> {
             "topn cache high_capacity should always > 0"
         );
         while !topn_cache.is_high_cache_full() && let Some(item) = state_table_iter.next().await {
-            let topn_row = self.get_topn_row(item?.into_owned(), group_key.map(|p|p.size()).unwrap_or(0), order_by_len);
+            let topn_row = self.get_topn_row(item?.into_owned(), group_key.map(|p|p.len()).unwrap_or(0), order_by_len);
             topn_cache.high.insert(topn_row.cache_key, (&topn_row.row).into());
         }
         if WITH_TIES && topn_cache.is_high_cache_full() {
@@ -263,7 +263,7 @@ impl<S: StateStore> ManagedTopNState<S> {
             while let Some(item) = state_table_iter.next().await {
                 let topn_row = self.get_topn_row(
                     item?.into_owned(),
-                    group_key.map(|p| p.size()).unwrap_or(0),
+                    group_key.map(|p| p.len()).unwrap_or(0),
                     order_by_len,
                 );
                 if topn_row.cache_key.0 == high_last_sort_key {
@@ -301,7 +301,8 @@ mod tests {
         order_by_len: usize,
         cache_key_serde: &(OrderedRowSerde, OrderedRowSerde),
     ) -> CacheKey {
-        let (cache_key_first, cache_key_second) = pk.0.split_at(order_by_len);
+        let pk = pk.into_inner();
+        let (cache_key_first, cache_key_second) = pk.split_at(order_by_len);
         let mut cache_key_first_bytes = vec![];
         let mut cache_key_second_bytes = vec![];
         cache_key_serde.0.serialize(
@@ -343,10 +344,10 @@ mod tests {
         let cache_key_serde = (first_key_serde, second_key_serde);
         let mut managed_state = ManagedTopNState::new(state_table, &data_types, &order_types, 1);
 
-        let row1 = row_nonnull!["abc".to_string(), 2i64];
-        let row2 = row_nonnull!["abc".to_string(), 3i64];
-        let row3 = row_nonnull!["abd".to_string(), 3i64];
-        let row4 = row_nonnull!["ab".to_string(), 4i64];
+        let row1 = row_nonnull!["abc", 2i64];
+        let row2 = row_nonnull!["abc", 3i64];
+        let row3 = row_nonnull!["abd", 3i64];
+        let row4 = row_nonnull!["ab", 4i64];
 
         let row1_bytes = serialize_row_to_cache_key(row1.clone(), 1, &cache_key_serde);
         let row2_bytes = serialize_row_to_cache_key(row2.clone(), 1, &cache_key_serde);
@@ -423,11 +424,11 @@ mod tests {
         let cache_key_serde = (first_key_serde, second_key_serde);
         let mut managed_state = ManagedTopNState::new(state_table, &data_types, &order_types, 1);
 
-        let row1 = row_nonnull!["abc".to_string(), 2i64];
-        let row2 = row_nonnull!["abc".to_string(), 3i64];
-        let row3 = row_nonnull!["abd".to_string(), 3i64];
-        let row4 = row_nonnull!["ab".to_string(), 4i64];
-        let row5 = row_nonnull!["abcd".to_string(), 5i64];
+        let row1 = row_nonnull!["abc", 2i64];
+        let row2 = row_nonnull!["abc", 3i64];
+        let row3 = row_nonnull!["abd", 3i64];
+        let row4 = row_nonnull!["ab", 4i64];
+        let row5 = row_nonnull!["abcd", 5i64];
 
         let row1_bytes = serialize_row_to_cache_key(row1.clone(), 1, &cache_key_serde);
         let row2_bytes = serialize_row_to_cache_key(row2.clone(), 1, &cache_key_serde);

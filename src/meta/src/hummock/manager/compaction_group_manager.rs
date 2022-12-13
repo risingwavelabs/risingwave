@@ -725,7 +725,7 @@ mod tests {
     use std::ops::Deref;
 
     use risingwave_common::catalog::{TableId, TableOption};
-    use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::meta::table_fragments::Fragment;
 
@@ -746,16 +746,16 @@ mod tests {
         let registered_number = |inner: &CompactionGroupManagerInner<MemStore>| {
             inner
                 .compaction_groups
-                .iter()
-                .map(|(_, cg)| cg.member_table_ids.len())
+                .values()
+                .map(|cg| cg.member_table_ids.len())
                 .sum::<usize>()
         };
 
         let table_option_number = |inner: &CompactionGroupManagerInner<MemStore>| {
             inner
                 .compaction_groups
-                .iter()
-                .map(|(_, cg)| cg.table_id_to_options().len())
+                .values()
+                .map(|cg| cg.table_id_to_options().len())
                 .sum::<usize>()
         };
 

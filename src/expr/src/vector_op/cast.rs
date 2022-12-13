@@ -15,11 +15,9 @@
 use std::any::type_name;
 use std::str::FromStr;
 
-use bytes::{Bytes, BytesMut};
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use itertools::Itertools;
 use num_traits::ToPrimitive;
-use postgres_types::ToSql;
 use risingwave_common::array::{Array, ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
@@ -39,11 +37,15 @@ const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
 const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
-const PARSE_ERROR_STR_TO_TIMESTAMPZ: &str = "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)";
+const PARSE_ERROR_STR_TO_TIMESTAMPZ: &str = concat!(
+    "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
+    , "\nFor example: '2021-04-01 00:00:00+00:00'"
+);
 const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
 const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
 const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
+const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
 
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
@@ -63,24 +65,26 @@ pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
 #[inline]
 fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
     if let Ok(res) = SpeedDateTime::parse_str(s) {
-        let date = NaiveDate::from_ymd(
+        Ok(NaiveDateWrapper::from_ymd_uncheck(
             res.date.year as i32,
             res.date.month as u32,
             res.date.day as u32,
-        );
-        let time = NaiveTime::from_hms_micro(
+        )
+        .and_hms_micro_uncheck(
             res.time.hour as u32,
             res.time.minute as u32,
             res.time.second as u32,
             res.time.microsecond,
-        );
-        Ok(NaiveDateTime::new(date, time))
+        )
+        .0)
     } else {
         let res =
             SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))?;
-        let date = NaiveDate::from_ymd(res.year as i32, res.month as u32, res.day as u32);
-        let time = NaiveTime::from_hms_micro(0, 0, 0, 0);
-        Ok(NaiveDateTime::new(date, time))
+        Ok(
+            NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
+                .and_hms_micro_uncheck(0, 0, 0, 0)
+                .0,
+        )
     }
 }
 
@@ -121,31 +125,28 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
 #[inline]
 pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
     let us = i64_to_timestampz(t)?;
-    Ok(NaiveDateTimeWrapper::new(NaiveDateTime::from_timestamp(
+    Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
         us / 1_000_000,
         (us % 1_000_000) as u32 * 1000,
-    )))
+    ))
 }
 
 #[inline]
 fn parse_naive_date(s: &str) -> Result<NaiveDate> {
     let res = SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE))?;
-    Ok(NaiveDate::from_ymd(
-        res.year as i32,
-        res.month as u32,
-        res.day as u32,
-    ))
+    Ok(NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32).0)
 }
 
 #[inline]
 fn parse_naive_time(s: &str) -> Result<NaiveTime> {
     let res = SpeedTime::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIME))?;
-    Ok(NaiveTime::from_hms_micro(
+    Ok(NaiveTimeWrapper::from_hms_micro_uncheck(
         res.hour as u32,
         res.minute as u32,
         res.second as u32,
         res.microsecond,
-    ))
+    )
+    .0)
 }
 
 #[inline(always)]
@@ -180,37 +181,74 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
 }
 
 #[inline(always)]
-pub fn timestampz_to_utc_string(elem: i64) -> String {
-    // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
-    // from session. See #3552.
-    let mut secs = elem / 1_000_000;
-    let mut nsecs = (elem % 1_000_000) * 1000;
-    if nsecs < 0 {
-        secs -= 1;
-        nsecs += 1_000_000_000;
+pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
+    // Padded with whitespace str is not allowed.
+    if elem.starts_with(' ') && elem.trim().starts_with("\\x") {
+        Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA))
+    } else if let Some(remainder) = elem.strip_prefix(r"\x") {
+        Ok(parse_bytes_hex(remainder)?.into())
+    } else {
+        Ok(parse_bytes_traditional(elem)?.into())
     }
-    let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
-    // PostgreSQL uses a space rather than `T` to separate the date and time.
-    // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-OUTPUT
-    instant.format("%Y-%m-%d %H:%M:%S%.f%:z").to_string()
 }
 
-pub fn timestampz_to_utc_binary(elem: i64) -> Bytes {
-    // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
-    // from session. See #3552.
-    let mut secs = elem / 1_000_000;
-    let mut nsecs = (elem % 1_000_000) * 1000;
-    if nsecs < 0 {
-        secs -= 1;
-        nsecs += 1_000_000_000;
+// Refer to Materialize: https://github.com/MaterializeInc/materialize/blob/1766ab3978bc90abf75eb9b1fbadfcc95eca1993/src/repr/src/strconv.rs#L623
+pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
+    // Can't use `hex::decode` here, as it doesn't tolerate whitespace
+    // between encoded bytes.
+
+    let decode_nibble = |b| match b {
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        b'A'..=b'F' => Ok(b - b'A' + 10),
+        b'0'..=b'9' => Ok(b - b'0'),
+        _ => Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+    };
+
+    let mut buf = vec![];
+    let mut nibbles = s.as_bytes().iter().copied();
+    while let Some(n) = nibbles.next() {
+        if let b' ' | b'\n' | b'\t' | b'\r' = n {
+            continue;
+        }
+        let n = decode_nibble(n)?;
+        let n2 = match nibbles.next() {
+            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            Some(n2) => decode_nibble(n2)?,
+        };
+        buf.push((n << 4) | n2);
     }
-    let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
-    let mut out = BytesMut::new();
-    // postgres_types::Type::ANY is only used as a placeholder.
-    instant
-        .to_sql(&postgres_types::Type::ANY, &mut out)
-        .unwrap();
-    out.freeze()
+    Ok(buf)
+}
+
+// Refer to https://github.com/MaterializeInc/materialize/blob/1766ab3978bc90abf75eb9b1fbadfcc95eca1993/src/repr/src/strconv.rs#L650
+pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
+    // Bytes are interpreted literally, save for the special escape sequences
+    // "\\", which represents a single backslash, and "\NNN", where each N
+    // is an octal digit, which represents the byte whose octal value is NNN.
+    let mut out = Vec::new();
+    let mut bytes = s.as_bytes().iter().fuse();
+    while let Some(&b) = bytes.next() {
+        if b != b'\\' {
+            out.push(b);
+            continue;
+        }
+        match bytes.next() {
+            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            Some(b'\\') => out.push(b'\\'),
+            b => match (b, bytes.next(), bytes.next()) {
+                (Some(d2 @ b'0'..=b'3'), Some(d1 @ b'0'..=b'7'), Some(d0 @ b'0'..=b'7')) => {
+                    out.push(((d2 - b'0') << 6) + ((d1 - b'0') << 3) + (d0 - b'0'));
+                }
+                _ => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            },
+        }
+    }
+    Ok(out)
+}
+
+pub fn timestampz_to_utc_string(elem: i64) -> Box<str> {
+    elem.to_text_with_type(&DataType::Timestampz)
+        .into_boxed_str()
 }
 
 #[inline(always)]
@@ -221,7 +259,7 @@ where
 {
     elem.trim()
         .parse()
-        .map_err(|_| ExprError::Cast(type_name::<str>(), type_name::<T>()))
+        .map_err(|_| ExprError::Parse(type_name::<T>()))
 }
 
 /// Define the cast function to primitive types.
@@ -246,8 +284,7 @@ macro_rules! define_cast_to_primitive {
             {
                 elem.[<to_ $ty>]()
                     .ok_or_else(|| {
-                        ExprError::Cast(
-                            std::any::type_name::<T>(),
+                        ExprError::CastOutOfRange(
                             std::any::type_name::<$ty>()
                         )
                     })
@@ -298,9 +335,9 @@ pub fn interval_to_time(elem: IntervalUnit) -> Result<NaiveTimeWrapper> {
     let ms = elem.get_ms_of_day();
     let secs = (ms / 1000) as u32;
     let nano = (ms % 1000 * 1_000_000) as u32;
-    Ok(NaiveTimeWrapper(NaiveTime::from_num_seconds_from_midnight(
+    Ok(NaiveTimeWrapper::from_num_seconds_from_midnight_uncheck(
         secs, nano,
-    )))
+    ))
 }
 
 #[inline(always)]
@@ -310,7 +347,7 @@ where
     <T1 as TryInto<T2>>::Error: std::fmt::Display,
 {
     elem.try_into()
-        .map_err(|_| ExprError::Cast(std::any::type_name::<T1>(), std::any::type_name::<T2>()))
+        .map_err(|_| ExprError::CastOutOfRange(std::any::type_name::<T2>()))
 }
 
 #[inline(always)]
@@ -337,18 +374,18 @@ pub fn int32_to_bool(input: i32) -> Result<bool> {
 
 // For most of the types, cast them to varchar is similar to return their text format.
 // So we use this function to cast type to varchar.
-pub fn general_to_text<T: ToText>(elem: T) -> Result<String> {
-    Ok(elem.to_text())
+pub fn general_to_text<T: ToText>(elem: T) -> Result<Box<str>> {
+    Ok(elem.to_text().into_boxed_str())
 }
 
-pub fn bool_to_varchar(input: bool) -> Result<String> {
-    Ok(if input { "true".into() } else { "false".into() })
+pub fn bool_to_varchar(input: bool) -> Result<Box<str>> {
+    Ok(if input { "true" } else { "false" }.into())
 }
 
 /// `bool_out` is different from `general_to_string<bool>` to produce a single char. `PostgreSQL`
 /// uses different variants of bool-to-string in different situations.
-pub fn bool_out(input: bool) -> Result<String> {
-    Ok(if input { "t".into() } else { "f".into() })
+pub fn bool_out(input: bool) -> Result<Box<str>> {
+    Ok(if input { "t" } else { "f" }.into())
 }
 
 /// It accepts a macro whose input is `{ $input:ident, $cast:ident, $func:expr }` tuples
@@ -373,6 +410,7 @@ macro_rules! for_all_cast_variants {
             { varchar, float64, str_parse },
             { varchar, decimal, str_parse },
             { varchar, boolean, str_to_bool },
+            { varchar, bytea, str_to_bytea },
             // `str_to_list` requires `target_elem_type` and is handled elsewhere
 
             { boolean, varchar, bool_to_varchar },
@@ -586,7 +624,7 @@ fn scalar_cast(
                             }
                         )*
                         _ => {
-                            return Err(ExprError::Cast2(source_type.clone(), target_type.clone()));
+                            return Err(ExprError::UnsupportedCast(source_type.clone(), target_type.clone()));
                         }
                     }
                 };
@@ -598,6 +636,7 @@ fn scalar_cast(
 
 #[cfg(test)]
 mod tests {
+
     use num_traits::FromPrimitive;
 
     use super::*;
@@ -652,38 +691,36 @@ mod tests {
     fn number_to_string() {
         use super::*;
 
-        assert_eq!(bool_to_varchar(true).unwrap(), "true");
-        assert_eq!(bool_to_varchar(false).unwrap(), "false");
+        macro_rules! test {
+            ($expr:expr, $right:literal) => {
+                assert_eq!($expr.unwrap().as_ref(), $right);
+            };
+        }
 
-        assert_eq!(general_to_text(32).unwrap(), "32");
-        assert_eq!(general_to_text(-32).unwrap(), "-32");
-        assert_eq!(general_to_text(i32::MIN).unwrap(), "-2147483648");
-        assert_eq!(general_to_text(i32::MAX).unwrap(), "2147483647");
+        test!(bool_to_varchar(true), "true");
+        test!(bool_to_varchar(true), "true");
+        test!(bool_to_varchar(false), "false");
 
-        assert_eq!(general_to_text(i16::MIN).unwrap(), "-32768");
-        assert_eq!(general_to_text(i16::MAX).unwrap(), "32767");
+        test!(general_to_text(32), "32");
+        test!(general_to_text(-32), "-32");
+        test!(general_to_text(i32::MIN), "-2147483648");
+        test!(general_to_text(i32::MAX), "2147483647");
 
-        assert_eq!(general_to_text(i64::MIN).unwrap(), "-9223372036854775808");
-        assert_eq!(general_to_text(i64::MAX).unwrap(), "9223372036854775807");
+        test!(general_to_text(i16::MIN), "-32768");
+        test!(general_to_text(i16::MAX), "32767");
 
-        assert_eq!(general_to_text(OrderedF64::from(32.12)).unwrap(), "32.12");
-        assert_eq!(general_to_text(OrderedF64::from(-32.14)).unwrap(), "-32.14");
+        test!(general_to_text(i64::MIN), "-9223372036854775808");
+        test!(general_to_text(i64::MAX), "9223372036854775807");
 
-        assert_eq!(
-            general_to_text(OrderedF32::from(32.12_f32)).unwrap(),
-            "32.12"
-        );
-        assert_eq!(
-            general_to_text(OrderedF32::from(-32.14_f32)).unwrap(),
-            "-32.14"
-        );
+        test!(general_to_text(OrderedF64::from(32.12)), "32.12");
+        test!(general_to_text(OrderedF64::from(-32.14)), "-32.14");
 
-        assert_eq!(
-            general_to_text(Decimal::from_f64(1.222).unwrap()).unwrap(),
-            "1.222"
-        );
+        test!(general_to_text(OrderedF32::from(32.12_f32)), "32.12");
+        test!(general_to_text(OrderedF32::from(-32.14_f32)), "-32.14");
 
-        assert_eq!(general_to_text(Decimal::NaN).unwrap(), "NaN");
+        test!(general_to_text(Decimal::from_f64(1.222).unwrap()), "1.222");
+
+        test!(general_to_text(Decimal::NaN), "NaN");
     }
 
     #[test]
@@ -842,11 +879,52 @@ mod tests {
     }
 
     #[test]
+    fn test_bytea() {
+        assert_eq!(str_to_bytea("fgo").unwrap().as_ref().to_text(), r"\x66676f");
+        assert_eq!(
+            str_to_bytea(r"\xDeadBeef").unwrap().as_ref().to_text(),
+            r"\xdeadbeef"
+        );
+        assert_eq!(
+            str_to_bytea("12CD").unwrap().as_ref().to_text(),
+            r"\x31324344"
+        );
+        assert_eq!(
+            str_to_bytea("1234").unwrap().as_ref().to_text(),
+            r"\x31323334"
+        );
+        assert_eq!(
+            str_to_bytea(r"\x12CD").unwrap().as_ref().to_text(),
+            r"\x12cd"
+        );
+        assert_eq!(
+            str_to_bytea(r"\x De Ad Be Ef ").unwrap().as_ref().to_text(),
+            r"\xdeadbeef"
+        );
+        assert_eq!(
+            str_to_bytea("x De Ad Be Ef ").unwrap().as_ref().to_text(),
+            r"\x7820446520416420426520456620"
+        );
+        assert_eq!(
+            str_to_bytea(r"De\\123dBeEf").unwrap().as_ref().to_text(),
+            r"\x44655c3132336442654566"
+        );
+        assert_eq!(
+            str_to_bytea(r"De\123dBeEf").unwrap().as_ref().to_text(),
+            r"\x4465536442654566"
+        );
+        assert_eq!(
+            str_to_bytea(r"De\\000dBeEf").unwrap().as_ref().to_text(),
+            r"\x44655c3030306442654566"
+        );
+    }
+
+    #[test]
     fn test_struct_cast() {
         assert_eq!(
             struct_cast(
                 StructValue::new(vec![
-                    Some("1".to_string().to_scalar_value()),
+                    Some("1".into()),
                     Some(OrderedF32::from(0.0).to_scalar_value()),
                 ])
                 .as_scalar_ref(),
@@ -884,11 +962,11 @@ mod tests {
         let str1_utc0 = "0001-11-15 07:35:40.999999+00:00";
         let timestampz1 = str_to_timestampz(str1).unwrap();
         assert_eq!(timestampz1, -62108094259000001);
-        assert_eq!(timestampz_to_utc_string(timestampz1), str1_utc0);
+        assert_eq!(timestampz_to_utc_string(timestampz1).as_ref(), str1_utc0);
 
         let str2 = "1969-12-31 23:59:59.999999+00:00";
         let timestampz2 = str_to_timestampz(str2).unwrap();
         assert_eq!(timestampz2, -1);
-        assert_eq!(timestampz_to_utc_string(timestampz2), str2);
+        assert_eq!(timestampz_to_utc_string(timestampz2).as_ref(), str2);
     }
 }

@@ -60,7 +60,7 @@ impl StreamTableScan {
             logical.base.logical_pk.clone(),
             logical.functional_dependency().clone(),
             distribution,
-            logical.table_desc().appendonly,
+            logical.table_desc().append_only,
         );
         Self {
             base,
@@ -98,19 +98,14 @@ impl fmt::Display for StreamTableScan {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamTableScan");
 
+        let v = match verbose {
+            false => self.logical.column_names(),
+            true => self.logical.column_names_with_table_prefix(),
+        }
+        .join(", ");
         builder
             .field("table", &format_args!("{}", self.logical.table_name()))
-            .field(
-                "columns",
-                &format_args!(
-                    "[{}]",
-                    match verbose {
-                        false => self.logical.column_names(),
-                        true => self.logical.column_names_with_table_prefix(),
-                    }
-                    .join(", ")
-                ),
-            );
+            .field("columns", &format_args!("[{}]", v));
 
         if verbose {
             builder.field(

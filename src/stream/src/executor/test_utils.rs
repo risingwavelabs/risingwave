@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, Executor, Message, PkIndices, StreamChunk, Watermark};
+use super::{
+    Barrier, BoxedMessageStream, Executor, Message, MessageStream, PkIndices, StreamChunk,
+    StreamExecutorResult, Watermark,
+};
 
 pub struct MockSource {
     schema: Schema,
@@ -152,12 +155,57 @@ impl Executor for MockSource {
 macro_rules! row_nonnull {
     [$( $value:expr ),*] => {
         {
-            use risingwave_common::types::Scalar;
             use risingwave_common::array::Row;
-            Row(vec![$(Some($value.to_scalar_value()), )*])
+            Row::new(vec![$(Some($value.into()), )*])
         }
     };
 }
+
+/// Trait for testing `StreamExecutor` more easily.
+///
+/// With `next_unwrap_ready`, we can retrieve the next message from the executor without `await`ing,
+/// so that we can immediately panic if the executor is not ready instead of getting stuck. This is
+/// useful for testing.
+pub trait StreamExecutorTestExt: MessageStream + Unpin {
+    /// Asserts that the executor is pending (not ready) now.
+    ///
+    /// Panics if it is ready.
+    fn next_unwrap_pending(&mut self) {
+        if let Some(r) = self.try_next().now_or_never() {
+            panic!("expect pending stream, but got `{:?}`", r);
+        }
+    }
+
+    /// Asserts that the executor is ready now, returning the next message.
+    ///
+    /// Panics if it is pending.
+    fn next_unwrap_ready(&mut self) -> StreamExecutorResult<Message> {
+        match self.next().now_or_never() {
+            Some(Some(r)) => r,
+            Some(None) => panic!("expect ready stream, but got terminated"),
+            None => panic!("expect ready stream, but got pending"),
+        }
+    }
+
+    /// Asserts that the executor is ready on a [`StreamChunk`] now, returning the next chunk.
+    ///
+    /// Panics if it is pending or the next message is not a [`StreamChunk`].
+    fn next_unwrap_ready_chunk(&mut self) -> StreamExecutorResult<StreamChunk> {
+        self.next_unwrap_ready()
+            .map(|msg| msg.into_chunk().expect("expect chunk"))
+    }
+
+    /// Asserts that the executor is ready on a [`Barrier`] now, returning the next barrier.
+    ///
+    /// Panics if it is pending or the next message is not a [`Barrier`].
+    fn next_unwrap_ready_barrier(&mut self) -> StreamExecutorResult<Barrier> {
+        self.next_unwrap_ready()
+            .map(|msg| msg.into_barrier().expect("expect barrier"))
+    }
+}
+
+// FIXME: implement on any `impl MessageStream` if the analyzer works well.
+impl StreamExecutorTestExt for BoxedMessageStream {}
 
 pub mod agg_executor {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};

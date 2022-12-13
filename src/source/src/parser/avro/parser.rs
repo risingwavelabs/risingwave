@@ -17,7 +17,7 @@ use std::fmt::Debug;
 
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Reader, Schema};
-use chrono::{Datelike, NaiveDate};
+use chrono::Datelike;
 use itertools::Itertools;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
@@ -36,7 +36,9 @@ use crate::parser::ParseFuture;
 use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 fn unix_epoch_days() -> i32 {
-    NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()
+    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
+        .0
+        .num_days_from_ce()
 }
 
 #[derive(Debug)]
@@ -56,7 +58,7 @@ impl AvroParser {
         })?;
         let (schema, schema_resolver) = if use_schema_registry {
             let kafka_topic = get_kafka_topic(&props)?;
-            let client = Client::new(url)?;
+            let client = Client::new(url, &props)?;
             let (schema, resolver) =
                 ConfluentSchemaResolver::new(format!("{}-value", kafka_topic).as_str(), client)
                     .await?;
@@ -179,7 +181,7 @@ impl AvroParser {
     async fn parse_inner(
         &self,
         payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
@@ -235,7 +237,7 @@ impl AvroParser {
 fn from_avro_value(value: Value) -> Result<Datum> {
     let v = match value {
         Value::Boolean(b) => ScalarImpl::Bool(b),
-        Value::String(s) => ScalarImpl::Utf8(s),
+        Value::String(s) => ScalarImpl::Utf8(s.into_boxed_str()),
         Value::Int(i) => ScalarImpl::Int32(i),
         Value::Long(i) => ScalarImpl::Int64(i),
         Value::Float(f) => ScalarImpl::Float32(OrderedF32::from(f)),
@@ -278,7 +280,7 @@ fn from_avro_value(value: Value) -> Result<Datum> {
             let millis = u32::from(duration.millis()) as i64;
             ScalarImpl::Interval(IntervalUnit::new(months, days, millis))
         }
-        Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol),
+        Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol.into_boxed_str()),
         Value::Record(descs) => {
             let rw_values = descs
                 .into_iter()
@@ -326,10 +328,10 @@ mod test {
 
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Days, Duration, Millis, Months, Schema, Writer};
-    use chrono::NaiveDate;
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
+    use risingwave_common::row::Row2;
     use risingwave_common::types::{
         DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
     };
@@ -418,12 +420,12 @@ mod test {
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
-        let row = row.to_owned_row();
+        let row = row.into_owned_row();
         for (i, field) in record.fields.iter().enumerate() {
             let value = field.clone().1;
             match value {
                 Value::String(str) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Utf8(str)));
+                    assert_eq!(row[i], Some(ScalarImpl::Utf8(str.into_boxed_str())));
                 }
                 Value::Boolean(bool_val) => {
                     assert_eq!(row[i], Some(ScalarImpl::Bool(bool_val)));
@@ -584,20 +586,25 @@ mod test {
                         record.put(field.name.as_str(), true);
                     }
                     Schema::Date => {
-                        let original_date = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
-                        let naive_date = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
-                        let num_days = naive_date.sub(original_date).num_days() as i32;
+                        let original_date =
+                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                        let naive_date =
+                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                        let num_days = naive_date.0.sub(original_date.0).num_days() as i32;
                         record.put(field.name.as_str(), Value::Date(num_days));
                     }
                     Schema::TimestampMillis => {
-                        let datetime = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
-                        let timestamp_mills = Value::TimestampMillis(datetime.timestamp() * 1_000);
+                        let datetime =
+                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                        let timestamp_mills =
+                            Value::TimestampMillis(datetime.0.timestamp() * 1_000);
                         record.put(field.name.as_str(), timestamp_mills);
                     }
                     Schema::TimestampMicros => {
-                        let datetime = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
+                        let datetime =
+                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
                         let timestamp_micros =
-                            Value::TimestampMicros(datetime.timestamp() * 1_000_000);
+                            Value::TimestampMicros(datetime.0.timestamp() * 1_000_000);
                         record.put(field.name.as_str(), timestamp_micros);
                     }
                     Schema::Duration => {

@@ -28,12 +28,14 @@ use super::{
     StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{
+    CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
@@ -309,7 +311,7 @@ impl LogicalScan {
     }
 
     /// Undo predicate push down when predicate in scan is not supported.
-    fn predicate_pull_up(&self) -> (LogicalScan, Condition, Option<Vec<ExprImpl>>) {
+    pub fn predicate_pull_up(&self) -> (LogicalScan, Condition, Option<Vec<ExprImpl>>) {
         let mut predicate = self.predicate().clone();
         if predicate.always_true() {
             return (self.clone(), Condition::true_cond(), None);
@@ -433,6 +435,26 @@ impl ColPrunable for LogicalScan {
 
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        // If the predicate contains `CorrelatedInputRef`. We don't push down.
+        // This case could come from the predicate push down before the subquery unnesting.
+        struct HasCorrelated {}
+        impl ExprVisitor<bool> for HasCorrelated {
+            fn merge(a: bool, b: bool) -> bool {
+                a | b
+            }
+
+            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> bool {
+                true
+            }
+        }
+        let mut has_correlated_visitor = HasCorrelated {};
+        if predicate.visit_expr(&mut has_correlated_visitor) {
+            return LogicalFilter::create(
+                self.clone_with_predicate(self.predicate().clone()).into(),
+                predicate,
+            );
+        }
+
         let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
         ));
@@ -451,8 +473,7 @@ impl LogicalScan {
                 self.core.table_desc.clone(),
                 self.base
                     .ctx
-                    .inner()
-                    .session_ctx
+                    .session_ctx()
                     .config()
                     .get_max_split_range_gap(),
             )?;

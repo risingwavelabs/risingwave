@@ -108,6 +108,7 @@ mod tests {
     use test::Bencher;
 
     use super::RecordRef;
+    use crate::row::Row2;
     use crate::test_utils::test_stream_chunk::{
         BigStreamChunk, TestStreamChunk, WhatEverStreamChunk,
     };
@@ -116,7 +117,7 @@ mod tests {
     fn test_chunk_rows() {
         let test = WhatEverStreamChunk;
         let chunk = test.stream_chunk();
-        let mut rows = chunk.rows().map(|(op, row)| (op, row.to_owned_row()));
+        let mut rows = chunk.rows().map(|(op, row)| (op, row.into_owned_row()));
         assert_eq!(Some(test.row_with_op_at(0)), rows.next());
         assert_eq!(Some(test.row_with_op_at(1)), rows.next());
         assert_eq!(Some(test.row_with_op_at(2)), rows.next());
@@ -130,7 +131,7 @@ mod tests {
         let mut rows = chunk
             .records()
             .flat_map(RecordRef::into_row_refs)
-            .map(|(op, row)| (op, row.to_owned_row()));
+            .map(|(op, row)| (op, row.into_owned_row()));
         assert_eq!(Some(test.row_with_op_at(0)), rows.next());
         assert_eq!(Some(test.row_with_op_at(1)), rows.next());
         assert_eq!(Some(test.row_with_op_at(2)), rows.next());

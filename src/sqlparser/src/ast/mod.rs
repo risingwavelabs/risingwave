@@ -844,7 +844,7 @@ pub enum Statement {
     /// UPDATE
     Update {
         /// TABLE
-        table: TableWithJoins,
+        table_name: ObjectName,
         /// Column assignments
         assignments: Vec<Assignment>,
         /// WHERE
@@ -1099,11 +1099,11 @@ impl fmt::Display for Statement {
                 write!(f, "\n\\.")
             }
             Statement::Update {
-                table,
+                table_name,
                 assignments,
                 selection,
             } => {
-                write!(f, "UPDATE {}", table)?;
+                write!(f, "UPDATE {}", table_name)?;
                 if !assignments.is_empty() {
                     write!(f, " SET {}", display_comma_separated(assignments))?;
                 }
@@ -1561,6 +1561,8 @@ pub enum GrantObjects {
     Sequences(Vec<ObjectName>),
     /// Grant privileges on specific tables
     Tables(Vec<ObjectName>),
+    /// Grant privileges on specific sinks
+    Sinks(Vec<ObjectName>),
 }
 
 impl fmt::Display for GrantObjects {
@@ -1611,6 +1613,9 @@ impl fmt::Display for GrantObjects {
             }
             GrantObjects::Mviews(mviews) => {
                 write!(f, "MATERIALIZED VIEW {}", display_comma_separated(mviews))
+            }
+            GrantObjects::Sinks(sinks) => {
+                write!(f, "SINK {}", display_comma_separated(sinks))
             }
         }
     }

@@ -681,7 +681,6 @@ pub fn new_like_default(
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
     use risingwave_common::array::interval_array::IntervalArray;
     use risingwave_common::array::*;
     use risingwave_common::types::{
@@ -762,8 +761,8 @@ mod tests {
             }
         }
 
-        let col1 = I32Array::from_slice(&lhs).into();
-        let col2 = I32Array::from_slice(&rhs).into();
+        let col1 = I32Array::from_iter(&lhs).into();
+        let col2 = I32Array::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -802,18 +801,16 @@ mod tests {
                 target.push(None);
             } else {
                 rhs.push(Some(IntervalUnit::from_ymd(0, i, i)));
-                lhs.push(Some(NaiveDateWrapper::new(
-                    NaiveDate::from_num_days_from_ce(i),
-                )));
+                lhs.push(Some(NaiveDateWrapper::from_num_days_from_ce_uncheck(i)));
                 target.push(Some(f(
-                    NaiveDateWrapper::new(NaiveDate::from_num_days_from_ce(i)),
+                    NaiveDateWrapper::from_num_days_from_ce_uncheck(i),
                     IntervalUnit::from_ymd(0, i, i),
                 )));
             }
         }
 
-        let col1 = NaiveDateArray::from_slice(&lhs).into();
-        let col2 = IntervalArray::from_slice(&rhs).into();
+        let col1 = NaiveDateArray::from_iter(&lhs).into();
+        let col2 = IntervalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Date, TypeName::Interval], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -865,8 +862,8 @@ mod tests {
             }
         }
 
-        let col1 = DecimalArray::from_slice(&lhs).into();
-        let col2 = DecimalArray::from_slice(&rhs).into();
+        let col1 = DecimalArray::from_iter(&lhs).into();
+        let col2 = DecimalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();

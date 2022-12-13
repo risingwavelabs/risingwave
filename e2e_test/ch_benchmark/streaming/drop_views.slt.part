@@ -1,0 +1,65 @@
+statement ok
+drop materialized view ch_benchmark_q1;
+
+statement ok
+drop materialized view ch_benchmark_q2;
+
+statement ok
+drop materialized view ch_benchmark_q3;
+
+statement ok
+drop materialized view ch_benchmark_q4;
+
+statement ok
+drop materialized view ch_benchmark_q5;
+
+statement ok
+drop materialized view ch_benchmark_q6;
+
+statement ok
+drop materialized view ch_benchmark_q7;
+
+statement ok
+drop materialized view ch_benchmark_q8;
+
+statement ok
+drop materialized view ch_benchmark_q9;
+
+statement ok
+drop materialized view ch_benchmark_q10;
+
+statement ok
+drop materialized view ch_benchmark_q11;
+
+statement ok
+drop materialized view ch_benchmark_q12;
+
+statement ok
+drop materialized view ch_benchmark_q13;
+
+statement ok
+drop materialized view ch_benchmark_q14;
+
+statement ok
+drop materialized view ch_benchmark_q15;
+
+statement ok
+drop materialized view ch_benchmark_q16;
+
+statement ok
+drop materialized view ch_benchmark_q17;
+
+statement ok
+drop materialized view ch_benchmark_q18;
+
+statement ok
+drop materialized view ch_benchmark_q19;
+
+statement ok
+drop materialized view ch_benchmark_q20;
+
+statement ok
+drop materialized view ch_benchmark_q21;
+
+statement ok
+drop materialized view ch_benchmark_q22;

@@ -23,7 +23,10 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
+use risingwave_common::catalog::{
+    get_dist_key_in_pk_indices, get_dist_key_start_index_in_pk, ColumnDesc, ColumnId, Schema,
+    TableId, TableOption,
+};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, Row, Row2, RowDeserializer, RowExt};
 use risingwave_common::util::ordered::*;
@@ -40,7 +43,7 @@ use crate::row_serde::row_serde_util::{
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
 use crate::table::{compute_vnode, Distribution, TableIter};
-use crate::{StateStore, StateStoreIter};
+use crate::StateStore;
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format, and is used in batch mode.
@@ -78,6 +81,7 @@ pub struct StorageTable<S: StateStore> {
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
+    distribution_key_start_index_in_pk: Option<usize>,
 
     /// Virtual nodes that the table is partitioned into.
     ///
@@ -183,21 +187,9 @@ impl<S: StateStore> StorageTable<S> {
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
         let row_deserializer = RowDeserializer::new(all_data_types);
 
-        let dist_key_in_pk_indices = dist_key_indices
-            .iter()
-            .map(|&di| {
-                pk_indices
-                    .iter()
-                    .position(|&pi| di == pi)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "distribution key {:?} must be a subset of primary key {:?}",
-                            dist_key_indices, pk_indices
-                        )
-                    })
-            })
-            .collect_vec();
-
+        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
+        let distribution_key_start_index_in_pk =
+            get_dist_key_start_index_in_pk(&dist_key_in_pk_indices);
         Self {
             table_id,
             store,
@@ -208,6 +200,7 @@ impl<S: StateStore> StorageTable<S> {
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
+            distribution_key_start_index_in_pk,
             vnodes,
             table_option,
         }
@@ -253,9 +246,11 @@ impl<S: StateStore> StorageTable<S> {
             .into_iter()
             .map(|index| self.pk_indices[index])
             .collect_vec();
+
         let read_options = ReadOptions {
-            prefix_hint: None,
-            check_bloom_filter: self.dist_key_indices == key_indices,
+            dist_key_hint: None,
+            check_bloom_filter: !self.dist_key_indices.is_empty()
+                && self.dist_key_indices == key_indices,
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
@@ -292,7 +287,7 @@ impl<S: StateStore> StorageTable<S> {
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
-        prefix_hint: Option<Vec<u8>>,
+        dist_key_hint: Option<Vec<u8>>,
         encoded_key_range: R,
         wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
@@ -308,12 +303,7 @@ impl<S: StateStore> StorageTable<S> {
             // If `vnode_hint` is set, we can only access this single vnode.
             Some(vnode) => std::iter::once(vnode),
             // Otherwise, we need to access all vnodes of this table.
-            None => self
-                .vnodes
-                .iter()
-                .enumerate()
-                .filter(|&(_, set)| set)
-                .map(|(i, _)| VirtualNode::from_index(i)),
+            None => self.vnodes.ones().map(VirtualNode::from_index),
         };
 
         // For each vnode, construct an iterator.
@@ -321,14 +311,13 @@ impl<S: StateStore> StorageTable<S> {
         // can use a single iterator.
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-            let prefix_hint = prefix_hint
-                .clone()
-                .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
+
+            let dist_key_hint = dist_key_hint.clone();
             let wait_epoch = wait_epoch.clone();
             async move {
-                let check_bloom_filter = prefix_hint.is_some();
+                let check_bloom_filter = dist_key_hint.is_some();
                 let read_options = ReadOptions {
-                    prefix_hint,
+                    dist_key_hint,
                     check_bloom_filter,
                     ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
@@ -379,7 +368,7 @@ impl<S: StateStore> StorageTable<S> {
         ) -> Bound<Vec<u8>> {
             match range_bound {
                 Included(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.0.len());
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.len());
                     let key = pk_prefix.chain(k);
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
@@ -391,7 +380,7 @@ impl<S: StateStore> StorageTable<S> {
                     }
                 }
                 Excluded(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.0.len());
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.len());
                     let key = pk_prefix.chain(k);
                     let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
@@ -438,27 +427,48 @@ impl<S: StateStore> StorageTable<S> {
             .into_iter()
             .map(|index| self.pk_indices[index])
             .collect_vec();
-        let prefix_hint = if self.dist_key_indices.is_empty()
-            || self.dist_key_indices != pk_prefix_indices
+
+        let dist_key_hint = if let Some(distribution_key_start_index_in_pk) =
+            self.distribution_key_start_index_in_pk &&
+            self.dist_key_indices.len() + distribution_key_start_index_in_pk
+                <= pk_prefix.len()
         {
-            trace!(
-                "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
-                self.table_id,
-                pk_prefix,
-                self.dist_key_indices,
-                pk_prefix_indices
-            );
-            None
+            let encoded_prefix = if let Bound::Included(start_key) = start_key.as_ref() {
+                start_key
+            } else {
+                unreachable!()
+            };
+            let distribution_key_end_index_in_pk =
+                self.dist_key_in_pk_indices.len() + distribution_key_start_index_in_pk;
+            let (dist_key_start_position, dist_key_len) = self
+                .pk_serializer
+                .deserialize_dist_key_position_with_column_indices(
+                    encoded_prefix,
+                    (
+                        distribution_key_start_index_in_pk,
+                        distribution_key_end_index_in_pk,
+                    ),
+                )
+                .unwrap();
+            Some(
+                encoded_prefix[dist_key_start_position..dist_key_len + dist_key_start_position]
+                    .to_vec(),
+            )
         } else {
-            let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.len());
-            let serialized_pk_prefix = serialize_pk(&pk_prefix, &pk_prefix_serializer);
-            Some(serialized_pk_prefix)
+            trace!(
+                    "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
+                    self.table_id,
+                    pk_prefix,
+                    self.dist_key_indices,
+                    pk_prefix_indices
+                );
+            None
         };
 
         trace!(
-            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
+            "iter_with_pk_bounds table_id {} dist_key_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
             self.table_id,
-            prefix_hint,
+            dist_key_hint,
             start_key,
             end_key,
             pk_prefix,
@@ -467,7 +477,7 @@ impl<S: StateStore> StorageTable<S> {
         );
 
         self.iter_with_encoded_key_range(
-            prefix_hint,
+            dist_key_hint,
             (start_key, end_key),
             epoch,
             self.try_compute_vnode_by_pk_prefix(pk_prefix),
@@ -498,7 +508,7 @@ impl<S: StateStore> StorageTable<S> {
 /// [`StorageTableIterInner`] iterates on the storage table.
 struct StorageTableIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
-    iter: S::Iter,
+    iter: S::IterStream,
 
     mapping: Arc<ColumnMapping>,
 
@@ -537,12 +547,13 @@ impl<S: StateStore> StorageTableIterInner<S> {
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
     async fn into_stream(self) {
-        use crate::store::StateStoreIterExt;
+        use futures::TryStreamExt;
 
         // No need for table id and epoch.
-        let mut iter = self.iter.map(|(k, v)| (k.user_key.table_key.0, v));
+        let iter = self.iter.map_ok(|(k, v)| (k.user_key.table_key.0, v));
+        futures::pin_mut!(iter);
         while let Some((raw_key, value)) = iter
-            .next()
+            .try_next()
             .verbose_stack_trace("storage_table_iter_next")
             .await?
         {

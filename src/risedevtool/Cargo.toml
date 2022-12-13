@@ -15,6 +15,7 @@ clap = { version = "3", features = ["derive"] }
 console = "0.15"
 dialoguer = "0.10"
 enum-iterator = "1"
+google-cloud-pubsub = "0.7.0"
 indicatif = "0.17"
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = "0.10"
@@ -27,5 +28,15 @@ serde_json = "1"
 serde_with = "2"
 serde_yaml = "0.9"
 tempfile = "3"
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs"
+] }
+toml = "0.5.9"
 workspace-hack = { path = "../workspace-hack" }
 yaml-rust = "0.4"

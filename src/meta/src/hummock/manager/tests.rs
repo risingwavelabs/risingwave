@@ -410,58 +410,6 @@ async fn test_context_id_validation() {
     hummock_manager.pin_version(context_id).await.unwrap();
 }
 
-// This is a non-deterministic test depending on the use of timeouts
-#[cfg(madsim)]
-#[tokio::test]
-async fn test_context_id_invalidation() {
-    use crate::hummock::start_local_notification_receiver;
-    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
-    let (member_join, member_shutdown) = start_local_notification_receiver(
-        hummock_manager.clone(),
-        hummock_manager.compactor_manager_ref_for_test(),
-        env.notification_manager_ref(),
-    )
-    .await;
-    let invalid_context_id = HummockContextId::MAX;
-    let context_id = worker_node.id;
-
-    // Invalid context id is rejected.
-    let error = hummock_manager
-        .pin_version(invalid_context_id)
-        .await
-        .unwrap_err();
-    assert!(matches!(error, Error::InvalidContext(_)));
-
-    // Valid context id is accepted.
-    hummock_manager.pin_version(context_id).await.unwrap();
-    // Pin multiple times is OK.
-    hummock_manager.pin_version(context_id).await.unwrap();
-
-    // Remove the node from cluster will invalidate context id by clearing
-    // the invalidated pinned versions.
-    cluster_manager
-        .delete_worker_node(worker_node.host.unwrap())
-        .await
-        .unwrap();
-
-    // Notification of local subscribers and resultant deletion of worker node from
-    // the Hummock manager needs time to complete. This test can run for a maximum of 10 seconds.
-    // (in practice, this usually succeeds on first try)
-    let mut success = false;
-    for _ in 0..40 {
-        if hummock_manager.pin_version(context_id).await.is_err() {
-            success = true;
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-    }
-    member_shutdown.send(()).unwrap();
-    member_join.await.unwrap();
-    if !success {
-        panic!("context_id did not get invalidated")
-    }
-}
-
 #[tokio::test]
 async fn test_hummock_manager_basic() {
     let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(1).await;
@@ -1217,7 +1165,6 @@ async fn test_version_stats() {
         total_key_size: 1000,
         total_value_size: 100,
         total_key_count: 10,
-        stale_key_count: 1,
     };
     let ssts_with_table_ids = vec![vec![1, 2], vec![2, 3]];
     let sst_ids = get_sst_ids(&hummock_manager, ssts_with_table_ids.len() as _).await;
@@ -1258,15 +1205,12 @@ async fn test_version_stats() {
     let table1_stats = stats_after_commit.table_stats.get(&1).unwrap();
     let table2_stats = stats_after_commit.table_stats.get(&2).unwrap();
     let table3_stats = stats_after_commit.table_stats.get(&3).unwrap();
-    assert_eq!(table1_stats.stale_key_count, 1);
     assert_eq!(table1_stats.total_key_count, 10);
     assert_eq!(table1_stats.total_value_size, 100);
     assert_eq!(table1_stats.total_key_size, 1000);
-    assert_eq!(table2_stats.stale_key_count, 2);
     assert_eq!(table2_stats.total_key_count, 20);
     assert_eq!(table2_stats.total_value_size, 200);
     assert_eq!(table2_stats.total_key_size, 2000);
-    assert_eq!(table3_stats.stale_key_count, 1);
     assert_eq!(table3_stats.total_key_count, 10);
     assert_eq!(table3_stats.total_value_size, 100);
     assert_eq!(table3_stats.total_key_size, 1000);
@@ -1293,7 +1237,6 @@ async fn test_version_stats() {
                 total_key_size: -1000,
                 total_value_size: -100,
                 total_key_count: -10,
-                stale_key_count: -1,
             },
         ),
         (
@@ -1302,7 +1245,6 @@ async fn test_version_stats() {
                 total_key_size: -1000,
                 total_value_size: -100,
                 total_key_count: -10,
-                stale_key_count: -1,
             },
         ),
     ]);
@@ -1319,11 +1261,9 @@ async fn test_version_stats() {
     let compact_table2_stats = stats_after_compact.table_stats.get(&2).unwrap();
     let compact_table3_stats = stats_after_compact.table_stats.get(&3).unwrap();
     assert_eq!(compact_table1_stats, table1_stats);
-    assert_eq!(compact_table2_stats.stale_key_count, 1);
     assert_eq!(compact_table2_stats.total_key_count, 10);
     assert_eq!(compact_table2_stats.total_value_size, 100);
     assert_eq!(compact_table2_stats.total_key_size, 1000);
-    assert_eq!(compact_table3_stats.stale_key_count, 0);
     assert_eq!(compact_table3_stats.total_key_count, 0);
     assert_eq!(compact_table3_stats.total_value_size, 0);
     assert_eq!(compact_table3_stats.total_key_size, 0);

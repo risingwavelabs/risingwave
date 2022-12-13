@@ -83,11 +83,7 @@ impl BigStreamChunk {
             .collect();
 
         let col = {
-            let array = I32Array::from_slice(
-                &std::iter::repeat(Some(114_514))
-                    .take(capacity)
-                    .collect_vec(),
-            );
+            let array = I32Array::from_iter(std::iter::repeat(114_514).take(capacity));
             Column::from(array)
         };
 
@@ -115,7 +111,7 @@ impl TestStreamChunk for BigStreamChunk {
     }
 
     fn row_at(&self, _idx: usize) -> Row {
-        Row(vec![Some(ScalarImpl::Int32(114_514))])
+        Row::new(vec![Some(ScalarImpl::Int32(114_514))])
     }
 }
 
@@ -175,18 +171,18 @@ impl TestStreamChunk for WhatEverStreamChunk {
 
     fn row_at(&self, idx: usize) -> Row {
         match idx {
-            0 => Row(vec![
+            0 => Row::new(vec![
                 Some(1i32.into()),
                 Some(4.0f32.into()),
                 Some(5i64.into()),
             ]),
-            1 => Row(vec![Some(2i32.into()), None, Some(6i64.into())]),
-            2 => Row(vec![
+            1 => Row::new(vec![Some(2i32.into()), None, Some(6i64.into())]),
+            2 => Row::new(vec![
                 Some(3i32.into()),
                 Some(2.2f32.into()),
                 Some(8i64.into()),
             ]),
-            3 => Row(vec![
+            3 => Row::new(vec![
                 Some(4i32.into()),
                 Some(1.8f32.into()),
                 Some(9i64.into()),

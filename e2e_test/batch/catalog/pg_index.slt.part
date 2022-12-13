@@ -1,0 +1,38 @@
+statement ok
+create table tmp(id1 int, id2 int);
+
+statement ok
+create index tmp_id2_idx on tmp(id2) include(id2);
+
+query IT
+select ix.indnatts, ix.indkey from pg_catalog.pg_class t 
+    join pg_catalog.pg_index ix on t.oid = ix.indrelid
+    join pg_catalog.pg_class i on i.oid = ix.indexrelid
+    where t.relname = 'tmp' and i.relname = 'tmp_id2_idx';
+----
+1 {2}
+
+statement ok
+create index tmp_id2_idx_include_id1 on tmp(id2) include(id1);
+
+query IT
+select ix.indnatts, ix.indkey from pg_catalog.pg_class t 
+    join pg_catalog.pg_index ix on t.oid = ix.indrelid
+    join pg_catalog.pg_class i on i.oid = ix.indexrelid
+    where t.relname = 'tmp' and i.relname = 'tmp_id2_idx_include_id1';
+----
+2 {2,1}
+
+statement ok
+create index tmp_id1_id2_idx on tmp(id1, id2);
+
+query IT
+select ix.indnatts, ix.indkey from pg_catalog.pg_class t 
+    join pg_catalog.pg_index ix on t.oid = ix.indrelid
+    join pg_catalog.pg_class i on i.oid = ix.indexrelid
+    where t.relname = 'tmp' and i.relname = 'tmp_id1_id2_idx';
+----
+2 {1,2}
+
+statement ok
+drop table tmp;
