@@ -14,6 +14,7 @@
 
 #![cfg(loom)]
 
+/// Run `RUSTFLAGS="--cfg loom" cargo test --test loom` to test.
 use loom::sync::atomic::{AtomicUsize, Ordering};
 use loom::sync::Arc;
 use loom::thread;
