@@ -41,6 +41,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 use serde::Serialize;
+use smallvec::SmallVec;
 
 use self::generic::GenericPlanRef;
 use self::stream::StreamPlanRef;
@@ -101,7 +102,6 @@ impl ColPrunable for PlanRef {
                     .collect_vec();
                 let input: PlanRef = logical_share.input();
                 let input = input.prune_col(&merge_require_cols, ctx);
-                let logical_share: &LogicalShare = logical_share;
                 let exprs = logical_share
                     .base
                     .schema()
@@ -161,6 +161,27 @@ impl PredicatePushdown for PlanRef {
             // Dispatch to dyn PlanNode instead of PlanRef.
             let dyn_t = self.deref();
             dyn_t.predicate_pushdown(predicate, ctx)
+        }
+    }
+}
+
+impl PlanTreeNode for PlanRef {
+    fn inputs(&self) -> SmallVec<[PlanRef; 2]> {
+        // Dispatch to dyn PlanNode instead of PlanRef.
+        let dyn_t = self.deref();
+        dyn_t.inputs()
+    }
+
+    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
+        if let Some(logical_share) = self.clone().as_logical_share() {
+            assert_eq!(inputs.len(), 1);
+            // We can't clone `LogicalShare`, but only can replace input instead.
+            logical_share.replace_input(inputs[0].clone());
+            self.clone()
+        } else {
+            // Dispatch to dyn PlanNode instead of PlanRef.
+            let dyn_t = self.deref();
+            dyn_t.clone_with_inputs(inputs)
         }
     }
 }

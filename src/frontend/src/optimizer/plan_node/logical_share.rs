@@ -136,7 +136,6 @@ impl ToStream for LogicalShare {
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        // let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
         todo!()
     }
 }
