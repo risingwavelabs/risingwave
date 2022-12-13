@@ -20,6 +20,7 @@ use risingwave_backup::error::BackupResult;
 use risingwave_backup::storage::{BackupStorageRef, ObjectStoreMetaSnapshotStorage};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
+use xxhash_rust::xxh64;
 
 use crate::backup_restore::RestoreOpts;
 use crate::storage::{EtcdMetaStore, MemStore};
@@ -41,6 +42,9 @@ macro_rules! dispatch_meta_store {
     }};
 }
 
+pub fn xxhash64_checksum(data: &[u8]) -> u64 {
+    xxh64::xxh64(data, 0)
+}
 // Code is copied from src/meta/src/rpc/server.rs. TODO #6482: extract method.
 pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendImpl> {
     let meta_store_backend = match opts.meta_store_type {
