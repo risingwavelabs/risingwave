@@ -1,4 +1,17 @@
-query ITTITTTT rowsort
-select * from ch_benchmark_q2;
+query ITTITTTT
+select * from ch_benchmark_q2
+order by n_name, su_name, i_id;
 ----
-11  Supplier#000000011  GERMANY    11  t4ccklaRBqjFXhCnH  JfwTs,LZrV, M,9C  28-613-996-1505  y ironic packages. slyly ironic accounts affix furiously; ironically unusual excuses across the flu
+    89 'Supplier#000000089 BELGIUM 89 'gPn6AxPJ5@8e7g' 'aUp9ybcZNZjsZ6' 99-605-832-1401 nic epitaphs need to detect always inside the blithely silent sauternes ? daringly final warthogs
+    44 'Supplier#000000044 GERMANY 44 '@E?0iafYnGEtp2AyfX' 'xdbOUNuXJI' 54-723-607-1939 ldly final tithes should have to snooze regularly instead of the idly fu
+    15 'Supplier#000000015 ITALY 15 'XS3BV21JgJ8R2G7qivhfM2C4' 'ROz6SxAYf?ABp68HnAjqqotBAfAj320iSOQXVwK' 25-640-138-2512 would haggle quickly since the steal
+    62 'Supplier#000000062 ITALY 62 'UGbAFLBG@kyKFui0Gu' 'hi8y?KzwcY' 72-463-100-6815 ve doggedly to the stealthily thin escapades ; st
+    63 'Supplier#000000063 NETHERLANDS 63 'jXv5g2zWrcOTB7' '44ZvHfu0?Q4RaOqPx' 73-633-849-7235 shall haggle never toward the enticingly dogged dolphins ? silently sly decoys nea
+    97 'Supplier#000000097 NETHERLANDS 97 'DkHUmuexN?Nv0AEuIgLE9Q2' 'YvBWWJYF4NWYc1TpCmfJ7ILN6' 17-989-458-7731 ogs should have to affix daringly through the slowly regular
+    50 'Supplier#000000050 POLAND 50 'w7pLIJ0OJAjmu60EpMSrY26' 'N0IvhmEtC1K4zu8txS95' 60-654-999-4564 il the ruthlessly blithe forges . blithely close pains above the ironically ruthless dinos
+    19 'Supplier#000000019 PORTUGAL 19 'ofwxvMu2BZS4tJnTr97eN' 'V8faDRCswpa9VQor9LM9xrs3YKSL0' 29-175-117-9456 mptotes to the evenly close braids might detect quickly upon the thinly idle sentime
+    91 'Supplier#000000091 ROMANIA 91 'IdKPbrqBUb3wPVxQdKCEchp' 'm3nYJPduLW@CbbpdYBWR@o' 11-310-537-9928 hould have to print idly against the fluffily ironic depe
+    29 'Supplier#000000029 SPAIN 29 '7k8K1F59fMzcJk?48ok' 'MQbuxhYOUPbk' 39-781-979-9850 nically idle frets . fluffily close sheaves about the s
+    48 'Supplier#000000048 UKRAINE 48 'P0ggW2EaXSmoXZRbgLUS' '16G7B3DENmOc7h2FlS' 58-829-858-2719 the daringly idle courts can cajole doggedly instead of the ironically enticing warhorses
+    23 'Supplier#000000023 UNITED KINGDOM 23 'Z7sML2Ix2kSGaa1acZNJsV' 'wwwomVXUNxaLVmUJc7ICJIww@2' 33-190-878-3200 ly after the idly close tithes -- enticingly silent dinos past the sometimes permanent pinto beans c
+    51 'Supplier#000000051 UNITED KINGDOM 51 'qsLLulZfW8jly4MM' 'WTOO7sdzH@EfAKJOAvNVe?8x1dbS9fEc82n1' 61-599-185-9405 the regularly quiet dolphins should are daringly after

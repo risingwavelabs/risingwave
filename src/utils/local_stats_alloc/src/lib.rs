@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(allocator_api)]
+#![feature(lint_reasons)]
 
 use std::alloc::Allocator;
 use std::ops::Deref;
