@@ -163,7 +163,7 @@ impl HummockStorage {
             HummockObserverNode::new(filter_key_extractor_manager.clone(), event_tx.clone()),
         )
         .await;
-        let _ = observer_manager.start().await;
+        observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
             Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
@@ -498,7 +498,7 @@ impl HummockStorageV1 {
             HummockObserverNode::new(filter_key_extractor_manager.clone(), event_tx.clone()),
         )
         .await;
-        let _ = observer_manager.start().await;
+        observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
             Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
