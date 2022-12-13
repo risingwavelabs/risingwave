@@ -211,16 +211,20 @@ impl ArrayBuilder for BytesArrayBuilder {
         }
     }
 
-    fn append<'a>(&'a mut self, value: Option<&'a [u8]>) {
+    fn append_n<'a>(&'a mut self, n: usize, value: Option<&'a [u8]>) {
         match value {
             Some(x) => {
-                self.bitmap.append(true);
-                self.data.extend_from_slice(x);
-                self.offset.push(self.data.len())
+                self.bitmap.append_n(n, true);
+                for _ in 0..n {
+                    self.data.extend_from_slice(x);
+                    self.offset.push(self.data.len());
+                }
             }
             None => {
-                self.bitmap.append(false);
-                self.offset.push(self.data.len())
+                self.bitmap.append_n(n, false);
+                for _ in 0..n {
+                    self.offset.push(self.data.len());
+                }
             }
         }
     }

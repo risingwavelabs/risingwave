@@ -77,24 +77,24 @@ impl ArrayBuilder for StructArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<StructRef<'_>>) {
+    fn append_n(&mut self, n: usize, value: Option<StructRef<'_>>) {
         match value {
             None => {
-                self.bitmap.append(false);
+                self.bitmap.append_n(n, false);
                 for child in &mut self.children_array {
-                    child.append_datum(Datum::None);
+                    child.append_datum_n(n, Datum::None);
                 }
             }
             Some(v) => {
-                self.bitmap.append(true);
+                self.bitmap.append_n(n, true);
                 let fields = v.fields_ref();
                 assert_eq!(fields.len(), self.children_array.len());
-                for (field_idx, f) in fields.into_iter().enumerate() {
-                    self.children_array[field_idx].append_datum(f);
+                for (child, f) in self.children_array.iter_mut().zip_eq(fields) {
+                    child.append_datum_n(n, f);
                 }
             }
         }
-        self.len += 1;
+        self.len += n;
     }
 
     fn append_array(&mut self, other: &StructArray) {

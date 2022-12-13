@@ -78,24 +78,28 @@ impl ArrayBuilder for ListArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<ListRef<'_>>) {
+    fn append_n(&mut self, n: usize, value: Option<ListRef<'_>>) {
         match value {
             None => {
-                self.bitmap.append(false);
+                self.bitmap.append_n(n, false);
                 let last = *self.offsets.last().unwrap();
-                self.offsets.push(last);
+                for _ in 0..n {
+                    self.offsets.push(last);
+                }
             }
             Some(v) => {
-                self.bitmap.append(true);
-                let last = *self.offsets.last().unwrap();
-                let values_ref = v.values_ref();
-                self.offsets.push(last + values_ref.len());
-                for f in values_ref {
-                    self.value.append_datum(f);
+                self.bitmap.append_n(n, true);
+                for _ in 0..n {
+                    let last = *self.offsets.last().unwrap();
+                    let values_ref = v.values_ref();
+                    self.offsets.push(last + values_ref.len());
+                    for f in values_ref {
+                        self.value.append_datum(f);
+                    }
                 }
             }
         }
-        self.len += 1;
+        self.len += n;
     }
 
     fn append_array(&mut self, other: &ListArray) {

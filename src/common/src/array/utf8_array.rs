@@ -138,8 +138,8 @@ impl ArrayBuilder for Utf8ArrayBuilder {
     }
 
     #[inline]
-    fn append<'a>(&'a mut self, value: Option<&'a str>) {
-        self.bytes.append(value.map(|v| v.as_bytes()));
+    fn append_n<'a>(&'a mut self, n: usize, value: Option<&'a str>) {
+        self.bytes.append_n(n, value.map(|v| v.as_bytes()));
     }
 
     #[inline]

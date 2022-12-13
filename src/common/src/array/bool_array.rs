@@ -150,15 +150,15 @@ impl ArrayBuilder for BoolArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<bool>) {
+    fn append_n(&mut self, n: usize, value: Option<bool>) {
         match value {
             Some(x) => {
-                self.bitmap.append(true);
-                self.data.append(x);
+                self.bitmap.append_n(n, true);
+                self.data.append_n(n, x);
             }
             None => {
-                self.bitmap.append(false);
-                self.data.append(bool::default());
+                self.bitmap.append_n(n, false);
+                self.data.append_n(n, false);
             }
         }
     }

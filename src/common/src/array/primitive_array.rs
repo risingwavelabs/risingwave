@@ -257,19 +257,6 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         }
     }
 
-    fn append(&mut self, value: Option<T>) {
-        match value {
-            Some(x) => {
-                self.bitmap.append(true);
-                self.data.push(x);
-            }
-            None => {
-                self.bitmap.append(false);
-                self.data.push(T::default());
-            }
-        }
-    }
-
     fn append_n(&mut self, n: usize, value: Option<T>) {
         match value {
             Some(x) => {
