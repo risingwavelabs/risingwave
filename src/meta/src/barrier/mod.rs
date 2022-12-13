@@ -632,7 +632,7 @@ where
         match result {
             Ok(node_need_collect) => {
                 // todo: the collect handler should be abort when recovery.
-                let _ = tokio::spawn(Self::collect_barrier(
+                tokio::spawn(Self::collect_barrier(
                     node_need_collect,
                     self.env.stream_client_pool_ref(),
                     command_context,

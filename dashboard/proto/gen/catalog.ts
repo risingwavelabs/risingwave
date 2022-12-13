@@ -148,6 +148,7 @@ export interface Table {
   valueIndices: number[];
   definition: string;
   handlePkConflict: boolean;
+  pkPrefixLenHint: number;
 }
 
 export const Table_TableType = {
@@ -736,6 +737,7 @@ function createBaseTable(): Table {
     valueIndices: [],
     definition: "",
     handlePkConflict: false,
+    pkPrefixLenHint: 0,
   };
 }
 
@@ -775,6 +777,7 @@ export const Table = {
         : [],
       definition: isSet(object.definition) ? String(object.definition) : "",
       handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      pkPrefixLenHint: isSet(object.pkPrefixLenHint) ? Number(object.pkPrefixLenHint) : 0,
     };
   },
 
@@ -832,6 +835,7 @@ export const Table = {
     }
     message.definition !== undefined && (obj.definition = message.definition);
     message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.pkPrefixLenHint !== undefined && (obj.pkPrefixLenHint = Math.round(message.pkPrefixLenHint));
     return obj;
   },
 
@@ -878,6 +882,7 @@ export const Table = {
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
     message.handlePkConflict = object.handlePkConflict ?? false;
+    message.pkPrefixLenHint = object.pkPrefixLenHint ?? 0;
     return message;
   },
 };
