@@ -14,7 +14,6 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use risingwave_common::config::load_config;

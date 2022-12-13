@@ -24,7 +24,6 @@ use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
-use risingwave_pb::common::HostAddress;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
@@ -34,9 +33,7 @@ use risingwave_pb::meta::leader_service_server::LeaderServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
-use risingwave_pb::meta::MetaLeaderInfo;
 use risingwave_pb::user::user_service_server::UserServiceServer;
-use tokio::sync::oneshot::Sender;
 use tokio::sync::watch::Receiver;
 use tokio::task::JoinHandle;
 use tonic::service::Interceptor;
@@ -509,7 +506,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
         }
 
-        let (idle_send, mut idle_recv) = tokio::sync::oneshot::channel();
+        let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
         sub_tasks.push(
             IdleManager::start_idle_checker(
                 env.idle_manager_ref(),
