@@ -131,6 +131,8 @@ impl<S: StateStore> StateTable<S> {
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
+
+        println!("build state table, table_id = {:?}", table_catalog.id);
         let table_id = TableId::new(table_catalog.id);
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
