@@ -138,8 +138,8 @@ impl Scheduler {
                 .push(p);
         }
         let mut parallel_units: LinkedList<_> = parallel_units_map
-            .into_iter()
-            .map(|(_k, v)| v.into_iter())
+            .into_values()
+            .map(|v| v.into_iter())
             .collect();
 
         // Visit the parallel units in a round-robin manner on each worker.
@@ -273,7 +273,9 @@ mod test {
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::stream_plan::stream_node::NodeBody;
-    use risingwave_pb::stream_plan::{MaterializeNode, StreamActor, StreamNode, TopNNode};
+    use risingwave_pb::stream_plan::{
+        FragmentTypeFlag, MaterializeNode, StreamActor, StreamNode, TopNNode,
+    };
 
     use super::*;
     use crate::manager::{ClusterManager, MetaSrvEnv};
@@ -305,7 +307,7 @@ mod test {
             .map(|id| {
                 let fragment = Fragment {
                     fragment_id: id,
-                    fragment_type: 0,
+                    fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
                     distribution_type: FragmentDistributionType::Single as i32,
                     actors: vec![StreamActor {
                         actor_id,
@@ -357,7 +359,7 @@ mod test {
                 actor_id += node_count * parallel_degree as u32;
                 Fragment {
                     fragment_id,
-                    fragment_type: 0,
+                    fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
                     distribution_type: FragmentDistributionType::Hash as i32,
                     actors,
                     ..Default::default()

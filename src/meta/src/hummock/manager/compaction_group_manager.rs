@@ -743,16 +743,16 @@ mod tests {
         let registered_number = |inner: &CompactionGroupManagerInner<MemStore>| {
             inner
                 .compaction_groups
-                .iter()
-                .map(|(_, cg)| cg.member_table_ids.len())
+                .values()
+                .map(|cg| cg.member_table_ids.len())
                 .sum::<usize>()
         };
 
         let table_option_number = |inner: &CompactionGroupManagerInner<MemStore>| {
             inner
                 .compaction_groups
-                .iter()
-                .map(|(_, cg)| cg.table_id_to_options().len())
+                .values()
+                .map(|cg| cg.table_id_to_options().len())
                 .sum::<usize>()
         };
 

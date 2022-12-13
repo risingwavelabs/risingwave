@@ -188,6 +188,10 @@ enum MetaCommands {
         #[clap(long)]
         dry_run: bool,
     },
+    /// backup meta by taking a meta snapshot
+    BackupMeta,
+    /// delete meta snapshots
+    DeleteMetaSnapshots { snapshot_ids: Vec<u64> },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -266,6 +270,10 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
         Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => {
             cmd_impl::meta::reschedule(plan, dry_run).await?
+        }
+        Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta().await?,
+        Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
+            cmd_impl::meta::delete_meta_snapshots(&snapshot_ids).await?
         }
         Commands::Trace => cmd_impl::trace::trace().await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(sleep).await?,
