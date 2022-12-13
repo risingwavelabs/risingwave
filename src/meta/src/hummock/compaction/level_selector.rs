@@ -579,8 +579,9 @@ pub mod tests {
             Arc::new(RangeOverlapStrategy::default()),
         );
         let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();
+        let mut local_stats = LocalSelectorStatistic::default();
         let compaction = selector
-            .pick_compaction(1, &levels, &mut levels_handlers)
+            .pick_compaction(1, &levels, &mut levels_handlers, &mut local_stats)
             .unwrap();
         // trivial move.
         assert_compaction_task(&compaction, &levels_handlers);
@@ -603,7 +604,7 @@ pub mod tests {
         push_tables_level0_nonoverlapping(&mut levels, generate_tables(15..25, 0..600, 3, 20));
         let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();
         let compaction = selector
-            .pick_compaction(1, &levels, &mut levels_handlers)
+            .pick_compaction(1, &levels, &mut levels_handlers, &mut local_stats)
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 0);
@@ -615,7 +616,7 @@ pub mod tests {
         levels.l0.as_mut().unwrap().sub_levels.clear();
         levels.levels[1].table_infos = generate_tables(20..30, 0..1000, 3, 10);
         let compaction = selector
-            .pick_compaction(2, &levels, &mut levels_handlers)
+            .pick_compaction(2, &levels, &mut levels_handlers, &mut local_stats)
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 3);
@@ -629,7 +630,8 @@ pub mod tests {
         assert_eq!(compaction.compression_algorithm.as_str(), "Lz4",);
         // no compaction need to be scheduled because we do not calculate the size of pending files
         // to score.
-        let compaction = selector.pick_compaction(2, &levels, &mut levels_handlers);
+        let compaction =
+            selector.pick_compaction(2, &levels, &mut levels_handlers, &mut local_stats);
         assert!(compaction.is_none());
     }
 }

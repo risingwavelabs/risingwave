@@ -183,7 +183,10 @@ pub mod tests {
 
         // pick a non-overlapping files. It means that this file could be trivial move to next
         // level.
-        let ret = picker.pick_compaction(&levels, &level_handlers).unwrap();
+        let mut local_stats = LocalPickerStatistic::default();
+        let ret = picker
+            .pick_compaction(&levels, &level_handlers, &mut local_stats)
+            .unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
@@ -191,7 +194,9 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].table_infos.len(), 0);
         ret.add_pending_task(0, &mut level_handlers);
 
-        let ret = picker.pick_compaction(&levels, &level_handlers).unwrap();
+        let ret = picker
+            .pick_compaction(&levels, &level_handlers, &mut local_stats)
+            .unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
@@ -200,7 +205,9 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].table_infos[0].id, 4);
         ret.add_pending_task(1, &mut level_handlers);
 
-        let ret = picker.pick_compaction(&levels, &level_handlers).unwrap();
+        let ret = picker
+            .pick_compaction(&levels, &level_handlers, &mut local_stats)
+            .unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
@@ -249,7 +256,13 @@ pub mod tests {
 
         // pick a non-overlapping files. It means that this file could be trivial move to next
         // level.
-        let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
+        let ret = picker
+            .pick_compaction(
+                &levels,
+                &levels_handler,
+                &mut LocalPickerStatistic::default(),
+            )
+            .unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.input_levels[1].level_idx, 2);
 
