@@ -447,11 +447,9 @@ impl SysCatalogReaderImpl {
     pub(super) fn read_description_info(&self) -> Result<Vec<Row>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
-        let schema_infos = reader.get_all_schema_info(&self.auth_context.database)?;
 
         Ok(schemas
-            .zip_eq(schema_infos.iter())
-            .flat_map(|(schema, _)| {
+            .flat_map(|schema| {
                 let rows = schema
                     .iter_table()
                     .map(|table| new_pg_description_row(table.id().table_id))
@@ -494,8 +492,6 @@ impl SysCatalogReaderImpl {
     }
 
     pub(super) fn read_settings_info(&self) -> Result<Vec<Row>> {
-        let all_variables = config_reader.get_all();
-        
         Ok(PG_SETTINGS_DATA_ROWS.clone())
     }
 
