@@ -60,6 +60,7 @@ pub enum SinkConfig {
     Kafka(KafkaConfig),
     Remote(RemoteConfig),
     Console(ConsoleConfig),
+    BlackHole,
 }
 
 #[derive(Clone, Debug, EnumAsInner, Serialize, Deserialize)]
@@ -69,7 +70,10 @@ pub enum SinkState {
     Redis,
     Console,
     Remote,
+    Blackhole,
 }
+
+pub const BLACKHOLE_SINK: &str = "blackhole";
 
 impl SinkConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
@@ -83,6 +87,7 @@ impl SinkConfig {
             CONSOLE_SINK => Ok(SinkConfig::Console(ConsoleConfig::from_hashmap(
                 properties,
             )?)),
+            BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
             _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
         }
     }
@@ -94,6 +99,7 @@ impl SinkConfig {
             SinkConfig::Redis(_) => "redis",
             SinkConfig::Remote(_) => "remote",
             SinkConfig::Console(_) => "console",
+            SinkConfig::BlackHole => "blackhole",
         }
     }
 }
@@ -105,6 +111,7 @@ pub enum SinkImpl {
     Kafka(Box<KafkaSink>),
     Remote(Box<RemoteSink>),
     Console(Box<ConsoleSink>),
+    Blackhole,
 }
 
 impl SinkImpl {
@@ -122,6 +129,7 @@ impl SinkImpl {
             SinkConfig::Remote(cfg) => SinkImpl::Remote(Box::new(
                 RemoteSink::new(cfg, schema, pk_indices, connector_params).await?,
             )),
+            SinkConfig::BlackHole => SinkImpl::Blackhole,
         })
     }
 
@@ -132,6 +140,7 @@ impl SinkImpl {
             SinkImpl::Kafka(_) => false,
             SinkImpl::Remote(_) => false,
             SinkImpl::Console(_) => false,
+            SinkImpl::Blackhole => false,
         }
     }
 
@@ -152,6 +161,7 @@ impl Sink for SinkImpl {
             SinkImpl::Kafka(sink) => sink.write_batch(chunk).await,
             SinkImpl::Remote(sink) => sink.write_batch(chunk).await,
             SinkImpl::Console(sink) => sink.write_batch(chunk).await,
+            SinkImpl::Blackhole => Ok(()),
         }
     }
 
@@ -162,6 +172,7 @@ impl Sink for SinkImpl {
             SinkImpl::Kafka(sink) => sink.begin_epoch(epoch).await,
             SinkImpl::Remote(sink) => sink.begin_epoch(epoch).await,
             SinkImpl::Console(sink) => sink.begin_epoch(epoch).await,
+            SinkImpl::Blackhole => Ok(()),
         }
     }
 
@@ -172,6 +183,7 @@ impl Sink for SinkImpl {
             SinkImpl::Kafka(sink) => sink.commit().await,
             SinkImpl::Remote(sink) => sink.commit().await,
             SinkImpl::Console(sink) => sink.commit().await,
+            SinkImpl::Blackhole => Ok(()),
         }
     }
 
@@ -182,6 +194,7 @@ impl Sink for SinkImpl {
             SinkImpl::Kafka(sink) => sink.abort().await,
             SinkImpl::Remote(sink) => sink.abort().await,
             SinkImpl::Console(sink) => sink.abort().await,
+            SinkImpl::Blackhole => Ok(()),
         }
     }
 }

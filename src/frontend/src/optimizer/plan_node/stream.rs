@@ -25,9 +25,9 @@ use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2;
 use crate::optimizer::property::{Distribution, FieldOrder};
-use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -239,13 +239,14 @@ impl HashJoin {
             .collect();
 
         // The pk of hash join internal and degree table should be join_key + input_pk.
+        let join_key_len = join_key_indices.len();
         let mut pk_indices = join_key_indices;
         // TODO(yuhao): dedup the dist key and pk.
         pk_indices.extend(input.logical_pk());
 
         // Build internal table
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
         let internal_columns_fields = schema.fields().to_vec();
 
         internal_columns_fields.iter().for_each(|field| {
@@ -258,7 +259,7 @@ impl HashJoin {
 
         // Build degree table.
         let mut degree_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
 
         let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
@@ -269,6 +270,9 @@ impl HashJoin {
         degree_table_catalog_builder.add_column(&degree_column_field);
         degree_table_catalog_builder
             .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
+
+        internal_table_catalog_builder.set_pk_prefix_len_hint(join_key_len);
+        degree_table_catalog_builder.set_pk_prefix_len_hint(join_key_len);
 
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),

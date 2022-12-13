@@ -25,7 +25,6 @@ mod key_cmp;
 extern crate num_derive;
 
 use std::cmp::Ordering;
-use std::ops::Deref;
 
 pub use key_cmp::*;
 use risingwave_pb::hummock::SstableInfo;
@@ -207,7 +206,7 @@ impl SstIdRange {
     }
 }
 
-pub fn can_concat(ssts: &[impl Deref<Target = SstableInfo>]) -> bool {
+pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     let len = ssts.len();
     for i in 0..len - 1 {
         if ssts[i]

@@ -58,7 +58,7 @@ where
             .get_cf(DEFAULT_COLUMN_FAMILY, category_gen_key.as_bytes())
             .await;
         let current_id = match res {
-            Ok(value) => u64::from_be_bytes(value.as_slice().try_into().unwrap()),
+            Ok(value) => memcomparable::from_slice(&value).unwrap(),
             Err(MetaStoreError::ItemNotFound(_)) => start.unwrap_or(0),
             Err(e) => panic!("{:?}", e),
         };
@@ -68,7 +68,7 @@ where
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
                 category_gen_key.clone().into_bytes(),
-                next_allocate_id.to_be_bytes().to_vec(),
+                memcomparable::to_vec(&next_allocate_id).unwrap(),
             )
             .await
         {
@@ -105,7 +105,7 @@ where
                     .put_cf(
                         DEFAULT_COLUMN_FAMILY,
                         self.category_gen_key.clone().into_bytes(),
-                        next_allocate_id.to_be_bytes().to_vec(),
+                        memcomparable::to_vec(&next_allocate_id).unwrap(),
                     )
                     .await?;
                 *next = next_allocate_id;

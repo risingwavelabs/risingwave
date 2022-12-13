@@ -66,7 +66,7 @@ impl NexmarkCluster {
             output
         };
 
-        self.run(&format!(
+        self.run(format!(
             r#"
 create source auction (
     id INTEGER,
@@ -87,7 +87,7 @@ with (
         ))
         .await?;
 
-        self.run(&format!(
+        self.run(format!(
             r#"
 create source bid (
     auction INTEGER,
@@ -103,7 +103,7 @@ with (
         ))
         .await?;
 
-        self.run(&format!(
+        self.run(format!(
             r#"
 create source person (
     id INTEGER,

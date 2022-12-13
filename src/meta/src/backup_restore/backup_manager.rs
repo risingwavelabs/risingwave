@@ -15,21 +15,22 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_backup::error::BackupError;
+use risingwave_backup::storage::BackupStorageRef;
+use risingwave_backup::{MetaBackupJobId, MetaSnapshotId};
 use risingwave_common::bail;
 use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_pb::backup_service::BackupJobStatus;
 use tokio::task::JoinHandle;
 
-use crate::backup_restore::error::BackupError;
-use crate::backup_restore::meta_snapshot::MetaSnapshotBuilder;
-use crate::backup_restore::storage::BackupStorageRef;
-use crate::backup_restore::MetaSnapshotId;
+use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
 use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub enum BackupJobResult {
-    Finished,
+    Succeeded,
     Failed(BackupError),
 }
 
@@ -78,14 +79,14 @@ impl<S: MetaStore> BackupManager<S> {
         Self {
             env,
             hummock_manager,
-            backup_store: Box::new(crate::backup_restore::DummyBackupStorage {}),
+            backup_store: Arc::new(risingwave_backup::storage::DummyBackupStorage {}),
             running_backup_job: Default::default(),
         }
     }
 
     /// Starts a backup job in background. It's non-blocking.
     /// Returns job id.
-    pub async fn start_backup_job(self: &Arc<Self>) -> MetaResult<u64> {
+    pub async fn start_backup_job(self: &Arc<Self>) -> MetaResult<MetaBackupJobId> {
         let mut guard = self.running_backup_job.lock().await;
         if let Some(job) = (*guard).as_ref() {
             bail!(format!(
@@ -111,15 +112,36 @@ impl<S: MetaStore> BackupManager<S> {
         Ok(job_id)
     }
 
-    async fn finish_backup_job(&self, job_id: u64, status: BackupJobResult) {
+    pub async fn get_backup_job_status(
+        &self,
+        job_id: MetaBackupJobId,
+    ) -> MetaResult<BackupJobStatus> {
+        if let Some(running_job) = self.running_backup_job.lock().await.as_ref() {
+            if running_job.job_id == job_id {
+                return Ok(BackupJobStatus::Running);
+            }
+        }
+        if self
+            .backup_store
+            .list()
+            .await?
+            .iter()
+            .any(|m| m.id == job_id)
+        {
+            return Ok(BackupJobStatus::Succeeded);
+        }
+        Ok(BackupJobStatus::NotFound)
+    }
+
+    async fn finish_backup_job(&self, job_id: MetaBackupJobId, job_result: BackupJobResult) {
         // _job_handle holds `hummock_version_safe_point` until the snapshot is added to meta.
         // It ensures snapshot's SSTs won't be deleted in between.
         let _job_handle = self
             .take_job_handle_by_job_id(job_id)
             .await
             .expect("job id should match");
-        match status {
-            BackupJobResult::Finished => {
+        match job_result {
+            BackupJobResult::Succeeded => {
                 tracing::info!("succeeded backup job {}", job_id);
             }
             BackupJobResult::Failed(e) => {
@@ -182,17 +204,13 @@ impl<S: MetaStore> BackupWorker<S> {
             snapshot_builder.build(job_id).await?;
             let snapshot = snapshot_builder.finish()?;
             backup_manager_clone.backup_store.create(&snapshot).await?;
-            backup_manager_clone
-                .finish_backup_job(job_id, BackupJobResult::Finished)
-                .await;
-            Ok::<(), BackupError>(())
+            Ok(BackupJobResult::Succeeded)
         };
         tokio::spawn(async move {
-            if let Err(e) = job.await {
-                self.backup_manager
-                    .finish_backup_job(job_id, BackupJobResult::Failed(e))
-                    .await;
-            }
+            let job_result = job.await.unwrap_or_else(BackupJobResult::Failed);
+            self.backup_manager
+                .finish_backup_job(job_id, job_result)
+                .await;
         })
     }
 }

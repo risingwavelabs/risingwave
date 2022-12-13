@@ -67,7 +67,7 @@ fn main() -> Result<()> {
         content
     };
 
-    let (risedev_config, compose_deploy_config) = if opts.deploy {
+    let (risedev_config, compose_deploy_config, rw_config_path) = if opts.deploy {
         let compose_deploy_config = {
             let mut content = String::new();
             File::open("risedev-compose.yml")?.read_to_string(&mut content)?;
@@ -75,31 +75,28 @@ fn main() -> Result<()> {
         };
         let compose_deploy_config: ComposeDeployConfig =
             serde_yaml::from_str(&compose_deploy_config)?;
-
-        (
-            ConfigExpander::expand_with_extra_info(
-                &risedev_config_content,
-                &opts.profile,
+        let extra_info = compose_deploy_config
+            .instances
+            .iter()
+            .map(|i| (format!("dns-host:{}", i.id), i.dns_host.clone()))
+            .chain(
                 compose_deploy_config
-                    .instances
+                    .risedev_extra_args
                     .iter()
-                    .map(|i| (format!("dns-host:{}", i.id), i.dns_host.clone()))
-                    .chain(
-                        compose_deploy_config
-                            .risedev_extra_args
-                            .iter()
-                            .map(|(k, v)| (k.clone(), v.clone())),
-                    )
-                    .collect(),
-            )?
-            .1,
-            Some(compose_deploy_config),
-        )
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            )
+            .collect();
+
+        let (config_path, expanded_config) = ConfigExpander::expand_with_extra_info(
+            &risedev_config_content,
+            &opts.profile,
+            extra_info,
+        )?;
+        (expanded_config, Some(compose_deploy_config), config_path)
     } else {
-        (
-            ConfigExpander::expand(&risedev_config_content, &opts.profile)?.1,
-            None,
-        )
+        let (config_path, expanded_config) =
+            ConfigExpander::expand(&risedev_config_content, &opts.profile)?;
+        (expanded_config, None, config_path)
     };
 
     let compose_config = ComposeConfig {
@@ -110,9 +107,10 @@ fn main() -> Result<()> {
                 .and_then(|x| x.risingwave_image_override.as_ref()),
         )?,
         config_directory: opts.directory.clone(),
+        rw_config_path,
     };
 
-    let services = ConfigExpander::deserialize(&risedev_config, &opts.profile)?;
+    let services = ConfigExpander::deserialize(&risedev_config)?;
 
     let mut compose_services: BTreeMap<String, BTreeMap<String, ComposeService>> = BTreeMap::new();
     let mut service_on_node: BTreeMap<String, String> = BTreeMap::new();

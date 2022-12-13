@@ -114,15 +114,15 @@ mod tests {
         let key3 = UserKey::for_test(TableId::new(1), b"0".to_vec());
 
         assert_eq!(
-            KeyComparator::compare_user_key_cross_format(&key1.encode(), &key1),
+            KeyComparator::compare_user_key_cross_format(key1.encode(), &key1),
             Ordering::Equal
         );
         assert_eq!(
-            KeyComparator::compare_user_key_cross_format(&key1.encode(), &key2),
+            KeyComparator::compare_user_key_cross_format(key1.encode(), &key2),
             Ordering::Less
         );
         assert_eq!(
-            KeyComparator::compare_user_key_cross_format(&key2.encode(), &key3),
+            KeyComparator::compare_user_key_cross_format(key2.encode(), &key3),
             Ordering::Less
         );
     }

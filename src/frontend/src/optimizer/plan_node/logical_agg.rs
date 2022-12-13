@@ -942,8 +942,8 @@ mod tests {
     use crate::expr::{
         assert_eq_input_ref, input_ref_to_column_indices, AggCall, ExprType, FunctionCall, OrderBy,
     };
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_create() {
@@ -1232,12 +1232,12 @@ mod tests {
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 1);
         assert_eq_input_ref!(&project.exprs()[0], 1);
-        assert_eq!(project.id().0, 4);
+        assert_eq!(project.id().0, 5);
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
         assert_eq!(agg_new.group_key(), &vec![0]);
-        assert_eq!(agg_new.id().0, 3);
+        assert_eq!(agg_new.id().0, 4);
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();

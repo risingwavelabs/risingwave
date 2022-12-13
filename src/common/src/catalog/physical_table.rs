@@ -38,7 +38,7 @@ pub struct TableDesc {
     pub stream_key: Vec<usize>,
 
     /// Whether the table source is append-only
-    pub appendonly: bool,
+    pub append_only: bool,
 
     pub retention_seconds: u32,
 

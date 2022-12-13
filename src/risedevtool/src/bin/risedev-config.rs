@@ -190,7 +190,7 @@ Required if you want to create CDC source from external Databases.
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
             Self::Kafka => "ENABLE_KAFKA",
-            Self::Pubsub => "ENABLE_PUBSUB_EMU",
+            Self::Pubsub => "ENABLE_PUBSUB",
             Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",

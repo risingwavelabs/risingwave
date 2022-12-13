@@ -21,16 +21,16 @@ use super::drop_table::check_source;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::table_catalog::TableKind;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::CatalogError;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_index(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     index_name: ObjectName,
     if_exists: bool,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, index_name) = Binder::resolve_schema_qualified_name(db_name, index_name)?;
     let search_path = session.config().get_search_path();
@@ -55,17 +55,23 @@ pub async fn handle_drop_index(
                     _ => return Err(err.into()),
                 };
                 return match reader.get_table_by_name(db_name, schema_path, &index_name) {
-                    Ok((table, schema_name)) => match table.kind() {
-                        TableKind::TableOrSource => {
+                    Ok((table, schema_name)) => match table.table_type() {
+                        TableType::Table => {
                             check_source(&reader, db_name, schema_name, &index_name)?;
                             Err(RwError::from(ErrorCode::InvalidInputSyntax(
                                 "Use `DROP TABLE` to drop a table.".to_owned(),
                             )))
                         }
-                        TableKind::MView => Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                            "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
+                        TableType::MaterializedView => {
+                            Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                                "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
+                                    .to_owned(),
+                            )))
+                        }
+                        TableType::Index => unreachable!(),
+                        TableType::Internal => Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                            "Internal tables cannot be dropped.".to_owned(),
                         ))),
-                        TableKind::Index => unreachable!(),
                     },
                     Err(e) => {
                         if if_exists {

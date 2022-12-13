@@ -43,3 +43,10 @@ tonic = { version = "0.2", package = "madsim-tonic" }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
+
+[dev-dependencies]
+criterion = "0.4"
+
+[[bench]]
+name = "expr"
+harness = false

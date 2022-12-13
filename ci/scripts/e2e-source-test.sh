@@ -55,11 +55,11 @@ echo "--- e2e, ci-1cn-1fe, cdc source"
 apt-get -y install mysql-client
 # import data to mysql
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
+# start cdc connector node
+nohup java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-node.log 2>&1 &
 # start risingwave cluster
 cargo make ci-start ci-1cn-1fe-with-recovery
-# start cdc connector node
-nohup java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-source.log 2>&1 &
-sleep 1
+sleep 2
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 # wait for cdc loading
 sleep 10
@@ -87,7 +87,6 @@ pkill -f connector-service.jar
 cargo make ci-kill
 
 echo "--- e2e test w/ Rust frontend - source with kafka and pubsub"
-cargo make clean-data
 cargo make ci-start ci-kafka-plus-pubsub
 ./scripts/source/prepare_ci_kafka.sh
 cargo run --bin prepare_ci_pubsub
