@@ -58,7 +58,7 @@ impl AvroParser {
         })?;
         let (schema, schema_resolver) = if use_schema_registry {
             let kafka_topic = get_kafka_topic(&props)?;
-            let client = Client::new(url)?;
+            let client = Client::new(url, &props)?;
             let (schema, resolver) =
                 ConfluentSchemaResolver::new(format!("{}-value", kafka_topic).as_str(), client)
                     .await?;

@@ -12,23 +12,83 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::Hasher;
+use std::sync::Arc;
+use std::time::Duration;
 
-use crate::backup_restore::error::{BackupError, BackupResult};
+use etcd_client::ConnectOptions;
+use risingwave_backup::error::BackupResult;
+use risingwave_backup::storage::{BackupStorageRef, ObjectStoreMetaSnapshotStorage};
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::parse_remote_object_store;
+use xxhash_rust::xxh64;
 
-pub fn xxhash64_checksum(data: &[u8]) -> u64 {
-    let mut hasher = twox_hash::XxHash64::with_seed(0);
-    hasher.write(data);
-    hasher.finish()
+use crate::backup_restore::RestoreOpts;
+use crate::storage::{EtcdMetaStore, MemStore, WrappedEtcdClient as EtcdClient};
+use crate::{Backend, MetaStoreBackend};
+
+#[derive(Clone)]
+pub enum MetaStoreBackendImpl {
+    Etcd(EtcdMetaStore),
+    Mem(MemStore),
 }
 
-pub fn xxhash64_verify(data: &[u8], checksum: u64) -> BackupResult<()> {
-    let data_checksum = xxhash64_checksum(data);
-    if data_checksum != checksum {
-        return Err(BackupError::ChecksumMismatch {
-            expected: checksum,
-            found: data_checksum,
-        });
+#[macro_export]
+macro_rules! dispatch_meta_store {
+    ($impl:expr, $store:ident, $body:tt) => {{
+        match $impl {
+            MetaStoreBackendImpl::Etcd($store) => $body,
+            MetaStoreBackendImpl::Mem($store) => $body,
+        }
+    }};
+}
+
+pub fn xxhash64_checksum(data: &[u8]) -> u64 {
+    xxh64::xxh64(data, 0)
+}
+// Code is copied from src/meta/src/rpc/server.rs. TODO #6482: extract method.
+pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendImpl> {
+    let meta_store_backend = match opts.meta_store_type {
+        Backend::Etcd => MetaStoreBackend::Etcd {
+            endpoints: opts
+                .etcd_endpoints
+                .split(',')
+                .map(|x| x.to_string())
+                .collect(),
+            credentials: match opts.etcd_auth {
+                true => Some((opts.etcd_username, opts.etcd_password)),
+                false => None,
+            },
+        },
+        Backend::Mem => MetaStoreBackend::Mem,
+    };
+    match meta_store_backend {
+        MetaStoreBackend::Etcd {
+            endpoints,
+            credentials,
+        } => {
+            let mut options = ConnectOptions::default()
+                .with_keep_alive(Duration::from_secs(3), Duration::from_secs(5));
+            if let Some((username, password)) = &credentials {
+                options = options.with_user(username, password)
+            }
+            let client = EtcdClient::connect(endpoints, Some(options), credentials.is_some())
+                .await
+                .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
+            Ok(MetaStoreBackendImpl::Etcd(EtcdMetaStore::new(client)))
+        }
+        MetaStoreBackend::Mem => Ok(MetaStoreBackendImpl::Mem(MemStore::new())),
     }
-    Ok(())
+}
+
+pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<BackupStorageRef> {
+    let object_store = parse_remote_object_store(
+        &opts.storage_url,
+        Arc::new(ObjectStoreMetrics::unused()),
+        true,
+    )
+    .await;
+    let backup_store =
+        ObjectStoreMetaSnapshotStorage::new(&opts.storage_directory, Arc::new(object_store))
+            .await?;
+    Ok(Arc::new(backup_store))
 }
