@@ -57,7 +57,6 @@ statement ok
 create table t(c int);
 
 # When inserting into t, mv1 will trigger updates.
-
 statement ok
 create materialized view mv1 as select array_agg(c) as res from t;
 

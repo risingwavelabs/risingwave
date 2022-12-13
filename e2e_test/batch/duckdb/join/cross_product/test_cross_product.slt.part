@@ -21,7 +21,6 @@ SELECT * FROM test t1, test t2 ORDER BY 1, 2, 3, 4;
 12	2	12	2
 
 # big cross product
-
 query I
 SELECT COUNT(*) FROM test t1, generate_series(1, 2000, 1) t2;
 ----
