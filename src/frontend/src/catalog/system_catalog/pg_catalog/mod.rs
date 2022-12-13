@@ -494,6 +494,8 @@ impl SysCatalogReaderImpl {
     }
 
     pub(super) fn read_settings_info(&self) -> Result<Vec<Row>> {
+        let all_variables = config_reader.get_all();
+        
         Ok(PG_SETTINGS_DATA_ROWS.clone())
     }
 

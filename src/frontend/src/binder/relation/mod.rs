@@ -24,7 +24,9 @@ use risingwave_sqlparser::ast::{FunctionArg, Ident, ObjectName, TableAlias, Tabl
 
 use super::bind_context::ColumnBinding;
 use crate::binder::{Binder, BoundSetExpr};
-use crate::catalog::system_catalog::pg_catalog::PG_KEYWORDS_TABLE_NAME;
+use crate::catalog::system_catalog::pg_catalog::{
+    PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
+};
 use crate::expr::{Expr, ExprImpl, TableFunction, TableFunctionType};
 
 mod join;
@@ -318,15 +320,16 @@ impl Binder {
                 if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
                     return self.bind_internal_table(args, alias);
                 }
-                if func_name.eq_ignore_ascii_case("pg_get_keywords")
-                    || name
-                        .real_value()
-                        .eq_ignore_ascii_case("pg_catalog.pg_get_keywords")
+                if func_name.eq_ignore_ascii_case(PG_GET_KEYWORDS_FUNC_NAME)
+                    || name.real_value().eq_ignore_ascii_case(
+                        format!("{}.{}", PG_CATALOG_SCHEMA_NAME, PG_GET_KEYWORDS_FUNC_NAME)
+                            .as_str(),
+                    )
                 {
                     return self.bind_relation_by_name_inner(
                         Some(PG_CATALOG_SCHEMA_NAME),
                         PG_KEYWORDS_TABLE_NAME,
-                        None,
+                        alias,
                     );
                 }
                 if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {

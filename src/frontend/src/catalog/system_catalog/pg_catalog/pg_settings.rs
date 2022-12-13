@@ -20,10 +20,9 @@ use risingwave_common::types::DataType;
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// The catalog `pg_settings` stores settings.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-namespace.html`]
+/// Ref: [`https://www.postgresql.org/docs/current/view-pg-settings.html`]
 pub const PG_SETTINGS_TABLE_NAME: &str = "pg_settings";
 pub const PG_SETTINGS_COLUMNS: &[SystemCatalogColumnsDef<'_>] =
     &[(DataType::Varchar, "name"), (DataType::Varchar, "setting")];
 
-pub static PG_SETTINGS_DATA_ROWS: LazyLock<Vec<Row>> =
-    LazyLock::new(|| vec![Row::new(vec![None, None])]);
+pub static PG_SETTINGS_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| vec![]);

@@ -18,13 +18,13 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// The catalog `pg_database` stores database.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-namespace.html`]
+/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-database.html`]
 pub const PG_DATABASE_TABLE_NAME: &str = "pg_database";
 pub const PG_DATABASE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Varchar, "datname"),
     // None
-    (DataType::Varchar, "datdba"),
+    (DataType::Int32, "datdba"),
     // 6
     (DataType::Int32, "encoding"),
     // 'C'

@@ -1,4 +1,4 @@
-query ITTITT
-SELECT * FROM pg_catalog.pg_database;
+query ITIITT
+SELECT * FROM pg_catalog.pg_database where oid = 0;
 ----
 0 dev NULL 6 C C

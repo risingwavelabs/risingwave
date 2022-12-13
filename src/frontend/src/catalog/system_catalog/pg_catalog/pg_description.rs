@@ -18,7 +18,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// The catalog `pg_description` stores description.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-namespace.html`]
+/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-description.html`]
 pub const PG_DESCRIPTION_TABLE_NAME: &str = "pg_description";
 pub const PG_DESCRIPTION_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "objoid"),
