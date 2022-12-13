@@ -109,6 +109,10 @@ impl BitmapBuilder {
         self.len += n;
         self.data
             .resize((self.len + 7) / 8, if bit_set { 0xFF } else { 0x00 });
+        if bit_set && self.len % 8 != 0 {
+            // remove tailing 1s
+            *self.data.last_mut().unwrap() &= (1 << (self.len % 8)) - 1;
+        }
         if bit_set {
             self.num_high_bits += n;
         }
@@ -121,6 +125,9 @@ impl BitmapBuilder {
         }
         self.len -= 1;
         self.data.truncate((self.len + 7) / 8);
+        if self.len % 8 != 0 {
+            *self.data.last_mut().unwrap() &= (1 << (self.len % 8)) - 1;
+        }
         Some(())
     }
 
