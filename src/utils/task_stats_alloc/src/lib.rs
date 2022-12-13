@@ -18,7 +18,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::future::Future;
-use std::sync::atomic::{fence, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use tokio::task_local;
@@ -64,17 +64,14 @@ impl TaskLocalBytesAllocated {
     #[inline(always)]
     fn sub(&self, val: usize) {
         if let Some(bytes) = self.0 {
-            // Use Release to synchronize with the below deletion.
-            let old_bytes = bytes.fetch_sub(val, Ordering::Release);
+            // Use Relax as we only need to make it atomic.
+            let old_bytes = bytes.fetch_sub(val, Ordering::Relaxed);
             // If the counter reaches zero, delete the counter. Note that we've ensured there's no
             // zero deltas in `wrap_layout`, so there'll be no more uses of the counter.
             if old_bytes == val {
-                // This fence is needed to prevent reordering of use of the counter and deletion of
-                // the counter. Because it is marked `Release`, the decreasing of the counter
-                // synchronizes with this `Acquire` fence. This means that use of the counter
-                // happens before decreasing the counter, which happens before this fence, which
-                // happens before the deletion of the counter.
-                fence(Ordering::Acquire);
+                // No fence here, this is different from ref counter impl in https://www.boost.org/doc/libs/1_55_0/doc/html/atomic/usage_examples.html#boost_atomic.usage_examples.example_reference_counters.
+                // As here, T is the exactly Counter and they have same memory address, so there
+                // should not happen out-of-order commit.
                 unsafe { Box::from_raw_in(bytes.as_mut_ptr(), System) };
             }
         }
