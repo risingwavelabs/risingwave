@@ -19,11 +19,11 @@ use std::time::Duration;
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
-use risingwave_pb::common::HostAddress;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
@@ -161,7 +161,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     MetaLeaderInfo,
     JoinHandle<()>,
     Sender<()>,
-    Receiver<(HostAddress, bool)>,
+    Receiver<(HostAddr, bool)>,
 )> {
     run_elections(addr, meta_store, lease_time_sec).await
 }

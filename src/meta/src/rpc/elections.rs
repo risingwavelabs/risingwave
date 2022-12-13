@@ -18,7 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use prost::Message;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use risingwave_pb::common::HostAddress;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch::Receiver;
@@ -46,8 +46,9 @@ struct ElectionOutcome {
 }
 
 impl ElectionOutcome {
-    pub fn get_leader_addr(&self) -> HostAddress {
-        s_to_ha(&self.meta_leader_info.node_address)
+    pub fn get_leader_addr(&self) -> HostAddr {
+        let tmp = self.meta_leader_info.node_address.as_str();
+        tmp.parse::<HostAddr>().unwrap()
     }
 }
 
@@ -161,25 +162,6 @@ async fn campaign<S: MetaStore>(
         _meta_lease_info: lease,
         is_leader,
     })
-}
-
-// converts a &str into a HostAddress
-// On error returns default HostAddress
-fn s_to_ha(s: &str) -> HostAddress {
-    // adduming addr is e.g. 127.0.0.1:1234
-    let parts = s.split(':').collect::<Vec<&str>>();
-    if parts.len() != 2 {
-        return HostAddress::default();
-    }
-    let host = match parts.first() {
-        None => "".to_owned(),
-        Some(h) => h.to_owned().to_owned(),
-    };
-    let port = match parts.get(1) {
-        None => 0,
-        Some(h) => h.to_owned().to_owned().parse::<i32>().unwrap_or_default(),
-    };
-    HostAddress { host, port }
 }
 
 /// Try to renew/acquire the leader lease
@@ -297,9 +279,14 @@ async fn get_infos_obj<S: MetaStore>(
 }
 
 fn gen_rand_lease_id() -> u64 {
-    123
-    // FIXME: Make this random again
-    // rand::thread_rng().gen_range(0..std::u64::MAX)
+    return 123;
+    // FIXME: We are unable to use a random lease at the moment
+    // During testing, meta gets killed, new meta starts
+    // meta detects that lease is still there, with same addr, but diff ID
+    // meta believes that leader is out there and becomes follower
+    // IMHO we can only use random lease id, if we have at least 2 meta nodes
+    // https://github.com/risingwavelabs/risingwave/issues/6844
+    rand::thread_rng().gen_range(0..std::u64::MAX)
 }
 
 /// Used to manage single leader setup. `run_elections` will continuously run elections to determine
@@ -329,7 +316,7 @@ pub async fn run_elections<S: MetaStore>(
     MetaLeaderInfo,
     JoinHandle<()>,
     Sender<()>,
-    Receiver<(HostAddress, bool)>,
+    Receiver<(HostAddr, bool)>,
 )> {
     // Randomize interval to reduce mitigate likelihood of simultaneous requests
     let mut rng: StdRng = SeedableRng::from_entropy();
@@ -382,7 +369,8 @@ pub async fn run_elections<S: MetaStore>(
                 // Do not elect new leader directly after running the initial election
                 let mut is_leader = is_initial_leader;
                 let mut leader_info = initial_leader.clone();
-                let mut leader_addr = s_to_ha(&initial_leader.node_address);
+                let n_addr = initial_leader.node_address.as_str();
+                let mut leader_addr = n_addr.parse::<HostAddr>().unwrap();
                 if !initial_election {
                     let (l_addr, l_info, is_l) =
                         match campaign(&meta_store, &addr, lease_time_sec, gen_rand_lease_id())
@@ -592,30 +580,6 @@ mod tests {
             leader.eq(&test_leader),
             "leader_info retrieved != leader_info send"
         );
-    }
-
-    #[tokio::test]
-    async fn test_s_to_ha() {
-        // invalid input defaults
-        let default_ha = HostAddress::default();
-        assert!(default_ha.eq(&s_to_ha("")));
-        assert!(default_ha.eq(&s_to_ha("12323")));
-        assert!(default_ha.eq(&s_to_ha("localhost")));
-        assert!(default_ha.eq(&s_to_ha("invalid")));
-        assert!(default_ha.eq(&s_to_ha("1:2:3")));
-
-        // valid input
-        let addr = HostAddress {
-            host: "localhost".to_owned(),
-            port: 123,
-        };
-        assert!(addr.eq(&s_to_ha("localhost:123")));
-
-        let addr = HostAddress {
-            host: "127.0.0.1".to_owned(),
-            port: 123,
-        };
-        assert!(addr.eq(&s_to_ha("127.0.0.1:123")));
     }
 
     async fn put_lease_info<S: MetaStore>(lease: &MetaLeaseInfo, meta_store: &Arc<S>) {
