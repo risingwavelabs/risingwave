@@ -25,8 +25,7 @@ use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
 use crate::catalog::system_catalog::pg_catalog::{
-    PG_CLASS_OID_INDEX, PG_CLASS_RELNAME_INDEX, PG_CLASS_TABLE_NAME, PG_USER_ID_INDEX,
-    PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
+    PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
 };
 use crate::expr::{
     CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef,

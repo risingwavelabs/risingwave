@@ -15,8 +15,6 @@
 use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
-pub const PG_CLASS_OID_INDEX: usize = 0;
-pub const PG_CLASS_RELNAME_INDEX: usize = 1;
 
 /// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
 /// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
