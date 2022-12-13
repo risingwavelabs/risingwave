@@ -64,7 +64,8 @@ impl TaskLocalBytesAllocated {
     #[inline(always)]
     fn sub(&self, val: usize) {
         if let Some(bytes) = self.0 {
-            // Use Relax as we only need to make it atomic.
+            // Use `Relaxed` order as we don't need to sync read/write with other memory addresses.
+            // Accesses to the counter itself are serialized by atomic operations.
             let old_bytes = bytes.fetch_sub(val, Ordering::Relaxed);
             // If the counter reaches zero, delete the counter. Note that we've ensured there's no
             // zero deltas in `wrap_layout`, so there'll be no more uses of the counter.
