@@ -5127,7 +5127,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
- "stats_alloc",
+ "task_stats_alloc",
  "tikv-jemallocator",
  "tracing",
  "workspace-config",
@@ -5152,8 +5152,8 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
- "stats_alloc",
  "sync-point",
+ "task_stats_alloc",
  "tikv-jemallocator",
  "tracing",
  "workspace-config",
@@ -6043,7 +6043,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "static_assertions",
- "stats_alloc",
+ "task_stats_alloc",
  "thiserror",
  "tikv-jemalloc-ctl",
  "tokio-metrics",
@@ -6902,6 +6902,14 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
+name = "task_stats_alloc"
+version = "0.1.11"
+dependencies = [
+ "madsim-tokio",
+ "workspace-hack",
+]
 
 [[package]]
 name = "tempfile"

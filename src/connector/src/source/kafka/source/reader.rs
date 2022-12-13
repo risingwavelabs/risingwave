@@ -108,23 +108,28 @@ impl SplitReader for KafkaSplitReader {
 impl KafkaSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(self) {
+        if let Some(stop_offset) = self.stop_offset && stop_offset == 0{
+            yield Vec::new();
+            return Ok(());
+        }
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(MAX_CHUNK_SIZE) {
             let mut res = Vec::with_capacity(msgs.len());
             for msg in msgs {
                 let msg = msg?;
+                let cur_offset = msg.offset();
+                res.push(SourceMessage::from(msg));
                 if let Some(stop_offset) = self.stop_offset {
-                    if msg.offset() >= stop_offset {
+                    if cur_offset == stop_offset - 1 {
                         tracing::debug!(
                             "stop offset reached, stop reading, offset: {}, stop offset: {}",
-                            msg.offset(),
+                            cur_offset,
                             stop_offset
                         );
                         yield res;
                         break 'for_outer_loop;
                     }
                 }
-                res.push(SourceMessage::from(msg));
             }
             yield res;
         }

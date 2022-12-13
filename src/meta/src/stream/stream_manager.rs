@@ -1058,7 +1058,7 @@ mod tests {
             0,
             Fragment {
                 fragment_id: 0,
-                fragment_type: FragmentType::Mview as i32,
+                fragment_type_mask: FragmentTypeFlag::Mview as u32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 ..Default::default()
@@ -1143,7 +1143,7 @@ mod tests {
             0,
             Fragment {
                 fragment_id: 0,
-                fragment_type: FragmentType::Mview as i32,
+                fragment_type_mask: FragmentTypeFlag::Mview as u32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 ..Default::default()
