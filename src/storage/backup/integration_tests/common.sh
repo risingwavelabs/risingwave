@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eo pipefail
 [ -n "${BACKUP_TEST_PREFIX_BIN}" ]
-[ -n "${BACKUP_TEST_PREFIX_DATA}" ]
+[ -n "${BACKUP_TEST_PREFIX_CONFIG}" ]
 
 function stop_cluster() {
   cargo make k 1>/dev/null 2>&1 || true
@@ -93,21 +93,24 @@ function get_safe_epoch() {
 }
 
 function get_total_sst_count() {
-  find "${BACKUP_TEST_PREFIX_DATA}/minio/hummock001/hummock_001" -type f -name "*.data" |wc -l
+  "${BACKUP_TEST_PREFIX_BIN}/mcli" -C "${BACKUP_TEST_PREFIX_CONFIG}/mcli" \
+  find "hummock-minio/hummock001/hummock_001" -name "*.data" |wc -l
 }
 
 function get_max_committed_epoch_in_backup() {
   local id
   id=$1
   sed_str="s/.*{\"id\":${id},\"hummock_version_id\":.*,\"ssts\":\[.*\],\"max_committed_epoch\":\([[:digit:]]*\),\"safe_epoch\":.*}.*/\1/p"
-  cat "${BACKUP_TEST_PREFIX_DATA}/minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
+  "${BACKUP_TEST_PREFIX_BIN}/mcli" -C "${BACKUP_TEST_PREFIX_CONFIG}/mcli" \
+  cat "hummock-minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
 }
 
 function get_safe_epoch_in_backup() {
   local id
   id=$1
   sed_str="s/.*{\"id\":${id},\"hummock_version_id\":.*,\"ssts\":\[.*\],\"max_committed_epoch\":.*,\"safe_epoch\":\([[:digit:]]*\)}.*/\1/p"
-  cat "${BACKUP_TEST_PREFIX_DATA}/minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
+  "${BACKUP_TEST_PREFIX_BIN}/mcli" -C "${BACKUP_TEST_PREFIX_CONFIG}/mcli" \
+  cat "hummock-minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
 }
 
 function get_min_pinned_snapshot() {

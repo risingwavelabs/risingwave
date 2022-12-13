@@ -25,12 +25,14 @@ sst_count_before_gc=$(get_total_sst_count)
 full_gc_sst
 sst_count_after_gc=$(get_total_sst_count)
 [ "${sst_count_before_gc}" -eq "${sst_count_after_gc}" ]
+[ "${sst_count_before_gc}" -gt 0 ]
 echo "sst count: ${sst_count_after_gc} ${sst_count_after_gc}"
 
 delete_snapshot "${job_id_2}"
 restore "${job_id_1}"
 start_cluster
 sst_count_before_gc=$(get_total_sst_count)
+[ "${sst_count_before_gc}" -gt 0 ]
 # SSTs are no longer pinned
 full_gc_sst
 sst_count_after_gc=$(get_total_sst_count)

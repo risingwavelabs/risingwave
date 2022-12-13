@@ -77,7 +77,9 @@ if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     chmod +x ./target/debug/backup-restore
 
     test_root="src/storage/backup/integration_tests"
-    BACKUP_TEST_PREFIX_BIN="target/debug" BACKUP_TEST_PREFIX_DATA=".risingwave/data" bash "${test_root}/run_all.sh"
+    BACKUP_TEST_PREFIX_BIN="target/debug" \
+    BACKUP_TEST_PREFIX_CONFIG=".risingwave/config" \
+    bash "${test_root}/run_all.sh"
     echo "--- Kill cluster"
     cargo make kill
 fi
