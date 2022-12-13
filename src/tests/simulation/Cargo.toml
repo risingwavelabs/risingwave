@@ -24,7 +24,7 @@ risingwave_frontend = { path = "../../frontend" }
 risingwave_meta = { path = "../../meta" }
 risingwave_pb = { path = "../../prost" }
 risingwave_sqlsmith = { path = "../sqlsmith" }
-sqllogictest = "0.8"
+sqllogictest = "0.9"
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7.7"
