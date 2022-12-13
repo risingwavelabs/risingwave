@@ -145,30 +145,7 @@ impl Fragment {
     ///
     /// Consumes `self` as the actor info will be stale after rescheduling.
     pub fn random_reschedule(self) -> String {
-        let actor_to_parallel_unit: HashMap<_, _> = self
-            .r
-            .table_fragments
-            .iter()
-            .flat_map(|tf| {
-                tf.actor_status
-                    .iter()
-                    .map(|(&actor_id, status)| (actor_id, status.get_parallel_unit().unwrap().id))
-            })
-            .collect();
-
-        let all_parallel_units = self
-            .r
-            .worker_nodes
-            .iter()
-            .flat_map(|n| n.parallel_units.iter())
-            .map(|p| p.id)
-            .collect_vec();
-        let current_parallel_units: HashSet<_> = self
-            .inner
-            .actors
-            .iter()
-            .map(|a| actor_to_parallel_unit[&a.actor_id])
-            .collect();
+        let (all_parallel_units, current_parallel_units) = self.parallel_unit_usage();
 
         let rng = &mut thread_rng();
         let target_parallel_unit_count = match self.inner.distribution_type() {
@@ -191,6 +168,38 @@ impl Fragment {
             .collect_vec();
 
         self.reschedule(remove, add)
+    }
+
+    pub fn parallel_unit_usage(&self) -> (Vec<ParallelUnitId>, HashSet<ParallelUnitId>) {
+        let actor_to_parallel_unit: HashMap<_, _> = self
+            .r
+            .table_fragments
+            .iter()
+            .flat_map(|tf| {
+                tf.actor_status.iter().map(|(&actor_id, status)| {
+                    (
+                        actor_id,
+                        status.get_parallel_unit().unwrap().id as ParallelUnitId,
+                    )
+                })
+            })
+            .collect();
+
+        let all_parallel_units = self
+            .r
+            .worker_nodes
+            .iter()
+            .flat_map(|n| n.parallel_units.iter())
+            .map(|p| p.id as ParallelUnitId)
+            .collect_vec();
+        let current_parallel_units: HashSet<_> = self
+            .inner
+            .actors
+            .iter()
+            .map(|a| actor_to_parallel_unit[&a.actor_id] as ParallelUnitId)
+            .collect();
+
+        (all_parallel_units, current_parallel_units)
     }
 }
 
