@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::leader_service_server::LeaderService;
 use risingwave_pb::meta::{LeaderRequest, LeaderResponse};
@@ -20,14 +21,12 @@ use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct LeaderServiceImpl {
-    leader_rx: Receiver<(HostAddress, bool)>,
+    leader_rx: Receiver<(HostAddr, bool)>,
 }
 
 impl LeaderServiceImpl {
-    pub fn new(cluster_manager: Receiver<(HostAddress, bool)>) -> Self {
-        LeaderServiceImpl {
-            leader_rx: cluster_manager,
-        }
+    pub fn new(leader_rx: Receiver<(HostAddr, bool)>) -> Self {
+        LeaderServiceImpl { leader_rx }
     }
 }
 
@@ -46,8 +45,12 @@ impl LeaderService for LeaderServiceImpl {
         // TODO: change request. Need only a simple ping
         // let req = request.into_inner();
         let leader_addr = self.leader_rx.borrow().0.clone();
+        let leader_address = HostAddress {
+            host: leader_addr.host,
+            port: leader_addr.port.into(),
+        };
         Ok(Response::new(LeaderResponse {
-            leader_addr: Some(leader_addr),
+            leader_addr: Some(leader_address),
         }))
     }
 }

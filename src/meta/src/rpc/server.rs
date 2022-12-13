@@ -17,10 +17,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
-use prost::Message;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
-use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
@@ -170,7 +169,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     MetaLeaderInfo,
     JoinHandle<()>,
     Sender<()>,
-    Receiver<(HostAddress, bool)>,
+    Receiver<(HostAddr, bool)>,
 )> {
     run_elections(addr, meta_store, lease_time_sec).await
 }
@@ -633,7 +632,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
 #[derive(Clone)]
 struct InterceptorWrapper {
-    leader_rx: Receiver<(HostAddress, bool)>,
+    leader_rx: Receiver<(HostAddr, bool)>,
 }
 
 impl Interceptor for InterceptorWrapper {
@@ -642,8 +641,7 @@ impl Interceptor for InterceptorWrapper {
         if !is_leader {
             return Err(Status::aborted(format!(
                 "http://{}:{}",
-                addr.get_host(),
-                addr.get_port(),
+                addr.host, addr.port,
             ))); // TODO: Do this as
                  // json
         }

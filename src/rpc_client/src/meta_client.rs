@@ -906,14 +906,19 @@ impl GrpcMetaClient {
             .expect("Expect that leader service always knows who leader is");
 
         // let leader_addr = format!("http://{}:{}", leader_addr.host, leader_addr.port);
-        let leader_addr = format!("{}:{}", leader_addr.host, leader_addr.port);
+        // let leader_addr = format!("{}:{}", leader_addr.host, leader_addr.port);
+        let leader_addr = format!(
+            "http://{}:{}",
+            leader_addr.get_host(),
+            leader_addr.get_port()
+        );
+
         // TODO: the http here may be incorrect
         // error in sim test
         // FIXME
         // export RUST_LOG=info
         // ./risedev sslt -- --kill-rate=0.0 --kill "e2e_test/streaming/**/*.slt"
         // Connecting against leader meta http://0.0.0.0:5690, instead of follower meta 192.168.1.1:5690
-        let leader_addr = leader_addr.as_str();
         if leader_addr.ne(addr) {
             // TODO: Write this as function. DNRY
             tracing::info!(
@@ -921,7 +926,7 @@ impl GrpcMetaClient {
                 leader_addr,
                 addr
             );
-            let endpoint = Endpoint::from_shared(leader_addr.to_string())?
+            let endpoint = Endpoint::from_shared(leader_addr.clone())?
                 .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
             let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
                 .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
