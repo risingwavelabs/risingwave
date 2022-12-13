@@ -1,7 +1,9 @@
 #!/bin/bash
 set -eo pipefail
-[ -n "${BACKUP_TEST_PREFIX_BIN}" ]
-[ -n "${BACKUP_TEST_PREFIX_CONFIG}" ]
+[ -n "${BACKUP_TEST_BACKUP_RESTORE}" ]
+[ -n "${BACKUP_TEST_MCLI}" ]
+[ -n "${BACKUP_TEST_MCLI_CONFIG}" ]
+[ -n "${BACKUP_TEST_RW_ALL_IN_ONE}" ]
 
 function stop_cluster() {
   cargo make k 1>/dev/null 2>&1 || true
@@ -25,10 +27,14 @@ function wait_cluster_ready() {
 }
 
 function full_gc_sst() {
-  cargo make ctl hummock trigger-full-gc -s 0
+  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-full-gc -s 0
   # TODO #6482: wait full gc finish deterministically.
   # Currently have to wait long enough.
   sleep 30
+}
+
+function manual_compaction() {
+  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-manual-compaction "$@"
 }
 
 function start_etcd_minio() {
@@ -49,7 +55,7 @@ function drop_mvs() {
 
 function backup() {
   local job_id
-  job_id=$(cargo make ctl meta backup-meta | grep "backup job succeeded" | awk '{print $(NF)}')
+  job_id=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta backup-meta | grep "backup job succeeded" | awk '{print $(NF)}')
   [ -n "${job_id}" ]
   echo "${job_id}"
 }
@@ -57,7 +63,7 @@ function backup() {
 function delete_snapshot() {
   local snapshot_id
   snapshot_id=$1
-  cargo make ctl meta delete-meta-snapshots "${snapshot_id}"
+  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta delete-meta-snapshots "${snapshot_id}"
 }
 
 function restore() {
@@ -67,7 +73,7 @@ function restore() {
   stop_cluster
   clean_etcd_data
   start_etcd_minio
-  "${BACKUP_TEST_PREFIX_BIN}"/backup-restore \
+  ${BACKUP_TEST_BACKUP_RESTORE} \
   --meta-store-type etcd \
   --meta-snapshot-id "${job_id}" \
   --etcd-endpoints 127.0.0.1:2388 \
@@ -83,25 +89,25 @@ function execute_sql() {
 }
 
 function get_max_committed_epoch() {
-  mce=$(cargo make ctl hummock list-version | grep max_committed_epoch | sed -n 's/max_committed_epoch: \(.*\),/\1/p')
+  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version | grep max_committed_epoch | sed -n 's/max_committed_epoch: \(.*\),/\1/p')
   echo "${mce}"
 }
 
 function get_safe_epoch() {
-  safe_epoch=$(cargo make ctl hummock list-version | grep safe_epoch | sed -n 's/safe_epoch: \(.*\),/\1/p')
+  safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version | grep safe_epoch | sed -n 's/safe_epoch: \(.*\),/\1/p')
   echo "${safe_epoch}"
 }
 
 function get_total_sst_count() {
-  "${BACKUP_TEST_PREFIX_BIN}/mcli" -C "${BACKUP_TEST_PREFIX_CONFIG}/mcli" \
-  find "hummock-minio/hummock001/hummock_001" -name "*.data" |wc -l
+  ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
+  find "hummock-minio/hummock001" -name "*.data" |wc -l
 }
 
 function get_max_committed_epoch_in_backup() {
   local id
   id=$1
   sed_str="s/.*{\"id\":${id},\"hummock_version_id\":.*,\"ssts\":\[.*\],\"max_committed_epoch\":\([[:digit:]]*\),\"safe_epoch\":.*}.*/\1/p"
-  "${BACKUP_TEST_PREFIX_BIN}/mcli" -C "${BACKUP_TEST_PREFIX_CONFIG}/mcli" \
+  ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
   cat "hummock-minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
 }
 
@@ -109,11 +115,11 @@ function get_safe_epoch_in_backup() {
   local id
   id=$1
   sed_str="s/.*{\"id\":${id},\"hummock_version_id\":.*,\"ssts\":\[.*\],\"max_committed_epoch\":.*,\"safe_epoch\":\([[:digit:]]*\)}.*/\1/p"
-  "${BACKUP_TEST_PREFIX_BIN}/mcli" -C "${BACKUP_TEST_PREFIX_CONFIG}/mcli" \
+  ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
   cat "hummock-minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
 }
 
 function get_min_pinned_snapshot() {
-  s=$(cargo make ctl hummock list-pinned-snapshots | grep "min_pinned_snapshot" | sed -n 's/.*min_pinned_snapshot \(.*\)/\1/p' | sort -n | head -1)
+  s=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-pinned-snapshots | grep "min_pinned_snapshot" | sed -n 's/.*min_pinned_snapshot \(.*\)/\1/p' | sort -n | head -1)
   echo "${s}"
 }

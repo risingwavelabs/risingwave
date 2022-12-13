@@ -77,8 +77,12 @@ if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     chmod +x ./target/debug/backup-restore
 
     test_root="src/storage/backup/integration_tests"
-    BACKUP_TEST_PREFIX_BIN="target/debug" \
-    BACKUP_TEST_PREFIX_CONFIG=".risingwave/config" \
+    BACKUP_TEST_BACKUP_RESTORE="target/debug/backup-restore" \
+    BACKUP_TEST_MCLI=".risingwave/bin/mcli" \
+    BACKUP_TEST_MCLI_CONFIG=".risingwave/config/mcli" \
+    BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \
+    RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001" \
+    RW_META_ADDR="http://127.0.0.1:5690" \
     bash "${test_root}/run_all.sh"
     echo "--- Kill cluster"
     cargo make kill

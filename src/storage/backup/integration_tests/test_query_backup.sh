@@ -60,7 +60,7 @@ done
 safe_epoch=$(get_safe_epoch)
 [ "${safe_epoch}" -eq 0 ]
 # trigger a compaction to increase safe_epoch
-cargo make ctl hummock trigger-manual-compaction -c 3 -l 0
+manual_compaction -c 3 -l 0
 # wait until compaction is done
 while [ "${safe_epoch}" -le "${backup_mce}" ] ;
 do

@@ -184,7 +184,7 @@ pub async fn restore(opts: RestoreOpts) -> BackupResult<()> {
             tracing::info!("restore succeeded");
         }
         Err(e) => {
-            tracing::error!("restore failed: {}", e);
+            tracing::warn!("restore failed: {}", e);
         }
     }
     result
