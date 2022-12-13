@@ -33,7 +33,7 @@ impl LeaderService for LeaderServiceImpl {
 }
 ```
 
-Also see the other services in `src/<component>/src/rcp/service/` for further examples. Above service defines a `LeaderRequest` and a `LeaderResponse`, which use proto messages. We have to define these proto mesages
+Also see the other services in `src/<component>/src/rcp/service/` for further examples. Above service defines a `LeaderRequest` and a `LeaderResponse`, which use proto messages. We have to define these proto messages
 
 ## Proto definitions
 
