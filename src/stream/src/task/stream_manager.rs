@@ -235,7 +235,7 @@ impl LocalStreamManager {
     pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<(CollectResult, bool)> {
         let complete_receiver = {
             let mut barrier_manager = self.context.lock_barrier_manager();
-            barrier_manager.remove_collect_rx(epoch)
+            barrier_manager.remove_collect_rx(epoch)?
         };
         // Wait for all actors finishing this barrier.
         let result = complete_receiver
@@ -292,7 +292,7 @@ impl LocalStreamManager {
             .barrier_inflight_latency
             .start_timer();
         barrier_manager.send_barrier(barrier, empty(), empty(), Some(timer))?;
-        barrier_manager.remove_collect_rx(barrier.epoch.prev);
+        barrier_manager.remove_collect_rx(barrier.epoch.prev)?;
         Ok(())
     }
 
