@@ -74,6 +74,7 @@ impl<S: StateStore> RangeCache<S> {
 
     /// Insert a row and corresponding scalar value key into cache (if within range) and
     /// `StateTable`.
+    /// TODO(row trait): optimize this
     pub fn insert(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
@@ -87,6 +88,7 @@ impl<S: StateStore> RangeCache<S> {
 
     /// Delete a row and corresponding scalar value key from cache (if within range) and
     /// `StateTable`.
+    /// TODO(row trait): optimize this
     // FIXME: panic instead of returning Err
     pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(k) {
@@ -102,6 +104,7 @@ impl<S: StateStore> RangeCache<S> {
         Ok(())
     }
 
+    /// TODO(row trait): optimize this
     fn to_row_bound(bound: Bound<ScalarImpl>) -> Bound<Row> {
         match bound {
             Unbounded => Unbounded,

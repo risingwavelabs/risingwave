@@ -222,8 +222,7 @@ mod tests {
 
         let v = 32i32;
         let t = TypeName::Interval;
-        let bytes =
-            serialize_datum(Some(IntervalUnit::from_month(v).to_scalar_value()).as_ref());
+        let bytes = serialize_datum(Some(IntervalUnit::from_month(v).to_scalar_value()).as_ref());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(
             IntervalUnit::from_month(v).to_scalar_value(),

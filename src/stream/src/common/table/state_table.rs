@@ -696,7 +696,7 @@ impl<S: StateStore> StateTable<S> {
         };
         let range_end_suffix = watermark.map(|watermark| {
             serialize_pk(
-                &Row::new(vec![Some(watermark.clone())]),
+                row::once(Some(watermark.clone())),
                 prefix_serializer.as_ref().unwrap(),
             )
         });
@@ -732,7 +732,7 @@ impl<S: StateStore> StateTable<S> {
         if let Some(range_end_suffix) = range_end_suffix {
             let range_begin_suffix = if let Some(ref last_watermark) = self.last_watermark {
                 serialize_pk(
-                    &Row::new(vec![Some(last_watermark.clone())]),
+                    row::once(Some(last_watermark.clone())),
                     prefix_serializer.as_ref().unwrap(),
                 )
             } else {

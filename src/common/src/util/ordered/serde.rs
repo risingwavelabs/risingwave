@@ -50,11 +50,12 @@ impl OrderedRowSerde {
         }
     }
 
-    #[deprecated]
+    /// Note: prefer [`Row2::memcmp_serialize`] if possible.
     pub fn serialize(&self, row: impl Row2, append_to: impl BufMut) {
         self.serialize_datums(row.iter(), append_to)
     }
 
+    /// Note: prefer [`Row2::memcmp_serialize`] if possible.
     pub fn serialize_datums(
         &self,
         datum_refs: impl Iterator<Item = impl ToDatumRef>,

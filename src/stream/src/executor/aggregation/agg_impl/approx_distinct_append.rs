@@ -124,11 +124,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
             }
         };
         if let Some(state_row) = state_row {
-            if let ScalarImpl::List(list) = state_row
-                [group_key.map(|row| row.len()).unwrap_or_default()]
-            .as_ref()
-            .unwrap()
-            {
+            if let ScalarImpl::List(list) = state_row[group_key.len()].as_ref().unwrap() {
                 let state = deserialize_buckets_from_list(list.values());
                 for (idx, bucket) in self.registers_mut().iter_mut().enumerate() {
                     if state[idx] != 0 {
@@ -159,7 +155,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
             .map(|x| Some(ScalarImpl::Int64(x as i64)))
             .collect_vec(),
         )));
-        let current_row = group_key.unwrap_or_else(Row::empty).chain(row::once(list));
+        let current_row = group_key.chain(row::once(list));
 
         let state_row = {
             let data_iter = state_table.iter_with_pk_prefix(&group_key).await?;

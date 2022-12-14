@@ -18,9 +18,7 @@ use risingwave_common::row::{Row, Row2};
 use risingwave_common::util::ordered::OrderedRowSerde;
 
 pub fn serialize_pk(pk: impl Row2, serializer: &OrderedRowSerde) -> Vec<u8> {
-    let mut result = vec![];
-    serializer.serialize(pk, &mut result);
-    result
+    pk.memcmp_serialize(serializer)
 }
 
 pub fn serialize_pk_with_vnode(
@@ -29,7 +27,7 @@ pub fn serialize_pk_with_vnode(
     vnode: VirtualNode,
 ) -> Vec<u8> {
     let mut result = vnode.to_be_bytes().to_vec();
-    serializer.serialize(pk, &mut result);
+    pk.memcmp_serialize_into(serializer, &mut result);
     result
 }
 

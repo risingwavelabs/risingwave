@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::row::{Row, Row2, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -84,14 +84,7 @@ impl<S: StateStore> ManagedTopNState<S> {
     }
 
     fn get_topn_row(&self, row: Row, group_key_len: usize, order_by_len: usize) -> TopNStateRow {
-        let datums = self
-            .state_table
-            .pk_indices()
-            .iter()
-            .skip(group_key_len)
-            .map(|pk_index| row[*pk_index].clone())
-            .collect();
-        let pk = Row::new(datums);
+        let pk = (&row).project(&self.state_table.pk_indices()[group_key_len..]);
         let cache_key = serialize_pk_to_cache_key(pk, order_by_len, &self.cache_key_serde);
 
         TopNStateRow::new(cache_key, row)
@@ -269,26 +262,6 @@ mod tests {
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::row_nonnull;
 
-    pub fn serialize_row_to_cache_key(
-        pk: Row,
-        order_by_len: usize,
-        cache_key_serde: &(OrderedRowSerde, OrderedRowSerde),
-    ) -> CacheKey {
-        let pk = pk.into_inner();
-        let (cache_key_first, cache_key_second) = pk.split_at(order_by_len);
-        let mut cache_key_first_bytes = vec![];
-        let mut cache_key_second_bytes = vec![];
-        cache_key_serde.0.serialize(
-            &Row::new(cache_key_first.to_vec()),
-            &mut cache_key_first_bytes,
-        );
-        cache_key_serde.1.serialize(
-            &Row::new(cache_key_second.to_vec()),
-            &mut cache_key_second_bytes,
-        );
-        (cache_key_first_bytes, cache_key_second_bytes)
-    }
-
     #[tokio::test]
     async fn test_managed_top_n_state() {
         let data_types = vec![DataType::Varchar, DataType::Int64];
@@ -322,10 +295,10 @@ mod tests {
         let row3 = row_nonnull!["abd", 3i64];
         let row4 = row_nonnull!["ab", 4i64];
 
-        let row1_bytes = serialize_row_to_cache_key(row1.clone(), 1, &cache_key_serde);
-        let row2_bytes = serialize_row_to_cache_key(row2.clone(), 1, &cache_key_serde);
-        let row3_bytes = serialize_row_to_cache_key(row3.clone(), 1, &cache_key_serde);
-        let row4_bytes = serialize_row_to_cache_key(row4.clone(), 1, &cache_key_serde);
+        let row1_bytes = serialize_pk_to_cache_key(row1.clone(), 1, &cache_key_serde);
+        let row2_bytes = serialize_pk_to_cache_key(row2.clone(), 1, &cache_key_serde);
+        let row3_bytes = serialize_pk_to_cache_key(row3.clone(), 1, &cache_key_serde);
+        let row4_bytes = serialize_pk_to_cache_key(row4.clone(), 1, &cache_key_serde);
         let rows = vec![row1, row2, row3, row4];
         let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes];
         managed_state.insert(rows[3].clone());
@@ -415,11 +388,11 @@ mod tests {
         let row4 = row_nonnull!["ab", 4i64];
         let row5 = row_nonnull!["abcd", 5i64];
 
-        let row1_bytes = serialize_row_to_cache_key(row1.clone(), 1, &cache_key_serde);
-        let row2_bytes = serialize_row_to_cache_key(row2.clone(), 1, &cache_key_serde);
-        let row3_bytes = serialize_row_to_cache_key(row3.clone(), 1, &cache_key_serde);
-        let row4_bytes = serialize_row_to_cache_key(row4.clone(), 1, &cache_key_serde);
-        let row5_bytes = serialize_row_to_cache_key(row5.clone(), 1, &cache_key_serde);
+        let row1_bytes = serialize_pk_to_cache_key(row1.clone(), 1, &cache_key_serde);
+        let row2_bytes = serialize_pk_to_cache_key(row2.clone(), 1, &cache_key_serde);
+        let row3_bytes = serialize_pk_to_cache_key(row3.clone(), 1, &cache_key_serde);
+        let row4_bytes = serialize_pk_to_cache_key(row4.clone(), 1, &cache_key_serde);
+        let row5_bytes = serialize_pk_to_cache_key(row5.clone(), 1, &cache_key_serde);
         let rows = vec![row1, row2, row3, row4, row5];
         let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes, row5_bytes];
 
