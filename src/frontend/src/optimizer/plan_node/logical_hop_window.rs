@@ -359,7 +359,7 @@ impl PredicatePushdown for LogicalHopWindow {
                 .output_indices()
                 .iter()
                 .filter(|i| **i != window_start_idx && **i != window_end_idx)
-                .map(|i| InputRef::new(*i, self.schema().fields()[*i].data_type()).into())
+                .map(|i| InputRef::new(*i, self.input().schema().fields()[*i].data_type()).into())
                 .collect(),
         };
         let pushed_predicate = pushed_predicate.rewrite_expr(&mut subst);
