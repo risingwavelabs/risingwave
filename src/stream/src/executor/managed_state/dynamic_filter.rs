@@ -208,7 +208,7 @@ impl<S: StateStore> RangeCache<S> {
 
             map.insert(
                 key_bytes[VirtualNode::SIZE..].to_vec(),
-                (row.as_ref()).into(),
+                row.into(),
             );
         }
 

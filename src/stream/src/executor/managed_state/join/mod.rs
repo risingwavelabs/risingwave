@@ -15,7 +15,6 @@
 mod join_entry_state;
 
 use std::alloc::Global;
-use std::borrow::Cow;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -361,8 +360,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                     pk1, pk2,
                     "mismatched pk in degree table: pk1: {pk1:?}, pk2: {pk2:?}",
                 );
-                let pk = row
-                    .as_ref()
+                let pk = (&row)
                     .project(&self.state.pk_indices)
                     .memcmp_serialize(&self.pk_serializer);
                 let degree_i64 = degree
@@ -378,9 +376,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             #[for_await]
             for row in table_iter {
-                let row: Cow<'_, Row> = row?;
-                let pk = row
-                    .as_ref()
+                let row: Row = row?;
+                let pk = (&row)
                     .project(&self.state.pk_indices)
                     .memcmp_serialize(&self.pk_serializer);
                 entry_state.insert(pk, JoinRow::new(row, 0).encode());

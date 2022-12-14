@@ -21,7 +21,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
@@ -857,10 +857,6 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
-fn get_second<T, U>(arg: StreamExecutorResult<(T, U)>) -> StreamExecutorResult<U> {
-    arg.map(|x| x.1)
-}
-
 // Iterator functions
 impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table.
@@ -880,8 +876,7 @@ impl<S: StateStore> StateTable<S> {
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
-                .into_stream()
-                .map(get_second),
+                .into_row_stream(),
         )
     }
 
@@ -921,8 +916,7 @@ impl<S: StateStore> StateTable<S> {
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
-                .into_stream()
-                .map(get_second),
+                .into_row_stream(),
         )
     }
 
@@ -955,8 +949,7 @@ impl<S: StateStore> StateTable<S> {
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
-                .into_stream()
-                .map(get_second),
+                .into_row_stream(),
         )
     }
 
@@ -1068,9 +1061,9 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
-pub type RowStream<'a, S: StateStore> = impl Stream<Item = StreamExecutorResult<Cow<'a, Row>>>;
+pub type RowStream<'a, S: StateStore> = impl Stream<Item = StreamExecutorResult<Row>> + 'a;
 pub type RowStreamWithPk<'a, S: StateStore> =
-    impl Stream<Item = StreamExecutorResult<(Cow<'a, Vec<u8>>, Cow<'a, Row>)>>;
+    impl Stream<Item = StreamExecutorResult<(Cow<'a, Vec<u8>>, Row)>> + 'a;
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
 /// It will merge the result of `mem_table_iter` and `state_store_iter`.
@@ -1083,8 +1076,8 @@ struct StateTableRowIter<'a, M, C> {
 
 impl<'a, M, C> StateTableRowIter<'a, M, C>
 where
-    M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
-    C: Stream<Item = StreamExecutorResult<(Vec<u8>, Row)>>,
+    M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)> + 'a,
+    C: Stream<Item = StreamExecutorResult<(Vec<u8>, Row)>> + 'a,
 {
     fn new(mem_table_iter: M, storage_iter: C, deserializer: RowDeserializer) -> Self {
         Self {
@@ -1098,7 +1091,7 @@ where
     /// This function scans kv pairs from the `shared_storage` and
     /// memory(`mem_table`) with optional pk_bounds. If a record exist in both `shared_storage` and
     /// `mem_table`, result `mem_table` is returned according to the operation(RowOp) on it.
-    #[try_stream(ok = (Cow<'a, Vec<u8>>, Cow<'a, Row>), error = StreamExecutorError)]
+    #[try_stream(ok = (Cow<'a, Vec<u8>>, Row), error = StreamExecutorError)]
     async fn into_stream(self) {
         let storage_iter = self.storage_iter.peekable();
         pin_mut!(storage_iter);
@@ -1111,7 +1104,7 @@ where
                 // The mem table side has come to an end, return data from the shared storage.
                 (Some(_), None) => {
                     let (pk, row) = storage_iter.next().await.unwrap()?;
-                    yield (Cow::Owned(pk), Cow::Owned(row))
+                    yield (Cow::Owned(pk), row)
                 }
                 // The stream side has come to an end, return data from the mem table.
                 (None, Some(_)) => {
@@ -1120,7 +1113,7 @@ where
                         RowOp::Insert(row_bytes) | RowOp::Update((_, row_bytes)) => {
                             let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
-                            yield (Cow::Borrowed(pk), Cow::Owned(row))
+                            yield (Cow::Borrowed(pk), row)
                         }
                         _ => {}
                     }
@@ -1130,7 +1123,7 @@ where
                         Ordering::Less => {
                             // yield data from storage
                             let (pk, row) = storage_iter.next().await.unwrap()?;
-                            yield (Cow::Owned(pk), Cow::Owned(row));
+                            yield (Cow::Owned(pk), row);
                         }
                         Ordering::Equal => {
                             // both memtable and storage contain the key, so we advance both
@@ -1142,7 +1135,7 @@ where
                                 RowOp::Insert(row_bytes) => {
                                     let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
-                                    yield (Cow::Borrowed(pk), Cow::Owned(row));
+                                    yield (Cow::Borrowed(pk), row);
                                 }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update((old_row_bytes, new_row_bytes)) => {
@@ -1153,7 +1146,7 @@ where
 
                                     debug_assert!(old_row == old_row_in_storage);
 
-                                    yield (Cow::Borrowed(pk), Cow::Owned(new_row));
+                                    yield (Cow::Borrowed(pk), new_row);
                                 }
                             }
                         }
@@ -1165,7 +1158,7 @@ where
                                 RowOp::Insert(row_bytes) => {
                                     let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
-                                    yield (Cow::Borrowed(pk), Cow::Owned(row));
+                                    yield (Cow::Borrowed(pk), row);
                                 }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update(_) => unreachable!(
@@ -1181,6 +1174,10 @@ where
                 }
             }
         }
+    }
+
+    fn into_row_stream(self) -> impl Stream<Item = StreamExecutorResult<Row>> + 'a {
+        self.into_stream().map_ok(|(_, row)| row)
     }
 }
 

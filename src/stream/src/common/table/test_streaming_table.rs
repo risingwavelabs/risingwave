@@ -386,7 +386,7 @@ async fn test_state_table_iter() {
                 Some(11_i32.into()),
                 Some(111_i32.into())
             ]),
-            res.as_ref()
+            &res
         );
 
         // will not get [2, 22, 222]
@@ -397,7 +397,7 @@ async fn test_state_table_iter() {
                 Some(33_i32.into()),
                 Some(3333_i32.into())
             ]),
-            res.as_ref()
+            &res
         );
 
         let res = iter.next().await.unwrap().unwrap();
@@ -407,7 +407,7 @@ async fn test_state_table_iter() {
                 Some(66_i32.into()),
                 Some(666_i32.into())
             ]),
-            res.as_ref()
+            &res
         );
     }
     epoch.inc();
@@ -461,7 +461,7 @@ async fn test_state_table_iter() {
             Some(33_i32.into()),
             Some(333_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
     // this row exists in mem_table
     let res = iter.next().await.unwrap().unwrap();
@@ -471,7 +471,7 @@ async fn test_state_table_iter() {
             Some(44_i32.into()),
             Some(444_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
     let res = iter.next().await.unwrap().unwrap();
 
@@ -482,7 +482,7 @@ async fn test_state_table_iter() {
             Some(55_i32.into()),
             Some(555_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
     let res = iter.next().await.unwrap().unwrap();
 
@@ -493,7 +493,7 @@ async fn test_state_table_iter() {
             Some(66_i32.into()),
             Some(666_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
 
     let res = iter.next().await.unwrap().unwrap();
@@ -504,7 +504,7 @@ async fn test_state_table_iter() {
             Some(77_i32.into()),
             Some(777.into())
         ]),
-        res.as_ref()
+        &res
     );
 
     let res = iter.next().await.unwrap().unwrap();
@@ -516,7 +516,7 @@ async fn test_state_table_iter() {
             Some(88_i32.into()),
             Some(888_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
 
     let res = iter.next().await.unwrap().unwrap();
@@ -528,7 +528,7 @@ async fn test_state_table_iter() {
             Some(99_i32.into()),
             Some(999_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
 
     // there is no row in both shared_storage and mem_table
@@ -615,7 +615,7 @@ async fn test_state_table_iter_with_prefix() {
             Some(55_i32.into()),
             Some(5555_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
 
     // this row exists in mem_table
@@ -626,7 +626,7 @@ async fn test_state_table_iter_with_prefix() {
             Some(33_i32.into()),
             Some(333_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
 
     // this row exists in shared_storage
@@ -637,7 +637,7 @@ async fn test_state_table_iter_with_prefix() {
             Some(22_i32.into()),
             Some(222_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
     // this row exists in shared_storage
     let res = iter.next().await.unwrap().unwrap();
@@ -647,7 +647,7 @@ async fn test_state_table_iter_with_prefix() {
             Some(11_i32.into()),
             Some(111_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
     // pk without the prefix the range will not be scan
     let res = iter.next().await;
@@ -739,7 +739,7 @@ async fn test_state_table_iter_with_pk_range() {
             Some(44_i32.into()),
             Some(444_i32.into()),
         ]),
-        res.as_ref()
+        &res
     );
 
     // pk without the prefix the range will not be scan
@@ -764,7 +764,7 @@ async fn test_state_table_iter_with_pk_range() {
             Some(44_i32.into()),
             Some(444_i32.into()),
         ]),
-        res.as_ref()
+        &res
     );
 
     // this row exists in mem_table
@@ -775,7 +775,7 @@ async fn test_state_table_iter_with_pk_range() {
             Some(66_i32.into()),
             Some(666_i32.into()),
         ]),
-        res.as_ref()
+        &res
     );
 
     // pk without the prefix the range will not be scan
@@ -879,14 +879,14 @@ async fn test_state_table_iter_with_value_indices() {
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
-        assert_eq!(&Row::new(vec![Some(111_i32.into())]), res.as_ref());
+        assert_eq!(&Row::new(vec![Some(111_i32.into())]), &res);
 
         // will not get [2, 22, 222]
         let res = iter.next().await.unwrap().unwrap();
-        assert_eq!(&Row::new(vec![Some(3333_i32.into())]), res.as_ref());
+        assert_eq!(&Row::new(vec![Some(3333_i32.into())]), &res);
 
         let res = iter.next().await.unwrap().unwrap();
-        assert_eq!(&Row::new(vec![Some(666_i32.into())]), res.as_ref());
+        assert_eq!(&Row::new(vec![Some(666_i32.into())]), &res);
     }
 
     epoch.inc();
@@ -936,34 +936,34 @@ async fn test_state_table_iter_with_value_indices() {
     let res = iter.next().await.unwrap().unwrap();
 
     // this pk exist in both shared_storage and mem_table
-    assert_eq!(&Row::new(vec![Some(333_i32.into())]), res.as_ref());
+    assert_eq!(&Row::new(vec![Some(333_i32.into())]), &res);
 
     // this row exists in mem_table
     let res = iter.next().await.unwrap().unwrap();
-    assert_eq!(&Row::new(vec![Some(444_i32.into())]), res.as_ref());
+    assert_eq!(&Row::new(vec![Some(444_i32.into())]), &res);
 
     let res = iter.next().await.unwrap().unwrap();
 
     // this row exists in mem_table
-    assert_eq!(&Row::new(vec![Some(555_i32.into())]), res.as_ref());
+    assert_eq!(&Row::new(vec![Some(555_i32.into())]), &res);
     let res = iter.next().await.unwrap().unwrap();
 
     // this row exists in shared_storage
-    assert_eq!(&Row::new(vec![Some(666_i32.into())]), res.as_ref());
+    assert_eq!(&Row::new(vec![Some(666_i32.into())]), &res);
 
     let res = iter.next().await.unwrap().unwrap();
     // this row exists in mem_table
-    assert_eq!(&Row::new(vec![Some(777.into())]), res.as_ref());
+    assert_eq!(&Row::new(vec![Some(777.into())]), &res);
 
     let res = iter.next().await.unwrap().unwrap();
 
     // this row exists in mem_table
-    assert_eq!(&Row::new(vec![Some(888_i32.into())]), res.as_ref());
+    assert_eq!(&Row::new(vec![Some(888_i32.into())]), &res);
 
     let res = iter.next().await.unwrap().unwrap();
 
     // this row exists in shared_storage
-    assert_eq!(&Row::new(vec![Some(999_i32.into())]), res.as_ref());
+    assert_eq!(&Row::new(vec![Some(999_i32.into())]), &res);
 
     // there is no row in both shared_storage and mem_table
     let res = iter.next().await;
@@ -1038,7 +1038,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
                 Some(11_i32.into()),
                 Some(1_i32.into())
             ]),
-            res.as_ref()
+            &res
         );
 
         // will not get [2, 22, 222]
@@ -1049,7 +1049,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
                 Some(33_i32.into()),
                 Some(3_i32.into())
             ]),
-            res.as_ref()
+            &res
         );
 
         let res = iter.next().await.unwrap().unwrap();
@@ -1059,7 +1059,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
                 Some(66_i32.into()),
                 Some(6_i32.into())
             ]),
-            res.as_ref()
+            &res
         );
     }
 
@@ -1115,7 +1115,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
             Some(33_i32.into()),
             Some(3_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
 
     // this row exists in mem_table
@@ -1126,7 +1126,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
             Some(44_i32.into()),
             Some(4_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
 
     let res = iter.next().await.unwrap().unwrap();
@@ -1138,7 +1138,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
             Some(55_i32.into()),
             Some(5_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
     let res = iter.next().await.unwrap().unwrap();
 
@@ -1149,7 +1149,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
             Some(66_i32.into()),
             Some(6_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
 
     let res = iter.next().await.unwrap().unwrap();
@@ -1160,7 +1160,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
             Some(77_i32.into()),
             Some(7_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
 
     let res = iter.next().await.unwrap().unwrap();
@@ -1172,7 +1172,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
             Some(88_i32.into()),
             Some(8_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
 
     let res = iter.next().await.unwrap().unwrap();
@@ -1184,7 +1184,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
             Some(99_i32.into()),
             Some(9_i32.into())
         ]),
-        res.as_ref()
+        &res
     );
 
     // there is no row in both shared_storage and mem_table
@@ -1295,7 +1295,7 @@ async fn test_state_table_write_chunk() {
 
     assert_eq!(rows.len(), 2);
     assert_eq!(
-        rows[0].as_ref(),
+        &rows[0],
         &Row::new(vec![
             Some(123i32.into()),
             Some(456i64.into()),
@@ -1304,7 +1304,7 @@ async fn test_state_table_write_chunk() {
         ])
     );
     assert_eq!(
-        rows[1].as_ref(),
+        &rows[1],
         &Row::new(vec![
             Some(365i32.into()),
             Some(4999i64.into()),
@@ -1405,7 +1405,7 @@ async fn test_state_table_write_chunk_visibility() {
 
     assert_eq!(rows.len(), 3);
     assert_eq!(
-        rows[0].as_ref(),
+        &rows[0],
         &Row::new(vec![
             Some(8i32.into()),
             Some(1000i64.into()),
@@ -1414,7 +1414,7 @@ async fn test_state_table_write_chunk_visibility() {
         ])
     );
     assert_eq!(
-        rows[1].as_ref(),
+        &rows[1],
         &Row::new(vec![
             Some(123i32.into()),
             Some(456i64.into()),
@@ -1423,7 +1423,7 @@ async fn test_state_table_write_chunk_visibility() {
         ])
     );
     assert_eq!(
-        rows[2].as_ref(),
+        &rows[2],
         &Row::new(vec![
             Some(365i32.into()),
             Some(4888i64.into()),
@@ -1510,15 +1510,15 @@ async fn test_state_table_write_chunk_value_indices() {
 
     assert_eq!(rows.len(), 3);
     assert_eq!(
-        rows[0].as_ref(),
+        &rows[0],
         &Row::new(vec![Some(true.into()), Some(1000i64.into()),])
     );
     assert_eq!(
-        rows[1].as_ref(),
+        &rows[1],
         &Row::new(vec![Some(true.into()), Some(456i64.into()),])
     );
     assert_eq!(
-        rows[2].as_ref(),
+        &rows[2],
         &Row::new(vec![Some(false.into()), Some(4888i64.into()),])
     );
 }
