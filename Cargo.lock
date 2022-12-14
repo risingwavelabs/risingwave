@@ -5792,6 +5792,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap 3.2.23",
+ "console",
  "futures",
  "glob",
  "itertools",

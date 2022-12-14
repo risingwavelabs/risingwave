@@ -8,6 +8,7 @@ edition = "2021"
 anyhow = "1.0"
 async-trait = "0.1"
 clap = "3"
+console = "0.15"
 etcd-client = { version = "0.2.11", package = "madsim-etcd-client" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
