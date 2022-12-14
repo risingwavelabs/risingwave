@@ -28,7 +28,7 @@ pub struct BarrierActorInfo {
     /// node_id => actors
     pub actor_map: HashMap<WorkerId, Vec<ActorId>>,
 
-    /// node_id => source actors
+    /// node_id => barrier inject actors
     pub actor_map_to_send: HashMap<WorkerId, Vec<ActorId>>,
 }
 
@@ -47,7 +47,7 @@ impl BarrierActorInfo {
         Self {
             node_map,
             actor_map: actor_infos.actor_maps,
-            actor_map_to_send: actor_infos.source_actor_maps,
+            actor_map_to_send: actor_infos.barrier_inject_actor_maps,
         }
     }
 
