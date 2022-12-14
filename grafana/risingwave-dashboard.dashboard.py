@@ -1868,7 +1868,6 @@ def section_hummock_tiered_cache(outer_panels):
         )
     ]
 
-
 def section_hummock_manager(outer_panels):
     panels = outer_panels.sub_panel()
     total_key_size_filter = "metric='total_key_size'"
@@ -1924,6 +1923,8 @@ def section_hummock_manager(outer_panels):
                                       "checkpoint version id"),
                         panels.target(f"{metric('storage_min_pinned_version_id')}",
                                       "min pinned version id"),
+                        panels.target(f"{metric('storage_min_safepoint_version_id')}",
+                                      "min safepoint version id"),
                     ],
                 ),
                 panels.timeseries_id(
@@ -1939,7 +1940,7 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_kilobytes(
-                    "table KV size",
+                    "Table KV Size",
                     "",
                     [
                         panels.target(f"{metric('storage_version_stats', total_key_size_filter)}/1024",
@@ -1949,7 +1950,7 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "table KV count",
+                    "Table KV Count",
                     "",
                     [
                         panels.target(f"{metric('storage_version_stats', total_key_count_filter)}",
@@ -1960,6 +1961,39 @@ def section_hummock_manager(outer_panels):
         )
     ]
 
+def section_backup_manager(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Backup Manager",
+            [
+                panels.timeseries_count(
+                    "Job Count",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('backup_job_count')}",
+                            "job count",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Job Process Time",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('backup_job_latency_bucket')}[$__rate_interval])) by (le, state))",
+                                f"Job Process Time p{legend}" +
+                                " - {{state}}",
+                                ),
+                            [50, 99, 999, "max"],
+                        ),
+                    ],
+                ),
+            ],
+        )
+    ]
 
 def grpc_metrics_target(panels, name, filter):
     return panels.timeseries_latency_small(
@@ -2304,6 +2338,7 @@ dashboard = Dashboard(
         *section_object_storage(panels),
         *section_hummock_tiered_cache(panels),
         *section_hummock_manager(panels),
+        *section_backup_manager(panels),
         *section_grpc_meta_catalog_service(panels),
         *section_grpc_meta_cluster_service(panels),
         *section_grpc_meta_stream_manager(panels),

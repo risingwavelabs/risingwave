@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use itertools::enumerate;
 use prost::Message;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionStats,
 };
@@ -180,6 +180,10 @@ pub fn trigger_pin_unpin_version_state(
 ) {
     if let Some(m) = pinned_versions.values().map(|v| v.min_pinned_id).min() {
         metrics.min_pinned_version_id.set(m as i64);
+    } else {
+        metrics
+            .min_pinned_version_id
+            .set(HummockVersionId::MAX as _);
     }
 }
 
@@ -193,5 +197,17 @@ pub fn trigger_pin_unpin_snapshot_state(
         .min()
     {
         metrics.min_pinned_epoch.set(m as i64);
+    } else {
+        metrics.min_pinned_epoch.set(HummockEpoch::MAX as _);
+    }
+}
+
+pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersionId]) {
+    if let Some(sp) = safepoints.iter().min() {
+        metrics.min_safepoint_version_id.set(*sp as _);
+    } else {
+        metrics
+            .min_safepoint_version_id
+            .set(HummockVersionId::MAX as _);
     }
 }
