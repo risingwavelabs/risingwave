@@ -415,14 +415,7 @@ pub async fn run_elections<S: MetaStore>(
                 initial_election = false;
 
                 // signal to observers if there is a change in leadership
-                loop {
-                    if let Err(err) = leader_tx.send((leader_addr.clone(), is_leader)) {
-                        tracing::info!("Error when sending leader update: {}", err);
-                        ticker.tick().await;
-                        continue;
-                    }
-                    break;
-                }
+                leader_tx.send((leader_addr.clone(), is_leader)).unwrap();
 
                 // election done. Enter the term of the current leader
                 // Leader stays in power until leader crashes
