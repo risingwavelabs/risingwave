@@ -90,18 +90,6 @@ export interface SinkResponse_WriteResponse {
 export interface SinkResponse_StartResponse {
 }
 
-export interface DbConnectorProperties {
-  databaseHost: string;
-  databasePort: string;
-  databaseUser: string;
-  databasePassword: string;
-  databaseName: string;
-  tableName: string;
-  partition: string;
-  startOffset: string;
-  includeSchemaEvents: boolean;
-}
-
 export interface CdcMessage {
   payload: string;
   partition: string;
@@ -110,7 +98,14 @@ export interface CdcMessage {
 
 export interface GetEventStreamRequest {
   sourceId: number;
-  properties: DbConnectorProperties | undefined;
+  sourceType: string;
+  startOffset: string;
+  properties: { [key: string]: string };
+}
+
+export interface GetEventStreamRequest_PropertiesEntry {
+  key: string;
+  value: string;
 }
 
 export interface GetEventStreamResponse {
@@ -645,64 +640,6 @@ export const SinkResponse_StartResponse = {
   },
 };
 
-function createBaseDbConnectorProperties(): DbConnectorProperties {
-  return {
-    databaseHost: "",
-    databasePort: "",
-    databaseUser: "",
-    databasePassword: "",
-    databaseName: "",
-    tableName: "",
-    partition: "",
-    startOffset: "",
-    includeSchemaEvents: false,
-  };
-}
-
-export const DbConnectorProperties = {
-  fromJSON(object: any): DbConnectorProperties {
-    return {
-      databaseHost: isSet(object.databaseHost) ? String(object.databaseHost) : "",
-      databasePort: isSet(object.databasePort) ? String(object.databasePort) : "",
-      databaseUser: isSet(object.databaseUser) ? String(object.databaseUser) : "",
-      databasePassword: isSet(object.databasePassword) ? String(object.databasePassword) : "",
-      databaseName: isSet(object.databaseName) ? String(object.databaseName) : "",
-      tableName: isSet(object.tableName) ? String(object.tableName) : "",
-      partition: isSet(object.partition) ? String(object.partition) : "",
-      startOffset: isSet(object.startOffset) ? String(object.startOffset) : "",
-      includeSchemaEvents: isSet(object.includeSchemaEvents) ? Boolean(object.includeSchemaEvents) : false,
-    };
-  },
-
-  toJSON(message: DbConnectorProperties): unknown {
-    const obj: any = {};
-    message.databaseHost !== undefined && (obj.databaseHost = message.databaseHost);
-    message.databasePort !== undefined && (obj.databasePort = message.databasePort);
-    message.databaseUser !== undefined && (obj.databaseUser = message.databaseUser);
-    message.databasePassword !== undefined && (obj.databasePassword = message.databasePassword);
-    message.databaseName !== undefined && (obj.databaseName = message.databaseName);
-    message.tableName !== undefined && (obj.tableName = message.tableName);
-    message.partition !== undefined && (obj.partition = message.partition);
-    message.startOffset !== undefined && (obj.startOffset = message.startOffset);
-    message.includeSchemaEvents !== undefined && (obj.includeSchemaEvents = message.includeSchemaEvents);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<DbConnectorProperties>, I>>(object: I): DbConnectorProperties {
-    const message = createBaseDbConnectorProperties();
-    message.databaseHost = object.databaseHost ?? "";
-    message.databasePort = object.databasePort ?? "";
-    message.databaseUser = object.databaseUser ?? "";
-    message.databasePassword = object.databasePassword ?? "";
-    message.databaseName = object.databaseName ?? "";
-    message.tableName = object.tableName ?? "";
-    message.partition = object.partition ?? "";
-    message.startOffset = object.startOffset ?? "";
-    message.includeSchemaEvents = object.includeSchemaEvents ?? false;
-    return message;
-  },
-};
-
 function createBaseCdcMessage(): CdcMessage {
   return { payload: "", partition: "", offset: "" };
 }
@@ -734,31 +671,78 @@ export const CdcMessage = {
 };
 
 function createBaseGetEventStreamRequest(): GetEventStreamRequest {
-  return { sourceId: 0, properties: undefined };
+  return { sourceId: 0, sourceType: "", startOffset: "", properties: {} };
 }
 
 export const GetEventStreamRequest = {
   fromJSON(object: any): GetEventStreamRequest {
     return {
       sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0,
-      properties: isSet(object.properties) ? DbConnectorProperties.fromJSON(object.properties) : undefined,
+      sourceType: isSet(object.sourceType) ? String(object.sourceType) : "",
+      startOffset: isSet(object.startOffset) ? String(object.startOffset) : "",
+      properties: isObject(object.properties)
+        ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+          acc[key] = String(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
   toJSON(message: GetEventStreamRequest): unknown {
     const obj: any = {};
     message.sourceId !== undefined && (obj.sourceId = Math.round(message.sourceId));
-    message.properties !== undefined &&
-      (obj.properties = message.properties ? DbConnectorProperties.toJSON(message.properties) : undefined);
+    message.sourceType !== undefined && (obj.sourceType = message.sourceType);
+    message.startOffset !== undefined && (obj.startOffset = message.startOffset);
+    obj.properties = {};
+    if (message.properties) {
+      Object.entries(message.properties).forEach(([k, v]) => {
+        obj.properties[k] = v;
+      });
+    }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<GetEventStreamRequest>, I>>(object: I): GetEventStreamRequest {
     const message = createBaseGetEventStreamRequest();
     message.sourceId = object.sourceId ?? 0;
-    message.properties = (object.properties !== undefined && object.properties !== null)
-      ? DbConnectorProperties.fromPartial(object.properties)
-      : undefined;
+    message.sourceType = object.sourceType ?? "";
+    message.startOffset = object.startOffset ?? "";
+    message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[key] = String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseGetEventStreamRequest_PropertiesEntry(): GetEventStreamRequest_PropertiesEntry {
+  return { key: "", value: "" };
+}
+
+export const GetEventStreamRequest_PropertiesEntry = {
+  fromJSON(object: any): GetEventStreamRequest_PropertiesEntry {
+    return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
+  },
+
+  toJSON(message: GetEventStreamRequest_PropertiesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = message.key);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetEventStreamRequest_PropertiesEntry>, I>>(
+    object: I,
+  ): GetEventStreamRequest_PropertiesEntry {
+    const message = createBaseGetEventStreamRequest_PropertiesEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
     return message;
   },
 };
