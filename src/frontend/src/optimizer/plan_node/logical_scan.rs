@@ -409,10 +409,7 @@ impl fmt::Display for LogicalScan {
                                 self.table_desc().columns[*i].name
                             ))
                         } else {
-                            f(&format_args!(
-                                "{}",
-                                self.table_desc().columns[*i].name.to_string()
-                            ))
+                            f(&format_args!("{}", self.table_desc().columns[*i].name))
                         }
                     })
                 )?;
