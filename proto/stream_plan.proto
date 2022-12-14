@@ -557,6 +557,7 @@ enum FragmentTypeFlag {
   SOURCE = 1;
   MVIEW = 2;
   SINK = 4;
+  NOW = 8;
 }
 
 message StreamFragmentGraph {
