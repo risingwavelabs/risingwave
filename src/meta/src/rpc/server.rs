@@ -19,7 +19,6 @@ use std::time::Duration;
 use etcd_client::ConnectOptions;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
@@ -34,10 +33,7 @@ use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
-use tokio::sync::watch::Receiver;
 use tokio::task::JoinHandle;
-use tonic::service::Interceptor;
-use tonic::{Request, Status};
 
 use super::elections::run_elections;
 use super::intercept::MetricsMiddlewareLayer;
@@ -200,9 +196,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     });
 
     // TODO:
-    // have a look at bug.txt
-
-    // TODO:
     // Remove the interceptor pattern again
 
     // TODO:
@@ -217,17 +210,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let span = tracing::span!(tracing::Level::INFO, "services");
         let _enter = span.enter();
 
-        let intercept = InterceptorWrapper { leader_rx };
-
         // failover logic
-
         if services_leader_rx.changed().await.is_err() {
             panic!("Leader sender dropped");
         }
 
         let is_leader = services_leader_rx.borrow().clone().1;
         let was_follower = !is_leader;
-        let intercept_clone = intercept.clone();
 
         // TODO: remove interceptor. Not needed if we have LeaderService
         let leader_srv = LeaderServiceImpl::new(f_leader_svc_leader_rx);
@@ -243,7 +232,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 // TODO: Use prometheus endpoint in follower?
                 tonic::transport::Server::builder()
                     .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
-                    .add_service(HealthServer::with_interceptor(health_srv, intercept_clone))
+                    .add_service(HealthServer::new(health_srv))
                     .add_service(LeaderServiceServer::new(leader_srv))
                     .serve_with_shutdown(address_info.listen_addr, async move {
                         tokio::select! {
@@ -533,46 +522,16 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
             .add_service(LeaderServiceServer::new(leader_srv))
-            .add_service(HeartbeatServiceServer::with_interceptor(
-                heartbeat_srv,
-                intercept.clone(),
-            ))
-            .add_service(ClusterServiceServer::with_interceptor(
-                cluster_srv,
-                intercept.clone(),
-            ))
-            .add_service(StreamManagerServiceServer::with_interceptor(
-                stream_srv,
-                intercept.clone(),
-            ))
-            .add_service(HummockManagerServiceServer::with_interceptor(
-                hummock_srv,
-                intercept.clone(),
-            ))
-            .add_service(NotificationServiceServer::with_interceptor(
-                notification_srv,
-                intercept.clone(),
-            ))
-            .add_service(DdlServiceServer::with_interceptor(
-                ddl_srv,
-                intercept.clone(),
-            ))
-            .add_service(UserServiceServer::with_interceptor(
-                user_srv,
-                intercept.clone(),
-            ))
-            .add_service(ScaleServiceServer::with_interceptor(
-                scale_srv,
-                intercept.clone(),
-            ))
-            .add_service(HealthServer::with_interceptor(
-                health_srv,
-                intercept.clone(),
-            ))
-            .add_service(BackupServiceServer::with_interceptor(
-                backup_srv,
-                intercept.clone(),
-            ))
+            .add_service(HeartbeatServiceServer::new(heartbeat_srv))
+            .add_service(ClusterServiceServer::new(cluster_srv))
+            .add_service(StreamManagerServiceServer::new(stream_srv))
+            .add_service(HummockManagerServiceServer::new(hummock_srv))
+            .add_service(NotificationServiceServer::new(notification_srv))
+            .add_service(DdlServiceServer::new(ddl_srv))
+            .add_service(UserServiceServer::new(user_srv))
+            .add_service(ScaleServiceServer::new(scale_srv))
+            .add_service(HealthServer::new(health_srv))
+            .add_service(BackupServiceServer::new(backup_srv))
             .serve_with_shutdown(address_info.listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
@@ -594,23 +553,4 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     });
 
     Ok((join_handle, svc_shutdown_tx))
-}
-
-#[derive(Clone)]
-struct InterceptorWrapper {
-    leader_rx: Receiver<(HostAddr, bool)>,
-}
-
-impl Interceptor for InterceptorWrapper {
-    fn call(&mut self, req: Request<()>) -> std::result::Result<Request<()>, Status> {
-        let (addr, is_leader) = self.leader_rx.borrow().clone();
-        if !is_leader {
-            return Err(Status::aborted(format!(
-                "http://{}:{}",
-                addr.host, addr.port,
-            ))); // TODO: Do this as
-                 // json
-        }
-        Ok(req)
-    }
 }
