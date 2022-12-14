@@ -258,9 +258,26 @@ impl Binder {
                     .into())
                 };
             }
+            "format_type" => {
+                return if inputs.len() == 2 {
+                    // TODO
+                    // return null as an workaround for now
+                    Ok(ExprImpl::literal_null(DataType::Varchar))
+                } else {
+                    Err(
+                        ErrorCode::ExprError("Too many/few arguments for format_type()".into())
+                            .into(),
+                    )
+                };
+            }
             "pg_table_is_visible" => return Ok(ExprImpl::literal_bool(true)),
             // internal
             "rw_vnode" => ExprType::Vnode,
+            // TODO: include version/tag/commit_id
+            // TODO: choose which pg version we should return.
+            "version" => return Ok(ExprImpl::literal_varchar("PostgreSQL 13.9-RW".to_string())),
+            // non-deterministic
+            "now" => ExprType::Now,
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported function: {:?}", function_name),

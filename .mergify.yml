@@ -1,13 +1,13 @@
 shared:
   - commit_message_template: &commit_message_template |
-      {{title}}
+      {{title}} (#{{number}})
       
       {{body | get_section("## What's changed and what's your intention?")}}
       
       {% for user in approved_reviews_by %}
       Approved-By: {{user}}
       {%- endfor %}
-      {% for commit in commits|unique(false, "email_author") %}
+      {% for commit in commits|unique(false, "email_author") if commit.author != "mergify[bot]" %}
       Co-Authored-By: {{ commit.author }} <{{ commit.email_author }}>
       {%- endfor %}
 

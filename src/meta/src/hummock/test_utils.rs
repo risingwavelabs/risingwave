@@ -217,7 +217,7 @@ pub async fn unregister_table_ids_from_compaction_group<S>(
 }
 
 pub fn update_filter_key_extractor_for_table_ids(
-    filter_key_extractor_manager_ref: FilterKeyExtractorManagerRef,
+    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
     table_ids: &[u32],
 ) {
     for table_id in table_ids {
