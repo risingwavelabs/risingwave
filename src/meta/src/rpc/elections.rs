@@ -122,7 +122,7 @@ async fn campaign<S: MetaStore>(
 
         // Check if new leader was elected in the meantime
         return match renew_lease(&campaign_leader_info, lease_time_sec, meta_store).await {
-            Some(is_leader) => {
+            Ok(is_leader) => {
                 if !is_leader {
                     return None;
                 }
@@ -132,14 +132,17 @@ async fn campaign<S: MetaStore>(
                     is_leader: true,
                 })
             }
-            None => None,
+            Err(_) => None,
         };
     }
 
     // follow-up elections: There have already been leaders before
     let is_leader = match renew_lease(&campaign_leader_info, lease_time_sec, meta_store).await {
-        None => return None,
-        Some(val) => val,
+        Err(e) => {
+            tracing::warn!("Encountered error when renewing lease {}", e);
+            return None;
+        }
+        Ok(val) => val,
     };
 
     if is_leader {
@@ -168,7 +171,7 @@ async fn campaign<S: MetaStore>(
 /// ## Returns
 /// True, if the current node could acquire/renew the lease.
 /// False, if the current node could acquire/renew the lease.
-/// None, if there was an error.
+/// MetaStoreError, if there was an error.
 ///
 /// ## Arguments
 /// `leader_info`: Info of the node that trie
@@ -182,7 +185,7 @@ async fn renew_lease<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
     lease_time_sec: u64,
     meta_store: &Arc<S>,
-) -> Option<bool> {
+) -> Result<bool, MetaStoreError> {
     // does this function work?
     let now = since_epoch();
     let mut txn = Transaction::default();
@@ -206,21 +209,11 @@ async fn renew_lease<S: MetaStore>(
     let is_leader = match meta_store.txn(txn).await {
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => false,
-            MetaStoreError::Internal(e) => {
-                tracing::warn!(
-                    "Renew/acquire lease: try again later, MetaStoreError: {:?}",
-                    e
-                );
-                return None;
-            }
-            MetaStoreError::ItemNotFound(e) => {
-                tracing::warn!("Renew/acquire lease: MetaStoreError: {:?}", e);
-                return None;
-            }
+            e => return Err(e),
         },
         Ok(_) => true,
     };
-    Some(is_leader)
+    Ok(is_leader)
 }
 
 /// Retrieve infos about the current leader
@@ -450,9 +443,12 @@ async fn manage_term<S: MetaStore>(
 ) -> Option<bool> {
     // try to renew/acquire the lease if this node is a leader
     if is_leader {
-        return renew_lease(leader_info, lease_time_sec, meta_store)
-            .await
-            .or(Some(false));
+        return Some(
+            renew_lease(leader_info, lease_time_sec, meta_store)
+                .await
+                .or::<MetaStoreError>(Ok(false))
+                .unwrap(),
+        );
     };
 
     // get leader info
@@ -539,14 +535,11 @@ mod tests {
     use crate::storage::MemStore;
 
     #[tokio::test]
-    async fn test_get_infos() {
+    async fn test_get_leader_lease_obj() {
         // no impfo present should give empty results or default objects
         let mock_meta_store = Arc::new(MemStore::new());
-        let (leader, lease) = get_leader_lease(&mock_meta_store).await.unwrap();
-        assert!(leader.is_empty() && lease.is_empty());
-        let (leader, lease) = get_leader_lease_obj(&mock_meta_store).await.unwrap();
-        assert!(leader.eq(&MetaLeaderInfo::default()));
-        assert!(lease.eq(&MetaLeaseInfo::default()));
+        let res = get_leader_lease_obj(&mock_meta_store).await;
+        assert!(res.is_none());
 
         // get_info should retrieve old leader info
         let test_leader = MetaLeaderInfo {
@@ -561,6 +554,24 @@ mod tests {
             )
             .await;
         assert!(res.is_ok(), "unable to send leader info to mock store");
+        let info_res = get_leader_lease_obj(&mock_meta_store).await;
+        assert!(
+            info_res.is_none(),
+            "get infos about leader should be none if either leader or lease is not set"
+        );
+        let res = mock_meta_store
+            .put_cf(
+                META_CF_NAME,
+                META_LEASE_KEY.as_bytes().to_vec(),
+                MetaLeaseInfo {
+                    leader: Some(test_leader.clone()),
+                    lease_register_time: since_epoch().as_secs(),
+                    lease_expire_time: since_epoch().as_secs() + 1,
+                }
+                .encode_to_vec(),
+            )
+            .await;
+        assert!(res.is_ok(), "unable to send lease info to mock store");
         let (leader, _) = get_leader_lease_obj(&mock_meta_store).await.unwrap();
         assert!(
             leader.eq(&test_leader),
@@ -744,11 +755,11 @@ mod tests {
                 .unwrap(),
             "Should have determined that new election is needed if lease is no longer valid"
         );
-        let (leader, lease) = get_leader_lease(&mock_meta_store).await.unwrap();
+        let res = get_leader_lease_obj(&mock_meta_store).await;
         assert!(
-            leader.is_empty() && lease.is_empty(),
-            "Expected that leader and lease were deleted after lease expired. leader.is_empty: {}. lease.is_empty(): {}",
-            leader.is_empty(), lease.is_empty()
+            res.is_none(),
+            "Expected that leader and lease were deleted after lease expired.  {:?}",
+            res
         )
     }
 
