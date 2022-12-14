@@ -520,8 +520,6 @@ async fn leader_changed<S: MetaStore>(
 #[cfg(test)]
 mod tests {
 
-    use core::panic;
-
     use super::*;
     use crate::storage::MemStore;
 
