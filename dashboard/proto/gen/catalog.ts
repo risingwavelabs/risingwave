@@ -137,9 +137,7 @@ export interface Table {
    * An optional column index of row id. If the primary key is specified by users,
    * this will be `None`.
    */
-  rowIdIndex:
-    | ColumnIndex
-    | undefined;
+  rowIdIndices: number[];
   /**
    * The column indices which are stored in the state store's value with
    * row-encoding. Currently is not supported yet and expected to be
@@ -733,7 +731,7 @@ function createBaseTable(): Table {
     properties: {},
     fragmentId: 0,
     vnodeColIndex: undefined,
-    rowIdIndex: undefined,
+    rowIdIndices: [],
     valueIndices: [],
     definition: "",
     handlePkConflict: false,
@@ -771,7 +769,9 @@ export const Table = {
         : {},
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
       vnodeColIndex: isSet(object.vnodeColIndex) ? ColumnIndex.fromJSON(object.vnodeColIndex) : undefined,
-      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
+      rowIdIndices: Array.isArray(object?.rowIdIndices)
+        ? object.rowIdIndices.map((e: any) => Number(e))
+        : [],
       valueIndices: Array.isArray(object?.valueIndices)
         ? object.valueIndices.map((e: any) => Number(e))
         : [],
@@ -826,8 +826,11 @@ export const Table = {
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
     message.vnodeColIndex !== undefined &&
       (obj.vnodeColIndex = message.vnodeColIndex ? ColumnIndex.toJSON(message.vnodeColIndex) : undefined);
-    message.rowIdIndex !== undefined &&
-      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
+    if (message.rowIdIndices) {
+      obj.rowIdIndices = message.rowIdIndices.map((e) => Math.round(e));
+    } else {
+      obj.rowIdIndices = [];
+    }
     if (message.valueIndices) {
       obj.valueIndices = message.valueIndices.map((e) => Math.round(e));
     } else {
@@ -876,9 +879,7 @@ export const Table = {
     message.vnodeColIndex = (object.vnodeColIndex !== undefined && object.vnodeColIndex !== null)
       ? ColumnIndex.fromPartial(object.vnodeColIndex)
       : undefined;
-    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
-      ? ColumnIndex.fromPartial(object.rowIdIndex)
-      : undefined;
+    message.rowIdIndices = object.rowIdIndices?.map((e) => e) || [];
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
     message.handlePkConflict = object.handlePkConflict ?? false;

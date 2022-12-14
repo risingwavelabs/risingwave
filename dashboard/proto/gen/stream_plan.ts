@@ -699,7 +699,7 @@ export interface DmlNode {
 }
 
 export interface RowIdGenNode {
-  rowIdIndex: number;
+  rowIdIndices: number[];
 }
 
 export interface NowNode {
@@ -3078,23 +3078,27 @@ export const DmlNode = {
 };
 
 function createBaseRowIdGenNode(): RowIdGenNode {
-  return { rowIdIndex: 0 };
+  return { rowIdIndices: [] };
 }
 
 export const RowIdGenNode = {
   fromJSON(object: any): RowIdGenNode {
-    return { rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : 0 };
+    return { rowIdIndices: Array.isArray(object?.rowIdIndices) ? object.rowIdIndices.map((e: any) => Number(e)) : [] };
   },
 
   toJSON(message: RowIdGenNode): unknown {
     const obj: any = {};
-    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
+    if (message.rowIdIndices) {
+      obj.rowIdIndices = message.rowIdIndices.map((e) => Math.round(e));
+    } else {
+      obj.rowIdIndices = [];
+    }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<RowIdGenNode>, I>>(object: I): RowIdGenNode {
     const message = createBaseRowIdGenNode();
-    message.rowIdIndex = object.rowIdIndex ?? 0;
+    message.rowIdIndices = object.rowIdIndices?.map((e) => e) || [];
     return message;
   },
 };
