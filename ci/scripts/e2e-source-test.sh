@@ -91,7 +91,6 @@ pkill -f connector-service.jar
 cargo make ci-kill
 
 echo "--- e2e test w/ Rust frontend - source with kafka and pubsub"
-cargo make clean-data
 cargo make ci-start ci-kafka-plus-pubsub
 ./scripts/source/prepare_ci_kafka.sh
 cargo run --bin prepare_ci_pubsub
