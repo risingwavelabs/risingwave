@@ -115,8 +115,7 @@ pub fn gen_create_mv_plan(
         definition,
         col_names,
         false,
-        false,
-        None,
+        None, // We will never alter a materialized view, so it is safe to pass `None` here.
         TableType::MaterializedView,
     )?;
     let mut table = materialize.table().to_prost(schema_id, database_id);

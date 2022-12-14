@@ -33,10 +33,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::{
-    BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
-    StreamRowIdGen, StreamSink,
-};
+use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize, StreamSink};
 use self::plan_visitor::{
     has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_logical_apply,
     has_logical_over_agg,
@@ -495,14 +492,12 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a create materialize view plan.
-    #[allow(clippy::too_many_arguments)]
     pub fn gen_materialize_plan(
         &mut self,
         mv_name: String,
         definition: String,
         col_names: Option<Vec<String>>,
         handle_pk_conflict: bool,
-        enable_dml: bool,
         row_id_index: Option<usize>,
         table_type: TableType,
     ) -> Result<StreamMaterialize> {
@@ -511,19 +506,7 @@ impl PlanRoot {
         } else {
             self.out_names.clone()
         };
-        let mut stream_plan = self.gen_stream_plan()?;
-        if enable_dml {
-            // Insert a dml executor after the previous exector.
-            // FIXME: Store `Field` or `Schema` in `TableSource` to avoid downcasting in the future.
-            // Or do we have a better solution to this?
-            let logical_source = self.plan.downcast_ref::<LogicalSource>().unwrap();
-            stream_plan =
-                StreamDml::new(stream_plan, logical_source.core.column_descs.clone()).into();
-        }
-        if let Some(row_id_index) = row_id_index {
-            // Insert a row id gen eexecutor after the previous executor.
-            stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
-        }
+        let stream_plan = self.gen_stream_plan()?;
 
         StreamMaterialize::create(
             stream_plan,

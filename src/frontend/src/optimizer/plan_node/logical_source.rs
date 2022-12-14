@@ -21,7 +21,7 @@ use risingwave_common::error::Result;
 use super::generic::GenericPlanNode;
 use super::{
     generic, BatchSource, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
-    PredicatePushdown, StreamSource, ToBatch, ToStream,
+    PredicatePushdown, StreamDml, StreamRowIdGen, StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
@@ -42,12 +42,16 @@ impl LogicalSource {
         source_catalog: Option<Rc<SourceCatalog>>,
         column_descs: Vec<ColumnDesc>,
         pk_col_ids: Vec<ColumnId>,
+        row_id_index: Option<usize>,
+        enable_dml: bool,
         ctx: OptimizerContextRef,
     ) -> Self {
         let core = generic::Source {
             catalog: source_catalog,
             column_descs,
             pk_col_ids,
+            row_id_index,
+            enable_dml,
         };
 
         let schema = core.schema();
@@ -121,7 +125,14 @@ impl ToBatch for LogicalSource {
 
 impl ToStream for LogicalSource {
     fn to_stream(&self) -> Result<PlanRef> {
-        Ok(StreamSource::new(self.clone()).into())
+        let mut plan: PlanRef = StreamSource::new(self.clone()).into();
+        if self.core.enable_dml {
+            plan = StreamDml::new(plan, self.core.column_descs.clone()).into();
+        }
+        if let Some(row_id_index) = self.core.row_id_index {
+            plan = StreamRowIdGen::new(plan, row_id_index).into();
+        }
+        Ok(plan)
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {

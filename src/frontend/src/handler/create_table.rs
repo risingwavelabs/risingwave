@@ -264,16 +264,21 @@ pub(crate) fn gen_create_table_plan_without_bind(
         .map(|column| column.column_desc.clone().unwrap().into())
         .collect_vec();
 
-    let source_node: PlanRef =
-        LogicalSource::new(source_catalog, column_descs, pk_column_ids, context).into();
+    let row_id_index = row_id_index.as_ref().map(|index| index.index as _);
+    let source_node: PlanRef = LogicalSource::new(
+        source_catalog,
+        column_descs,
+        pk_column_ids,
+        row_id_index,
+        true,
+        context,
+    )
+    .into();
 
     let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
     required_cols.toggle_range(..);
     let mut out_names = source_node.schema().names();
 
-    // `row_id_index` being `Some` means the user has not specified the primary key. In that case,
-    // we will add a hidden column as the primary key.
-    let row_id_index = row_id_index.as_ref().map(|index| index.index as _);
     if let Some(row_id_index) = row_id_index {
         required_cols.toggle(row_id_index);
         out_names.remove(row_id_index);
@@ -295,7 +300,6 @@ pub(crate) fn gen_create_table_plan_without_bind(
         "".into(),
         None,
         handle_pk_conflict,
-        true,
         row_id_index,
         TableType::Table,
     )?;
@@ -313,6 +317,7 @@ pub(crate) fn gen_materialize_plan(
     owner: u32,
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
+        let row_id_index = source.row_id_index.as_ref().map(|index| index.index as _);
         // Manually assemble the materialization plan for the table.
         let source_node: PlanRef = LogicalSource::new(
             Some(Rc::new((&source).into())),
@@ -326,10 +331,12 @@ pub(crate) fn gen_materialize_plan(
                 .iter()
                 .map(|id| ColumnId::new(*id))
                 .collect(),
+            row_id_index,
+            false,
             context,
         )
         .into();
-        let row_id_index = source.row_id_index.as_ref().map(|index| index.index as _);
+
         // row_id_index is Some means that the user has not specified pk, then we will add a hidden
         // column to store pk, and materialize executor do not need to handle pk conflict.
         let handle_pk_conflict = row_id_index.is_none();
@@ -354,7 +361,6 @@ pub(crate) fn gen_materialize_plan(
             "".into(),
             None,
             handle_pk_conflict,
-            false,
             row_id_index,
             TableType::Table,
         )?

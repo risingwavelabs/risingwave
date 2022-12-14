@@ -31,10 +31,14 @@ use crate::TableCatalog;
 pub struct Source {
     /// If there is an external stream source, `catalog` will be `Some`. Otherwise, it is `None`.
     pub catalog: Option<Rc<SourceCatalog>>,
-    /// NOTE(Yuanxin): Here we store column descriptions and pk column ids for plan generating,
-    /// even if there is no external stream source.
+    /// NOTE(Yuanxin): Here we store column descriptions, pk column ids, and row id index for plan
+    /// generating, even if there is no external stream source.
     pub column_descs: Vec<ColumnDesc>,
     pub pk_col_ids: Vec<ColumnId>,
+    pub row_id_index: Option<usize>,
+    /// Whether to allow user to insert, update, and delete data in the materialize executor at the
+    /// end of the plan.
+    pub enable_dml: bool,
 }
 
 impl GenericPlanNode for Source {
