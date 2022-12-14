@@ -48,6 +48,8 @@ impl Row2 for Empty {
 }
 
 /// Creates a row which contains no datums.
-pub fn empty() -> Empty {
+pub const fn empty() -> Empty {
     assert_row(Empty { _private: () })
 }
+
+pub(super) static EMPTY: Empty = empty();

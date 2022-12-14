@@ -33,6 +33,7 @@ pub use owned_row::{Row, RowDeserializer};
 pub use project::Project;
 pub use repeat_n::{repeat_n, RepeatN};
 
+use self::empty::EMPTY;
 use crate::hash::HashCode;
 use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum};
 use crate::util::ordered::OrderedRowSerde;
@@ -296,4 +297,65 @@ impl<D: ToDatumRef, const N: usize> Row2 for [D; N] {
         Self: 'a;
 
     impl_slice_row!();
+}
+
+/// Implements [`Row2`] for an optional row.
+impl<R: Row2> Row2 for Option<R> {
+    type Iter<'a> = itertools::Either<R::Iter<'a>, <Empty as Row2>::Iter<'a>>
+    where
+        Self: 'a;
+
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        match self {
+            Some(row) => row.datum_at(index),
+            None => EMPTY.datum_at(index), // for better error messages
+        }
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        match self {
+            Some(row) => row.datum_at_unchecked(index),
+            None => EMPTY.datum_at_unchecked(index), // for better error messages
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Some(row) => row.len(),
+            None => 0,
+        }
+    }
+
+    fn iter(&self) -> Self::Iter<'_> {
+        match self {
+            Some(row) => itertools::Either::Left(row.iter()),
+            None => itertools::Either::Right(EMPTY.iter()),
+        }
+    }
+
+    fn to_owned_row(&self) -> Row {
+        match self {
+            Some(row) => row.to_owned_row(),
+            None => EMPTY.to_owned_row(),
+        }
+    }
+
+    fn into_owned_row(self) -> Row {
+        match self {
+            Some(row) => row.into_owned_row(),
+            None => EMPTY.to_owned_row(),
+        }
+    }
+
+    fn value_serialize_into(&self, buf: impl BufMut) {
+        if let Some(row) = self {
+            row.value_serialize_into(buf);
+        }
+    }
+
+    fn memcmp_serialize_into(&self, serde: &OrderedRowSerde, buf: impl BufMut) {
+        if let Some(row) = self {
+            row.memcmp_serialize_into(serde, buf);
+        }
+    }
 }

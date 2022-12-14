@@ -74,8 +74,8 @@ impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
     // Manually implemented in case `R1` or `R2` has a more efficient implementation.
     #[inline]
     fn value_serialize_into(&self, mut buf: impl BufMut) {
-        buf.put_slice(&self.r1.value_serialize());
-        buf.put_slice(&self.r2.value_serialize());
+        self.r1.value_serialize_into(&mut buf);
+        self.r2.value_serialize_into(buf);
     }
 }
 
