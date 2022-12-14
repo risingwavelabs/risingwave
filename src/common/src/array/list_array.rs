@@ -40,7 +40,7 @@ use crate::types::{
 #[derive(Debug)]
 pub struct ListArrayBuilder {
     bitmap: BitmapBuilder,
-    offsets: Vec<usize>,
+    offsets: Vec<u32>,
     value: Box<ArrayBuilderImpl>,
     value_type: DataType,
     len: usize,
@@ -93,7 +93,10 @@ impl ArrayBuilder for ListArrayBuilder {
                 for _ in 0..n {
                     let last = *self.offsets.last().unwrap();
                     let values_ref = v.values_ref();
-                    self.offsets.push(last + values_ref.len());
+                    self.offsets.push(
+                        last.checked_add(values_ref.len() as u32)
+                            .expect("offset overflow"),
+                    );
                     for f in values_ref {
                         self.value.append_datum(f);
                     }
@@ -113,17 +116,14 @@ impl ArrayBuilder for ListArrayBuilder {
     }
 
     fn pop(&mut self) -> Option<()> {
-        if self.bitmap.pop().is_some() {
-            let start = self.offsets.pop().unwrap();
-            let end = *self.offsets.last().unwrap();
-            self.len -= 1;
-            for _ in end..start {
-                self.value.pop().unwrap()
-            }
-            Some(())
-        } else {
-            None
+        self.bitmap.pop()?;
+        let start = self.offsets.pop().unwrap();
+        let end = *self.offsets.last().unwrap();
+        self.len -= 1;
+        for _ in end..start {
+            self.value.pop().unwrap();
         }
+        Some(())
     }
 
     fn finish(self) -> ListArray {
@@ -141,7 +141,8 @@ impl ListArrayBuilder {
     pub fn append_row_ref(&mut self, row: RowRef<'_>) {
         self.bitmap.append(true);
         let last = *self.offsets.last().unwrap();
-        self.offsets.push(last + row.len());
+        self.offsets
+            .push(last.checked_add(row.len() as u32).expect("offset overflow"));
         self.len += 1;
         for v in row.iter() {
             self.value.append_datum(v);
@@ -154,7 +155,7 @@ impl ListArrayBuilder {
 #[derive(Debug, Clone)]
 pub struct ListArray {
     bitmap: Bitmap,
-    offsets: Vec<usize>,
+    offsets: Vec<u32>,
     value: Box<ArrayImpl>,
     value_type: DataType,
     len: usize,
@@ -255,7 +256,7 @@ impl ListArray {
         let value = ArrayImpl::from_protobuf(array_data.value.as_ref().unwrap(), cardinality)?;
         let arr = ListArray {
             bitmap,
-            offsets: array_data.offsets.iter().map(|u| *u as usize).collect(),
+            offsets: array_data.offsets,
             value: Box::new(value),
             value_type: DataType::from(&array_data.value_type.unwrap()),
             len: cardinality,
@@ -271,24 +272,25 @@ impl ListArray {
     ) -> ListArray {
         let cardinality = null_bitmap.len();
         let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
-        let mut offsets = vec![0];
+        let mut offsets = vec![0u32];
         let mut values = values.into_iter().peekable();
         let mut builder = values.peek().unwrap().as_ref().unwrap().create_builder(0);
         for i in values {
+            let last_offset = *offsets.last().unwrap();
             match i {
                 Some(a) => {
-                    offsets.push(a.len());
+                    offsets.push(
+                        last_offset
+                            .checked_add(a.len() as u32)
+                            .expect("offset overflow"),
+                    );
                     builder.append_array(&a)
                 }
                 None => {
-                    offsets.push(0);
+                    offsets.push(last_offset);
                 }
             }
         }
-        offsets.iter_mut().fold(0, |acc, x| {
-            *x += acc;
-            *x
-        });
         ListArray {
             bitmap,
             offsets,
@@ -394,7 +396,7 @@ macro_rules! iter_elems_ref {
     ($self:ident, $it:ident, { $($body:tt)* }) => {
         match $self {
             ListRef::Indexed { arr, idx } => {
-                let $it = (arr.offsets[*idx]..arr.offsets[*idx + 1]).map(|o| arr.value.value_at(o));
+                let $it = (arr.offsets[*idx]..arr.offsets[*idx + 1]).map(|o| arr.value.value_at(o as usize));
                 $($body)*
             }
             ListRef::ValueRef { val } => {
@@ -428,7 +430,7 @@ impl<'a> ListRef<'a> {
         match self {
             ListRef::Indexed { arr, idx } => {
                 if index <= arr.value.len() {
-                    Ok(arr.value.value_at(arr.offsets[*idx] + index - 1))
+                    Ok(arr.value.value_at(arr.offsets[*idx] as usize + index - 1))
                 } else {
                     Ok(None)
                 }
