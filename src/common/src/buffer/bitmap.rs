@@ -159,39 +159,36 @@ impl BitmapBuilder {
 }
 
 /// An immutable bitmap. Use [`BitmapBuilder`] to build it.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Bitmap {
-    bits: Bytes,
-
-    // The useful bits in the bitmap. The total number of bits will usually
-    // be larger than the useful bits due to byte-padding.
+    /// The useful bits in the bitmap. The total number of bits will usually
+    /// be larger than the useful bits due to byte-padding.
     num_bits: usize,
-
-    // The number of high bits in the bitmap.
+    /// The number of high bits in the bitmap.
     num_high_bits: usize,
+    /// The bitmap array.
+    bits: Bytes,
 }
 
 impl std::fmt::Debug for Bitmap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[")?;
-        let mut is_first = true;
         for data in self.iter() {
-            if is_first {
-                write!(f, "{}", data)?;
-            } else {
-                write!(f, ", {}", data)?;
-            }
-            is_first = false;
+            write!(f, "{}", data as u8)?;
         }
-        write!(f, "]")
+        Ok(())
     }
 }
 
 impl Bitmap {
     pub fn all_high_bits(num_bits: usize) -> Self {
         let len = Self::num_bytes(num_bits);
+        let mut bits = vec![0xff; len];
+        if num_bits % 8 != 0 {
+            // make tailing zeros
+            bits[len - 1] &= (1 << (num_bits % 8)) - 1;
+        }
         Self {
-            bits: vec![0xff; len].into(),
+            bits: bits.into(),
             num_bits,
             num_high_bits: num_bits,
         }
@@ -457,21 +454,6 @@ impl From<&ProstBuffer> for Bitmap {
         let num_bits = (bits.len() << 3) - ((8 - last_byte_num_bits) % 8) as usize;
 
         Self::from_bytes_with_num_bits(bits, num_bits)
-    }
-}
-
-impl PartialEq for Bitmap {
-    fn eq(&self, other: &Self) -> bool {
-        // buffer equality considers capacity, but here we want to only compare
-        // actual data contents
-        if self.num_bits != other.num_bits {
-            return false;
-        }
-        // assume unset bits are always 0, and num_bits is always consistent with bits length.
-        // Note: If you new a Buffer without init, the PartialEq may have UB due to uninit mem cuz
-        // we are comparing bytes by bytes instead of bits by bits.
-        let length = (self.num_bits + 7) / 8;
-        self.bits[..length] == other.bits[..length]
     }
 }
 
