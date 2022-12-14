@@ -409,7 +409,7 @@ pub async fn run_elections<S: MetaStore>(
                         _ = ticker.tick() => {},
                     }
 
-                    if let Some(leader_alive) =
+                    if let Ok(leader_alive) =
                         manage_term(is_leader, &leader_info, lease_time_sec, &meta_store).await && !leader_alive {
                             // leader failed. Elect new leader
                             continue 'election;
@@ -440,15 +440,13 @@ async fn manage_term<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
     lease_time_sec: u64,
     meta_store: &Arc<S>,
-) -> Option<bool> {
+) -> Result<bool, MetaStoreError> {
     // try to renew/acquire the lease if this node is a leader
     if is_leader {
-        return Some(
-            renew_lease(leader_info, lease_time_sec, meta_store)
-                .await
-                .or::<MetaStoreError>(Ok(false))
-                .unwrap(),
-        );
+        return Ok(renew_lease(leader_info, lease_time_sec, meta_store)
+            .await
+            .or::<MetaStoreError>(Ok(false))
+            .unwrap());
     };
 
     // get leader info
@@ -458,14 +456,17 @@ async fn manage_term<S: MetaStore>(
     if !has_leader {
         // ETCD does not have leader lease. Elect new leader
         tracing::info!("ETCD does not have leader lease. Running new election");
-        return Some(false);
+        return Ok(false);
     }
 
     match leader_changed(leader_info, meta_store).await {
-        None => return None,
-        Some(has_new_leader) => {
+        Err(e) => {
+            tracing::warn!("Error when observing leader change {}", e);
+            return Err(e);
+        }
+        Ok(has_new_leader) => {
             if has_new_leader {
-                return Some(false);
+                return Ok(false);
             }
         }
     }
@@ -486,11 +487,11 @@ async fn manage_term<S: MetaStore>(
             Err(e) => tracing::warn!("Unable to update lease. Error {:?}", e),
             Ok(_) => tracing::info!("Deleted leader and lease"),
         }
-        return Some(false);
+        return Ok(false);
     }
 
     // lease exists and the same leader continues term
-    Some(true)
+    Ok(true)
 }
 
 /// True if leader changed
@@ -499,7 +500,7 @@ async fn manage_term<S: MetaStore>(
 async fn leader_changed<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
     meta_store: &Arc<S>,
-) -> Option<bool> {
+) -> Result<bool, MetaStoreError> {
     let mut txn = Transaction::default();
     txn.check_equal(
         META_CF_NAME.to_string(),
@@ -509,20 +510,10 @@ async fn leader_changed<S: MetaStore>(
 
     return match meta_store.txn(txn).await {
         Err(e) => match e {
-            MetaStoreError::TransactionAbort() => Some(true),
-            MetaStoreError::Internal(e) => {
-                tracing::warn!(
-                    "Renew/acquire lease: try again later, MetaStoreError: {:?}",
-                    e
-                );
-                return None;
-            }
-            MetaStoreError::ItemNotFound(e) => {
-                tracing::warn!("Renew/acquire lease: MetaStoreError: {:?}", e);
-                return None;
-            }
+            MetaStoreError::TransactionAbort() => Ok(true),
+            e => return Err(e),
         },
-        Ok(_) => Some(false),
+        Ok(_) => Ok(false),
     };
 }
 
