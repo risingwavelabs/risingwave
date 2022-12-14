@@ -44,13 +44,6 @@ impl TaskLocalBytesAllocated {
         Self::default()
     }
 
-    /// Should only used in unit test.
-    pub fn new_for_test(val: usize) -> Self {
-        Self(Some(
-            NonNull::new(Box::into_raw(Box::new_in(val.into(), System))).unwrap(),
-        ))
-    }
-
     /// Create an invalid counter.
     pub const fn invalid() -> Self {
         Self(None)
@@ -58,7 +51,7 @@ impl TaskLocalBytesAllocated {
 
     /// Adds to the current counter.
     #[inline(always)]
-    pub(crate) fn add(&self, val: usize) {
+    pub fn add(&self, val: usize) {
         if let Some(bytes) = self.0 {
             let bytes_ref = unsafe { bytes.as_ref() };
             bytes_ref.fetch_add(val, Ordering::Relaxed);
@@ -78,7 +71,7 @@ impl TaskLocalBytesAllocated {
 
     /// Subtracts from the counter value, and `drop` the counter while the count reaches zero.
     #[inline(always)]
-    pub(crate) fn sub(&self, val: usize) {
+    pub fn sub(&self, val: usize) -> bool {
         if let Some(bytes) = self.0 {
             // Use `Relaxed` order as we don't need to sync read/write with other memory addresses.
             // Accesses to the counter itself are serialized by atomic operations.
@@ -91,8 +84,10 @@ impl TaskLocalBytesAllocated {
                 // As here, T is the exactly Counter and they have same memory address, so there
                 // should not happen out-of-order commit.
                 unsafe { Box::from_raw_in(bytes.as_ptr(), System) };
+                return true;
             }
         }
+        false
     }
 
     #[inline(always)]
@@ -100,26 +95,6 @@ impl TaskLocalBytesAllocated {
         let bytes_ref = self.0.as_ref().expect("bytes is invalid");
         let bytes_ref = unsafe { bytes_ref.as_ref() };
         bytes_ref.load(Ordering::Relaxed)
-    }
-
-    /// Subtracts from the counter value, and `drop` the counter while the count reaches zero.
-    /// Should be a copy for `.sub()` to test in loom.
-    #[inline(always)]
-    #[cfg(loom)]
-    pub fn sub_for_test(&self, val: usize, flag: loom::sync::Arc<loom::sync::atomic::AtomicBool>) {
-        if let Some(bytes) = self.0 {
-            let bytes_ref = unsafe { bytes.as_ref() };
-            // Use Release to synchronize with the below deletion.
-            let old_bytes = bytes_ref.fetch_sub(val, Ordering::Relaxed);
-            // If the counter reaches zero, delete the counter. Note that we've ensured there's no
-            // zero deltas in `wrap_layout`, so there'll be no more uses of the counter.
-            if old_bytes == val {
-                // No fence here. Atomic add to avoid
-                assert!(!flag.load(Ordering::Relaxed));
-                flag.store(true, Ordering::Relaxed);
-                unsafe { Box::from_raw_in(bytes.as_ptr(), System) };
-            }
-        }
     }
 }
 

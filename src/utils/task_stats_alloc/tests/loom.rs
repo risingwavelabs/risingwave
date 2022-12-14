@@ -15,7 +15,6 @@
 #![cfg(loom)]
 
 /// Run `RUSTFLAGS="--cfg loom" cargo test --test loom` to test.
-use loom::sync::atomic::{AtomicBool, Ordering};
 use loom::sync::Arc;
 use loom::thread;
 use task_stats_alloc::TaskLocalBytesAllocated;
@@ -24,26 +23,27 @@ use task_stats_alloc::TaskLocalBytesAllocated;
 fn test_to_avoid_double_drop() {
     loom::model(|| {
         let bytes_num = 3;
-        let num = Arc::new(TaskLocalBytesAllocated::new_for_test(3));
-
-        // Add the flag value when counter drop so we can observe.
-        let flag = Arc::new(AtomicBool::new(false));
+        let num = Arc::new(TaskLocalBytesAllocated::new());
 
         let threads: Vec<_> = (0..bytes_num)
             .map(|_| {
                 let num = num.clone();
-                let flag = flag.clone();
                 thread::spawn(move || {
-                    num.sub_for_test(1, flag);
+                    num.add(1);
+                    num.sub(1)
                 })
             })
             .collect();
 
+        // How many times the bytes have been dropped.
+        let mut drop_num = 0;
         for t in threads {
-            t.join().unwrap();
+            if t.join().unwrap() {
+                drop_num += 1;
+            }
         }
 
         // Ensure the counter is dropped.
-        assert!(flag.load(Ordering::Relaxed));
+        assert_eq!(drop_num, 1);
     });
 }
