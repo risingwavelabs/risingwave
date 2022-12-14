@@ -564,8 +564,8 @@ mod tests {
             .await;
         assert!(res.is_ok(), "unable to send lease info to mock store");
         let (leader, _) = get_leader_lease_obj(&mock_meta_store).await.unwrap();
-        assert!(
-            leader.eq(&test_leader),
+        assert_eq!(
+            leader, test_leader,
             "leader_info retrieved != leader_info send"
         );
     }
