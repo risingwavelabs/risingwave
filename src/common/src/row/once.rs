@@ -20,7 +20,7 @@ use crate::types::{DatumRef, ToDatumRef};
 pub struct Once<D>(D);
 
 impl<D: ToDatumRef> Row2 for Once<D> {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = std::iter::Once<DatumRef<'a>>
     where
         Self: 'a;
 

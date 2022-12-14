@@ -93,7 +93,7 @@ impl EstimateSize for Row {
 }
 
 impl Row2 for Row {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = std::iter::Map<std::slice::Iter<'a, Datum>, fn(&'a Datum) -> DatumRef<'a>>
     where
         Self: 'a;
 

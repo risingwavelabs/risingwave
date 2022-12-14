@@ -22,7 +22,7 @@ pub struct Empty {
 }
 
 impl Row2 for Empty {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = std::iter::Empty<DatumRef<'a>>
     where
         Self: 'a;
 

@@ -32,7 +32,7 @@ impl<R1: Row2, R2: Row2> PartialEq for Chain<R1, R2> {
 impl<R1: Row2, R2: Row2> Eq for Chain<R1, R2> {}
 
 impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = std::iter::Chain<R1::Iter<'a>, R2::Iter<'a>>
     where
         R1: 'a,
         R2: 'a;

@@ -280,8 +280,10 @@ macro_rules! impl_slice_row {
     };
 }
 
+type SliceIter<'a, D> = std::iter::Map<std::slice::Iter<'a, D>, fn(&'a D) -> DatumRef<'a>>;
+
 impl<D: ToDatumRef> Row2 for &[D] {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = SliceIter<'a, D>
     where
         Self: 'a;
 
@@ -289,7 +291,7 @@ impl<D: ToDatumRef> Row2 for &[D] {
 }
 
 impl<D: ToDatumRef, const N: usize> Row2 for [D; N] {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = SliceIter<'a, D>
     where
         Self: 'a;
 

@@ -21,7 +21,7 @@ use crate::types::DatumRef;
 
 impl DataChunk {
     /// Get an iterator for visible rows.
-    pub fn rows(&self) -> impl Iterator<Item = RowRef<'_>> {
+    pub fn rows(&self) -> DataChunkRefIter<'_> {
         DataChunkRefIter {
             chunk: self,
             idx: Some(0),
@@ -29,7 +29,7 @@ impl DataChunk {
     }
 
     /// Get an iterator for all rows in the chunk, and a `None` represents an invisible row.
-    pub fn rows_with_holes(&self) -> impl Iterator<Item = Option<RowRef<'_>>> {
+    pub fn rows_with_holes(&self) -> DataChunkRefIterWithHoles<'_> {
         DataChunkRefIterWithHoles {
             chunk: self,
             idx: 0,
@@ -37,7 +37,7 @@ impl DataChunk {
     }
 }
 
-struct DataChunkRefIter<'a> {
+pub struct DataChunkRefIter<'a> {
     chunk: &'a DataChunk,
     /// `None` means finished
     idx: Option<usize>,
@@ -66,7 +66,7 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
     }
 }
 
-struct DataChunkRefIterWithHoles<'a> {
+pub struct DataChunkRefIterWithHoles<'a> {
     chunk: &'a DataChunk,
     idx: usize,
 }
