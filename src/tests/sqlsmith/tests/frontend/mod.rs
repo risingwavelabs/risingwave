@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
-
 use std::env;
 use std::sync::Arc;
 
@@ -43,7 +41,10 @@ pub struct SqlsmithEnv {
 
 /// Executes sql queries, prints recoverable errors.
 /// Panic recovery happens separately, see [`reproduce_failing_queries`].
-async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<()> {
+/// Returns `Ok(true)` if query result was ignored.
+/// Skip status is required, so that we know if a SQL statement writing to the database was skipped.
+/// Then, we can infer the correct state of the database.
+async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<bool> {
     let result = handler::handle(session.clone(), stmt, sql, false)
         .await
         .map(|_| ())
@@ -106,8 +107,10 @@ async fn create_tables(
         setup_sql.push_str(&format!("{};", &sql));
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
-        handle(session.clone(), stmt, &sql).await?;
-        tables.push(table);
+        let skipped = handle(session.clone(), stmt, &sql).await?;
+        if !skipped {
+            tables.push(table);
+        }
     }
     Ok((tables, setup_sql))
 }
@@ -217,13 +220,18 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
     })
 }
 
-fn validate_result<T>(result: Result<T>) -> Result<()> {
+/// Returns error if it is not permissible.
+/// If error was permissible, query still failed, return skip status: true.
+/// Otherwise no error: skip status: false.
+fn validate_result<T>(result: Result<T>) -> Result<bool> {
     if let Err(e) = result {
-        if let Some(s) = e.message() && !is_permissible_error(s) {
+        if let Some(s) = e.message() && is_permissible_error(s) {
+            return Ok(true);
+        } else {
             return Err(e);
         }
     }
-    Ok(())
+    Ok(false)
 }
 
 pub fn run() {
@@ -240,15 +248,10 @@ pub fn run() {
                     tables,
                     setup_sql,
                 } = &*env;
-                validate_result(test_batch_query(
-                    session.clone(),
-                    tables.clone(),
-                    i,
-                    setup_sql,
-                ))?;
+                test_batch_query(session.clone(), tables.clone(), i, setup_sql)?;
                 let test_stream_query =
                     test_stream_query(session.clone(), tables.clone(), i, setup_sql);
-                validate_result(build_runtime().block_on(test_stream_query))?;
+                build_runtime().block_on(test_stream_query)?;
                 Ok(())
             })
         })
