@@ -503,7 +503,7 @@ impl PlanRoot {
         col_names: Option<Vec<String>>,
         handle_pk_conflict: bool,
         enable_dml: bool,
-        row_id_index: Option<usize>,
+        row_id_indices: Vec<usize>,
         table_type: TableType,
     ) -> Result<StreamMaterialize> {
         let out_names = if let Some(col_names) = col_names {
@@ -526,9 +526,9 @@ impl PlanRoot {
                 .collect_vec();
             stream_plan = StreamDml::new(stream_plan, column_descs).into();
         }
-        if let Some(row_id_index) = row_id_index {
+        if !row_id_indices.is_empty() {
             // Insert a row id gen eexecutor after the previous executor.
-            stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
+            stream_plan = StreamRowIdGen::new(stream_plan, row_id_indices.clone()).into();
         }
 
         StreamMaterialize::create(
@@ -541,7 +541,7 @@ impl PlanRoot {
             false,
             definition,
             handle_pk_conflict,
-            row_id_index,
+            row_id_indices,
             table_type,
         )
     }
@@ -559,7 +559,7 @@ impl PlanRoot {
             true,
             "".into(),
             false,
-            None,
+            vec![],
             TableType::Index,
         )
     }
@@ -583,7 +583,7 @@ impl PlanRoot {
             false,
             definition,
             false,
-            None,
+            vec![],
             // NOTE(Yuanxin): We set the table type as default here because this is irrelevant to
             // sink's plan generating.
             TableType::default(),

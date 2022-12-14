@@ -42,7 +42,7 @@ impl ExecutorBuilder for RowIdGenExecutorBuilder {
             params.schema,
             params.pk_indices,
             params.executor_id,
-            node.row_id_index as _,
+            node.row_id_indices.iter().map(|i| *i as _).collect(),
             vnodes,
         );
         Ok(Box::new(executor))

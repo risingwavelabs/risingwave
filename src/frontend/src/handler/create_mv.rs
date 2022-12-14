@@ -116,7 +116,7 @@ pub fn gen_create_mv_plan(
         col_names,
         false,
         false,
-        None,
+        vec![],
         TableType::MaterializedView,
     )?;
     let mut table = materialize.table().to_prost(schema_id, database_id);

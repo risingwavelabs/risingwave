@@ -98,9 +98,8 @@ pub struct TableCatalog {
     /// hash distribution
     pub vnode_col_index: Option<usize>,
 
-    /// An optional column index of row id. If the primary key is specified by users, this will be
-    /// `None`.
-    pub row_id_index: Option<usize>,
+    /// Column indices of row id. If the primary key is specified by users, this will be empty.
+    pub row_id_indices: Vec<usize>,
 
     /// The column indices which are stored in the state store's value with row-encoding. Currently
     /// is not supported yet and expected to be `[0..columns.len()]`
@@ -263,9 +262,7 @@ impl TableCatalog {
             vnode_col_index: self
                 .vnode_col_index
                 .map(|i| ProstColumnIndex { index: i as _ }),
-            row_id_index: self
-                .row_id_index
-                .map(|i| ProstColumnIndex { index: i as _ }),
+            row_id_indices: self.row_id_indices.iter().map(|i| *i as _).collect(),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
             definition: self.definition.clone(),
             handle_pk_conflict: self.handle_pk_conflict,
@@ -315,7 +312,7 @@ impl From<ProstTable> for TableCatalog {
             properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
             vnode_col_index: tb.vnode_col_index.map(|x| x.index as usize),
-            row_id_index: tb.row_id_index.map(|x| x.index as usize),
+            row_id_indices: tb.row_id_indices.iter().map(|x| *x as _).collect(),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition.clone(),
             handle_pk_conflict: tb.handle_pk_conflict,
@@ -406,7 +403,7 @@ mod tests {
             handle_pk_conflict: false,
             pk_prefix_len_hint: 0,
             vnode_col_index: None,
-            row_id_index: None,
+            row_id_indices: vec![],
         }
         .into();
 
@@ -462,7 +459,7 @@ mod tests {
                 )])),
                 fragment_id: 0,
                 vnode_col_index: None,
-                row_id_index: None,
+                row_id_indices: vec![],
                 value_indices: vec![0],
                 definition: "".into(),
                 handle_pk_conflict: false,

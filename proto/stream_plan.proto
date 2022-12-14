@@ -439,7 +439,7 @@ message DmlNode {
 }
 
 message RowIdGenNode {
-  uint64 row_id_index = 1;
+  repeated uint64 row_id_indices = 1;
 }
 
 message NowNode {

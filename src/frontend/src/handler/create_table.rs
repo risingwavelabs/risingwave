@@ -277,8 +277,8 @@ pub(crate) fn gen_materialize_plan(
             "".into(),
             None,
             handle_pk_conflict,
-            false, // TODO(Yuanxin): true
-            None,  // TODO(Yuanxin): row_id_index
+            false,  // TODO(Yuanxin): true
+            vec![], // TODO(Yuanxin): row_id_index
             TableType::Table,
         )?
     };

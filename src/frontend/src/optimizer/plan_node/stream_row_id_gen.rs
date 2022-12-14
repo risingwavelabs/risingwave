@@ -23,11 +23,11 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 pub struct StreamRowIdGen {
     pub base: PlanBase,
     input: PlanRef,
-    row_id_index: usize,
+    row_id_indices: Vec<usize>,
 }
 
 impl StreamRowIdGen {
-    pub fn new(input: PlanRef, row_id_index: usize) -> Self {
+    pub fn new(input: PlanRef, row_id_indices: Vec<usize>) -> Self {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
@@ -39,18 +39,17 @@ impl StreamRowIdGen {
         Self {
             base,
             input,
-            row_id_index,
+            row_id_indices,
         }
     }
 }
 
 impl fmt::Display for StreamRowIdGen {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamRowIdGen {{ row_id_index: {} }}",
-            self.row_id_index
-        )
+        let mut builder = f.debug_struct("StreamRowIdGen");
+        builder
+            .field("row_id_indices", &self.row_id_indices)
+            .finish()
     }
 }
 
@@ -60,7 +59,7 @@ impl PlanTreeNodeUnary for StreamRowIdGen {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.row_id_index)
+        Self::new(input, self.row_id_indices.clone())
     }
 }
 
@@ -71,7 +70,7 @@ impl StreamNode for StreamRowIdGen {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::RowIdGen(RowIdGenNode {
-            row_id_index: self.row_id_index as _,
+            row_id_indices: self.row_id_indices.iter().map(|i| *i as _).collect(),
         })
     }
 }

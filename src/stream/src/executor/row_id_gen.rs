@@ -36,9 +36,9 @@ pub struct RowIdGenExecutor {
 
     identity: String,
 
-    row_id_index: usize,
+    row_id_indices: Vec<usize>,
 
-    row_id_generator: RowIdGenerator,
+    row_id_generator: Option<RowIdGenerator>,
 }
 
 impl RowIdGenExecutor {
@@ -47,7 +47,7 @@ impl RowIdGenExecutor {
         schema: Schema,
         pk_indices: PkIndices,
         executor_id: u64,
-        row_id_index: usize,
+        row_id_indices: Vec<usize>,
         vnodes: Bitmap,
     ) -> Self {
         // TODO: We should generate row id for each vnode in the future instead of using the first
@@ -58,23 +58,27 @@ impl RowIdGenExecutor {
             schema,
             pk_indices,
             identity: format!("RowIdGenExecutor {:X}", executor_id),
-            row_id_index,
-            row_id_generator: RowIdGenerator::with_epoch(
+            row_id_indices,
+            row_id_generator: Some(RowIdGenerator::with_epoch(
                 vnode as u32,
                 *UNIX_SINGULARITY_DATE_EPOCH,
-            ),
+            )),
         }
     }
 
     /// Generate a row ID column according to ops.
-    async fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
+    async fn gen_row_id_column_by_op(
+        column: &Column,
+        ops: Ops<'_>,
+        row_id_generator: &mut RowIdGenerator,
+    ) -> Column {
         let len = column.array_ref().len();
         let mut builder = I64ArrayBuilder::new(len);
 
         for (datum, op) in column.array_ref().iter().zip_eq(ops) {
             // Only refill row_id for insert operation.
             match op {
-                Op::Insert => builder.append(Some(self.row_id_generator.next().await)),
+                Op::Insert => builder.append(Some(row_id_generator.next().await)),
                 _ => builder.append(Some(i64::try_from(datum.unwrap()).unwrap())),
             }
         }
@@ -90,15 +94,22 @@ impl RowIdGenExecutor {
         let barrier = expect_first_barrier(&mut upstream).await?;
         yield Message::Barrier(barrier);
 
+        let mut row_id_generator = self.row_id_generator.take().unwrap();
+
         #[for_await]
         for msg in upstream {
             let msg = msg?;
             if let Message::Chunk(chunk) = msg {
                 // For chunk message, we fill the row id column and then yield it.
                 let (ops, mut columns, bitmap) = chunk.into_inner();
-                columns[self.row_id_index] = self
-                    .gen_row_id_column_by_op(&columns[self.row_id_index], &ops)
+                for row_id_index in &self.row_id_indices {
+                    columns[*row_id_index] = Self::gen_row_id_column_by_op(
+                        &columns[*row_id_index],
+                        &ops,
+                        &mut row_id_generator,
+                    )
                     .await;
+                }
                 yield Message::Chunk(StreamChunk::new(ops, columns, bitmap));
             } else {
                 // For barrier message or watermark message, we just yield it.
@@ -145,7 +156,7 @@ mod tests {
             Field::unnamed(DataType::Int64),
         ]);
         let pk_indices = vec![0];
-        let row_id_index = 0;
+        let row_id_indices = vec![0];
         let row_id_generator = Bitmap::all_high_bits(VirtualNode::COUNT);
         let (mut tx, upstream) = MockSource::channel(schema.clone(), pk_indices.clone());
         let row_id_gen_executor = Box::new(RowIdGenExecutor::new(
@@ -153,7 +164,7 @@ mod tests {
             schema,
             pk_indices,
             1,
-            row_id_index,
+            row_id_indices.clone(),
             row_id_generator,
         ));
 
@@ -179,12 +190,14 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<i64> = chunk.column_at(row_id_index).array_ref().into();
-        row_id_col.iter().for_each(|row_id| {
-            // Should generate row id for insert operations.
-            assert!(row_id.is_some());
-        });
-
+        for row_id_index in &row_id_indices {
+            let row_id_col: &PrimitiveArray<i64> =
+                chunk.column_at(*row_id_index).array_ref().into();
+            row_id_col.iter().for_each(|row_id| {
+                // Should generate row id for insert operations.
+                assert!(row_id.is_some());
+            });
+        }
         // Update operation
         let chunk2 = StreamChunk::from_pretty(
             "      I        I
@@ -199,7 +212,8 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<i64> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<i64> =
+            chunk.column_at(row_id_indices[0]).array_ref().into();
         // Should not generate row id for update operations.
         assert_eq!(row_id_col.value_at(0).unwrap(), 32874283748);
         assert_eq!(row_id_col.value_at(1).unwrap(), 32874283748);
@@ -217,7 +231,8 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<i64> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<i64> =
+            chunk.column_at(row_id_indices[0]).array_ref().into();
         // Should not generate row id for delete operations.
         assert_eq!(row_id_col.value_at(0).unwrap(), 84629409685);
     }

@@ -68,7 +68,7 @@ impl StreamMaterialize {
         is_index: bool,
         definition: String,
         handle_pk_conflict: bool,
-        row_id_index: Option<usize>,
+        row_id_indices: Vec<usize>,
         table_type: TableType,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
@@ -170,7 +170,7 @@ impl StreamMaterialize {
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
             vnode_col_index: None,
-            row_id_index,
+            row_id_indices,
             value_indices,
             definition,
             handle_pk_conflict,
