@@ -325,6 +325,7 @@ pub async fn run_elections<S: MetaStore>(
     let mut ticker = tokio::time::interval(
         Duration::from_secs(lease_time_sec / 2) + Duration::from_millis(rng.gen_range(0..500)),
     );
+    ticker.reset();
 
     // runs the initial election, determining who the first leader is
     'initial_election: loop {
