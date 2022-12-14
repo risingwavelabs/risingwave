@@ -820,7 +820,7 @@ mod tests {
         };
         let new_leader = MetaLeaderInfo {
             node_address: "other:789".to_owned(),
-            lease_id: gen_rand_lease_id("other:789".to_owned()),
+            lease_id: gen_rand_lease_id("other:789"),
         };
         put_leader_info(&new_leader, &mock_meta_store).await;
         assert!(
