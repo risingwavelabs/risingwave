@@ -191,14 +191,3 @@
   batch_plan: |
     BatchProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval), (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval)] }
     └─BatchValues { rows: [['2020-01-01 12:00:00':Varchar::Timestamp]] }
-- sql: |
-    SELECT window_start, window_end, count(trip_id) as no_of_trips, sum(distance) as total_distance 
-    FROM TUMBLE (taxi_trips, completed_at, INTERVAL '2 MINUTES') 
-    GROUP BY window_start, window_end 
-    ORDER BY window_start ASC;
-- sql: |
-    SELECT trip.window_start, trip.window_end, trip.distance, taxi.company
-    FROM TUMBLE (taxi_trips, completed_at, INTERVAL '2 MINUTES') as trip
-    JOIN taxi
-    ON trip.taxi_id = taxi.taxi_id
-    ORDER BY trip.window_start ASC;
