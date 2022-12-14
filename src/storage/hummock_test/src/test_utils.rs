@@ -22,13 +22,21 @@ use async_stream::try_stream;
 use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::catalog::TableId;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_common::error::Result;
+use risingwave_common::util::addr::HostAddr;
+use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverManager};
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
+};
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
-use risingwave_meta::manager::MetaSrvEnv;
-use risingwave_meta::storage::MemStore;
+use risingwave_meta::hummock::test_utils::{
+    register_table_ids_to_compaction_group, setup_compute_env,
+    update_filter_key_extractor_for_table_ids,
+};
+use risingwave_meta::hummock::{HummockManager, HummockManagerRef, MockHummockMetaClient};
+use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
+use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_storage::error::StorageResult;
@@ -67,7 +75,7 @@ pub async fn prepare_first_valid_version(
         HummockObserverNode::new(Arc::new(FilterKeyExtractorManager::default()), tx.clone()),
     )
     .await;
-    let _ = observer_manager.start().await;
+    observer_manager.start().await;
     let hummock_version = match rx.recv().await {
         Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(
             version,
@@ -276,12 +284,19 @@ pub async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHummockMeta
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
+        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
         Arc::new(StateStoreMetrics::unused()),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
     )
     .await
     .unwrap();
+
+    register_test_tables(
+        hummock_storage.filter_key_extractor_manager(),
+        &hummock_manager_ref,
+        &[0],
+    )
+    .await;
 
     (hummock_storage, meta_client)
 }
@@ -302,13 +317,34 @@ pub async fn with_hummock_storage_v2(
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
+        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
     )
     .await
     .unwrap();
+
+    register_test_tables(
+        hummock_storage.filter_key_extractor_manager(),
+        &hummock_manager_ref,
+        &[table_id.table_id()],
+    )
+    .await;
 
     (
         HummockV2MixedStateStore::new(hummock_storage, table_id).await,
         meta_client,
     )
+}
+
+pub async fn register_test_tables<S: MetaStore>(
+    filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
+    hummock_manager_ref: &HummockManagerRef<S>,
+    table_ids: &[u32],
+) {
+    update_filter_key_extractor_for_table_ids(filter_key_extractor_manager, table_ids);
+    register_table_ids_to_compaction_group(
+        hummock_manager_ref,
+        table_ids,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
 }

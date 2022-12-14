@@ -148,6 +148,8 @@ impl KafkaSplitEnumerator {
             None
         };
 
+        // Watermark here has nothing to do with watermark in streaming processing. Watermark
+        // here means smallest/largest offset available for reading.
         let mut watermarks = {
             let mut ret = HashMap::new();
             for partition in &topic_partitions {

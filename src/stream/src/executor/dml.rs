@@ -198,7 +198,7 @@ mod tests {
         tx.push_chunk(stream_chunk3);
 
         // Message from batch
-        let _ = dml_manager.write_chunk(&table_id, batch_chunk).unwrap();
+        dml_manager.write_chunk(&table_id, batch_chunk).unwrap();
 
         // Consume the 1st message from upstream executor
         let msg = dml_executor.next().await.unwrap().unwrap();

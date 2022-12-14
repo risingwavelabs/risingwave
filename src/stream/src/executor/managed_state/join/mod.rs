@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod iter_utils;
 mod join_entry_state;
 
 use std::alloc::Global;
@@ -22,6 +21,7 @@ use std::sync::Arc;
 
 use fixedbitset::FixedBitSet;
 use futures::future::try_join;
+use futures::StreamExt;
 use futures_async_stream::for_await;
 pub(super) use join_entry_state::JoinEntryState;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
@@ -36,7 +36,6 @@ use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::StateStore;
 
-use self::iter_utils::zip_by_order_key;
 use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
@@ -354,34 +353,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
 
-            // TODO(chi): fix this after Rust compiler bug is resolved
-            // https://github.com/risingwavelabs/risingwave/issues/5977
-            // Given that matched keys are generally small, we can safely fetch it all instead of
-            // making it a stream.
-
-            let mut table_data = vec![];
-            let mut degree_table_data = vec![];
-
             #[for_await]
-            for x in table_iter {
-                table_data.push(x?);
-            }
-
-            #[for_await]
-            for x in degree_table_iter {
-                degree_table_data.push(x?);
-            }
-
-            // We need this because ttl may remove some entries from table but leave the entries
-            // with the same stream key in degree table.
-            let zipped_iter = zip_by_order_key(
-                futures::stream::iter(table_data.into_iter()),
-                futures::stream::iter(degree_table_data.into_iter()),
-            );
-
-            #[for_await]
-            for row_and_degree in zipped_iter {
-                let (row, degree): (Cow<'_, Row>, Cow<'_, Row>) = row_and_degree?;
+            for (row, degree) in table_iter.zip(degree_table_iter) {
+                let (pk1, row) = row?;
+                let (pk2, degree) = degree?;
+                debug_assert_eq!(
+                    pk1, pk2,
+                    "mismatched pk in degree table: pk1: {pk1:?}, pk2: {pk2:?}",
+                );
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)

@@ -3152,9 +3152,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.11"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5b15031e1ca7bb25f51c6ddb36f9ec8e10aa184e21987c49118e18a1141f7a8"
+checksum = "19a97146650b9d03128eb9a1101f45c7dadb1f867ef7b10e58d878432e47de00"
 dependencies = [
  "ahash",
  "async-channel",
@@ -3168,6 +3168,7 @@ dependencies = [
  "madsim-macros",
  "naive-timer",
  "rand 0.8.5",
+ "rustversion",
  "serde",
  "spin 0.9.4",
  "tokio",
@@ -3198,9 +3199,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-macros"
-version = "0.2.5"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8abbe137adbf2023c066b8acb3fdef0a4bec6494642ef2174d060fc99a9f80ea"
+checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3926,6 +3927,12 @@ name = "overload"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
+
+[[package]]
+name = "owo-colors"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
 
 [[package]]
 name = "parking"
@@ -5120,7 +5127,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
- "stats_alloc",
+ "task_stats_alloc",
  "tikv-jemallocator",
  "tracing",
  "workspace-config",
@@ -5145,8 +5152,8 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
- "stats_alloc",
  "sync-point",
+ "task_stats_alloc",
  "tikv-jemallocator",
  "tracing",
  "workspace-config",
@@ -5463,6 +5470,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "crc32fast",
+ "criterion",
  "dyn-clone",
  "either",
  "hex",
@@ -5658,6 +5666,7 @@ dependencies = [
  "url",
  "uuid",
  "workspace-hack",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -5787,6 +5796,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap 3.2.23",
+ "console",
  "futures",
  "glob",
  "itertools",
@@ -5808,6 +5818,7 @@ dependencies = [
  "tempfile",
  "tokio-postgres",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -5978,7 +5989,6 @@ dependencies = [
  "tokio-retry",
  "tokio-stream",
  "tracing",
- "twox-hash",
  "uuid",
  "workspace-hack",
  "xxhash-rust",
@@ -6039,7 +6049,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "static_assertions",
- "stats_alloc",
+ "task_stats_alloc",
  "thiserror",
  "tikv-jemalloc-ctl",
  "tokio-metrics",
@@ -6702,9 +6712,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba41e01d229d7725401de371e323851f82d839d68732a06162405362b60852fe"
+checksum = "a89f3be6c90ef2b67d55f999663b367ede63747a2311e480e7710f70c52fef65"
 dependencies = [
  "async-trait",
  "difference",
@@ -6713,6 +6723,8 @@ dependencies = [
  "humantime",
  "itertools",
  "libtest-mimic",
+ "md5",
+ "owo-colors",
  "regex",
  "tempfile",
  "thiserror",
@@ -6896,6 +6908,14 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
+name = "task_stats_alloc"
+version = "0.1.11"
+dependencies = [
+ "madsim-tokio",
+ "workspace-hack",
+]
 
 [[package]]
 name = "tempfile"

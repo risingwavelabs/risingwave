@@ -30,7 +30,8 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use crate::source::cdc::{
-    CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, CDC_CONNECTOR,
+    CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, MYSQL_CDC_CONNECTOR,
+    POSTGRES_CDC_CONNECTOR,
 };
 use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
@@ -91,6 +92,59 @@ pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
 /// The max size of a chunk yielded by source stream.
 pub const MAX_CHUNK_SIZE: usize = 1024;
 
+#[derive(Clone, Debug, Deserialize)]
+pub enum ConnectorProperties {
+    Kafka(Box<KafkaProperties>),
+    Pulsar(Box<PulsarProperties>),
+    Kinesis(Box<KinesisProperties>),
+    Nexmark(Box<NexmarkProperties>),
+    Datagen(Box<DatagenProperties>),
+    S3(Box<S3Properties>),
+    MySqlCdc(Box<CdcProperties>),
+    PostgresCdc(Box<CdcProperties>),
+    GooglePubsub(Box<PubsubProperties>),
+    Dummy(Box<()>),
+}
+
+impl ConnectorProperties {
+    fn new_cdc_properties(
+        connector_name: &str,
+        properties: HashMap<String, String>,
+    ) -> Result<Self> {
+        match connector_name {
+            MYSQL_CDC_CONNECTOR => Ok(Self::MySqlCdc(Box::new(CdcProperties {
+                props: properties,
+                source_type: "mysql".to_string(),
+                ..Default::default()
+            }))),
+            POSTGRES_CDC_CONNECTOR => Ok(Self::PostgresCdc(Box::new(CdcProperties {
+                props: properties,
+                source_type: "postgres".to_string(),
+                ..Default::default()
+            }))),
+            _ => Err(anyhow!("unexpected cdc connector '{}'", connector_name,)),
+        }
+    }
+
+    pub fn set_source_id_for_cdc(&mut self, source_id: u32) {
+        match self {
+            ConnectorProperties::MySqlCdc(c) | ConnectorProperties::PostgresCdc(c) => {
+                c.source_id = source_id;
+            }
+            _ => {}
+        }
+    }
+
+    pub fn set_connector_node_addr(&mut self, addr: String) {
+        match self {
+            ConnectorProperties::MySqlCdc(c) | ConnectorProperties::PostgresCdc(c) => {
+                c.connector_node_addr = addr;
+            }
+            _ => {}
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner, PartialEq, Hash)]
 pub enum SplitImpl {
     Kafka(KafkaSplit),
@@ -98,8 +152,9 @@ pub enum SplitImpl {
     Kinesis(KinesisSplit),
     Nexmark(NexmarkSplit),
     Datagen(DatagenSplit),
-    Cdc(CdcSplit),
     GooglePubsub(PubsubSplit),
+    MySqlCdc(CdcSplit),
+    PostgresCdc(CdcSplit),
 }
 
 pub enum SplitReaderImpl {
@@ -109,7 +164,8 @@ pub enum SplitReaderImpl {
     Nexmark(Box<NexmarkSplitReader>),
     Pulsar(Box<PulsarSplitReader>),
     Datagen(Box<DatagenSplitReader>),
-    Cdc(Box<CdcSplitReader>),
+    MySqlCdc(Box<CdcSplitReader>),
+    PostgresCdc(Box<CdcSplitReader>),
     GooglePubsub(Box<PubsubSplitReader>),
 }
 
@@ -119,21 +175,9 @@ pub enum SplitEnumeratorImpl {
     Kinesis(KinesisSplitEnumerator),
     Nexmark(NexmarkSplitEnumerator),
     Datagen(DatagenSplitEnumerator),
-    Cdc(DebeziumSplitEnumerator),
+    MySqlCdc(DebeziumSplitEnumerator),
+    PostgresCdc(DebeziumSplitEnumerator),
     GooglePubsub(PubsubSplitEnumerator),
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub enum ConnectorProperties {
-    Kafka(Box<KafkaProperties>),
-    Pulsar(Box<PulsarProperties>),
-    Kinesis(Box<KinesisProperties>),
-    Nexmark(Box<NexmarkProperties>),
-    Datagen(Box<DatagenProperties>),
-    S3(Box<S3Properties>),
-    Cdc(Box<CdcProperties>),
-    Dummy(Box<()>),
-    GooglePubsub(Box<PubsubProperties>),
 }
 
 impl_connector_properties! {
@@ -143,7 +187,8 @@ impl_connector_properties! {
     { Nexmark, NEXMARK_CONNECTOR },
     { Datagen, DATAGEN_CONNECTOR },
     { S3, S3_CONNECTOR },
-    { Cdc, CDC_CONNECTOR },
+    { MySqlCdc, MYSQL_CDC_CONNECTOR },
+    { PostgresCdc, POSTGRES_CDC_CONNECTOR },
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR}
 }
 
@@ -153,7 +198,8 @@ impl_split_enumerator! {
     { Kinesis, KinesisSplitEnumerator },
     { Nexmark, NexmarkSplitEnumerator },
     { Datagen, DatagenSplitEnumerator },
-    { Cdc, DebeziumSplitEnumerator },
+    { MySqlCdc, DebeziumSplitEnumerator },
+    { PostgresCdc, DebeziumSplitEnumerator },
     { GooglePubsub, PubsubSplitEnumerator}
 }
 
@@ -163,8 +209,9 @@ impl_split! {
     { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
     { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
     { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
-    { Cdc, CDC_CONNECTOR, CdcSplit },
-    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit }
+    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit },
+    { MySqlCdc, MYSQL_CDC_CONNECTOR, CdcSplit },
+    { PostgresCdc, POSTGRES_CDC_CONNECTOR, CdcSplit }
 }
 
 impl_split_reader! {
@@ -173,7 +220,8 @@ impl_split_reader! {
     { Kinesis, KinesisSplitReader },
     { Nexmark, NexmarkSplitReader },
     { Datagen, DatagenSplitReader },
-    { Cdc, CdcSplitReader},
+    { MySqlCdc, CdcSplitReader},
+    { PostgresCdc, CdcSplitReader},
     { GooglePubsub, PubsubSplitReader },
     { Dummy, DummySplitReader }
 }
@@ -261,7 +309,7 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let split_impl = SplitImpl::Cdc(CdcSplit::new(1001, offset_str.to_string()));
+        let split_impl = SplitImpl::MySqlCdc(CdcSplit::new(1001, offset_str.to_string()));
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
         assert_eq!(
@@ -291,27 +339,58 @@ mod tests {
 
     #[test]
     fn test_extract_cdc_properties() {
-        let props: HashMap<String, String> = convert_args!(hashmap!(
-            "connector" => "cdc",
-            "database.name" => "mydb",
+        let user_props_mysql: HashMap<String, String> = convert_args!(hashmap!(
+            "connector_node_addr" => "localhost",
+            "connector" => "mysql-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "3306",
             "database.user" => "root",
             "database.password" => "123456",
+            "database.name" => "mydb",
             "table.name" => "products",
         ));
 
-        let props = ConnectorProperties::extract(props).unwrap();
+        let user_props_postgres: HashMap<String, String> = convert_args!(hashmap!(
+            "connector_node_addr" => "localhost",
+            "connector" => "postgres-cdc",
+            "database.hostname" => "127.0.0.1",
+            "database.port" => "5432",
+            "database.user" => "root",
+            "database.password" => "654321",
+            "schema.name" => "public",
+            "database.name" => "mypgdb",
+            "table.name" => "orders",
+        ));
 
-        if let ConnectorProperties::Cdc(props) = props {
-            assert_eq!(props.source_id, 0);
-            assert_eq!(props.start_offset, "");
-            assert_eq!(props.database_name, "mydb");
-            assert_eq!(props.table_name, "products");
-            assert_eq!(props.database_host, "127.0.0.1");
-            assert_eq!(props.database_password, "123456");
+        let conn_props = ConnectorProperties::extract(user_props_mysql).unwrap();
+        if let ConnectorProperties::MySqlCdc(c) = conn_props {
+            assert_eq!(c.source_id, 0);
+            assert_eq!(c.source_type, "mysql");
+            assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
+            assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
+            assert_eq!(c.props.get("database.port").unwrap(), "3306");
+            assert_eq!(c.props.get("database.user").unwrap(), "root");
+            assert_eq!(c.props.get("database.password").unwrap(), "123456");
+            assert_eq!(c.props.get("database.name").unwrap(), "mydb");
+            assert_eq!(c.props.get("table.name").unwrap(), "products");
         } else {
-            panic!("extract nexmark config failed");
+            panic!("extract cdc config failed");
+        }
+
+        let conn_props = ConnectorProperties::extract(user_props_postgres).unwrap();
+        if let ConnectorProperties::PostgresCdc(c) = conn_props {
+            assert_eq!(c.source_id, 0);
+            assert_eq!(c.source_type, "postgres");
+            assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
+            assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
+            assert_eq!(c.props.get("database.port").unwrap(), "5432");
+            assert_eq!(c.props.get("database.user").unwrap(), "root");
+            assert_eq!(c.props.get("database.password").unwrap(), "654321");
+            assert_eq!(c.props.get("schema.name").unwrap(), "public");
+            assert_eq!(c.props.get("database.name").unwrap(), "mypgdb");
+            assert_eq!(c.props.get("table.name").unwrap(), "orders");
+        } else {
+            panic!("extract cdc config failed");
         }
     }
 }

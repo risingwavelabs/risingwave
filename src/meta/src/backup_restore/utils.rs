@@ -15,14 +15,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use etcd_client::{Client as EtcdClient, ConnectOptions};
+use etcd_client::ConnectOptions;
 use risingwave_backup::error::BackupResult;
 use risingwave_backup::storage::{BackupStorageRef, ObjectStoreMetaSnapshotStorage};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
+use xxhash_rust::xxh64;
 
 use crate::backup_restore::RestoreOpts;
-use crate::storage::{EtcdMetaStore, MemStore};
+use crate::storage::{EtcdMetaStore, MemStore, WrappedEtcdClient as EtcdClient};
 use crate::{Backend, MetaStoreBackend};
 
 #[derive(Clone)]
@@ -41,6 +42,9 @@ macro_rules! dispatch_meta_store {
     }};
 }
 
+pub fn xxhash64_checksum(data: &[u8]) -> u64 {
+    xxh64::xxh64(data, 0)
+}
 // Code is copied from src/meta/src/rpc/server.rs. TODO #6482: extract method.
 pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendImpl> {
     let meta_store_backend = match opts.meta_store_type {
@@ -64,10 +68,10 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
         } => {
             let mut options = ConnectOptions::default()
                 .with_keep_alive(Duration::from_secs(3), Duration::from_secs(5));
-            if let Some((username, password)) = credentials {
+            if let Some((username, password)) = &credentials {
                 options = options.with_user(username, password)
             }
-            let client = EtcdClient::connect(endpoints, Some(options))
+            let client = EtcdClient::connect(endpoints, Some(options), credentials.is_some())
                 .await
                 .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             Ok(MetaStoreBackendImpl::Etcd(EtcdMetaStore::new(client)))
