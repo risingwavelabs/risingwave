@@ -128,10 +128,19 @@ message SourceNode {
   string source_name = 8;
 }
 
+message SinkDesc {
+  uint32 id = 1;
+  string name = 2;
+  string definition = 3;
+  repeated plan_common.ColumnDesc columns = 4;
+  repeated plan_common.ColumnOrder pk = 5;
+  repeated uint32 distribution_key = 6;
+  bool appendonly = 8;
+  map<string, string> sink_config = 9;
+}
+
 message SinkNode {
-  uint32 table_id = 1;
-  repeated int32 column_ids = 2;
-  map<string, string> properties = 3;
+  SinkDesc sink_desc = 1;
 }
 
 message ProjectNode {

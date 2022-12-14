@@ -810,7 +810,7 @@ impl ActorGraphBuilder {
                 mview_count += 1;
             }
             if let NodeBody::Sink(sink_node) = node_body {
-                sink_node.table_id = ctx.table_id.table_id;
+                sink_node.sink_desc.as_mut().unwrap().id = ctx.table_id.table_id;
                 mview_count += 1;
             }
             for input in &mut stream_node.input {

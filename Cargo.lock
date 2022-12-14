@@ -5354,6 +5354,7 @@ dependencies = [
  "mysql_async",
  "nexmark",
  "num-traits",
+ "parse-display",
  "paste",
  "prost 0.11.2",
  "pulsar",

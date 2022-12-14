@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod catalog;
 pub mod console;
 pub mod kafka;
 pub mod mysql;
 pub mod redis;
 pub mod remote;
-
-use std::collections::HashMap;
 
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
@@ -30,11 +29,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 pub use tracing;
 
-use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
-use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
+use self::catalog::SinkConfig;
+use crate::sink::console::ConsoleSink;
+use crate::sink::kafka::KafkaSink;
 pub use crate::sink::mysql::{MySqlConfig, MySqlSink, MYSQL_SINK};
-use crate::sink::redis::{RedisConfig, RedisSink};
-use crate::sink::remote::{RemoteConfig, RemoteSink};
+use crate::sink::redis::RedisSink;
+use crate::sink::remote::RemoteSink;
 use crate::ConnectorParams;
 
 #[async_trait]
@@ -53,16 +53,6 @@ pub trait Sink {
     async fn abort(&mut self) -> Result<()>;
 }
 
-#[derive(Clone, Debug, EnumAsInner)]
-pub enum SinkConfig {
-    Mysql(MySqlConfig),
-    Redis(RedisConfig),
-    Kafka(KafkaConfig),
-    Remote(RemoteConfig),
-    Console(ConsoleConfig),
-    BlackHole,
-}
-
 #[derive(Clone, Debug, EnumAsInner, Serialize, Deserialize)]
 pub enum SinkState {
     Kafka,
@@ -71,37 +61,6 @@ pub enum SinkState {
     Console,
     Remote,
     Blackhole,
-}
-
-pub const BLACKHOLE_SINK: &str = "blackhole";
-
-impl SinkConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        const SINK_TYPE_KEY: &str = "connector";
-        let sink_type = properties
-            .get(SINK_TYPE_KEY)
-            .ok_or_else(|| SinkError::Config(format!("missing config: {}", SINK_TYPE_KEY)))?;
-        match sink_type.to_lowercase().as_str() {
-            KAFKA_SINK => Ok(SinkConfig::Kafka(KafkaConfig::from_hashmap(properties)?)),
-            MYSQL_SINK => Ok(SinkConfig::Mysql(MySqlConfig::from_hashmap(properties)?)),
-            CONSOLE_SINK => Ok(SinkConfig::Console(ConsoleConfig::from_hashmap(
-                properties,
-            )?)),
-            BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
-            _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
-        }
-    }
-
-    pub fn get_connector(&self) -> &'static str {
-        match self {
-            SinkConfig::Mysql(_) => "mysql",
-            SinkConfig::Kafka(_) => "kafka",
-            SinkConfig::Redis(_) => "redis",
-            SinkConfig::Remote(_) => "remote",
-            SinkConfig::Console(_) => "console",
-            SinkConfig::BlackHole => "blackhole",
-        }
-    }
 }
 
 #[derive(Debug)]

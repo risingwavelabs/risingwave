@@ -69,6 +69,10 @@ impl DatabaseId {
     pub fn placeholder() -> i32 {
         i32::MAX - 1
     }
+
+    pub fn inner(&self) -> i32 {
+        self.database_id
+    }
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
@@ -84,8 +88,11 @@ impl SchemaId {
     pub fn placeholder() -> i32 {
         i32::MAX - 1
     }
-}
 
+    pub fn inner(&self) -> i32 {
+        self.schema_id
+    }
+}
 #[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
 pub struct TableId {
     pub table_id: u32,

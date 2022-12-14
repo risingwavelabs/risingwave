@@ -17,8 +17,12 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+use risingwave_common::util::sort_util::OrderPair;
+use risingwave_connector::sink::catalog::{SinkConfig, SinkDesc, SinkId};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
+use risingwave_pb::catalog::{
+    ColumnIndex as ProstColumnIndex, Sink as ProstSink, Table as ProstTable,
+};
 
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, FragmentId, SchemaId};
@@ -223,6 +227,26 @@ impl TableCatalog {
             definition: self.definition.clone(),
             handle_pk_conflict: self.handle_pk_conflict,
         }
+    }
+
+    pub fn to_sink_desc(
+        &self,
+        properties: WithOptions,
+    ) -> risingwave_connector::sink::Result<SinkDesc> {
+        Ok(SinkDesc {
+            id: SinkId::placeholder(),
+            name: self.name.clone(),
+            columns: self
+                .columns()
+                .iter()
+                .map(|c| c.column_desc.clone())
+                .collect(),
+            pk: self.pk.iter().map(|x| x.to_order_pair()).collect(),
+            distribution_key: self.distribution_key.clone(),
+            appendonly: self.appendonly,
+            definition: self.definition.clone(),
+            config: SinkConfig::from_hashmap(properties.into_inner())?,
+        })
     }
 }
 

@@ -26,7 +26,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::{PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::FragmentId;
+use crate::catalog::{DatabaseId, FragmentId, SchemaId};
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -185,14 +185,14 @@ impl StreamMaterialize {
         self.table.name()
     }
 
-    pub fn rewrite_into_sink(self, properties: WithOptions) -> StreamSink {
-        let Self {
-            base,
-            input,
-            mut table,
-        } = self;
-        table.properties = properties;
-        StreamSink::with_base(input, table, base)
+    pub fn rewrite_into_sink(
+        self,
+        properties: WithOptions,
+    ) -> risingwave_connector::sink::Result<StreamSink> {
+        Ok(StreamSink::new(
+            self.input,
+            self.table.to_sink_desc(properties)?,
+        ))
     }
 }
 

@@ -30,7 +30,7 @@ use itertools::Itertools as _;
 pub use optimizer_context::*;
 use property::Order;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{
@@ -566,7 +566,9 @@ impl PlanRoot {
         properties: WithOptions,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_stream_plan()?;
-        StreamMaterialize::create(
+
+        // reuse the logic to derive the catalog
+        let materialize = StreamMaterialize::create(
             stream_plan,
             sink_name,
             self.required_dist.clone(),
@@ -576,8 +578,11 @@ impl PlanRoot {
             false,
             definition,
             false,
-        )
-        .map(|plan| plan.rewrite_into_sink(properties))
+        )?;
+
+        materialize
+            .rewrite_into_sink(properties)
+            .map_err(|err| RwError::from(ErrorCode::ConnectorError(err.into())))
     }
 
     /// Set the plan root's required dist.
