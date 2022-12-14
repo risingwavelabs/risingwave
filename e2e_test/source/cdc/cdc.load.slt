@@ -6,13 +6,14 @@ create materialized source products ( id INT,
  description STRING,
  PRIMARY KEY (id)
 ) with (
- connector = 'cdc',
- database.hostname = 'mysql',
- database.port = '3306',
- database.user = 'root',
- database.password = '123456',
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
  database.name = 'mydb',
- table.name = 'products'
+ table.name = 'products',
+ server.id = '5085'
 ) row format debezium_json;
 
 statement ok
@@ -28,13 +29,14 @@ create materialized source orders (
    order_status smallint,
    PRIMARY KEY (order_id)
 ) with (
- connector = 'cdc',
- database.hostname = 'mysql',
- database.port = '3306',
- database.user = 'root',
- database.password = '123456',
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
  database.name = 'mydb',
- table.name = 'orders'
+ table.name = 'orders',
+ server.id = '5086'
 ) row format debezium_json;
 
 statement ok
@@ -46,16 +48,18 @@ create materialized source shipments (
   order_id INTEGER,
   origin STRING,
   destination STRING,
-  is_arrived smallint,
+  is_arrived boolean,
  PRIMARY KEY (shipment_id)
 ) with (
- connector = 'cdc',
- database.hostname = 'mysql',
- database.port = '3306',
- database.user = 'root',
- database.password = '123456',
- database.name = 'mydb',
- table.name = 'shipments'
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
 ) row format debezium_json;
 
 statement ok
@@ -75,11 +79,12 @@ create materialized source mytable (
   v3 STRING,
  PRIMARY KEY (v1)
 ) with (
- connector = 'cdc',
- database.hostname = 'mysql',
- database.port = '3306',
- database.user = 'root',
- database.password = '123456',
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
  database.name = 'mydb',
- table.name = 'mytable'
+ table.name = 'mytable',
+ server.id = '5087'
 ) row format debezium_json;

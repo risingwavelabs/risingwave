@@ -536,6 +536,16 @@ def section_compaction(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
+                    "Compaction Skip Count",
+                    "num of compaction task which does not trigger",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_skip_compact_frequency')}[$__rate_interval])) by (level, type)",
+                            "{{level}}-{{type}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
                     "Compactor Running Task Count",
                     "num of compactions from each level to next level",
                     [
@@ -988,6 +998,16 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval]) / 1000000000",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Actor Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            "rate(actor_memory_usage[$__rate_interval])",
                             "{{actor_id}}",
                         ),
                     ],
@@ -1630,9 +1650,9 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_merge_sstable_counts_bucket')}[$__rate_interval])) by (le, job, instance))",
+                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_merge_sstable_counts_bucket')}[$__rate_interval])) by (le, job, type))",
                         f"# merged ssts p{legend}" +
-                        " - {{job}} @ {{instance}}",
+                        " - {{job}} @ {{type}}",
                     ),
                     [90, 99, "max"],
                 ),
