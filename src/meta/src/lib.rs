@@ -21,6 +21,7 @@
 #![feature(custom_test_frameworks)]
 #![feature(lint_reasons)]
 #![feature(map_try_insert)]
+#![feature(once_cell)]
 #![feature(hash_drain_filter)]
 #![feature(is_some_and)]
 #![feature(btree_drain_filter)]
