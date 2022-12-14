@@ -31,7 +31,7 @@ pub struct TaskLocalBytesAllocated(Option<NonNull<AtomicUsize>>);
 impl Default for TaskLocalBytesAllocated {
     fn default() -> Self {
         Self(Some(
-            NonNull::new(Box::leak(Box::new_in(0.into(), System))).unwrap(),
+            NonNull::new(Box::into_raw(Box::new_in(0.into(), System))).unwrap(),
         ))
     }
 }
@@ -44,9 +44,10 @@ impl TaskLocalBytesAllocated {
         Self::default()
     }
 
+    /// Should only used in unit test.
     pub fn new_for_test(val: usize) -> Self {
         Self(Some(
-            NonNull::new(Box::leak(Box::new_in(val.into(), System))).unwrap(),
+            NonNull::new(Box::into_raw(Box::new_in(val.into(), System))).unwrap(),
         ))
     }
 
@@ -102,13 +103,10 @@ impl TaskLocalBytesAllocated {
     }
 
     /// Subtracts from the counter value, and `drop` the counter while the count reaches zero.
+    /// Should be a copy for `.sub()` to test in loom.
     #[inline(always)]
     #[cfg(loom)]
-    pub fn sub_for_test(
-        &self,
-        val: usize,
-        flag: loom::sync::Arc<loom::sync::atomic::AtomicBool>,
-    ) {
+    pub fn sub_for_test(&self, val: usize, flag: loom::sync::Arc<loom::sync::atomic::AtomicBool>) {
         if let Some(bytes) = self.0 {
             let bytes_ref = unsafe { bytes.as_ref() };
             // Use Release to synchronize with the below deletion.
