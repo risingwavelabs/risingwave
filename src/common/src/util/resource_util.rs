@@ -517,18 +517,16 @@ mod util {
             for tc in test_cases {
                 let curr_test_case = &tc.1;
                 if curr_test_case.file_exists {
-                    let mut file = File::create(test_file_path)
+                    let mut file = tempfile::NamedTempFile::new()
                         .expect("Error encountered while creating file!");
-                    file.write_all(curr_test_case.value_in_file.as_bytes())
+                    file.as_file_mut()
+                        .write_all(curr_test_case.value_in_file.as_bytes())
                         .expect("Error while writing to file");
+                    assert_eq!(
+                        read_cgroup_v2_cpu_limit_from_file_path(file.path()),
+                        curr_test_case.expected
+                    );
                 };
-                assert_eq!(
-                    read_cgroup_v2_cpu_limit_from_file_path(test_file_path),
-                    curr_test_case.expected
-                );
-                if Path::new(test_file_path).exists() {
-                    fs::remove_file(test_file_path).expect("File delete failed");
-                }
             }
         }
 
