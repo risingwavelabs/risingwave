@@ -355,7 +355,6 @@ pub async fn run_elections<S: MetaStore>(
                 continue 'initial_election;
             }
         };
-        // why always false?
         if is_initial_leader {
             tracing::info!(
                 "Initial leader with address '{}' elected. New lease id is {}",
