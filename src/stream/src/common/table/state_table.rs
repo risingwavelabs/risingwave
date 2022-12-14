@@ -447,10 +447,14 @@ impl<S: StateStore> StateTable<S> {
                 assert!(pk.len() <= self.pk_indices.len());
 
                 if self.prefix_hint_len != 0 && self.prefix_hint_len != pk.len() {
-                    tracing::warn!(
+                    panic!(
                         "State table point get does not hit the bloom filter, table id {}",
                         self.table_id
                     );
+                    // tracing::warn!(
+                    //     "State table point get does not hit the bloom filter, table id {}",
+                    //     self.table_id
+                    // );
                 }
                 let read_options = ReadOptions {
                     prefix_hint: None,
@@ -993,10 +997,14 @@ impl<S: StateStore> StateTable<S> {
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
         if self.prefix_hint_len != 0 && self.prefix_hint_len > pk_prefix.len() {
-            tracing::warn!(
+            panic!(
                 "State table iter does not hit the bloom filter, table id {}",
                 self.table_id
             );
+            // tracing::warn!(
+            //     "State table iter does not hit the bloom filter, table id {}",
+            //     self.table_id
+            // );
         }
         let prefix_hint = {
             if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
