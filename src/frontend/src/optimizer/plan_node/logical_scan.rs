@@ -393,12 +393,6 @@ impl fmt::Display for LogicalScan {
                 output_col_names,
             )
         } else {
-            let required_col_names = self
-                .required_col_idx()
-                .iter()
-                .map(|i| self.table_desc().columns[*i].name.to_string())
-                .collect_vec();
-
             write!(f, "LogicalScan {{ table: {}", self.table_name())?;
             if self.output_col_idx() == self.required_col_idx() {
                 write!(f, ", columns: [{}]", output_col_names)?;
@@ -407,7 +401,20 @@ impl fmt::Display for LogicalScan {
                     f,
                     ", output_columns: [{}], required_columns: [{}]",
                     output_col_names,
-                    required_col_names.join(", ")
+                    self.required_col_idx().iter().format_with(", ", |i, f| {
+                        if verbose {
+                            f(&format_args!(
+                                "{}.{}",
+                                self.table_name(),
+                                self.table_desc().columns[*i].name
+                            ))
+                        } else {
+                            f(&format_args!(
+                                "{}",
+                                self.table_desc().columns[*i].name.to_string()
+                            ))
+                        }
+                    })
                 )?;
             }
 

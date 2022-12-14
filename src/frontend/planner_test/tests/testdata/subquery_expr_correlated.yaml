@@ -492,11 +492,11 @@
     LogicalAgg { aggs: [count] }
     └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.z, a.z) AND (a.y::Int64 = count(1:Int32)), output: [] }
       ├─LogicalProject { exprs: [a.z, a.y::Int64] }
-      | └─LogicalScan { table: a, output_columns: [a.y, a.z], required_columns: [y, z, x], predicate: (a.x = 3:Int32) }
+      | └─LogicalScan { table: a, output_columns: [a.y, a.z], required_columns: [a.y, a.z, a.x], predicate: (a.x = 3:Int32) }
       └─LogicalAgg { group_key: [a.z], aggs: [count(1:Int32)] }
         └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.z, b.z), output: [a.z, 1:Int32] }
           ├─LogicalAgg { group_key: [a.z], aggs: [] }
-          | └─LogicalScan { table: a, output_columns: [a.z], required_columns: [z, x], predicate: (a.x = 3:Int32) }
+          | └─LogicalScan { table: a, output_columns: [a.z], required_columns: [a.z, a.x], predicate: (a.x = 3:Int32) }
           └─LogicalProject { exprs: [b.z, 1:Int32] }
             └─LogicalScan { table: b, columns: [b.z], predicate: IsNotNull(b.z) }
 - sql: |
