@@ -909,24 +909,41 @@ impl PredicatePushdown for LogicalJoin {
         let right_cols_num = self.right().schema().len();
         let eq_condition = EqJoinPredicate::create(left_cols_num, right_cols_num, new_on.clone());
 
-        let right_derived_predicate = Condition {
-            conjunctions: left_predicate
-                .conjunctions
-                .iter()
-                .filter_map(|expr| {
-                    derive_predicate_from_eq_condition(expr, &eq_condition, left_cols_num, true)
-                })
-                .collect(),
+        // Only push to RHS if RHS is inner side of a join (RHS requires match on LHS)
+        let right_derived_predicate = if matches!(join_type, JoinType::Inner | JoinType::LeftOuter)
+        {
+            Condition {
+                conjunctions: left_predicate
+                    .conjunctions
+                    .iter()
+                    .filter_map(|expr| {
+                        derive_predicate_from_eq_condition(expr, &eq_condition, left_cols_num, true)
+                    })
+                    .collect(),
+            }
+        } else {
+            Condition::true_cond()
         };
 
-        let left_derived_predicate = Condition {
-            conjunctions: right_predicate
-                .conjunctions
-                .iter()
-                .filter_map(|expr| {
-                    derive_predicate_from_eq_condition(expr, &eq_condition, right_cols_num, false)
-                })
-                .collect(),
+        // Only push to LHS if LHS is inner side of a join (LHS requires match on RHS)
+        let left_derived_predicate = if matches!(join_type, JoinType::Inner | JoinType::RightOuter)
+        {
+            Condition {
+                conjunctions: right_predicate
+                    .conjunctions
+                    .iter()
+                    .filter_map(|expr| {
+                        derive_predicate_from_eq_condition(
+                            expr,
+                            &eq_condition,
+                            right_cols_num,
+                            false,
+                        )
+                    })
+                    .collect(),
+            }
+        } else {
+            Condition::true_cond()
         };
 
         let left_predicate = left_predicate.and(left_derived_predicate);
