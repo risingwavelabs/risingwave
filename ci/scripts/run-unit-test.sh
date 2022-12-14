@@ -4,7 +4,10 @@ set -euo pipefail
 echo "+++ Run unit tests with coverage"
 # use tee to disable progress bar
 NEXTEST_PROFILE=ci cargo llvm-cov nextest --lcov --output-path lcov.info --features failpoints,sync_point 2> >(tee);
+
+echo "+++ Run the loom unit test"
 NEXTEST_PROFILE=ci RUSTFLAGS="--cfg loom" cargo nextest run --test loom
+
 if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     NEXTEST_PROFILE=ci cargo nextest run run_sqlsmith_on_frontend --features "failpoints sync_point enable_sqlsmith_unit_test" 2> >(tee);
 fi
