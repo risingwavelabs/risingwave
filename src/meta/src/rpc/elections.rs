@@ -171,7 +171,7 @@ async fn campaign<S: MetaStore>(
 /// ## Returns
 /// True, if the current node could acquire/renew the lease.
 /// False, if the current node could acquire/renew the lease.
-/// MetaStoreError, if there was an error.
+/// `MetaStoreError`, if there was an error.
 ///
 /// ## Arguments
 /// `leader_info`: Info of the node that trie
@@ -445,8 +445,7 @@ async fn manage_term<S: MetaStore>(
     if is_leader {
         return Ok(renew_lease(leader_info, lease_time_sec, meta_store)
             .await
-            .or::<MetaStoreError>(Ok(false))
-            .unwrap());
+            .unwrap_or(false));
     };
 
     // get leader info
