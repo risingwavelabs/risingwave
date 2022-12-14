@@ -15,7 +15,7 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::for_all_variants;
 use risingwave_common::row::Row;
 use risingwave_common::types::{literal_type_match, DataType, Datum, Scalar, ScalarImpl};
@@ -48,10 +48,10 @@ impl Expression for LiteralExpression {
                 match (builder, literal) {
                     $(
                         (ArrayBuilderImpl::$variant_name(inner), Some(ScalarImpl::$variant_name(v))) => {
-                            append_literal_to_arr(inner, Some(v.as_scalar_ref()), capacity)?;
+                            inner.append_n(capacity, Some(v.as_scalar_ref()));
                         }
                         (ArrayBuilderImpl::$variant_name(inner), None) => {
-                            append_literal_to_arr(inner, None, capacity)?;
+                            inner.append_n(capacity, None);
                         }
                     )*
                     (_, _) => $crate::bail!(
@@ -69,20 +69,6 @@ impl Expression for LiteralExpression {
     fn eval_row(&self, _input: &Row) -> Result<Datum> {
         Ok(self.literal.as_ref().cloned())
     }
-}
-
-fn append_literal_to_arr<'a, A1>(
-    a: &'a mut A1,
-    v: Option<<<A1 as ArrayBuilder>::ArrayType as Array>::RefItem<'a>>,
-    cardinality: usize,
-) -> Result<()>
-where
-    A1: ArrayBuilder,
-{
-    for _ in 0..cardinality {
-        a.append(v)
-    }
-    Ok(())
 }
 
 impl LiteralExpression {

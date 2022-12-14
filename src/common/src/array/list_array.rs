@@ -23,6 +23,7 @@ use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 use serde::{Deserializer, Serializer};
 
+use super::iterator::ArrayRawIter;
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult, RowRef,
 };
@@ -77,24 +78,28 @@ impl ArrayBuilder for ListArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<ListRef<'_>>) {
+    fn append_n(&mut self, n: usize, value: Option<ListRef<'_>>) {
         match value {
             None => {
-                self.bitmap.append(false);
+                self.bitmap.append_n(n, false);
                 let last = *self.offsets.last().unwrap();
-                self.offsets.push(last);
+                for _ in 0..n {
+                    self.offsets.push(last);
+                }
             }
             Some(v) => {
-                self.bitmap.append(true);
-                let last = *self.offsets.last().unwrap();
-                let values_ref = v.values_ref();
-                self.offsets.push(last + values_ref.len());
-                for f in values_ref {
-                    self.value.append_datum(f);
+                self.bitmap.append_n(n, true);
+                for _ in 0..n {
+                    let last = *self.offsets.last().unwrap();
+                    let values_ref = v.values_ref();
+                    self.offsets.push(last + values_ref.len());
+                    for f in values_ref {
+                        self.value.append_datum(f);
+                    }
                 }
             }
         }
-        self.len += 1;
+        self.len += n;
     }
 
     fn append_array(&mut self, other: &ListArray) {
@@ -158,7 +163,12 @@ impl Array for ListArray {
     type Builder = ListArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = ListValue;
+    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = ListRef<'a>;
+
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        ListRef::Indexed { arr: self, idx }
+    }
 
     fn value_at(&self, idx: usize) -> Option<ListRef<'_>> {
         if !self.is_null(idx) {
@@ -182,6 +192,10 @@ impl Array for ListArray {
 
     fn iter(&self) -> Self::Iter<'_> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        ArrayRawIter::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {

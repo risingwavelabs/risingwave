@@ -133,54 +133,60 @@ export function dispatcherTypeToJSON(object: DispatcherType): string {
   }
 }
 
-export const FragmentType = {
+export const FragmentTypeFlag = {
   FRAGMENT_UNSPECIFIED: "FRAGMENT_UNSPECIFIED",
-  OTHERS: "OTHERS",
   SOURCE: "SOURCE",
   MVIEW: "MVIEW",
   SINK: "SINK",
+  NOW: "NOW",
+  CHAIN_NODE: "CHAIN_NODE",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
-export type FragmentType = typeof FragmentType[keyof typeof FragmentType];
+export type FragmentTypeFlag = typeof FragmentTypeFlag[keyof typeof FragmentTypeFlag];
 
-export function fragmentTypeFromJSON(object: any): FragmentType {
+export function fragmentTypeFlagFromJSON(object: any): FragmentTypeFlag {
   switch (object) {
     case 0:
     case "FRAGMENT_UNSPECIFIED":
-      return FragmentType.FRAGMENT_UNSPECIFIED;
+      return FragmentTypeFlag.FRAGMENT_UNSPECIFIED;
     case 1:
-    case "OTHERS":
-      return FragmentType.OTHERS;
-    case 2:
     case "SOURCE":
-      return FragmentType.SOURCE;
-    case 3:
+      return FragmentTypeFlag.SOURCE;
+    case 2:
     case "MVIEW":
-      return FragmentType.MVIEW;
+      return FragmentTypeFlag.MVIEW;
     case 4:
     case "SINK":
-      return FragmentType.SINK;
+      return FragmentTypeFlag.SINK;
+    case 8:
+    case "NOW":
+      return FragmentTypeFlag.NOW;
+    case 16:
+    case "CHAIN_NODE":
+      return FragmentTypeFlag.CHAIN_NODE;
     case -1:
     case "UNRECOGNIZED":
     default:
-      return FragmentType.UNRECOGNIZED;
+      return FragmentTypeFlag.UNRECOGNIZED;
   }
 }
 
-export function fragmentTypeToJSON(object: FragmentType): string {
+export function fragmentTypeFlagToJSON(object: FragmentTypeFlag): string {
   switch (object) {
-    case FragmentType.FRAGMENT_UNSPECIFIED:
+    case FragmentTypeFlag.FRAGMENT_UNSPECIFIED:
       return "FRAGMENT_UNSPECIFIED";
-    case FragmentType.OTHERS:
-      return "OTHERS";
-    case FragmentType.SOURCE:
+    case FragmentTypeFlag.SOURCE:
       return "SOURCE";
-    case FragmentType.MVIEW:
+    case FragmentTypeFlag.MVIEW:
       return "MVIEW";
-    case FragmentType.SINK:
+    case FragmentTypeFlag.SINK:
       return "SINK";
-    case FragmentType.UNRECOGNIZED:
+    case FragmentTypeFlag.NOW:
+      return "NOW";
+    case FragmentTypeFlag.CHAIN_NODE:
+      return "CHAIN_NODE";
+    case FragmentTypeFlag.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
   }
@@ -825,8 +831,11 @@ export interface StreamFragmentGraph_StreamFragment {
   /** 0-based on frontend, and will be rewritten to global id on meta. */
   fragmentId: number;
   /** root stream node in this fragment. */
-  node: StreamNode | undefined;
-  fragmentType: FragmentType;
+  node:
+    | StreamNode
+    | undefined;
+  /** Bitwise-OR of FragmentTypeFlags */
+  fragmentTypeMask: number;
   /** mark whether this fragment should only have one actor. */
   isSingleton: boolean;
   /** Number of table ids (stateful states) for this fragment. */
@@ -3725,7 +3734,7 @@ function createBaseStreamFragmentGraph_StreamFragment(): StreamFragmentGraph_Str
   return {
     fragmentId: 0,
     node: undefined,
-    fragmentType: FragmentType.FRAGMENT_UNSPECIFIED,
+    fragmentTypeMask: 0,
     isSingleton: false,
     tableIdsCnt: 0,
     upstreamTableIds: [],
@@ -3737,9 +3746,7 @@ export const StreamFragmentGraph_StreamFragment = {
     return {
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
       node: isSet(object.node) ? StreamNode.fromJSON(object.node) : undefined,
-      fragmentType: isSet(object.fragmentType)
-        ? fragmentTypeFromJSON(object.fragmentType)
-        : FragmentType.FRAGMENT_UNSPECIFIED,
+      fragmentTypeMask: isSet(object.fragmentTypeMask) ? Number(object.fragmentTypeMask) : 0,
       isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
       upstreamTableIds: Array.isArray(object?.upstreamTableIds)
@@ -3752,7 +3759,7 @@ export const StreamFragmentGraph_StreamFragment = {
     const obj: any = {};
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
     message.node !== undefined && (obj.node = message.node ? StreamNode.toJSON(message.node) : undefined);
-    message.fragmentType !== undefined && (obj.fragmentType = fragmentTypeToJSON(message.fragmentType));
+    message.fragmentTypeMask !== undefined && (obj.fragmentTypeMask = Math.round(message.fragmentTypeMask));
     message.isSingleton !== undefined && (obj.isSingleton = message.isSingleton);
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
     if (message.upstreamTableIds) {
@@ -3771,7 +3778,7 @@ export const StreamFragmentGraph_StreamFragment = {
     message.node = (object.node !== undefined && object.node !== null)
       ? StreamNode.fromPartial(object.node)
       : undefined;
-    message.fragmentType = object.fragmentType ?? FragmentType.FRAGMENT_UNSPECIFIED;
+    message.fragmentTypeMask = object.fragmentTypeMask ?? 0;
     message.isSingleton = object.isSingleton ?? false;
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
     message.upstreamTableIds = object.upstreamTableIds?.map((e) => e) || [];

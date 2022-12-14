@@ -28,6 +28,7 @@ use crate::pg_server::BoxedError;
 use crate::types::Row;
 
 /// Messages that can be sent from pg client to server. Implement `read`.
+#[derive(Debug)]
 pub enum FeMessage {
     Ssl,
     Startup(FeStartupMessage),
@@ -44,6 +45,7 @@ pub enum FeMessage {
     Flush,
 }
 
+#[derive(Debug)]
 pub struct FeStartupMessage {
     pub config: HashMap<String, String>,
 }
@@ -73,6 +75,7 @@ impl FeStartupMessage {
 }
 
 /// Query message contains the string sql.
+#[derive(Debug)]
 pub struct FeQueryMessage {
     pub sql_bytes: Bytes,
 }
@@ -125,6 +128,7 @@ pub struct FeCloseMessage {
     pub name: Bytes,
 }
 
+#[derive(Debug)]
 pub struct FeCancelMessage {
     pub target_process_id: i32,
     pub target_secret_key: i32,

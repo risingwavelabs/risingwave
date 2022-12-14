@@ -160,9 +160,8 @@ impl NaiveDateWrapper {
 
     pub fn with_days_value(days: i32) -> value_encoding::Result<Self> {
         Ok(NaiveDateWrapper::new(
-            #[allow(clippy::unnecessary_lazy_evaluations)]
             NaiveDate::from_num_days_from_ce_opt(days)
-                .ok_or_else(|| ValueEncodingError::InvalidNaiveDateEncoding(days))?,
+                .ok_or(ValueEncodingError::InvalidNaiveDateEncoding(days))?,
         ))
     }
 
@@ -214,10 +213,9 @@ impl NaiveTimeWrapper {
     }
 
     pub fn with_secs_nano_value(secs: u32, nano: u32) -> value_encoding::Result<Self> {
-        #[allow(clippy::unnecessary_lazy_evaluations)] // TODO: remove in toolchain bump
         Ok(NaiveTimeWrapper::new(
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
-                .ok_or_else(|| ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
+                .ok_or(ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
         ))
     }
 
@@ -267,9 +265,9 @@ impl NaiveDateTimeWrapper {
 
     pub fn with_secs_nsecs_value(secs: i64, nsecs: u32) -> value_encoding::Result<Self> {
         Ok(NaiveDateTimeWrapper::new({
-            #[allow(clippy::unnecessary_lazy_evaluations)] // TODO: remove in toolchain bump
-            NaiveDateTime::from_timestamp_opt(secs, nsecs)
-                .ok_or_else(|| ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs))?
+            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
+                ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs),
+            )?
         }))
     }
 

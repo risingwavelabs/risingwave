@@ -105,8 +105,15 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     /// Panics if `meta`'s type mismatches with the array type.
     fn with_meta(capacity: usize, meta: ArrayMeta) -> Self;
 
+    /// Append a value multiple times.
+    ///
+    /// This should be more efficient than calling `append` multiple times.
+    fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>);
+
     /// Append a value to builder.
-    fn append(&mut self, value: Option<<<Self as ArrayBuilder>::ArrayType as Array>::RefItem<'_>>);
+    fn append(&mut self, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
+        self.append_n(1, value);
+    }
 
     fn append_null(&mut self) {
         self.append(None)
@@ -164,6 +171,21 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     where
         Self: 'a;
 
+    /// Raw iterator type of this array.
+    type RawIter<'a>: Iterator<Item = Self::RefItem<'a>>
+    where
+        Self: 'a;
+
+    /// Retrieve a reference to value regardless of whether it is null
+    /// without checking the index boundary.
+    ///
+    /// The returned value for NULL values is the default value.
+    ///
+    /// # Safety
+    ///
+    /// Index must be within the bounds.
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_>;
+
     /// Retrieve a reference to value.
     fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>>;
 
@@ -177,6 +199,12 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 
     /// Get iterator of current array.
     fn iter(&self) -> Self::Iter<'_>;
+
+    /// Get raw iterator of current array.
+    ///
+    /// The raw iterator simply iterates values without checking the null bitmap.
+    /// The returned value for NULL values is undefined.
+    fn raw_iter(&self) -> Self::RawIter<'_>;
 
     /// Serialize to protobuf
     fn to_protobuf(&self) -> ProstArray;
@@ -441,12 +469,14 @@ macro_rules! impl_array_builder {
                 }
             }
 
-            /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
-            pub fn append_datum(&mut self, datum: impl ToDatumRef) {
+            /// Append a [`Datum`] or [`DatumRef`] multiple times, return error while type not match.
+            pub fn append_datum_n(&mut self, n: usize, datum: impl ToDatumRef) {
                 match datum.to_datum_ref() {
-                    None => self.append_null(),
+                    None => match self {
+                        $( Self::$variant_name(inner) => inner.append_n(n, None), )*
+                    }
                     Some(scalar_ref) => match (self, scalar_ref) {
-                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
+                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append_n(n, Some(v)), )*
                         (this_builder, this_scalar_ref) => panic!(
                             "Failed to append datum, array builder type: {}, scalar type: {}",
                             this_builder.get_ident(),
@@ -454,6 +484,11 @@ macro_rules! impl_array_builder {
                         ),
                     },
                 }
+            }
+
+            /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
+            pub fn append_datum(&mut self, datum: impl ToDatumRef) {
+                self.append_datum_n(1, datum);
             }
 
             pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {

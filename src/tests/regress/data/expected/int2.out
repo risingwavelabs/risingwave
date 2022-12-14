@@ -243,13 +243,13 @@ SELECT i.f1, i.f1 / int '2' AS x FROM INT2_TBL i;
 (5 rows)
 
 -- corner cases
-SELECT (-1::int2<<15)::text;
+SELECT (-1::int2<<15)::text AS text;
   text  
 --------
  -32768
 (1 row)
 
-SELECT ((-1::int2<<15)+1::int2)::text;
+SELECT ((-1::int2<<15)+1::int2)::text AS text;
   text  
 --------
  -32767

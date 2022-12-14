@@ -22,6 +22,7 @@ query II rowsort
 select v1, v2 from s1 where v1 is not null limit 15;
 ----
 1 11
+10 20
 2 12
 3 13
 4 14
@@ -30,7 +31,6 @@ select v1, v2 from s1 where v1 is not null limit 15;
 7 17
 8 18
 9 19
-10 20
 
 statement ok
 drop source s1;

@@ -29,7 +29,7 @@ impl NotificationVersion {
             .get_cf(DEFAULT_COLUMN_FAMILY, NOTIFICATION_VERSION_KEY)
             .await
         {
-            Ok(byte_vec) => u64::from_be_bytes(byte_vec.as_slice().try_into().unwrap()),
+            Ok(byte_vec) => memcomparable::from_slice(&byte_vec).unwrap(),
             Err(MetaStoreError::ItemNotFound(_)) => 0,
             Err(e) => panic!("{:?}", e),
         };
@@ -42,7 +42,7 @@ impl NotificationVersion {
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
                 NOTIFICATION_VERSION_KEY.to_vec(),
-                version.to_be_bytes().to_vec(),
+                memcomparable::to_vec(&version).unwrap(),
             )
             .await
             .unwrap();

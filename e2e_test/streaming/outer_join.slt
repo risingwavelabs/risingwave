@@ -41,6 +41,7 @@ query II rowsort
 select * from v;
 ----
 
+
 statement ok
 drop materialized view v;
 

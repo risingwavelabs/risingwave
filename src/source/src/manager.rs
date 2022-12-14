@@ -167,11 +167,11 @@ impl TableSourceManager {
         self.sources.lock().clear()
     }
 
-    fn metrics(&self) -> Arc<SourceMetrics> {
+    pub fn metrics(&self) -> Arc<SourceMetrics> {
         self.metrics.clone()
     }
 
-    fn msg_buf_size(&self) -> usize {
+    pub fn msg_buf_size(&self) -> usize {
         self.connector_message_buffer_size
     }
 }
@@ -293,15 +293,12 @@ impl SourceDescBuilder {
             "source should have at least one pk column"
         );
 
-        // store the connector node address to properties for later use
-        let mut source_props: HashMap<String, String> =
-            HashMap::from_iter(self.properties.clone().into_iter());
-        self.connector_params
-            .connector_rpc_endpoint
-            .as_ref()
-            .map(|addr| source_props.insert("connector_node_addr".to_string(), addr.clone()));
-        let config = ConnectorProperties::extract(source_props)
-            .map_err(|e| RwError::from(ConnectorError(e.into())))?;
+        let mut config = ConnectorProperties::extract(self.properties.clone())
+            .map_err(|e| ConnectorError(e.into()))?;
+        if let Some(addr) = self.connector_params.connector_rpc_endpoint.as_ref() {
+            config.set_connector_node_addr(addr.to_owned());
+            config.set_source_id_for_cdc(self.source_id.table_id());
+        }
 
         let source = SourceImpl::Connector(ConnectorSource {
             config,

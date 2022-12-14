@@ -125,7 +125,7 @@ impl PartialEq for HeapElem {
 
 impl Eq for HeapElem {}
 
-fn compare_values<'a, T>(lhs: Option<&T>, rhs: Option<&T>, order_type: &'a OrderType) -> Ordering
+fn compare_values<T>(lhs: Option<&T>, rhs: Option<&T>, order_type: &OrderType) -> Ordering
 where
     T: Ord,
 {
