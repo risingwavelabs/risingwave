@@ -24,6 +24,7 @@ use std::time::Duration;
 
 use tokio::task_local;
 
+/// If you change the code in this struct, pls re-run the `tests/loom.rs` test locally.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
 pub struct TaskLocalBytesAllocated(Option<NonNull<AtomicUsize>>);

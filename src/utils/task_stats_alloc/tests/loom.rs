@@ -14,7 +14,8 @@
 
 #![cfg(loom)]
 
-/// Run `RUSTFLAGS="--cfg loom" cargo test --test loom` to test.
+/// Note this test is not running in CI, due to the re-compile time cost. Add it when it is
+/// necessary. Run `RUSTFLAGS="--cfg loom" cargo test --test loom` to test.
 use loom::sync::Arc;
 use loom::thread;
 use task_stats_alloc::TaskLocalBytesAllocated;
