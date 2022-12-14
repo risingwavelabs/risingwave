@@ -996,7 +996,7 @@ impl<S: StateStore> StateTable<S> {
 
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
-        if self.prefix_hint_len != 0 && self.prefix_hint_len > pk_prefix.len() {
+        if self.prefix_hint_len != 0 && self.prefix_hint_len != pk_prefix.len() {
             panic!(
                 "State table iter does not hit the bloom filter, table id {}",
                 self.table_id
