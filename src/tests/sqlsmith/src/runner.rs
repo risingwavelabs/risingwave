@@ -143,9 +143,12 @@ async fn create_tables(
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         setup_sql.push_str(&format!("{};", &create_sql));
         tracing::info!("Executing MView Setup: {}", &create_sql);
-        client.execute(&create_sql, &[]).await.unwrap();
-        tables.push(table.clone());
-        mviews.push(table);
+        let response = client.execute(&create_sql, &[]).await;
+        let skip_count = validate_response(&setup_sql, &create_sql, response);
+        if skip_count == 0 {
+            tables.push(table.clone());
+            mviews.push(table);
+        }
     }
     (tables, mviews, setup_sql)
 }
