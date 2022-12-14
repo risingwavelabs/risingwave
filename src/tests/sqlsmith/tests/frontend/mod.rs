@@ -133,12 +133,32 @@ async fn test_stream_query(
     // The generated SQL must be parsable.
     let statements = parse_sql(&sql);
     let stmt = statements[0].clone();
-    handle(session.clone(), stmt, &sql).await?;
+    let skipped = handle(session.clone(), stmt, &sql).await?;
+    if !skipped {
+        let drop_sql = format!("DROP MATERIALIZED VIEW {}", table.name);
+        let drop_stmts = parse_sql(&drop_sql);
+        let drop_stmt = drop_stmts[0].clone();
+        handle(session.clone(), drop_stmt, &drop_sql).await?;
+    }
+    Ok(())
+}
 
-    let drop_sql = format!("DROP MATERIALIZED VIEW {}", table.name);
-    let drop_stmts = parse_sql(&drop_sql);
-    let drop_stmt = drop_stmts[0].clone();
-    handle(session.clone(), drop_stmt, &drop_sql).await?;
+fn run_batch_query(
+    session: Arc<SessionImpl>,
+    context: OptimizerContextRef,
+    stmt: Statement,
+) -> Result<()> {
+    let mut binder = Binder::new(&session);
+    let bound = binder
+        .bind(stmt)
+        .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e)))?;
+    let mut planner = Planner::new(context);
+    let mut logical_plan = planner
+        .plan(bound)
+        .map_err(|e| Failed::from(format!("Failed to generate logical plan:\nReason:\n{}", e)))?;
+    logical_plan
+        .gen_batch_distributed_plan()
+        .map_err(|e| Failed::from(format!("Failed to generate batch plan:\nReason:\n{}", e)))?;
     Ok(())
 }
 
@@ -171,17 +191,8 @@ fn test_batch_query(
 
     match stmt {
         Statement::Query(_) => {
-            let mut binder = Binder::new(&session);
-            let bound = binder
-                .bind(stmt)
-                .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e)))?;
-            let mut planner = Planner::new(context);
-            let mut logical_plan = planner.plan(bound).map_err(|e| {
-                Failed::from(format!("Failed to generate logical plan:\nReason:\n{}", e))
-            })?;
-            logical_plan.gen_batch_distributed_plan().map_err(|e| {
-                Failed::from(format!("Failed to generate batch plan:\nReason:\n{}", e))
-            })?;
+            let result = run_batch_query(session, context, stmt);
+            validate_result(result)?;
             Ok(())
         }
         _ => Err(format!("Invalid Query: {}", stmt).into()),
