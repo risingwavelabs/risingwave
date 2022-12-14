@@ -63,4 +63,8 @@ impl DmlManager {
         let batch_dmls = self.batch_dmls.lock();
         batch_dmls.get(table_id).unwrap().write_chunk(chunk)
     }
+
+    pub fn clear(&self) {
+        self.batch_dmls.lock().clear()
+    }
 }
