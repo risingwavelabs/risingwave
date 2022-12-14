@@ -408,11 +408,11 @@ async fn test_fragmenter() -> MetaResult<()> {
 
     let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
-    let source_actor_ids = table_fragments.source_actor_ids();
+    let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
     let sink_actor_ids = table_fragments.mview_actor_ids();
     let internal_table_ids = ctx.internal_table_ids();
     assert_eq!(actors.len(), 9);
-    assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
+    assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
     assert_eq!(2, internal_table_ids.len());
 

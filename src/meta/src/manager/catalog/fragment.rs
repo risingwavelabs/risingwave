@@ -79,8 +79,8 @@ pub struct ActorInfos {
     /// node_id => actor_ids
     pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 
-    /// all reachable source actors
-    pub source_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
+    /// all reachable barrier inject actors
+    pub barrier_inject_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 }
 
 pub struct FragmentVNodeInfo {
@@ -339,7 +339,7 @@ where
         check_state: impl Fn(ActorState, TableId, ActorId) -> bool,
     ) -> ActorInfos {
         let mut actor_maps = HashMap::new();
-        let mut source_actor_maps = HashMap::new();
+        let mut barrier_inject_actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
@@ -354,11 +354,11 @@ where
                 }
             }
 
-            let source_actors = fragments.worker_source_actor_states();
-            for (worker_id, actor_states) in source_actors {
+            let barrier_inject_actors = fragments.worker_barrier_inject_actor_states();
+            for (worker_id, actor_states) in barrier_inject_actors {
                 for (actor_id, actor_state) in actor_states {
                     if check_state(actor_state, fragments.table_id(), actor_id) {
-                        source_actor_maps
+                        barrier_inject_actor_maps
                             .entry(worker_id)
                             .or_insert_with(Vec::new)
                             .push(actor_id);
@@ -369,7 +369,7 @@ where
 
         ActorInfos {
             actor_maps,
-            source_actor_maps,
+            barrier_inject_actor_maps,
         }
     }
 

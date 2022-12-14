@@ -77,6 +77,7 @@ pub struct MetaMetrics {
 
     /// The number of workers in the cluster.
     pub worker_num: IntGaugeVec,
+    pub compact_skip_frequency: IntCounterVec,
 }
 
 impl MetaMetrics {
@@ -163,6 +164,13 @@ impl MetaMetrics {
             "storage_level_compact_frequency",
             "num of compactions from each level to next level",
             &["compactor", "group", "result"],
+            registry
+        )
+        .unwrap();
+        let compact_skip_frequency = register_int_counter_vec_with_registry!(
+            "storage_skip_compact_frequency",
+            "num of compactions from each level to next level",
+            &["level", "type"],
             registry
         )
         .unwrap();
@@ -255,6 +263,7 @@ impl MetaMetrics {
             level_sst_num,
             level_compact_cnt,
             compact_frequency,
+            compact_skip_frequency,
             level_file_size,
             version_size,
             version_stats,
