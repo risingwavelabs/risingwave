@@ -365,6 +365,7 @@ mod tests {
         let conn_props = ConnectorProperties::extract(user_props_mysql).unwrap();
         if let ConnectorProperties::MySqlCdc(c) = conn_props {
             assert_eq!(c.source_id, 0);
+            assert_eq!(c.source_type, "mysql");
             assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
             assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.props.get("database.port").unwrap(), "3306");
@@ -379,6 +380,7 @@ mod tests {
         let conn_props = ConnectorProperties::extract(user_props_postgres).unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
             assert_eq!(c.source_id, 0);
+            assert_eq!(c.source_type, "postgres");
             assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
             assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.props.get("database.port").unwrap(), "5432");

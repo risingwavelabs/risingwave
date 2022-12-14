@@ -187,7 +187,7 @@ pub struct ConnectorSource {
 
 impl ConnectorSource {
     #[allow(clippy::too_many_arguments)]
-    pub async fn new_v2(
+    pub async fn new(
         format: SourceFormat,
         row_schema_location: &str,
         use_schema_registry: bool,
@@ -353,7 +353,7 @@ impl SourceDescBuilderV2 {
             "source should have at least one pk column"
         );
 
-        let source = ConnectorSource::new_v2(
+        let source = ConnectorSource::new(
             format.clone(),
             &self.source_info.row_schema_location,
             self.source_info.use_schema_registry,
