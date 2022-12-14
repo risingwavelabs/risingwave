@@ -477,7 +477,7 @@ pub(crate) mod tests {
                 append_only: false,
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
                 value_indices: vec![0, 1, 2],
-                prefix_hint_len: 0,
+                read_prefix_len_hint: 0,
             }),
             vec![],
             ctx,

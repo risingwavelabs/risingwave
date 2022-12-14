@@ -44,9 +44,9 @@ pub enum FilterKeyExtractorImpl {
 
 impl FilterKeyExtractorImpl {
     pub fn from_table(table_catalog: &Table) -> Self {
-        let pk_prefix_len = table_catalog.get_pk_prefix_len_hint() as usize;
+        let read_prefix_len = table_catalog.get_read_prefix_len_hint() as usize;
 
-        if pk_prefix_len == 0 || pk_prefix_len > table_catalog.get_pk().len() {
+        if read_prefix_len == 0 || read_prefix_len > table_catalog.get_pk().len() {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
             FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor::default())
@@ -125,7 +125,7 @@ pub struct SchemaFilterKeyExtractor {
     /// Prefix key length can be decoded through its `DataType` and `OrderType` which obtained from
     /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
     /// from storage key.
-    prefix_hint_len: usize,
+    read_prefix_len: usize,
     deserializer: OrderedRowSerde,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
     // prefix_key)
@@ -145,7 +145,7 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
         let bloom_filter_key_len = self
             .deserializer
-            .deserialize_prefix_len(pk, self.prefix_hint_len)
+            .deserialize_prefix_len(pk, self.read_prefix_len)
             .unwrap();
 
         let end_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + bloom_filter_key_len;
@@ -161,7 +161,7 @@ impl SchemaFilterKeyExtractor {
             .map(|col_order| col_order.index as usize)
             .collect();
 
-        let prefix_hint_len = table_catalog.pk_prefix_len_hint as usize;
+        let read_prefix_len = table_catalog.get_read_prefix_len_hint() as usize;
 
         let data_types = pk_indices
             .iter()
@@ -180,7 +180,7 @@ impl SchemaFilterKeyExtractor {
             .collect();
 
         Self {
-            prefix_hint_len,
+            read_prefix_len,
             deserializer: OrderedRowSerde::new(data_types, order_types),
         }
     }
@@ -468,7 +468,7 @@ mod tests {
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,
-            pk_prefix_len_hint: 1,
+            read_prefix_len_hint: 1,
         }
     }
 

@@ -213,7 +213,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-        let prefix_hint_len = table_desc.get_prefix_hint_len_hint() as usize;
+        let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(
                 state_store,

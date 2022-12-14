@@ -205,7 +205,7 @@ impl<S: StateStore> StateTable<S> {
             true => None,
             false => Some(input_value_indices),
         };
-        let prefix_hint_len = table_catalog.pk_prefix_len_hint as usize;
+        let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
         Self {
             table_id,
             mem_table: MemTable::new(),
