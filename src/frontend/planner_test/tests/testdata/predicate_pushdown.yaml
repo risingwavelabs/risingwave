@@ -56,9 +56,9 @@
         └─LogicalHopWindow { time_col: t.ts, slide: 1 day, size: 3 days, output: all }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts, t._row_id] }
   optimized_logical_plan: |
-    LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (t.ts >= '1997-07-01':Varchar::Date) AND (window_start >= '1997-07-02':Varchar::Date) AND (window_end >= '1997-07-03':Varchar::Date) AND (window_start >= (t.ts + '1 day':Interval)) AND (window_end > (t.ts + '4 days':Interval)) }
+    LogicalFilter { predicate: (window_start >= '1997-07-02':Varchar::Date) AND (window_end >= '1997-07-03':Varchar::Date) AND (window_start >= (t.ts + '1 day':Interval)) AND (window_end > (t.ts + '4 days':Interval)) }
     └─LogicalHopWindow { time_col: t.ts, slide: 1 day, size: 3 days, output: all }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts] }
+      └─LogicalScan { table: t, output_columns: [t.v1, t.v2, t.v3, t.v4, t.ts], required_columns: [v1, v2, v3, v4, ts], predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (t.ts >= '1997-07-01':Varchar::Date) }
 - name: filter union transpose
   sql: |
     create table t1 (v1 int, v2 int, v3 int);
