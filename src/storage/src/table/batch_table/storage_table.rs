@@ -247,7 +247,7 @@ impl<S: StateStore> StorageTable<S> {
 
         let read_options = ReadOptions {
             prefix_hint: None,
-            check_bloom_filter: self.prefix_hint_len != 0 && self.prefix_hint_len <= pk.len(),
+            check_bloom_filter: self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len(),
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,

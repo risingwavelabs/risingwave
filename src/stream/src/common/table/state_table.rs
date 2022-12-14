@@ -445,9 +445,8 @@ impl<S: StateStore> StateTable<S> {
             },
             None => {
                 assert!(pk.len() <= self.pk_indices.len());
-                let check_bloom_filter =
-                    self.prefix_hint_len != 0 && self.prefix_hint_len <= pk.len();
-                if !check_bloom_filter {
+
+                if self.prefix_hint_len != 0 && self.prefix_hint_len != pk.len() {
                     tracing::warn!(
                         "State table point get does not hit the bloom filter, table id {}",
                         self.table_id
@@ -455,7 +454,8 @@ impl<S: StateStore> StateTable<S> {
                 }
                 let read_options = ReadOptions {
                     prefix_hint: None,
-                    check_bloom_filter,
+                    check_bloom_filter: self.prefix_hint_len != 0
+                        && self.prefix_hint_len == pk.len(),
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,
@@ -992,6 +992,12 @@ impl<S: StateStore> StateTable<S> {
 
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
+        if self.prefix_hint_len != 0 && self.prefix_hint_len > pk_prefix.len() {
+            tracing::warn!(
+                "State table iter does not hit the bloom filter, table id {}",
+                self.table_id
+            );
+        }
         let prefix_hint = {
             if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
                 None
@@ -1025,13 +1031,6 @@ impl<S: StateStore> StateTable<S> {
         let mem_table_iter = self.mem_table.iter(key_range.clone());
 
         let check_bloom_filter = prefix_hint.is_some();
-
-        if !check_bloom_filter {
-            tracing::warn!(
-                "State table iter does not hit the bloom filter, table id {}",
-                self.table_id
-            );
-        }
 
         let read_options = ReadOptions {
             prefix_hint,
