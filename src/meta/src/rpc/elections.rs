@@ -282,7 +282,7 @@ async fn get_infos_obj<S: MetaStore>(
     }
 }
 
-fn gen_rand_lease_id(addr: String) -> u64 {
+fn gen_rand_lease_id(addr: &str) -> u64 {
     let mut ds = DefaultHasher::new();
     addr.hash(&mut ds);
     ds.finish()
@@ -342,7 +342,7 @@ pub async fn run_elections<S: MetaStore>(
             &meta_store,
             &addr,
             lease_time_sec,
-            gen_rand_lease_id(addr.clone()),
+            gen_rand_lease_id(addr.as_str()),
         )
         .await;
         let (leader_addr, initial_leader, is_initial_leader) = match election_outcome {
@@ -387,7 +387,7 @@ pub async fn run_elections<S: MetaStore>(
                         &meta_store,
                         &addr,
                         lease_time_sec,
-                        gen_rand_lease_id(addr.clone()),
+                        gen_rand_lease_id(addr.as_str()),
                     )
                     .await
                     {
