@@ -29,7 +29,8 @@ use super::{
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{
-    CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+    CollectInputRef, CorrelatedInputRef, CountNow, Expr, ExprImpl, ExprRewriter, ExprVisitor,
+    InputRef,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
@@ -435,7 +436,7 @@ impl ColPrunable for LogicalScan {
 
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        // If the predicate contains `CorrelatedInputRef`. We don't push down.
+        // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}
         impl ExprVisitor<bool> for HasCorrelated {
@@ -448,7 +449,9 @@ impl PredicatePushdown for LogicalScan {
             }
         }
         let mut has_correlated_visitor = HasCorrelated {};
-        if predicate.visit_expr(&mut has_correlated_visitor) {
+        if predicate.visit_expr(&mut has_correlated_visitor)
+            || predicate.visit_expr(&mut CountNow::default()) > 0
+        {
             return LogicalFilter::create(
                 self.clone_with_predicate(self.predicate().clone()).into(),
                 predicate,
