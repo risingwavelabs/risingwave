@@ -702,7 +702,7 @@ mod tests {
 
     #[tokio::test]
     async fn not_renew_lease() {
-        let (lease_timeout, mock_meta_store, _, _, _) = default_setup().await;
+        let (lease_timeout, mock_meta_store, ..) = default_setup().await;
         // Leader: If new leader was elected old leader should NOT renew lease
         let other_leader_info = MetaLeaderInfo {
             node_address: "other:1234".into(),
