@@ -28,7 +28,7 @@ use super::{TopNCache, TopNCacheTrait};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::ManagedTopNState;
+use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
@@ -249,7 +249,7 @@ where
                     self.managed_state.delete(row_ref);
                     self.cache
                         .delete(
-                            None,
+                            NO_GROUP_KEY,
                             &mut self.managed_state,
                             cache_key,
                             row_ref,
@@ -282,7 +282,7 @@ where
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
-            .init_topn_cache(None, &mut self.cache, self.order_by_len)
+            .init_topn_cache(NO_GROUP_KEY, &mut self.cache, self.order_by_len)
             .await
     }
 }

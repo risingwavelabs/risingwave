@@ -25,7 +25,6 @@ use risingwave_storage::StateStore;
 use super::approx_distinct_utils::{
     deserialize_buckets_from_list, serialize_buckets, RegisterBucket, StreamingApproxCountDistinct,
 };
-use crate::common::iter_state_table;
 use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::table::TableStateImpl;
 use crate::executor::StreamExecutorResult;
@@ -116,7 +115,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
         group_key: Option<&Row>,
     ) -> StreamExecutorResult<()> {
         let state_row = {
-            let data_iter = iter_state_table(state_table, group_key).await?;
+            let data_iter = state_table.iter_with_pk_prefix(&group_key).await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
                 Some(state_row?)
@@ -163,7 +162,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
         let current_row = group_key.unwrap_or_else(Row::empty).chain(row::once(list));
 
         let state_row = {
-            let data_iter = iter_state_table(state_table, group_key).await?;
+            let data_iter = state_table.iter_with_pk_prefix(&group_key).await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
                 Some(state_row?)

@@ -21,7 +21,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
-use risingwave_common::row::{Row2, RowExt};
+use risingwave_common::row::{RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
@@ -227,15 +227,14 @@ where
             let cache_key =
                 serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
 
-            // TODO(row trait): optimize this
-            let group_key = row_ref.project(&self.group_by).into_owned_row();
+            let group_key = row_ref.project(&self.group_by);
 
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
                 let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
                 self.managed_state
-                    .init_topn_cache(Some(&group_key), &mut topn_cache, self.order_by_len)
+                    .init_topn_cache(Some(group_key), &mut topn_cache, self.order_by_len)
                     .await?;
                 self.caches.insert(group_cache_key.clone(), topn_cache);
             }
@@ -252,7 +251,7 @@ where
                     self.managed_state.delete(row_ref);
                     cache
                         .delete(
-                            Some(&group_key),
+                            Some(group_key),
                             &mut self.managed_state,
                             cache_key,
                             row_ref,
