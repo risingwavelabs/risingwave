@@ -362,8 +362,7 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamDynamicFilter { predicate: (t.v1 >= now), output: [t.v1, t._row_id] }
-      ├─StreamFilter { predicate: true }
-      | └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamNow { output: [now] }
 - name: and of two now expression condition
   sql: |
@@ -373,8 +372,7 @@
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamDynamicFilter { predicate: (t.v2 >= now), output: [t.v1, t.v2, t._row_id] }
       ├─StreamDynamicFilter { predicate: (t.v1 >= now), output: [t.v1, t.v2, t._row_id] }
-      | ├─StreamFilter { predicate: true }
-      | | └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      | ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       | └─StreamNow { output: [now] }
       └─StreamNow { output: [now] }
 - name: or of two now expression condition

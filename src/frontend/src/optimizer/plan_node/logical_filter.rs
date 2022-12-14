@@ -266,10 +266,15 @@ impl ToStream for LogicalFilter {
             now_conds.sort_by_key(|(comparator_priority, _)| *comparator_priority);
             // We do simple logical filters first because it can reduce size of dynamic filter's
             // cache.
-            let simple_logical = LogicalFilter::new(self.input(), Condition { conjunctions });
-            let mut cur_streaming = PlanRef::from(StreamFilter::new(
-                simple_logical.clone_with_input(new_input),
-            ));
+
+            let mut cur_streaming = if conjunctions.is_empty() {
+                new_input
+            } else {
+                let simple_logical = LogicalFilter::new(self.input(), Condition { conjunctions });
+                PlanRef::from(StreamFilter::new(
+                    simple_logical.clone_with_input(new_input),
+                ))
+            };
             // Rewrite each now condition. Replace `NowExpr` with `StreamNow` and replace
             // `LogicalFilter` with `DynamicFilter`.
             for (_, now_cond) in now_conds {
