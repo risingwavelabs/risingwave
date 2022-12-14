@@ -185,7 +185,7 @@ impl LogicalHopWindow {
             .rewrite_provided_order(self.input().order())
     }
 
-    /// Return output indices
+    /// Get output indices
     pub fn output_indices(&self) -> &Vec<usize> {
         &self.core.output_indices
     }
@@ -322,21 +322,65 @@ impl ColPrunable for LogicalHopWindow {
 
 impl PredicatePushdown for LogicalHopWindow {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        println!("input schema: {:?}", self.input().schema());
+        println!("schema: {:?}", self.schema());
+        println!(
+            "output_indices len for logical hop window: {:?}",
+            self.output_indices()
+        );
+        // if !output_indices.contains(&self.schema().len())
+        //     && !output_indices.contains(&(self.schema().len() + 1));
         // For reference: HOP(table_or_source, start_time, hop_size, window_size);
         // `window_start`, `window_end` cannot be pushed-down, they are produced by HopWindow.
         // schema: |
-        let mut window_columns = FixedBitSet::with_capacity(4);
-        window_columns.insert_range(2..4);
+        let mut window_columns = FixedBitSet::with_capacity(self.output_indices().len());
+        let window_start_idx = self.input().schema().len();
+        let window_end_idx = self.input().schema().len() + 1;
+        let mut window_start_pos = None;
+        let mut window_end_pos = None;
+        for (i, v) in self.output_indices().iter().enumerate() {
+            if *v == window_start_idx {
+                window_start_pos = Some(i);
+            }
+            if *v == window_end_idx {
+                window_end_pos = Some(i)
+            }
+        }
+        // just set the bits which do not mark `input.schema`.
+        if let Some(i) = window_start_pos {
+            window_columns.insert(i);
+        }
+        if let Some(i) = window_end_pos {
+            window_columns.insert(i);
+        }
+
         let (time_window_pred, pushed_predicate) = predicate.split_disjoint(&window_columns);
 
-        // convert the predicate to one that references the child of the agg
-        // TODO: Not sure how to rewrite this?
-        // What is the semantics of substitute?
+        // Convert the predicate to one that references the child of the hop window
+        // TODO: What is the semantics of substitute?
+        // For now we just set those filtered out.
         let mut subst = Substitute {
-            mapping: self.output_indices()
+            mapping: self
+                .output_indices()
+                .iter()
+                .filter(|i| **i != window_start_idx && **i != window_end_idx)
+                // TODO: What is difference between schema and input.schema?
+                // Is schema the output schema?
+                // Is schema full output, before columns are filtered out by `SELECT`?
+                .map(|i| InputRef::new(*i, self.schema().fields()[*i].data_type()).into())
+                .collect(),
+            // mapping: self
+            //     .group_key()
+            //     .iter()
+            //     .enumerate()
+            //     .map(|(i, group_key)| {
+            //         InputRef::new(*group_key, self.schema().fields()[i].data_type()).into()
+            //     })
+            //     .collect(),
         };
         let pushed_predicate = pushed_predicate.rewrite_expr(&mut subst);
         gen_filter_and_pushdown(self, time_window_pred, pushed_predicate)
+        // gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
 
