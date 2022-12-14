@@ -198,8 +198,7 @@ mod test {
                     )))),
                     Column::new(Arc::new(ArrayImpl::from(StructArray::from_slices(
                         &[true, true, true],
-                        vec![ArrayImpl::from(ListArray::from_slices(
-                            &[true, true, true],
+                        vec![ArrayImpl::from(ListArray::from_iter(
                             vec![
                                 Some(ArrayImpl::from(array!(Utf8Array, [Some("1 Poultry Rd")]))),
                                 Some(ArrayImpl::from(array!(Utf8Array, [Some("50 Vesey St")]))),
@@ -231,8 +230,7 @@ mod test {
                     )))),
                     Column::new(Arc::new(ArrayImpl::from(StructArray::from_slices(
                         &[true, true, true],
-                        vec![ArrayImpl::from(ListArray::from_slices(
-                            &[true, true, true],
+                        vec![ArrayImpl::from(ListArray::from_iter(
                             vec![
                                 Some(ArrayImpl::from(array!(
                                     Utf8Array,

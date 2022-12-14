@@ -132,7 +132,6 @@ impl ArrayBuilder for ListArrayBuilder {
             offsets: self.offsets,
             value: Box::new(self.value.finish()),
             value_type: self.value_type,
-            len: self.len,
         }
     }
 }
@@ -158,7 +157,6 @@ pub struct ListArray {
     offsets: Vec<u32>,
     value: Box<ArrayImpl>,
     value_type: DataType,
-    len: usize,
 }
 
 impl Array for ListArray {
@@ -189,7 +187,7 @@ impl Array for ListArray {
     }
 
     fn len(&self) -> usize {
-        self.len
+        self.bitmap.len()
     }
 
     fn iter(&self) -> Self::Iter<'_> {
@@ -206,7 +204,7 @@ impl Array for ListArray {
             array_type: ProstArrayType::List as i32,
             struct_array_data: None,
             list_array_data: Some(Box::new(ListArrayData {
-                offsets: self.offsets.iter().map(|u| *u as u32).collect(),
+                offsets: self.offsets.clone(),
                 value: Some(Box::new(value)),
                 value_type: Some(self.value_type.to_protobuf()),
             })),
@@ -251,33 +249,33 @@ impl ListArray {
             "Must have no buffer in a list array"
         );
         let bitmap: Bitmap = array.get_null_bitmap()?.into();
-        let cardinality = bitmap.len();
         let array_data = array.get_list_array_data()?.to_owned();
-        let value = ArrayImpl::from_protobuf(array_data.value.as_ref().unwrap(), cardinality)?;
+        let value = ArrayImpl::from_protobuf(array_data.value.as_ref().unwrap(), bitmap.len())?;
         let arr = ListArray {
             bitmap,
             offsets: array_data.offsets,
             value: Box::new(value),
             value_type: DataType::from(&array_data.value_type.unwrap()),
-            len: cardinality,
         };
         Ok(arr.into())
     }
 
     // Used for testing purposes
-    pub fn from_slices(
-        null_bitmap: &[bool],
-        values: Vec<Option<ArrayImpl>>,
+    pub fn from_iter(
+        values: impl IntoIterator<Item = Option<ArrayImpl>>,
         value_type: DataType,
     ) -> ListArray {
-        let cardinality = null_bitmap.len();
-        let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
+        let values = values.into_iter();
+        let size_hint = values.size_hint().0;
+
         let mut offsets = vec![0u32];
-        let mut values = values.into_iter().peekable();
-        let mut builder = values.peek().unwrap().as_ref().unwrap().create_builder(0);
-        for i in values {
+        offsets.reserve(size_hint);
+        let mut builder = ArrayBuilderImpl::from_type(&value_type, size_hint);
+        let mut bitmap = BitmapBuilder::with_capacity(size_hint);
+        for v in values {
+            bitmap.append(v.is_some());
             let last_offset = *offsets.last().unwrap();
-            match i {
+            match v {
                 Some(a) => {
                     offsets.push(
                         last_offset
@@ -292,11 +290,10 @@ impl ListArray {
             }
         }
         ListArray {
-            bitmap,
+            bitmap: bitmap.finish(),
             offsets,
             value: Box::new(builder.finish()),
             value_type,
-            len: cardinality,
         }
     }
 
@@ -579,9 +576,8 @@ mod tests {
     #[test]
     fn test_list_with_values() {
         use crate::array::*;
-        let arr = ListArray::from_slices(
-            &[true, false, true, true],
-            vec![
+        let arr = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(12), Some(-7), Some(25)] }.into()),
                 None,
                 Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
@@ -626,18 +622,16 @@ mod tests {
         let arr = builder.finish();
         assert_eq!(arr.values_vec(), list_values);
 
-        let part1 = ListArray::from_slices(
-            &[true, false],
-            vec![
+        let part1 = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(12), Some(-7), Some(25)] }.into()),
                 None,
             ],
             DataType::Int32,
         );
 
-        let part2 = ListArray::from_slices(
-            &[true, true],
-            vec![
+        let part2 = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
                 Some(empty_array! { I32Array }.into()),
             ],
@@ -660,9 +654,8 @@ mod tests {
     #[test]
     fn test_list_create_builder() {
         use crate::array::*;
-        let arr = ListArray::from_slices(
-            &[true],
-            vec![Some(
+        let arr = ListArray::from_iter(
+            [Some(
                 array! { F32Array, [Some(2.0), Some(42.0), Some(1.0)] }.into(),
             )],
             DataType::Float32,
@@ -729,18 +722,16 @@ mod tests {
     fn test_list_nested_layout() {
         use crate::array::*;
 
-        let listarray1 = ListArray::from_slices(
-            &[true, true],
-            vec![
+        let listarray1 = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(1), Some(2)] }.into()),
                 Some(array! { I32Array, [Some(3), Some(4)] }.into()),
             ],
             DataType::Int32,
         );
 
-        let listarray2 = ListArray::from_slices(
-            &[true, false, true],
-            vec![
+        let listarray2 = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(5), Some(6), Some(7)] }.into()),
                 None,
                 Some(array! { I32Array, [Some(8)] }.into()),
@@ -748,15 +739,13 @@ mod tests {
             DataType::Int32,
         );
 
-        let listarray3 = ListArray::from_slices(
-            &[true],
-            vec![Some(array! { I32Array, [Some(9), Some(10)] }.into())],
+        let listarray3 = ListArray::from_iter(
+            [Some(array! { I32Array, [Some(9), Some(10)] }.into())],
             DataType::Int32,
         );
 
-        let nestarray = ListArray::from_slices(
-            &[true, true, true],
-            vec![
+        let nestarray = ListArray::from_iter(
+            [
                 Some(listarray1.into()),
                 Some(listarray2.into()),
                 Some(listarray3.into()),
@@ -998,9 +987,8 @@ mod tests {
     fn test_listref() {
         use crate::array::*;
         use crate::types;
-        let arr = ListArray::from_slices(
-            &[true, false, true],
-            vec![
+        let arr = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(1), Some(2), Some(3)] }.into()),
                 None,
                 Some(array! { I32Array, [Some(4), Some(5), Some(6), Some(7)] }.into()),
