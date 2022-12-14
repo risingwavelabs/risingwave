@@ -14,6 +14,7 @@
 
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
+mod arrow;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
