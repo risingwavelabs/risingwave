@@ -378,7 +378,7 @@ pub async fn run_elections<S: MetaStore>(
                 let n_addr = initial_leader.node_address.as_str();
                 let mut leader_addr = n_addr.parse::<HostAddr>().unwrap();
                 if !initial_election {
-                    let (l_addr, l_info, is_l) = match campaign(
+                    let (leader_addr_, leader_info_, is_leader_) = match campaign(
                         &meta_store,
                         &addr,
                         lease_time_sec,
@@ -401,16 +401,16 @@ pub async fn run_elections<S: MetaStore>(
                         }
                     };
 
-                    if is_l {
+                    if is_leader_ {
                         tracing::info!(
                             "Leader with address '{}' elected. New lease id is {}",
-                            l_info.node_address,
-                            l_info.lease_id
+                            leader_info_.node_address,
+                            leader_info_.lease_id
                         );
                     }
-                    leader_info = l_info;
-                    is_leader = is_l;
-                    leader_addr = l_addr;
+                    leader_info = leader_info_;
+                    is_leader = is_leader_;
+                    leader_addr = leader_addr_;
                 }
                 initial_election = false;
 
