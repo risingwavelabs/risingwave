@@ -227,7 +227,7 @@ export interface StorageTableDesc {
   distKeyIndices: number[];
   retentionSeconds: number;
   valueIndices: number[];
-  prefixHintLenHint: number;
+  readPrefixLenHint: number;
 }
 
 export interface ColumnOrder {
@@ -346,7 +346,7 @@ function createBaseStorageTableDesc(): StorageTableDesc {
     distKeyIndices: [],
     retentionSeconds: 0,
     valueIndices: [],
-    prefixHintLenHint: 0,
+    readPrefixLenHint: 0,
   };
 }
 
@@ -359,7 +359,7 @@ export const StorageTableDesc = {
       distKeyIndices: Array.isArray(object?.distKeyIndices) ? object.distKeyIndices.map((e: any) => Number(e)) : [],
       retentionSeconds: isSet(object.retentionSeconds) ? Number(object.retentionSeconds) : 0,
       valueIndices: Array.isArray(object?.valueIndices) ? object.valueIndices.map((e: any) => Number(e)) : [],
-      prefixHintLenHint: isSet(object.prefixHintLenHint) ? Number(object.prefixHintLenHint) : 0,
+      readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
     };
   },
 
@@ -387,7 +387,7 @@ export const StorageTableDesc = {
     } else {
       obj.valueIndices = [];
     }
-    message.prefixHintLenHint !== undefined && (obj.prefixHintLenHint = Math.round(message.prefixHintLenHint));
+    message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
     return obj;
   },
 
@@ -399,7 +399,7 @@ export const StorageTableDesc = {
     message.distKeyIndices = object.distKeyIndices?.map((e) => e) || [];
     message.retentionSeconds = object.retentionSeconds ?? 0;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
-    message.prefixHintLenHint = object.prefixHintLenHint ?? 0;
+    message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     return message;
   },
 };
