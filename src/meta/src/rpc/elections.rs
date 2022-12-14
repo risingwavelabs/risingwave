@@ -371,12 +371,12 @@ pub async fn run_elections<S: MetaStore>(
         let handle = tokio::spawn(async move {
             // runs all follow-up elections
 
+            let mut is_leader = is_initial_leader;
+            let mut leader_info = initial_leader.clone();
+            let n_addr = initial_leader.node_address.as_str();
+            let mut leader_addr = n_addr.parse::<HostAddr>().unwrap();
             'election: loop {
                 // Do not elect new leader directly after running the initial election
-                let mut is_leader = is_initial_leader;
-                let mut leader_info = initial_leader.clone();
-                let n_addr = initial_leader.node_address.as_str();
-                let mut leader_addr = n_addr.parse::<HostAddr>().unwrap();
                 if !initial_election {
                     let (leader_addr_, leader_info_, is_leader_) = match campaign(
                         &meta_store,
