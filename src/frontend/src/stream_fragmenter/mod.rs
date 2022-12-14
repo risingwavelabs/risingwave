@@ -215,6 +215,7 @@ fn build_fragment(
 
         // FIXME: workaround for single-fragment mview on singleton upstream mview.
         NodeBody::Chain(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
             // memorize table id for later use
             state
                 .dependent_table_ids

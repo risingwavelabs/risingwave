@@ -558,6 +558,7 @@ enum FragmentTypeFlag {
   MVIEW = 2;
   SINK = 4;
   NOW = 8;
+  CHAIN_NODE = 16;
 }
 
 message StreamFragmentGraph {
