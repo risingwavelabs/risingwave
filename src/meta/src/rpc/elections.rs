@@ -430,12 +430,9 @@ pub async fn run_elections<S: MetaStore>(
                     }
 
                     if let Some(leader_alive) =
-                        manage_term(is_leader, &leader_info, lease_time_sec, &meta_store).await
-                    {
-                        if !leader_alive {
+                        manage_term(is_leader, &leader_info, lease_time_sec, &meta_store).await && !leader_alive {
                             // leader failed. Elect new leader
                             continue 'election;
-                        }
                     }
                 }
             }
