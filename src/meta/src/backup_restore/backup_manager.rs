@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use itertools::Itertools;
+use prometheus::Registry;
 use risingwave_backup::error::BackupError;
 use risingwave_backup::storage::BackupStorageRef;
 use risingwave_backup::{MetaBackupJobId, MetaSnapshotId};
@@ -24,6 +26,7 @@ use risingwave_pb::backup_service::BackupJobStatus;
 use tokio::task::JoinHandle;
 
 use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
+use crate::backup_restore::metrics::BackupManagerMetrics;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
 use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::storage::MetaStore;
@@ -38,6 +41,7 @@ pub enum BackupJobResult {
 struct BackupJobHandle {
     job_id: u64,
     hummock_version_safe_point: HummockVersionSafePoint,
+    start_time: Instant,
 }
 
 impl BackupJobHandle {
@@ -45,6 +49,7 @@ impl BackupJobHandle {
         Self {
             job_id,
             hummock_version_safe_point,
+            start_time: Instant::now(),
         }
     }
 }
@@ -58,6 +63,7 @@ pub struct BackupManager<S: MetaStore> {
     backup_store: BackupStorageRef,
     /// Tracks the running backup job. Concurrent jobs is not supported.
     running_backup_job: tokio::sync::Mutex<Option<BackupJobHandle>>,
+    metrics: BackupManagerMetrics,
 }
 
 impl<S: MetaStore> BackupManager<S> {
@@ -65,23 +71,25 @@ impl<S: MetaStore> BackupManager<S> {
         env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
         backup_store: BackupStorageRef,
+        registry: Registry,
     ) -> Self {
         Self {
             env,
             hummock_manager,
             backup_store,
             running_backup_job: tokio::sync::Mutex::new(None),
+            metrics: BackupManagerMetrics::new(registry),
         }
     }
 
     #[cfg(test)]
     pub fn for_test(env: MetaSrvEnv<S>, hummock_manager: HummockManagerRef<S>) -> Self {
-        Self {
+        Self::new(
             env,
             hummock_manager,
-            backup_store: Arc::new(risingwave_backup::storage::DummyBackupStorage {}),
-            running_backup_job: Default::default(),
-        }
+            Arc::new(risingwave_backup::storage::DummyBackupStorage {}),
+            Registry::new(),
+        )
     }
 
     /// Starts a backup job in background. It's non-blocking.
@@ -100,8 +108,8 @@ impl<S: MetaStore> BackupManager<S> {
             .generate::<{ IdCategory::Backup }>()
             .await?;
         let hummock_version_safe_point = self.hummock_manager.register_safe_point().await;
-        // TODO #6482: ideally `BackupWorker` and its r/w IO can be made external to meta node.
-        // The pros of keeping `BackupWorker` in meta node are:
+        // Ideally `BackupWorker` and its r/w IO can be made external to meta node.
+        // The justification of keeping `BackupWorker` in meta node are:
         // - It makes meta node the only writer of backup storage, which eases implementation.
         // - It's likely meta store is deployed in the same node with meta node.
         // - IO volume of metadata snapshot is not expected to be large.
@@ -109,6 +117,7 @@ impl<S: MetaStore> BackupManager<S> {
         BackupWorker::new(self.clone()).start(job_id);
         let job_handle = BackupJobHandle::new(job_id, hummock_version_safe_point);
         *guard = Some(job_handle);
+        self.metrics.job_count.inc();
         Ok(job_id)
     }
 
@@ -134,17 +143,19 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     async fn finish_backup_job(&self, job_id: MetaBackupJobId, job_result: BackupJobResult) {
-        // _job_handle holds `hummock_version_safe_point` until the snapshot is added to meta.
-        // It ensures snapshot's SSTs won't be deleted in between.
-        let _job_handle = self
+        // `job_handle` holds `hummock_version_safe_point` until the job is completed.
+        let job_handle = self
             .take_job_handle_by_job_id(job_id)
             .await
             .expect("job id should match");
+        let job_latency = job_handle.start_time.elapsed().as_secs_f64();
         match job_result {
             BackupJobResult::Succeeded => {
+                self.metrics.job_latency_success.observe(job_latency);
                 tracing::info!("succeeded backup job {}", job_id);
             }
             BackupJobResult::Failed(e) => {
+                self.metrics.job_latency_failure.observe(job_latency);
                 tracing::warn!("failed backup job {}: {}", job_id, e);
             }
         }
