@@ -131,8 +131,6 @@ enum HummockCommands {
         #[clap(long)]
         sub_level_max_compaction_bytes: Option<u64>,
         #[clap(long)]
-        level0_trigger_file_number: Option<u64>,
-        #[clap(long)]
         level0_tier_compact_file_number: Option<u64>,
         #[clap(long)]
         target_file_size_base: Option<u64>,
@@ -241,7 +239,6 @@ pub async fn start(opts: CliOpts) -> Result<()> {
             max_bytes_for_level_multiplier,
             max_compaction_bytes,
             sub_level_max_compaction_bytes,
-            level0_trigger_file_number,
             level0_tier_compact_file_number,
             target_file_size_base,
             compaction_filter_mask,
@@ -254,7 +251,6 @@ pub async fn start(opts: CliOpts) -> Result<()> {
                     max_bytes_for_level_multiplier,
                     max_compaction_bytes,
                     sub_level_max_compaction_bytes,
-                    level0_trigger_file_number,
                     level0_tier_compact_file_number,
                     target_file_size_base,
                     compaction_filter_mask,
