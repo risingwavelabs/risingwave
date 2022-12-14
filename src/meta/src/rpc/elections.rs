@@ -300,7 +300,7 @@ fn gen_rand_lease_id(addr: &str) -> u64 {
 /// A term lasts until the current leader crashes.   
 ///
 /// ## Arguments
-/// `addr`: Address of the current leader, e.g. "127.0.0.1".
+/// `addr`: Address of the current leader, e.g. "127.0.0.1:5690".
 /// `meta_store`: Holds information about the leader.
 /// `lease_time_sec`: Time in seconds that a lease will be valid for.
 /// A large value reduces the meta store traffic. A small value reduces the downtime during failover
