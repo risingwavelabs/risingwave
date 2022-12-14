@@ -191,6 +191,10 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_OPERATOR, vec![0], read_operator_info },
     { PG_CATALOG, PG_VIEWS, vec![], read_views_info },
     { PG_CATALOG, PG_ATTRIBUTE, vec![0, 4], read_pg_attribute },
+    { PG_CATALOG, PG_DATABASE, vec![0], read_database_info },
+    { PG_CATALOG, PG_DESCRIPTION, vec![0], read_description_info },
+    { PG_CATALOG, PG_SETTINGS, vec![0], read_settings_info },
+    { PG_CATALOG, PG_KEYWORDS, vec![0], read_keywords_info },
     { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
     { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
 }

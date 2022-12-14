@@ -16,7 +16,7 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
 use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::buffer::{Bitmap, BitmapBuilder, BitmapIter};
 
 #[derive(Debug, Clone)]
 pub struct BoolArray {
@@ -54,7 +54,11 @@ impl<'a> FromIterator<&'a Option<bool>> for BoolArray {
 
 impl FromIterator<bool> for BoolArray {
     fn from_iter<I: IntoIterator<Item = bool>>(iter: I) -> Self {
-        iter.into_iter().map(Some).collect()
+        let data: Bitmap = iter.into_iter().collect();
+        BoolArray {
+            bitmap: Bitmap::all_high_bits(data.len()),
+            data,
+        }
     }
 }
 
@@ -62,7 +66,12 @@ impl Array for BoolArray {
     type Builder = BoolArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = bool;
+    type RawIter<'a> = BitmapIter<'a>;
     type RefItem<'a> = bool;
+
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> bool {
+        self.data.is_set_unchecked(idx)
+    }
 
     fn value_at(&self, idx: usize) -> Option<bool> {
         if !self.is_null(idx) {
@@ -87,6 +96,10 @@ impl Array for BoolArray {
 
     fn iter(&self) -> Self::Iter<'_> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        self.data.iter()
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -137,15 +150,15 @@ impl ArrayBuilder for BoolArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<bool>) {
+    fn append_n(&mut self, n: usize, value: Option<bool>) {
         match value {
             Some(x) => {
-                self.bitmap.append(true);
-                self.data.append(x);
+                self.bitmap.append_n(n, true);
+                self.data.append_n(n, x);
             }
             None => {
-                self.bitmap.append(false);
-                self.data.append(bool::default());
+                self.bitmap.append_n(n, false);
+                self.data.append_n(n, false);
             }
         }
     }

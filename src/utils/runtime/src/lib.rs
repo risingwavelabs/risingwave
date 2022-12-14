@@ -67,7 +67,7 @@ impl LoggerSettings {
     pub fn new(enable_tokio_console: bool) -> Self {
         Self {
             enable_tokio_console,
-            colorful: console::colors_enabled_stderr(),
+            colorful: console::colors_enabled_stderr() && console::colors_enabled(),
         }
     }
 }
