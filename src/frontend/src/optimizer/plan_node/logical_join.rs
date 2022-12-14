@@ -910,8 +910,10 @@ impl PredicatePushdown for LogicalJoin {
         let eq_condition = EqJoinPredicate::create(left_cols_num, right_cols_num, new_on.clone());
 
         // Only push to RHS if RHS is inner side of a join (RHS requires match on LHS)
-        let right_derived_predicate = if matches!(join_type, JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi)
-        {
+        let right_derived_predicate = if matches!(
+            join_type,
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
+        ) {
             Condition {
                 conjunctions: left_predicate
                     .conjunctions
@@ -926,8 +928,10 @@ impl PredicatePushdown for LogicalJoin {
         };
 
         // Only push to LHS if LHS is inner side of a join (LHS requires match on RHS)
-        let left_derived_predicate = if matches!(join_type, JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi)
-        {
+        let left_derived_predicate = if matches!(
+            join_type,
+            JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
+        ) {
             Condition {
                 conjunctions: right_predicate
                     .conjunctions
