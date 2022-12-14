@@ -330,7 +330,6 @@ impl PredicatePushdown for LogicalHopWindow {
         // );
         // For reference: HOP(table_or_source, start_time, hop_size, window_size);
         // `window_start`, `window_end` cannot be pushed-down, they are produced by HopWindow.
-        // schema: |
         let mut window_columns = FixedBitSet::with_capacity(self.output_indices().len());
         let window_start_idx = self.input().schema().len();
         let window_end_idx = self.input().schema().len() + 1;
@@ -362,18 +361,9 @@ impl PredicatePushdown for LogicalHopWindow {
                 .filter(|i| **i != window_start_idx && **i != window_end_idx)
                 .map(|i| InputRef::new(*i, self.schema().fields()[*i].data_type()).into())
                 .collect(),
-            // mapping: self
-            //     .group_key()
-            //     .iter()
-            //     .enumerate()
-            //     .map(|(i, group_key)| {
-            //         InputRef::new(*group_key, self.schema().fields()[i].data_type()).into()
-            //     })
-            //     .collect(),
         };
         let pushed_predicate = pushed_predicate.rewrite_expr(&mut subst);
         gen_filter_and_pushdown(self, time_window_pred, pushed_predicate)
-        // gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
 
