@@ -53,7 +53,7 @@ impl Ord for Row {
 }
 
 impl Row {
-    pub fn new(values: Vec<Datum>) -> Self {
+    pub const fn new(values: Vec<Datum>) -> Self {
         Self(values)
     }
 

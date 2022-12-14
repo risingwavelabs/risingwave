@@ -336,14 +336,14 @@ impl<R: Row2> Row2 for Option<R> {
     fn to_owned_row(&self) -> Row {
         match self {
             Some(row) => row.to_owned_row(),
-            None => EMPTY.to_owned_row(),
+            None => Row::new(Vec::new()),
         }
     }
 
     fn into_owned_row(self) -> Row {
         match self {
             Some(row) => row.into_owned_row(),
-            None => EMPTY.to_owned_row(),
+            None => Row::new(Vec::new()),
         }
     }
 
