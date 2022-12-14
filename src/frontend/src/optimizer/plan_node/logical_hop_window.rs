@@ -322,14 +322,12 @@ impl ColPrunable for LogicalHopWindow {
 
 impl PredicatePushdown for LogicalHopWindow {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        println!("input schema: {:?}", self.input().schema());
-        println!("schema: {:?}", self.schema());
-        println!(
-            "output_indices len for logical hop window: {:?}",
-            self.output_indices()
-        );
-        // if !output_indices.contains(&self.schema().len())
-        //     && !output_indices.contains(&(self.schema().len() + 1));
+        // println!("input schema: {:?}", self.input().schema());
+        // println!("schema: {:?}", self.schema());
+        // println!(
+        //     "output_indices len for logical hop window: {:?}",
+        //     self.output_indices()
+        // );
         // For reference: HOP(table_or_source, start_time, hop_size, window_size);
         // `window_start`, `window_end` cannot be pushed-down, they are produced by HopWindow.
         // schema: |
@@ -357,16 +355,11 @@ impl PredicatePushdown for LogicalHopWindow {
         let (time_window_pred, pushed_predicate) = predicate.split_disjoint(&window_columns);
 
         // Convert the predicate to one that references the child of the hop window
-        // TODO: What is the semantics of substitute?
-        // For now we just set those filtered out.
         let mut subst = Substitute {
             mapping: self
                 .output_indices()
                 .iter()
                 .filter(|i| **i != window_start_idx && **i != window_end_idx)
-                // TODO: What is difference between schema and input.schema?
-                // Is schema the output schema?
-                // Is schema full output, before columns are filtered out by `SELECT`?
                 .map(|i| InputRef::new(*i, self.schema().fields()[*i].data_type()).into())
                 .collect(),
             // mapping: self
