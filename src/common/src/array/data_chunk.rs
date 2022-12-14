@@ -341,7 +341,7 @@ impl DataChunk {
         table.load_preset("||--+-++|    ++++++\n");
         for row in self.rows() {
             let cells: Vec<_> = row
-                .values()
+                .iter()
                 .map(|v| {
                     match v {
                         None => "".to_owned(), // null
@@ -640,6 +640,7 @@ impl DataChunkTestExt for DataChunk {
 mod tests {
 
     use crate::array::*;
+    use crate::row::Row2;
     use crate::{column, column_nonnull};
 
     #[test]
@@ -716,7 +717,7 @@ mod tests {
         let chunk: DataChunk = DataChunk::new(columns, length);
         for row in chunk.rows() {
             for i in 0..num_of_columns {
-                let val = row.value_at(i).unwrap();
+                let val = row.datum_at(i).unwrap();
                 assert_eq!(val.into_int32(), i as i32);
             }
         }

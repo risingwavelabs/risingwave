@@ -28,6 +28,7 @@ use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult, RowRef,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::row::Row2;
 use crate::types::to_text::ToText;
 use crate::types::{
     deserialize_datum_from, hash_datum, serialize_datum_into, DataType, Datum, DatumRef, Scalar,
@@ -140,9 +141,9 @@ impl ListArrayBuilder {
     pub fn append_row_ref(&mut self, row: RowRef<'_>) {
         self.bitmap.append(true);
         let last = *self.offsets.last().unwrap();
-        self.offsets.push(last + row.size());
+        self.offsets.push(last + row.len());
         self.len += 1;
-        for v in row.values() {
+        for v in row.iter() {
             self.value.append_datum(v);
         }
     }

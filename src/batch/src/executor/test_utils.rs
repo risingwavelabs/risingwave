@@ -326,7 +326,7 @@ impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
         for idx in 0..base_data_chunk.capacity() {
             let probe_row = base_data_chunk.row_at_unchecked_vis(idx);
             for datum in &self.datums {
-                if datum[0] == probe_row.value_at(0).to_owned_datum() {
+                if datum[0] == probe_row.datum_at(0).to_owned_datum() {
                     let owned_row = probe_row.into_owned_row();
                     let chunk =
                         DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32]);
