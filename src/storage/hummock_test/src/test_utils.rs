@@ -22,9 +22,7 @@ use async_stream::try_stream;
 use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
-use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverManager};
+use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
@@ -34,8 +32,8 @@ use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
     update_filter_key_extractor_for_table_ids,
 };
-use risingwave_meta::hummock::{HummockManager, HummockManagerRef, MockHummockMetaClient};
-use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
+use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
+use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;

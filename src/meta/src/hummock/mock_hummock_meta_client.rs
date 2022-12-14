@@ -18,7 +18,8 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use fail::fail_point;
-use futures::stream::BoxStream;
+use futures::stream::{BoxStream, Stream};
+use futures::StreamExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStatsMap};
 use risingwave_hummock_sdk::{
@@ -33,6 +34,8 @@ use risingwave_pb::hummock::{
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{CompactTaskItem, HummockMetaClient};
+use tokio::task::JoinHandle;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::hummock::compaction_scheduler::CompactionRequestChannel;
 use crate::hummock::HummockManager;
@@ -191,7 +194,7 @@ impl HummockMetaClient for MockHummockMetaClient {
 
         let hummock_manager_compact = self.hummock_manager.clone();
         let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel();
-        let _ = tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             while let Some(group) = sched_rx.recv().await {
                 sched_channel.unschedule(group);
                 if let Some(task) = hummock_manager_compact
@@ -210,8 +213,11 @@ impl HummockMetaClient for MockHummockMetaClient {
                 }
             }
         });
-        let s = tokio_stream::wrappers::UnboundedReceiverStream::new(task_rx);
-        Ok(Box::pin(s))
+        let s = UnboundedReceiverStream::new(task_rx);
+        Ok(Box::pin(CompactTaskItemStream {
+            inner: s,
+            _handle: handle,
+        }))
     }
 
     async fn report_compaction_task_progress(
@@ -250,5 +256,27 @@ impl HummockMetaClient for MockHummockMetaClient {
 impl MockHummockMetaClient {
     pub fn hummock_manager_ref(&self) -> Arc<HummockManager<MemStore>> {
         self.hummock_manager.clone()
+    }
+}
+
+pub struct CompactTaskItemStream {
+    inner: UnboundedReceiverStream<CompactTaskItem>,
+    _handle: JoinHandle<()>,
+}
+
+impl Drop for CompactTaskItemStream {
+    fn drop(&mut self) {
+        self.inner.close();
+    }
+}
+
+impl Stream for CompactTaskItemStream {
+    type Item = CompactTaskItem;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.inner.poll_next_unpin(cx)
     }
 }
