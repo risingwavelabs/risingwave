@@ -520,8 +520,6 @@ async fn leader_changed<S: MetaStore>(
 #[cfg(test)]
 mod tests {
 
-    use core::panic;
-
     use super::*;
     use crate::storage::MemStore;
 
@@ -590,9 +588,10 @@ mod tests {
             META_LEADER_KEY.as_bytes().to_vec(),
             leader.encode_to_vec(),
         );
-        if meta_store.txn(txn).await.is_err() {
-            panic!("Putting test leader failed");
-        }
+        meta_store
+            .txn(txn)
+            .await
+            .expect("Putting test lease failed");
     }
 
     async fn put_leader_lease<S: MetaStore>(
