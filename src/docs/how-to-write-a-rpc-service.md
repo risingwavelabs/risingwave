@@ -1,53 +1,56 @@
 # How to write a service
 
-Quick example on how to write a service. The example leader service is implemented [in this PR](https://github.com/risingwavelabs/risingwave/pull/6466)
+Quick example on how to write a service.
 
 ## Define actual service
 
-Add your service definition under `src/<component>/src/rcp/service/<service_name>.rs`. 
+Add your service definition under `src/<component>/src/rcp/service/<service_name>.rs`, e.g. `src/meta/src/rpc/service/health_service.rs`.
 
 ```rust 
-#[derive(Clone)]
-pub struct LeaderServiceImpl {
-    leader_rx: Receiver<(HostAddress, bool)>,
-}
-impl LeaderServiceImpl {
-    pub fn new(cluster_manager: Receiver<(HostAddress, bool)>) -> Self {
-        LeaderServiceImpl {
-            leader_rx: cluster_manager,
-        }
+pub struct HealthServiceImpl {}
+impl HealthServiceImpl {
+    pub fn new() -> Self {
+        Self {}
     }
 }
 #[async_trait::async_trait]
-impl LeaderService for LeaderServiceImpl {
-    #[cfg_attr(coverage, no_coverage)]
-    async fn leader(
+impl Health for HealthServiceImpl {
+    async fn check(
         &self,
-        _request: Request<LeaderRequest>,
-    ) -> Result<Response<LeaderResponse>, Status> {
-        let leader_addr = self.leader_rx.borrow().0.clone();
-        Ok(Response::new(LeaderResponse {
-            leader_addr: Some(leader_addr),
+        _request: Request<HealthCheckRequest>,
+    ) -> Result<Response<HealthCheckResponse>, Status> {
+        // Reply serving as long as tonic service is started
+        Ok(Response::new(HealthCheckResponse {
+            status: ServingStatus::Serving as i32,
         }))
     }
 }
 ```
 
-Also see the other services in `src/<component>/src/rcp/service/` for further examples. Above service defines a `LeaderRequest` and a `LeaderResponse`, which use proto messages. We have to define these proto messages
+Also see the other services in `src/<component>/src/rcp/service/` for further examples. Above service defines a `HealthCheckRequest` and a `HealthCheckResponse`, which use proto messages. We have to define these proto messages
 
 ## Proto definitions
 
-Add definition in `proto/meta.proto`. For above service I added 
+Add definition in `proto/health.proto`. For above service it is
 
 ```
-message LeaderRequest {}
+package health;
 
-message LeaderResponse {
-  common.HostAddress leaderAddr = 1;
+message HealthCheckRequest {
+  string service = 1;
 }
 
-service LeaderService {
-  rpc Leader(LeaderRequest) returns (LeaderResponse);
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+  }
+  ServingStatus status = 1;
+}
+
+service Health {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
 }
 ```
 
@@ -55,33 +58,32 @@ Make sure to lint your file using [buf](https://docs.buf.build/installation)
 
 ## Use service 
 
-To use your service you need to generate some boilerplate code, like e.g. the service definition. 
 
 Add your module in `src/prost/src/lib.rs`, like so: 
 
 ```rust
-#[cfg_attr(madsim, path = "sim/leader.rs")]
-pub mod leader;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/health.rs")]
+pub mod health;
 ```
 
-Add your proto file `"leader"` in `src/prost/build.rs`.
+Add your proto file `"health"` in `src/prost/build.rs`.
 
 Add the module in `src/meta/src/rpc/service/mod.rs`.
 
 Use your service in `src/meta/src/rpc/server.rs`, like 
 
 ```rust
-let leader_srv = LeaderServiceImpl::new(f_leader_svc_leader_rx);
+let health_srv = HealthServiceImpl::new();
 tokio::spawn(async move {
      tonic::transport::Server::builder()
          .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
-         .add_service(LeaderServiceServer::new(leader_srv))
+         .add_service(HealthServer::new(health_srv))
          .serve(address_info.listen_addr)
          .await
          .unwrap();
 });
 ```
 
-Running `risedev d` should generate the needed boilerplate code
+To use your service you need to generate some boilerplate code, like e.g. the service definition. Running `risedev d` should generate this boilerplate code
 
