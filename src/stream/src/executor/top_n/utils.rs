@@ -179,13 +179,12 @@ pub fn generate_executor_pk_indices_info(
 
 /// For a given pk (Row), it can be split into `order_key` and `additional_pk` according to
 /// `order_by_len`, and the two split parts are serialized separately.
-///
-/// TODO(row trait): optimize this
 pub fn serialize_pk_to_cache_key(
     pk: impl Row2,
     order_by_len: usize,
     cache_key_serde: &(OrderedRowSerde, OrderedRowSerde),
 ) -> CacheKey {
+    // TODO(row trait): may support splitting row
     let pk = pk.into_owned_row().into_inner();
     let (cache_key_first, cache_key_second) = pk.split_at(order_by_len);
     (

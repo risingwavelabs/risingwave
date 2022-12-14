@@ -171,10 +171,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             if let Some(val) = left_val {
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        self.range_cache.insert(&val, row.into_owned_row())?;
+                        self.range_cache.insert(&val, row)?;
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        self.range_cache.delete(&val, row.into_owned_row())?;
+                        self.range_cache.delete(&val, row)?;
                     }
                 }
             }

@@ -23,7 +23,7 @@ use futures::{pin_mut, stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{AllVirtualNodeIter, VirtualNode};
-use risingwave_common::row::{CompactedRow, Row, Row2, RowExt};
+use risingwave_common::row::{self, CompactedRow, Row2, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::row_serde::row_serde_util::serialize_pk;
@@ -74,8 +74,7 @@ impl<S: StateStore> RangeCache<S> {
 
     /// Insert a row and corresponding scalar value key into cache (if within range) and
     /// `StateTable`.
-    /// TODO(row trait): optimize this
-    pub fn insert(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
+    pub fn insert(&mut self, k: &ScalarImpl, v: impl Row2) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
             let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
@@ -88,9 +87,8 @@ impl<S: StateStore> RangeCache<S> {
 
     /// Delete a row and corresponding scalar value key from cache (if within range) and
     /// `StateTable`.
-    /// TODO(row trait): optimize this
     // FIXME: panic instead of returning Err
-    pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
+    pub fn delete(&mut self, k: &ScalarImpl, v: impl Row2) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
             let pk = (&v).project(self.state_table.pk_indices()).memcmp_serialize(self.state_table.pk_serde());
@@ -104,13 +102,8 @@ impl<S: StateStore> RangeCache<S> {
         Ok(())
     }
 
-    /// TODO(row trait): optimize this
-    fn to_row_bound(bound: Bound<ScalarImpl>) -> Bound<Row> {
-        match bound {
-            Unbounded => Unbounded,
-            Included(s) => Included(Row::new(vec![Some(s)])),
-            Excluded(s) => Excluded(Row::new(vec![Some(s)])),
-        }
+    fn to_row_bound(bound: Bound<ScalarImpl>) -> Bound<impl Row2> {
+        bound.map(|s| row::once(Some(s)))
     }
 
     /// Return an iterator over sets of rows that satisfy the given range. Evicts entries if
