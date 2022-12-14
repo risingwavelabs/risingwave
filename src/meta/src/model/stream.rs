@@ -182,8 +182,8 @@ impl TableFragments {
             .collect()
     }
 
-    /// Returns source and now actor ids.
-    pub fn source_now_actor_ids(&self) -> Vec<ActorId> {
+    /// Returns barrier inject actor ids.
+    pub fn barrier_inject_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
             (fragment_type_mask & (FragmentTypeFlag::Source as u32 | FragmentTypeFlag::Now as u32))
                 != 0
@@ -373,10 +373,12 @@ impl TableFragments {
         actors
     }
 
-    pub fn worker_source_now_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
+    pub fn worker_barrier_inject_actor_states(
+        &self,
+    ) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
         let mut map = BTreeMap::default();
-        let source_now_actor_ids = self.source_now_actor_ids();
-        for &actor_id in &source_now_actor_ids {
+        let barrier_inject_actor_ids = self.barrier_inject_actor_ids();
+        for &actor_id in &barrier_inject_actor_ids {
             let actor_status = &self.actor_status[&actor_id];
             map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId)
                 .or_insert_with(Vec::new)
