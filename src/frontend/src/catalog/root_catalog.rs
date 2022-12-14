@@ -620,7 +620,7 @@ impl Catalog {
     pub fn get_id_by_class_name(
         &self,
         db_name: &str,
-        schema_path: SchemaPath,
+        schema_path: SchemaPath<'_>,
         class_name: &str,
     ) -> CatalogResult<u32> {
         match schema_path {
