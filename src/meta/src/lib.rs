@@ -193,6 +193,5 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         // Ok(_) => tracing::info!("Stopping meta server gracefully"),
         // Err(_) => tracing::info!("Error when shutting down meta server"),
         // }
-        tracing::info!("Meta server is stopped");
     })
 }

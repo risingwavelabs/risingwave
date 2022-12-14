@@ -468,6 +468,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         }
 
         // Initialize sub-tasks.
+        // sub_tasks executed concurrently. Can be shutdown via shutdown_all
         let compaction_scheduler = Arc::new(CompactionScheduler::new(
             env.clone(),
             hummock_manager.clone(),
@@ -518,7 +519,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let leader_srv = LeaderServiceImpl::new(l_leader_svc_leader_rx);
 
         // leader services defined above
-
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
             .add_service(LeaderServiceServer::new(leader_srv))

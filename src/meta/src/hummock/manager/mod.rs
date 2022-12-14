@@ -51,7 +51,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
-use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
+use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCompactionOption};
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
@@ -788,13 +788,16 @@ where
             return Ok(None);
         }
         let can_trivial_move = manual_compaction_option.is_none();
+        let mut stats = LocalSelectorStatistic::default();
         let compact_task = compact_status.get_compact_task(
             current_version.get_compaction_group_levels(compaction_group_id),
             task_id as HummockCompactionTaskId,
             compaction_group_id,
             manual_compaction_option,
             group_config.compaction_config(),
+            &mut stats,
         );
+        stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let mut compact_task = match compact_task {
             None => {
                 return Ok(None);
