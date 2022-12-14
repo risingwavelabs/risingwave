@@ -101,10 +101,10 @@ statement ok
 create table t2 (v1 int, "v2" int);
 
 statement ok
-create index index_on_quoted_column on t1("v1", v2);
+create index index_on_quoted_column on t2("v1", v2);
 
 statement ok
-create index index_on_quoted_column2 on t1(v1, "v2");
+create index index_on_quoted_column2 on t2(v1, "v2");
 
 statement ok
 drop index index_on_quoted_column;
