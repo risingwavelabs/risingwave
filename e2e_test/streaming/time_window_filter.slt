@@ -3,7 +3,7 @@ create table t1(v1 int, v2 int, v3 int, v4 int, ts timestamp);
 
 statement ok
 insert into t1 values
-    (1, 1, 4, 6,  '2022-01-01 10:00:00'),
+    (1, 1, 4, 6, '2022-01-01 10:00:00'),
     (2, 3, 3, 9, '2022-01-01 10:05:00'),
     (3, 2, 2, 6, '2022-01-01 10:14:00'),
     (4, 1, 1, 6, '2022-01-01 10:22:00'),
@@ -21,8 +21,7 @@ with cte as (select * from hop(t1, ts, interval '1' minute, interval '3' minute)
 select * from cte
 where v1>0 AND v2>1 AND v3>2 AND ts >= timestamp '2022-01-01 10:00:00'
 AND window_start >= timestamp '2022-01-01 09:00:00' AND window_end <= timestamp '2022-01-01 10:50:00'
-AND window_start <= ts + interval '1' minute AND window_end > ts + interval '1' minute
-ORDER BY window_start ASC, ts ASC;
+AND window_start <= ts AND window_end > ts + interval '1' minute;
 
 statement ok
 flush;
