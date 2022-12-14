@@ -16,8 +16,8 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use risingwave_common::array::{Op, RowDeserializer, RowRef};
-use risingwave_common::row::{CompactedRow, Row2};
+use risingwave_common::array::{Op, RowRef};
+use risingwave_common::row::{CompactedRow, Row2, RowDeserializer};
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;

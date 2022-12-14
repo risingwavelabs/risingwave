@@ -25,7 +25,7 @@ use crate::array::data_chunk_iter::RowRef;
 use crate::array::{ArrayBuilderImpl, StructValue};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
-use crate::row::{Row, Row2};
+use crate::row::Row2;
 use crate::types::struct_type::StructType;
 use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
@@ -65,7 +65,7 @@ impl DataChunk {
     }
 
     /// Build a `DataChunk` with rows.
-    pub fn from_rows(rows: &[Row], data_types: &[DataType]) -> Self {
+    pub fn from_rows(rows: &[impl Row2], data_types: &[DataType]) -> Self {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(1))
