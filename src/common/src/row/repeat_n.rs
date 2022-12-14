@@ -16,7 +16,7 @@ use super::Row2;
 use crate::types::{DatumRef, ToDatumRef};
 
 /// Row for the [`repeat_n`] function.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct RepeatN<D> {
     datum: D,
     n: usize,

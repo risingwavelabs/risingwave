@@ -16,7 +16,7 @@ use super::{assert_row, Row2};
 use crate::types::DatumRef;
 
 /// Row for the [`empty`] function.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Empty {
     _private: (),
 }

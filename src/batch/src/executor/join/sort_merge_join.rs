@@ -133,7 +133,7 @@ impl SortMergeJoinExecutor {
             for probe_row in probe_chunk.rows() {
                 let probe_key = probe_row.project(&probe_key_idxs);
                 // If current probe key equals to last probe key, reuse join results.
-                if let Some(last_probe_key) = &last_probe_key && Row2::eq(last_probe_key, &probe_key) {
+                if let Some(last_probe_key) = &last_probe_key && Row2::eq(last_probe_key, probe_key) {
                     for (chunk, row_idx) in &last_matched_build_rows {
                         let build_row = chunk.row_at_unchecked_vis(*row_idx);
                         if let Some(spilled) = chunk_builder.append_one_row((&probe_row).chain(build_row)) {
@@ -152,7 +152,7 @@ impl SortMergeJoinExecutor {
                             // TODO: [`Row`] may not be PartialOrd. May use some trait like
                             // [`ScalarPartialOrd`].
 
-                            match Row2::cmp(&probe_key, &build_key) {
+                            match Row2::cmp(&probe_key, build_key) {
                                 std::cmp::Ordering::Equal => {
                                     last_matched_build_rows.push((build_chunk.clone(), next_build_row_idx));
                                     if let Some(spilled) = chunk_builder.append_one_row((&probe_row).chain(build_row)) {

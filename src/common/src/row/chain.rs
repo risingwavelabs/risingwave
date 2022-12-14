@@ -18,7 +18,7 @@ use super::Row2;
 use crate::types::DatumRef;
 
 /// Row for the [`chain`](super::RowExt::chain) method.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Chain<R1, R2> {
     r1: R1,
     r2: R2,

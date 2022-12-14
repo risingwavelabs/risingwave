@@ -38,6 +38,8 @@ impl OrderedRowSerde {
         }
     }
 
+    /// FIXME: This leads to allocation in most cases. Should allow using slices for the schema and
+    /// order types.
     #[must_use]
     pub fn prefix(&self, len: usize) -> Cow<'_, Self> {
         if len == self.order_types.len() {

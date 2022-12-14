@@ -312,7 +312,7 @@ impl<S: StateStore> LookupExecutor<S> {
                         for matched_row in self.lookup_one_row(&row).await? {
                             tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
-                            if let Some(chunk) = builder.append_row(*op, &row, &matched_row) {
+                            if let Some(chunk) = builder.append_row(*op, row, &matched_row) {
                                 yield Message::Chunk(chunk);
                             }
                         }
