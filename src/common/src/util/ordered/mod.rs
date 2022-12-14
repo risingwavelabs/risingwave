@@ -21,7 +21,7 @@ use OrderedDatum::{NormalOrder, ReversedOrder};
 
 pub use self::serde::*;
 use crate::row::Row;
-use crate::types::{serialize_datum_into, Datum};
+use crate::types::{memcmp_serialize_datum_into, Datum};
 use crate::util::sort_util::OrderType;
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -100,7 +100,7 @@ impl OrderedRow {
                     &datum.0
                 }
             };
-            serialize_datum_into(datum, &mut serializer)?;
+            memcmp_serialize_datum_into(datum, &mut serializer)?;
         }
         Ok(serializer.into_inner())
     }
