@@ -41,6 +41,7 @@ use risingwave_pb::plan_common::RowFormatType as ProstRowFormatType;
 use risingwave_source::connector_test_utils::create_source_desc_builder;
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::panic_store::PanicStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::error::StreamResult;
@@ -158,7 +159,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
     // Create a `SourceExecutor` to read the changes.
-    let source_executor = SourceExecutorV2::new(
+    let source_executor = SourceExecutorV2::<PanicStateStore>::new(
         ActorContext::create(0x3f3f3f),
         all_schema.clone(),
         pk_indices.clone(),
@@ -167,7 +168,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         barrier_rx,
         u64::MAX,
         1,
-        memory_state_store.clone(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.

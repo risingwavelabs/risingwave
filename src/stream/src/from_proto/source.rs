@@ -18,6 +18,7 @@ use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::connector_source::SourceDescBuilderV2;
+use risingwave_storage::panic_store::PanicStateStore;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
@@ -104,10 +105,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 barrier_receiver,
                 stream.config.barrier_interval_ms as u64,
                 params.executor_id,
-                store,
             )))
         } else {
-            Ok(Box::new(SourceExecutorV2::new(
+            // If there is no external stream source, then no data should be persisted. We pass a
+            // `PanicStateStore` type here for indication.
+            Ok(Box::new(SourceExecutorV2::<PanicStateStore>::new(
                 params.actor_context,
                 params.schema,
                 params.pk_indices,
@@ -116,7 +118,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 barrier_receiver,
                 stream.config.barrier_interval_ms as u64,
                 params.executor_id,
-                store,
             )))
         }
     }

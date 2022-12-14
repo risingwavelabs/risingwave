@@ -79,9 +79,6 @@ pub struct SourceExecutorV2<S: StateStore> {
 
     /// Expected barrier latency.
     expected_barrier_latency_ms: u64,
-
-    // FIXME(Yuanxin): Remove this.
-    _store: S,
 }
 
 impl<S: StateStore> SourceExecutorV2<S> {
@@ -95,7 +92,6 @@ impl<S: StateStore> SourceExecutorV2<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         expected_barrier_latency_ms: u64,
         executor_id: u64,
-        _store: S,
     ) -> Self {
         Self {
             ctx,
@@ -106,7 +102,6 @@ impl<S: StateStore> SourceExecutorV2<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             expected_barrier_latency_ms,
-            _store,
         }
     }
 
@@ -562,7 +557,6 @@ mod tests {
             barrier_rx,
             u64::MAX,
             1,
-            MemoryStateStore::new(),
         );
         let mut executor = Box::new(executor).execute();
 
@@ -655,7 +649,6 @@ mod tests {
             barrier_rx,
             u64::MAX,
             1,
-            MemoryStateStore::new(),
         );
 
         let mut materialize = MaterializeExecutor::for_test(
