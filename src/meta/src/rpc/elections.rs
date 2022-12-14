@@ -577,9 +577,10 @@ mod tests {
             META_LEASE_KEY.as_bytes().to_vec(),
             lease.encode_to_vec(),
         );
-        if meta_store.txn(txn).await.is_err() {
-            panic!("Putting test lease failed");
-        }
+        meta_store
+            .txn(txn)
+            .await
+            .expect("Putting test lease failed");
     }
 
     async fn put_leader_info<S: MetaStore>(leader: &MetaLeaderInfo, meta_store: &Arc<S>) {
