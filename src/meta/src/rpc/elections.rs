@@ -39,7 +39,7 @@ fn since_epoch() -> Duration {
 
 /// Contains the outcome of an election
 /// Use this to get information about the current leader and yourself
-struct ElectionOutcome {
+struct ElectionResult {
     pub meta_leader_info: MetaLeaderInfo,
     pub _meta_lease_info: MetaLeaseInfo,
 
@@ -47,7 +47,7 @@ struct ElectionOutcome {
     pub is_leader: bool,
 }
 
-impl ElectionOutcome {
+impl ElectionResult {
     pub fn get_leader_addr(&self) -> HostAddr {
         let tmp = self.meta_leader_info.node_address.as_str();
         tmp.parse::<HostAddr>().unwrap()
@@ -70,7 +70,7 @@ async fn campaign<S: MetaStore>(
     addr: &String,
     lease_time_sec: u64,
     next_lease_id: u64,
-) -> Option<ElectionOutcome> {
+) -> Option<ElectionResult> {
     tracing::info!("running for election with lease {}", next_lease_id);
 
     let campaign_leader_info = MetaLeaderInfo {
@@ -129,7 +129,7 @@ async fn campaign<S: MetaStore>(
                 if !is_leader {
                     return None;
                 }
-                Some(ElectionOutcome {
+                Some(ElectionResult {
                     meta_leader_info: campaign_leader_info,
                     _meta_lease_info: campaign_lease_info,
                     is_leader: true,
@@ -147,7 +147,7 @@ async fn campaign<S: MetaStore>(
 
     if is_leader {
         // if is leader, return HostAddress to this node
-        return Some(ElectionOutcome {
+        return Some(ElectionResult {
             meta_leader_info: campaign_leader_info,
             _meta_lease_info: campaign_lease_info,
             is_leader,
@@ -159,7 +159,7 @@ async fn campaign<S: MetaStore>(
     // Ask Pin how to implement txn.get here
     let (leader, lease) = get_infos_obj(meta_store).await?;
 
-    Some(ElectionOutcome {
+    Some(ElectionResult {
         meta_leader_info: leader,
         _meta_lease_info: lease,
         is_leader,
