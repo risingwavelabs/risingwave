@@ -13,6 +13,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    command: [ "postgres", "-c", "wal_level=logical" ]
 
   mysql:
     image: mysql:8.0
