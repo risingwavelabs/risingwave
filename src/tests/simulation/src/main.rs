@@ -125,6 +125,8 @@ async fn main() {
     use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
     use risingwave_simulation::slt::*;
 
+    tracing_subscriber::fmt::init();
+
     let args = Args::parse();
     let config = Configuration {
         config_path: args.config_path.unwrap_or_default(),
