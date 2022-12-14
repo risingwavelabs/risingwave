@@ -270,16 +270,12 @@ async fn get_infos<S: MetaStore>(
 async fn get_infos_obj<S: MetaStore>(
     meta_store: &Arc<S>,
 ) -> Option<(MetaLeaderInfo, MetaLeaseInfo)> {
-    match get_infos(meta_store).await {
-        None => None,
-        Some(infos) => {
-            let (leader, lease) = infos;
-            return Some((
-                MetaLeaderInfo::decode(&mut leader.as_slice()).unwrap(),
-                MetaLeaseInfo::decode(&mut lease.as_slice()).unwrap(),
-            ));
-        }
-    }
+    get_infos(meta_store).await.map(|(leader, lease)| {
+        (
+            MetaLeaderInfo::decode(leader.as_slice()).unwrap(),
+            MetaLeaseInfo::decode(lease.as_slice()).unwrap(),
+        )
+    })
 }
 
 fn gen_rand_lease_id(addr: &str) -> u64 {
