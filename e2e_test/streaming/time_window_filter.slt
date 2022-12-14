@@ -38,4 +38,6 @@ select window_start, window_end, ts, v3, v4, v2, v1 from m1 ORDER BY window_star
 
 statement ok
 drop materialized view m1;
+
+statement ok
 drop table t1;
