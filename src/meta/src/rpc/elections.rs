@@ -88,7 +88,7 @@ async fn campaign<S: MetaStore>(
     };
 
     // get old leader info and lease
-    let (current_leader_info, current_lease_info) = match get_infos(meta_store).await {
+    let (current_leader_info, current_lease_info) = match get_leader_lease(meta_store).await {
         None => return None,
         Some(infos) => {
             let (leader, lease) = infos;
@@ -159,7 +159,7 @@ async fn campaign<S: MetaStore>(
     // FIXME: This has to be done with a single transaction, not 2
     // if it is not leader, then get the current leaders HostAddress
     // Ask Pin how to implement txn.get here
-    let (leader, lease) = get_infos_obj(meta_store).await?;
+    let (leader, lease) = get_leader_lease_obj(meta_store).await?;
 
     Some(ElectionResult {
         meta_leader_info: leader,
@@ -240,7 +240,7 @@ type MetaLeaseInfoVec = Vec<u8>;
 ///
 /// ## Attributes:
 /// `meta_store`: The store holding information about the leader
-async fn get_infos<S: MetaStore>(
+async fn get_leader_lease<S: MetaStore>(
     meta_store: &Arc<S>,
 ) -> Option<(MetaLeaderInfoVec, MetaLeaseInfoVec)> {
     let current_leader_info = match meta_store
@@ -267,10 +267,10 @@ async fn get_infos<S: MetaStore>(
 ///
 /// ## Returns
 /// None on error, else infos about the leader and lease
-async fn get_infos_obj<S: MetaStore>(
+async fn get_leader_lease_obj<S: MetaStore>(
     meta_store: &Arc<S>,
 ) -> Option<(MetaLeaderInfo, MetaLeaseInfo)> {
-    get_infos(meta_store).await.map(|(leader, lease)| {
+    get_leader_lease(meta_store).await.map(|(leader, lease)| {
         (
             MetaLeaderInfo::decode(leader.as_slice()).unwrap(),
             MetaLeaseInfo::decode(lease.as_slice()).unwrap(),
@@ -483,7 +483,7 @@ async fn manage_term<S: MetaStore>(
     };
 
     // get leader info
-    let (_, lease_info) = get_infos(meta_store).await.unwrap_or_default();
+    let (_, lease_info) = get_leader_lease(meta_store).await.unwrap_or_default();
     if lease_info.is_empty() {
         // ETCD does not have leader lease. Elect new leader
         tracing::info!("ETCD does not have leader lease. Running new election");
@@ -567,9 +567,9 @@ mod tests {
     async fn test_get_infos() {
         // no impfo present should give empty results or default objects
         let mock_meta_store = Arc::new(MemStore::new());
-        let (leader, lease) = get_infos(&mock_meta_store).await.unwrap();
+        let (leader, lease) = get_leader_lease(&mock_meta_store).await.unwrap();
         assert!(leader.is_empty() && lease.is_empty());
-        let (leader, lease) = get_infos_obj(&mock_meta_store).await.unwrap();
+        let (leader, lease) = get_leader_lease_obj(&mock_meta_store).await.unwrap();
         assert!(leader.eq(&MetaLeaderInfo::default()));
         assert!(lease.eq(&MetaLeaseInfo::default()));
 
@@ -586,7 +586,7 @@ mod tests {
             )
             .await;
         assert!(res.is_ok(), "unable to send leader info to mock store");
-        let (leader, _) = get_infos_obj(&mock_meta_store).await.unwrap();
+        let (leader, _) = get_leader_lease_obj(&mock_meta_store).await.unwrap();
         assert!(
             leader.eq(&test_leader),
             "leader_info retrieved != leader_info send"
@@ -687,7 +687,7 @@ mod tests {
                 .unwrap(),
             "Leader should still be in power after updating lease"
         );
-        let (_, new_lease_info) = get_infos_obj(&mock_meta_store).await.unwrap();
+        let (_, new_lease_info) = get_leader_lease_obj(&mock_meta_store).await.unwrap();
         assert_eq!(
             now.as_secs() + lease_timeout,
             new_lease_info.get_lease_expire_time(),
@@ -714,7 +714,7 @@ mod tests {
                 .unwrap(),
             "Leader should still be in power if follower fails to renew lease"
         );
-        let (_, new_lease_info) = get_infos_obj(&mock_meta_store).await.unwrap();
+        let (_, new_lease_info) = get_leader_lease_obj(&mock_meta_store).await.unwrap();
         assert_eq!(
             lease_info.get_lease_expire_time(),
             new_lease_info.get_lease_expire_time(),
@@ -769,7 +769,7 @@ mod tests {
                 .unwrap(),
             "Should have determined that new election is needed if lease is no longer valid"
         );
-        let (leader, lease) = get_infos(&mock_meta_store).await.unwrap();
+        let (leader, lease) = get_leader_lease(&mock_meta_store).await.unwrap();
         assert!(
             leader.is_empty() && lease.is_empty(),
             "Expected that leader and lease were deleted after lease expired. leader.is_empty: {}. lease.is_empty(): {}",
