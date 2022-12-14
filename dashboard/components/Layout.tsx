@@ -108,6 +108,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             <NavButton href="/materialized_views/">
               Materialized Views
             </NavButton>
+            <NavButton href="/sinks/">Sinks</NavButton>
           </VStack>
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Streaming</NavTitle>

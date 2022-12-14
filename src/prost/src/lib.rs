@@ -72,6 +72,9 @@ pub mod source;
 #[cfg_attr(madsim, path = "sim/monitor_service.rs")]
 pub mod monitor_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/backup_service.rs")]
+pub mod backup_service;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/health.rs")]
 pub mod health;
 #[rustfmt::skip]
@@ -128,6 +131,9 @@ pub mod source_serde;
 #[rustfmt::skip]
 #[path = "monitor_service.serde.rs"]
 pub mod monitor_service_serde;
+#[rustfmt::skip]
+#[path = "backup_service.serde.rs"]
+pub mod backup_service_serde;
 
 
 #[derive(Clone, PartialEq, Eq, Debug)]

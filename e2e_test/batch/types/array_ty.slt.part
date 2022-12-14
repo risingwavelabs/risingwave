@@ -16,7 +16,7 @@ select ARRAY[null];
 ----
 {NULL}
 
-statement error 
+statement error
 select ARRAY[];
 
 query T
@@ -89,8 +89,5 @@ drop table t;
 
 # Now we don't disallow arrays with unmatching dimensions in multidimensional arrays.
 # This is different from PostgreSQL, we may want to change this in the future.
-
-query ?
+statement ok
 select array[array[1,2], array[3]];
-----
-{{1,2},{3}}

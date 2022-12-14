@@ -157,18 +157,20 @@ impl DispatchExecutorInner {
         let dispatcher = self.find_dispatcher(update.dispatcher_id);
         dispatcher.remove_outputs(&ids);
 
-        match dispatcher {
-            // The hash mapping is only used by the hash dispatcher.
-            DispatcherImpl::Hash(dispatcher) => {
-                dispatcher.hash_mapping = {
-                    let compressed_mapping = update.get_hash_mapping()?;
-                    decompress_data(
-                        &compressed_mapping.original_indices,
-                        &compressed_mapping.data,
-                    )
-                }
+        // The hash mapping is only used by the hash dispatcher.
+        //
+        // We specify a single upstream hash mapping for scaling the downstream fragment. However,
+        // it's possible that there're multiple upstreams with different exchange types, for
+        // example, the `Broadcast` inner side of the dynamic filter. There're too many combinations
+        // to handle here, so we just ignore the `hash_mapping` field for any other exchange types.
+        if let DispatcherImpl::Hash(dispatcher) = dispatcher {
+            dispatcher.hash_mapping = {
+                let compressed_mapping = update.get_hash_mapping()?;
+                decompress_data(
+                    &compressed_mapping.original_indices,
+                    &compressed_mapping.data,
+                )
             }
-            _ => assert!(update.hash_mapping.is_none()),
         }
 
         Ok(())

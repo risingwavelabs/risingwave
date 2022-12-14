@@ -246,7 +246,7 @@ impl StreamChunk {
                     None => "".to_owned(), // NULL
                     Some(scalar) => scalar.to_text(),
                 };
-                cells.push(Cell::new(&str));
+                cells.push(Cell::new(str));
             }
             table.add_row(cells);
         }

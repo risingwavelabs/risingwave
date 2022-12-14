@@ -24,7 +24,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FragmentType,
+    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
@@ -200,11 +200,15 @@ fn build_fragment(
 ) -> Result<StreamNode> {
     // Update current fragment based on the node we're visiting.
     match stream_node.get_node_body()? {
-        NodeBody::Source(_) => current_fragment.fragment_type = FragmentType::Source,
+        NodeBody::Source(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32
+        }
 
-        NodeBody::Materialize(_) => current_fragment.fragment_type = FragmentType::Mview,
+        NodeBody::Materialize(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Mview as u32
+        }
 
-        NodeBody::Sink(_) => current_fragment.fragment_type = FragmentType::Sink,
+        NodeBody::Sink(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32,
 
         // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
         NodeBody::TopN(_) => current_fragment.is_singleton = true,
