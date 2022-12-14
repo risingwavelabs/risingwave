@@ -617,10 +617,10 @@ impl Catalog {
         Err(CatalogError::NotFound("class", class_name.to_string()))
     }
 
-    pub fn get_id_by_class_name<'a>(
+    pub fn get_id_by_class_name(
         &self,
         db_name: &str,
-        schema_path: SchemaPath<'a>,
+        schema_path: SchemaPath,
         class_name: &str,
     ) -> CatalogResult<u32> {
         match schema_path {
