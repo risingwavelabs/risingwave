@@ -107,7 +107,7 @@ impl TaskLocalBytesAllocated {
     pub fn sub_for_test(
         &self,
         val: usize,
-        atomic: loom::sync::Arc<loom::sync::atomic::AtomicUsize>,
+        flag: loom::sync::Arc<loom::sync::atomic::AtomicBool>,
     ) {
         if let Some(bytes) = self.0 {
             let bytes_ref = unsafe { bytes.as_ref() };
@@ -117,7 +117,8 @@ impl TaskLocalBytesAllocated {
             // zero deltas in `wrap_layout`, so there'll be no more uses of the counter.
             if old_bytes == val {
                 // No fence here. Atomic add to avoid
-                atomic.fetch_add(1, Ordering::Relaxed);
+                assert!(!flag.load(Ordering::Relaxed));
+                flag.store(true, Ordering::Relaxed);
                 unsafe { Box::from_raw_in(bytes.as_ptr(), System) };
             }
         }
