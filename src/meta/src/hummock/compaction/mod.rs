@@ -290,6 +290,7 @@ pub struct LocalPickerStatistic {
     skip_by_write_amp_limit: u64,
     skip_by_count_limit: u64,
     skip_by_pending_files: u64,
+    skip_by_overlapping: u64,
 }
 
 #[derive(Default)]
@@ -318,6 +319,12 @@ impl LocalSelectorStatistic {
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "pending-files"])
                     .inc_by(stats.skip_by_pending_files);
+            }
+            if stats.skip_by_overlapping > 0 {
+                metrics
+                    .compact_skip_frequency
+                    .with_label_values(&[level_label.as_str(), "overlapping"])
+                    .inc_by(stats.skip_by_overlapping);
             }
             metrics
                 .compact_skip_frequency
