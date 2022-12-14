@@ -331,7 +331,7 @@
                 ├─LogicalAgg { group_key: [a.a1], aggs: [] }
                 | └─LogicalScan { table: a, columns: [a.a1] }
                 └─LogicalProject { exprs: [b.b1, b.b1] }
-                  └─LogicalScan { table: b, output_columns: [b.b1], required_columns: [b1], predicate: IsNotNull(b.b1) }
+                  └─LogicalScan { table: b, columns: [b.b1], predicate: IsNotNull(b.b1) }
 - name: test subquery in join on condition
   sql: |
     create table a (v1 int, v2 int);
