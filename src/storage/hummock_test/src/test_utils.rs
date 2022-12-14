@@ -151,7 +151,7 @@ pub async fn prepare_first_valid_version(
         HummockObserverNode::new(Arc::new(FilterKeyExtractorManager::default()), tx.clone()),
     )
     .await;
-    let _ = observer_manager.start().await;
+    observer_manager.start().await;
     let hummock_version = match rx.recv().await {
         Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(
             version,

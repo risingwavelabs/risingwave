@@ -167,11 +167,11 @@ impl TableSourceManager {
         self.sources.lock().clear()
     }
 
-    fn metrics(&self) -> Arc<SourceMetrics> {
+    pub fn metrics(&self) -> Arc<SourceMetrics> {
         self.metrics.clone()
     }
 
-    fn msg_buf_size(&self) -> usize {
+    pub fn msg_buf_size(&self) -> usize {
         self.connector_message_buffer_size
     }
 }
