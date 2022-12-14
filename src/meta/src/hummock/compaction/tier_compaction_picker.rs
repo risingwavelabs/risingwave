@@ -73,15 +73,18 @@ impl TierCompactionPicker {
             let mut compaction_bytes = level.total_file_size;
             let mut max_level_size = level.total_file_size;
             let mut compact_file_count = level.table_infos.len();
+            let mut waiting_enough_files = true;
 
             for other in &l0.sub_levels[idx + 1..] {
                 if compaction_bytes >= max_compaction_bytes {
+                    waiting_enough_files = false;
                     break;
                 }
 
                 if other.level_type == non_overlapping_type
                     && other.total_file_size > self.config.sub_level_max_compaction_bytes
                 {
+                    waiting_enough_files = false;
                     break;
                 }
 
@@ -100,7 +103,7 @@ impl TierCompactionPicker {
             }
 
             if compact_file_count < self.config.level0_tier_compact_file_number as usize
-                && compaction_bytes < max_compaction_bytes
+                && waiting_enough_files
             {
                 stats.skip_by_count_limit += 1;
                 continue;
@@ -118,7 +121,7 @@ impl TierCompactionPicker {
             // compact task never be trigger.
             if level.level_type == non_overlapping_type
                 && is_write_amp_large
-                && (select_level_inputs.len() == 1 || compaction_bytes < max_compaction_bytes)
+                && waiting_enough_files
             {
                 stats.skip_by_write_amp_limit += 1;
                 continue;
