@@ -218,6 +218,7 @@ impl ToStream for LogicalFilter {
                 if conjunction.count_nows() > 0 {
                     let comparator_expr = try_match_expand!(conjunction, ExprImpl::FunctionCall)?;
                     if convert_comparator_to_priority(comparator_expr.get_expr_type()) < 0 {
+                        // TODO: We should avoid using `ExprError` in frontend, same 2 below.
                         return Err(ExprError::InvalidParam {
                             name: "now",
                             reason: String::from("now expression must be placed in a comparison"),
