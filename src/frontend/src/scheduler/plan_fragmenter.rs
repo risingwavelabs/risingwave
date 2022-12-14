@@ -34,6 +34,7 @@ use serde::ser::SerializeStruct;
 use serde::Serialize;
 use uuid::Uuid;
 
+use super::SchedulerError;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
@@ -602,13 +603,16 @@ impl BatchPlanFragmenter {
                 let mut enumerator = block_on(SplitEnumeratorImpl::create(property))?;
                 let kafka_enumerator = match enumerator {
                     SplitEnumeratorImpl::Kafka(ref mut kafka_enumerator) => kafka_enumerator,
-                    _ => todo!(),
+                    _ => {
+                        return Err(SchedulerError::Internal(anyhow!(
+                            "Unsupported to query directly from this source"
+                        )))
+                    }
                 };
                 let split_info = block_on(kafka_enumerator.list_splits_batch(None, None))?
                     .into_iter()
                     .map(SplitImpl::Kafka)
                     .collect_vec();
-
                 return Ok(Some(SourceScanInfo::new(split_info)));
             }
         }

@@ -67,7 +67,7 @@ impl Task for ZooKeeperService {
         let config_path = Path::new(&prefix_config).join(format!("{}.properties", self.id()));
         std::fs::write(
             &config_path,
-            &ZooKeeperGen.gen_server_properties(&self.config, &path.to_string_lossy()),
+            ZooKeeperGen.gen_server_properties(&self.config, &path.to_string_lossy()),
         )?;
 
         let mut cmd = self.zookeeper()?;

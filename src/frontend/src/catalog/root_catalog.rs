@@ -592,4 +592,53 @@ impl Catalog {
             .unwrap()
             .get_indexes_by_table_id(&mv_id)
     }
+
+    fn get_id_by_class_name_inner(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        class_name: &str,
+    ) -> CatalogResult<u32> {
+        let schema = self.get_schema_by_name(db_name, schema_name)?;
+        if let Some(item) = schema.get_system_table_by_name(class_name) {
+            return Ok(item.id().into());
+        } else if let Some(item) = schema.get_table_by_name(class_name) {
+            return Ok(item.id().into());
+        } else if let Some(item) = schema.get_index_by_name(class_name) {
+            return Ok(item.id.into());
+        } else if let Some(item) = schema.get_source_by_name(class_name) {
+            return Ok(item.id);
+        } else if let Some(item) = schema.get_view_by_name(class_name) {
+            return Ok(item.id);
+        }
+        Err(CatalogError::NotFound("class", class_name.to_string()))
+    }
+
+    pub fn get_id_by_class_name(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'_>,
+        class_name: &str,
+    ) -> CatalogResult<u32> {
+        match schema_path {
+            SchemaPath::Name(schema_name) => {
+                self.get_id_by_class_name_inner(db_name, schema_name, class_name)
+            }
+            SchemaPath::Path(search_path, user_name) => {
+                for path in search_path.path() {
+                    let mut schema_name: &str = path;
+                    if schema_name == USER_NAME_WILD_CARD {
+                        schema_name = user_name;
+                    }
+
+                    if let Ok(id) =
+                        self.get_id_by_class_name_inner(db_name, schema_name, class_name)
+                    {
+                        return Ok(id);
+                    }
+                }
+                Err(CatalogError::NotFound("class", class_name.to_string()))
+            }
+        }
+    }
 }

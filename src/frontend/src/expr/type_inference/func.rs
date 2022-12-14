@@ -317,10 +317,10 @@ fn infer_type_for_special(
 ///    4e in `PostgreSQL`. See [`narrow_category`] for details.
 /// 5. Attempt to narrow down candidates by assuming all arguments are same type. This covers Rule
 ///    4f in `PostgreSQL`. See [`narrow_same_type`] for details.
-fn infer_type_name<'a, 'b>(
+fn infer_type_name<'a>(
     sig_map: &'a FuncSigMap,
     func_type: ExprType,
-    inputs: &'b [Option<DataTypeName>],
+    inputs: &[Option<DataTypeName>],
 ) -> Result<&'a FuncSign> {
     let candidates = sig_map
         .0
@@ -423,9 +423,9 @@ fn implicit_ok(source: DataTypeName, target: DataTypeName, eq_ok: bool) -> bool 
 /// [rule 4a src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L907-L947
 /// [rule 4c src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1062-L1104
 /// [rule 4d src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1106-L1153
-fn top_matches<'a, 'b>(
+fn top_matches<'a>(
     candidates: &'a [FuncSign],
-    inputs: &'b [Option<DataTypeName>],
+    inputs: &[Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
     let mut best_exact = 0;
     let mut best_preferred = 0;
@@ -483,9 +483,9 @@ fn top_matches<'a, 'b>(
 ///   src]
 ///
 /// [rule 4e src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1164-L1298
-fn narrow_category<'a, 'b>(
+fn narrow_category<'a>(
     candidates: Vec<&'a FuncSign>,
-    inputs: &'b [Option<DataTypeName>],
+    inputs: &[Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
     const BIASED_TYPE: DataTypeName = DataTypeName::Varchar;
     let Ok(categories) = inputs.iter().enumerate().map(|(i, actual)| {
@@ -565,9 +565,9 @@ fn narrow_category<'a, 'b>(
 ///
 /// [rule 4f src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1300-L1355
 /// [Rule 2]: https://www.postgresql.org/docs/current/typeconv-oper.html#:~:text=then%20assume%20it%20is%20the%20same%20type%20as%20the%20other%20argument%20for%20this%20check
-fn narrow_same_type<'a, 'b>(
+fn narrow_same_type<'a>(
     candidates: Vec<&'a FuncSign>,
-    inputs: &'b [Option<DataTypeName>],
+    inputs: &[Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
     let Ok(Some(same_type)) = inputs.iter().try_fold(None, |acc, cur| match (acc, cur) {
         (None, t) => Ok(*t),

@@ -62,9 +62,8 @@ struct ConnectorSourceWorker {
 impl ConnectorSourceWorker {
     pub async fn create(source: &Source, period: Duration) -> MetaResult<Self> {
         let mut properties = ConnectorProperties::extract(source.properties.clone())?;
-        if let ConnectorProperties::Cdc(prop) = &mut properties {
-            prop.as_mut().source_id = source.id;
-        }
+        // set source id for cdc connector if any
+        properties.set_source_id_for_cdc(source.id);
         let enumerator = SplitEnumeratorImpl::create(properties).await?;
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         Ok(Self {

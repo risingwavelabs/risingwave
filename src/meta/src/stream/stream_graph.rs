@@ -923,7 +923,7 @@ impl ActorGraphBuilder {
                     fragment_id,
                     Fragment {
                         fragment_id,
-                        fragment_type: fragment.fragment_type,
+                        fragment_type_mask: fragment.get_fragment_type_mask(),
                         distribution_type: if fragment.is_singleton {
                             FragmentDistributionType::Single
                         } else {

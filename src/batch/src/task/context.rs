@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::dml_manager::DmlManagerRef;
+use risingwave_source::monitor::SourceMetrics;
 use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
@@ -53,6 +56,8 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     /// Get config for batch environment
     fn get_config(&self) -> &BatchConfig;
+
+    fn source_metrics(&self) -> Arc<SourceMetrics>;
 }
 
 /// Batch task context on compute node.
@@ -96,6 +101,10 @@ impl BatchTaskContext for ComputeNodeContext {
 
     fn get_config(&self) -> &BatchConfig {
         self.env.config()
+    }
+
+    fn source_metrics(&self) -> Arc<SourceMetrics> {
+        unimplemented!("not supported in compute node context")
     }
 }
 

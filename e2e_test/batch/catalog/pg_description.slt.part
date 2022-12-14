@@ -1,0 +1,18 @@
+query IIITT
+SELECT d.*, c.relname FROM pg_catalog.pg_description d join pg_catalog.pg_class c on d.objoid = c.oid ORDER BY d.objoid limit 15;
+----
+1 NULL 0 NULL pg_type
+2 NULL 0 NULL pg_namespace
+3 NULL 0 NULL pg_cast
+4 NULL 0 NULL pg_matviews
+5 NULL 0 NULL pg_user
+6 NULL 0 NULL pg_class
+7 NULL 0 NULL pg_index
+8 NULL 0 NULL pg_opclass
+9 NULL 0 NULL pg_collation
+10 NULL 0 NULL pg_am
+11 NULL 0 NULL pg_operator
+12 NULL 0 NULL pg_views
+13 NULL 0 NULL pg_attribute
+14 NULL 0 NULL pg_database
+15 NULL 0 NULL pg_description

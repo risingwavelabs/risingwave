@@ -1,6 +1,5 @@
 # tpchq1
 # Todo: The precision is different from PostgresSql
-
 query TTRRRRRRRI
 select
   l_returnflag,

@@ -197,13 +197,13 @@ impl ConnectorSource {
         connector_node_addr: Option<String>,
         connector_message_buffer_size: usize,
     ) -> Result<Self> {
-        // Store the connector node address to properties for later use.
-        let mut source_props: HashMap<String, String> =
-            HashMap::from_iter(properties.clone().into_iter());
-        connector_node_addr
-            .map(|addr| source_props.insert("connector_node_addr".to_string(), addr));
-        let config =
-            ConnectorProperties::extract(source_props).map_err(|e| ConnectorError(e.into()))?;
+        let mut config = ConnectorProperties::extract(properties.clone())
+            .map_err(|e| ConnectorError(e.into()))?;
+        if let Some(addr) = connector_node_addr {
+            config.set_connector_node_addr(addr);
+            // fixme: require source_id
+            // config.set_source_id_for_cdc(source_id);
+        }
         let parser = SourceParserImpl::create(
             &format,
             &properties,

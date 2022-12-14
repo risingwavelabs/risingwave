@@ -16,12 +16,12 @@ use std::fmt;
 use std::rc::Rc;
 
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 
 use super::generic::GenericPlanNode;
 use super::{
-    generic, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef, PredicatePushdown,
-    StreamSource, ToBatch, ToStream,
+    generic, BatchSource, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
+    PredicatePushdown, StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
@@ -115,10 +115,7 @@ impl PredicatePushdown for LogicalSource {
 
 impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "there is no batch source operator".to_string(),
-            None.into(),
-        )))
+        Ok(BatchSource::new(self.clone()).into())
     }
 }
 
