@@ -322,7 +322,8 @@ impl ColPrunable for LogicalHopWindow {
 
 impl PredicatePushdown for LogicalHopWindow {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        // Do not push down `window_start`, `window_end` for now, they are columns produced by HopWindow.
+        // Do not push down `window_start`, `window_end` for now, they are columns produced by
+        // HopWindow.
         let mut window_columns = FixedBitSet::with_capacity(self.output_indices().len());
         let window_start_idx = self.input().schema().len();
         let window_end_idx = self.input().schema().len() + 1;
@@ -335,7 +336,8 @@ impl PredicatePushdown for LogicalHopWindow {
             }
         }
 
-        // Keep predicate on time window (time_window_pred), the rest (pushed_predicate) may be pushed-down.
+        // Keep predicate on time window (time_window_pred), the rest (pushed_predicate) may be
+        // pushed-down.
         let (time_window_pred, pushed_predicate) = predicate.split_disjoint(&window_columns);
 
         // Convert the pushed_predicate to one that references the child of the hop window
