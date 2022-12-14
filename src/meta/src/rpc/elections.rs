@@ -463,12 +463,9 @@ async fn manage_term<S: MetaStore>(
 ) -> Option<bool> {
     // try to renew/acquire the lease if this node is a leader
     if is_leader {
-        match renew_lease(leader_info, lease_time_sec, meta_store).await {
-            None => return Some(false),
-            Some(val) => {
-                return Some(val);
-            }
-        }
+        return renew_lease(leader_info, lease_time_sec, meta_store)
+            .await
+            .or(Some(false));
     };
 
     // get leader info
