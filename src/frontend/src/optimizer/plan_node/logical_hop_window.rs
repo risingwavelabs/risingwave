@@ -184,6 +184,11 @@ impl LogicalHopWindow {
         self.i2o_col_mapping()
             .rewrite_provided_order(self.input().order())
     }
+
+    /// Return output indices
+    pub fn output_indices(&self) -> &Vec<usize> {
+        &self.core.output_indices
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalHopWindow {
@@ -319,6 +324,7 @@ impl PredicatePushdown for LogicalHopWindow {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
         // For reference: HOP(table_or_source, start_time, hop_size, window_size);
         // `window_start`, `window_end` cannot be pushed-down, they are produced by HopWindow.
+        // schema: |
         let mut window_columns = FixedBitSet::with_capacity(4);
         window_columns.insert_range(2..4);
         let (time_window_pred, pushed_predicate) = predicate.split_disjoint(&window_columns);
@@ -327,7 +333,7 @@ impl PredicatePushdown for LogicalHopWindow {
         // TODO: Not sure how to rewrite this?
         // What is the semantics of substitute?
         let mut subst = Substitute {
-            mapping: self.exprs().clone(),
+            mapping: self.output_indices()
         };
         let pushed_predicate = pushed_predicate.rewrite_expr(&mut subst);
         gen_filter_and_pushdown(self, time_window_pred, pushed_predicate)
