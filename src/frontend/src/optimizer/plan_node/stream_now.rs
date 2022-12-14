@@ -80,7 +80,7 @@ impl StreamNode for StreamNow {
         let schema = self.base.schema();
         let dist_keys = self.base.distribution().dist_column_indices().to_vec();
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(self.base.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(self.base.ctx().with_options().internal_table_subset());
         schema.fields().iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });
