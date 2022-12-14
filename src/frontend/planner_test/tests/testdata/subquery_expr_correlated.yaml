@@ -189,7 +189,7 @@
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND ((t1.x + t2.x) = 100:Int32), output: [t1.x] }
     ├─LogicalScan { table: t1, output_columns: [t1.x, t1.y], required_columns: [x, y], predicate: (t1.y = 1000:Int32) }
     └─LogicalProject { exprs: [t2.y, t2.x] }
-      └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
+      └─LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: (t2.y = 1000:Int32) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -461,11 +461,11 @@
           └─LogicalAgg { group_key: [a.a3, b.b2], aggs: [count(1:Int32)] }
             └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a3, c.c3) AND IsNotDistinctFrom(b.b2, c.c2), output: [a.a3, b.b2, 1:Int32] }
               ├─LogicalAgg { group_key: [a.a3, b.b2], aggs: [] }
-              | └─LogicalJoin { type: Inner, on: true, output: all }
+              | └─LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
               |   ├─LogicalScan { table: a, columns: [a.a3] }
               |   └─LogicalScan { table: b, columns: [b.b2] }
               └─LogicalProject { exprs: [c.c3, c.c2, 1:Int32] }
-                └─LogicalScan { table: c, output_columns: [c.c2, c.c3], required_columns: [c2, c3], predicate: IsNotNull(c.c3) AND IsNotNull(c.c2) }
+                └─LogicalScan { table: c, output_columns: [c.c2, c.c3], required_columns: [c2, c3], predicate: (c.c3 = c.c2) AND IsNotNull(c.c3) AND IsNotNull(c.c2) }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
